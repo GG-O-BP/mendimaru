@@ -12,6 +12,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const GUEST_REQUEST_TIMEOUT_SECONDS: u64 = 30;
+const STUDIO_LAUNCH_TIMEOUT_SECONDS: u64 = 5 * 60;
 const INSTALL_TIMEOUT_SECONDS: u64 = 45 * 60;
 const UNINSTALL_TIMEOUT_SECONDS: u64 = 15 * 60;
 const REMOTE_APP_START_GRACE_SECONDS: u64 = 20;
@@ -154,13 +155,37 @@ pub async fn launch_studio(
         None
     };
     let label = format!("Studio Pro {}", selected.version);
-    let _remote_app = spawn_remote_app(
-        config,
-        &selected.executable_path,
-        None,
-        project_argument.as_deref(),
-        &label,
+    let operation_directory = Path::new(&config.shared_directory).join(".mendimaru/operations");
+    fs::create_dir_all(&operation_directory)
+        .map_err(|error| format!("실행 상태 디렉터리를 만들 수 없습니다: {error}"))?;
+    let operation_id = format!(
+        "launch-{}-{}",
+        safe_operation_name(version),
+        unix_timestamp_millis()
+    );
+    let report_path = operation_directory.join(format!("{operation_id}.json"));
+    let windows_report_path = linux_path_to_windows_share(
+        Path::new(&config.shared_directory),
+        &report_path,
+        &config.windows_shared_directory,
     )?;
+    let script = launch_studio_script(
+        &selected.executable_path,
+        project_argument.as_deref(),
+        &windows_report_path,
+    );
+    let script_path = write_command_script(config, &operation_id, &script)?;
+    let mut remote_app = spawn_powershell_file(config, &script_path, &label)?;
+    let report = wait_for_windows_operation(
+        &report_path,
+        &mut remote_app,
+        STUDIO_LAUNCH_TIMEOUT_SECONDS,
+        "Studio Pro 실행",
+    )
+    .await?;
+    if report.executable_path.as_deref().is_none_or(str::is_empty) {
+        return Err("Studio Pro 창은 열렸지만 실행 경로를 확인하지 못했습니다.".to_string());
+    }
     Ok(LaunchResult {
         label,
         executable_path: selected.executable_path,
@@ -197,9 +222,12 @@ pub async fn install_studio(
     );
     // Keep the exact script next to other commands so a failed installation can
     // be diagnosed without exposing the Windows password or FreeRDP arguments.
-    let _script_path = write_command_script(config, &operation_id, &script)?;
-    let mut remote_app =
-        spawn_powershell_script(config, &script, &format!("Install Studio Pro {version}"))?;
+    let script_path = write_command_script(config, &operation_id, &script)?;
+    let mut remote_app = spawn_powershell_file(
+        config,
+        &script_path,
+        &format!("Install Studio Pro {version}"),
+    )?;
 
     let report = wait_for_windows_operation(
         &report_path,
@@ -237,9 +265,12 @@ pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(),
         version,
         &windows_report_path,
     );
-    let _script_path = write_command_script(config, &operation_id, &script)?;
-    let mut remote_app =
-        spawn_powershell_script(config, &script, &format!("Uninstall Studio Pro {version}"))?;
+    let script_path = write_command_script(config, &operation_id, &script)?;
+    let mut remote_app = spawn_powershell_file(
+        config,
+        &script_path,
+        &format!("Uninstall Studio Pro {version}"),
+    )?;
     wait_for_windows_operation(
         &report_path,
         &mut remote_app,
@@ -476,6 +507,115 @@ fn container_credentials(config: &AppConfig) -> Result<(String, String), String>
         .map(ToString::to_string)
         .ok_or_else(|| "WinBoat Windows 암호가 설정되지 않았습니다.".to_string())?;
     Ok((username, password))
+}
+
+fn launch_studio_script(
+    executable_path: &str,
+    project_path: Option<&str>,
+    windows_report_path: &str,
+) -> String {
+    const TEMPLATE: &str = r#"$ErrorActionPreference = 'Stop'
+$executable = '__EXECUTABLE_PATH__'
+$projectPath = '__PROJECT_PATH__'
+$resultPath = '__RESULT_PATH__'
+$process = $null
+
+function Write-LaunchResult {
+    param(
+        [string]$State,
+        [string]$Message,
+        $ExitCode,
+        $ExecutablePath,
+        $ErrorMessage
+    )
+
+    $payload = [ordered]@{
+        state = $State
+        message = $Message
+        exitCode = $ExitCode
+        executablePath = $ExecutablePath
+        error = $ErrorMessage
+        timestamp = (Get-Date).ToString('o')
+    }
+    $temporaryPath = "$resultPath.tmp"
+    $payload | ConvertTo-Json -Compress | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+    Move-Item -LiteralPath $temporaryPath -Destination $resultPath -Force
+}
+
+function Get-ReadyStudioProcess {
+    $matches = @(Get-Process -Name 'studiopro' -ErrorAction SilentlyContinue | Where-Object {
+        try {
+            $_.Path -and $_.Path.Equals($executable, [System.StringComparison]::OrdinalIgnoreCase)
+        } catch {
+            $false
+        }
+    })
+
+    foreach ($candidate in ($matches | Sort-Object StartTime -Descending)) {
+        $candidate.Refresh()
+        if ($candidate.MainWindowHandle -ne [IntPtr]::Zero) {
+            return $candidate
+        }
+    }
+    return $null
+}
+
+try {
+    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+        throw "Studio Pro executable not found: $executable"
+    }
+
+    Write-LaunchResult 'starting' 'Studio Pro is starting.' $null $executable $null
+    if ([string]::IsNullOrWhiteSpace($projectPath)) {
+        $process = Start-Process -FilePath $executable -PassThru
+    } else {
+        $quotedProjectPath = '"' + $projectPath + '"'
+        $process = Start-Process -FilePath $executable -ArgumentList $quotedProjectPath -PassThru
+    }
+
+    $minimumReadyAt = (Get-Date).AddSeconds(2)
+    $handoffDeadline = (Get-Date).AddSeconds(15)
+    $deadline = (Get-Date).AddMinutes(4)
+    $readyProcess = $null
+    do {
+        $readyProcess = Get-ReadyStudioProcess
+        if ($null -ne $readyProcess -and (Get-Date) -ge $minimumReadyAt) {
+            break
+        }
+        if ($process.HasExited -and $null -eq $readyProcess -and (Get-Date) -ge $handoffDeadline) {
+            throw "Studio Pro exited before its window opened (code $($process.ExitCode))."
+        }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+
+    if ($null -eq $readyProcess) {
+        throw 'Studio Pro window did not appear within 4 minutes.'
+    }
+
+    # Give FreeRDP time to publish the confirmed Windows handle as a local
+    # RemoteApp window before the Linux-side launch button is enabled again.
+    Start-Sleep -Milliseconds 1200
+    Write-LaunchResult 'succeeded' 'Studio Pro window is ready.' $null $executable $null
+
+    # The RemoteApp host must stay alive for the Studio Pro child window.
+    try {
+        Wait-Process -Id $readyProcess.Id -ErrorAction SilentlyContinue
+    } catch { }
+    exit 0
+} catch {
+    $exitCode = if ($null -ne $process -and $process.HasExited) { [int]$process.ExitCode } else { $null }
+    Write-LaunchResult 'failed' 'Studio Pro failed to start.' $exitCode $executable $_.Exception.Message
+    exit 1
+}
+"#;
+
+    TEMPLATE
+        .replace("__EXECUTABLE_PATH__", &powershell_literal(executable_path))
+        .replace(
+            "__PROJECT_PATH__",
+            &powershell_literal(project_path.unwrap_or_default()),
+        )
+        .replace("__RESULT_PATH__", &powershell_literal(windows_report_path))
 }
 
 fn install_script(
@@ -737,17 +877,66 @@ fn parse_install_report(content: &str) -> Result<WindowsOperationReport, serde_j
     serde_json::from_str(content.trim_start_matches('\u{feff}').trim())
 }
 
-fn spawn_powershell_script(config: &AppConfig, script: &str, label: &str) -> Result<Child, String> {
-    let encoded = encode_powershell_script(script);
-    let arguments = format!(
-        "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}"
+fn spawn_powershell_file(
+    config: &AppConfig,
+    script_path: &Path,
+    label: &str,
+) -> Result<Child, String> {
+    let windows_script_path = linux_path_to_windows_share(
+        Path::new(&config.shared_directory),
+        script_path,
+        &config.windows_shared_directory,
+    )?;
+    // RAIL limits RemoteApplicationCmdLine to 16,000 bytes. Encoding the full
+    // script can exceed that limit, so only encode a short command that invokes
+    // the script already stored in the WinBoat shared directory.
+    let launcher = format!(
+        "& '{}'; exit $LASTEXITCODE",
+        powershell_literal(&windows_script_path)
     );
+    let encoded = encode_powershell_script(&launcher);
+    let arguments = powershell_encoded_arguments(&encoded);
+    let hidden_launcher_path = write_hidden_powershell_launcher(script_path, &arguments)?;
+    let windows_hidden_launcher_path = linux_path_to_windows_share(
+        Path::new(&config.shared_directory),
+        &hidden_launcher_path,
+        &config.windows_shared_directory,
+    )?;
     spawn_remote_app(
         config,
-        r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
-        Some(&arguments),
-        None,
+        r"C:\Windows\System32\wscript.exe",
+        Some("//B //NoLogo"),
+        Some(&windows_hidden_launcher_path),
         label,
+    )
+}
+
+fn write_hidden_powershell_launcher(
+    script_path: &Path,
+    powershell_arguments: &str,
+) -> Result<PathBuf, String> {
+    let launcher_path = script_path.with_extension("vbs");
+    fs::write(
+        &launcher_path,
+        hidden_powershell_launcher(powershell_arguments),
+    )
+    .map_err(|error| format!("숨김 Windows 명령 래퍼를 저장할 수 없습니다: {error}"))?;
+    Ok(launcher_path)
+}
+
+fn hidden_powershell_launcher(powershell_arguments: &str) -> String {
+    format!(
+        "Option Explicit\r\n\
+         Dim shell, exitCode\r\n\
+         Set shell = CreateObject(\"WScript.Shell\")\r\n\
+         exitCode = shell.Run(\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe {powershell_arguments}\", 0, True)\r\n\
+         WScript.Quit exitCode\r\n"
+    )
+}
+
+fn powershell_encoded_arguments(encoded_command: &str) -> String {
+    format!(
+        "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded_command}"
     )
 }
 
@@ -865,8 +1054,9 @@ fn powershell_literal(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        encode_powershell_script, parse_install_report, parse_studio_versions, uninstall_script,
-        validate_version,
+        encode_powershell_script, hidden_powershell_launcher, launch_studio_script,
+        parse_install_report, parse_studio_versions, powershell_encoded_arguments,
+        uninstall_script, validate_version,
     };
     use crate::models::WinApp;
     use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -948,5 +1138,45 @@ mod tests {
         assert!(script.contains("'C:\\ProgramData\\Mendix'"));
         assert!(script.contains("'11.13.0'"));
         assert!(!script.contains("__VERSION__"));
+    }
+
+    #[test]
+    fn studio_launcher_waits_for_a_real_window_and_keeps_remote_app_alive() {
+        let script = launch_studio_script(
+            r"C:\Program Files\Mendix\11.13.0\modeler\studiopro.exe",
+            Some(r"\\host.lan\Data\Orders\Orders.mpr"),
+            r"\\host.lan\Data\.mendimaru\operations\launch.json",
+        );
+
+        assert!(script.contains("MainWindowHandle -ne [IntPtr]::Zero"));
+        assert!(script.contains("Start-Process -FilePath $executable"));
+        assert!(script.contains("Start-Sleep -Milliseconds 1200"));
+        assert!(script.contains("Wait-Process -Id $readyProcess.Id"));
+        assert!(script.contains(r"'\\host.lan\Data\Orders\Orders.mpr'"));
+        assert!(!script.contains("__EXECUTABLE_PATH__"));
+    }
+
+    #[test]
+    fn powershell_file_launcher_stays_below_freerdp_rail_argument_limit() {
+        let launcher = r"& '\\host.lan\Data\.mendimaru\commands\launch-11.12.2.ps1'";
+        let encoded = encode_powershell_script(launcher);
+        let arguments = powershell_encoded_arguments(&encoded);
+
+        // TS_RAIL_ORDER_EXEC allows at most 16,000 bytes for Arguments.
+        assert!(arguments.encode_utf16().count() * 2 < 16_000);
+        assert!(arguments.contains("-EncodedCommand"));
+        assert!(!arguments.contains("MainWindowHandle"));
+    }
+
+    #[test]
+    fn windows_script_host_runs_powershell_hidden_and_waits_for_it() {
+        let arguments = powershell_encoded_arguments("QQA=");
+        let launcher = hidden_powershell_launcher(&arguments);
+
+        assert!(launcher.contains("WScript.Shell"));
+        assert!(launcher.contains("shell.Run("));
+        assert!(launcher.contains(", 0, True)"));
+        assert!(launcher.contains("WScript.Quit exitCode"));
+        assert!(!launcher.contains("WindowStyle Normal"));
     }
 }

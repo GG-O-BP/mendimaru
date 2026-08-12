@@ -70,6 +70,8 @@ function App() {
   const [applyMountNow, setApplyMountNow] = useState(true);
   const toastId = useRef(0);
   const initialized = useRef(false);
+  const actionLocks = useRef<Set<string>>(new Set());
+  const launchLock = useRef(false);
 
   const notify = useCallback((kind: ToastKind, title: string, detail?: string) => {
     const id = ++toastId.current;
@@ -171,12 +173,15 @@ function App() {
 
   const runAction = useCallback(
     async (key: string, action: () => Promise<void>) => {
+      if (actionLocks.current.has(key)) return;
+      actionLocks.current.add(key);
       setBusyActions((current) => new Set(current).add(key));
       try {
         await action();
       } catch (error) {
         notify("error", "작업을 완료하지 못했습니다", errorText(error));
       } finally {
+        actionLocks.current.delete(key);
         setBusyActions((current) => {
           const next = new Set(current);
           next.delete(key);
@@ -199,18 +204,23 @@ function App() {
       await invoke("open_winboat");
     });
 
-  const launchVersion = (version: StudioVersion, project?: MendixProject) =>
-    runAction(`launch-${version.version}`, async () => {
+  const launchVersion = (version: StudioVersion, project?: MendixProject) => {
+    if (launchLock.current) return Promise.resolve();
+    launchLock.current = true;
+    return runAction(`launch-${version.version}`, async () => {
       await invoke("launch_studio_pro", {
         version: version.version,
         projectMprPath: project?.mprPath ?? null,
       });
       notify(
         "success",
-        `Studio Pro ${version.version}을 시작했습니다`,
-        project ? `${project.name} 프로젝트를 여는 중입니다.` : undefined,
+        `Studio Pro ${version.version} 창을 열었습니다`,
+        project ? `${project.name} 프로젝트를 열었습니다.` : undefined,
       );
+    }).finally(() => {
+      launchLock.current = false;
     });
+  };
 
   const launchProject = (project: MendixProject) => {
     const exact = installedVersions.find((version) => version.version === project.version);
@@ -363,6 +373,7 @@ function App() {
 
   const online = Boolean(status?.guestOnline);
   const isBusy = (key: string) => busyActions.has(key);
+  const isLaunching = Array.from(busyActions).some((key) => key.startsWith("launch-"));
   const isInstalling = Array.from(busyActions).some((key) => key.startsWith("install-"));
   const installedSet = useMemo(
     () => new Set(installedVersions.map((version) => version.version)),
@@ -459,6 +470,7 @@ function App() {
             hasMore={hasMoreVersions}
             installedSet={installedSet}
             downloadProgress={downloadProgress}
+            isLaunching={isLaunching}
             isInstalling={isInstalling}
             isBusy={isBusy}
             onSearch={setVersionSearch}
@@ -479,6 +491,7 @@ function App() {
             search={projectSearch}
             sharedDirectory={config.sharedDirectory}
             installedSet={installedSet}
+            isLaunching={isLaunching}
             isBusy={isBusy}
             onSearch={setProjectSearch}
             onRefresh={() => void refreshProjects()}
@@ -539,6 +552,7 @@ function StudioView({
   hasMore,
   installedSet,
   downloadProgress,
+  isLaunching,
   isInstalling,
   isBusy,
   onSearch,
@@ -561,6 +575,7 @@ function StudioView({
   hasMore: boolean;
   installedSet: Set<string>;
   downloadProgress: DownloadProgress | null;
+  isLaunching: boolean;
   isInstalling: boolean;
   isBusy: (key: string) => boolean;
   onSearch: (value: string) => void;
@@ -602,10 +617,10 @@ function StudioView({
                   type="button"
                   className="button secondary compact"
                   onClick={() => onLaunch(version)}
-                  disabled={!online || isBusy(`launch-${version.version}`)}
+                  disabled={!online || isLaunching}
                 >
                   {isBusy(`launch-${version.version}`) ? <LoaderCircle size={15} className="spin" /> : <Play size={15} />}
-                  실행
+                  {isBusy(`launch-${version.version}`) ? "실행 중" : "실행"}
                 </button>
                 <button
                   type="button"
@@ -735,6 +750,7 @@ function ProjectsView({
   search,
   sharedDirectory,
   installedSet,
+  isLaunching,
   isBusy,
   onSearch,
   onRefresh,
@@ -748,6 +764,7 @@ function ProjectsView({
   search: string;
   sharedDirectory: string;
   installedSet: Set<string>;
+  isLaunching: boolean;
   isBusy: (key: string) => boolean;
   onSearch: (value: string) => void;
   onRefresh: () => void;
@@ -812,9 +829,14 @@ function ProjectsView({
                     type="button"
                     className="button primary compact"
                     onClick={() => onLaunch(project)}
-                    disabled={!canOpen || isBusy(`launch-${project.version ?? "unknown"}`)}
+                    disabled={!canOpen || isLaunching}
                   >
-                    <Play size={15} /> 열기
+                    {isBusy(`launch-${project.version ?? "unknown"}`) ? (
+                      <LoaderCircle size={15} className="spin" />
+                    ) : (
+                      <Play size={15} />
+                    )}
+                    {isBusy(`launch-${project.version ?? "unknown"}`) ? "여는 중" : "열기"}
                   </button>
                   <button type="button" className="icon-button" title="Linux 폴더 열기" onClick={() => onOpenFolder(project.directory)}>
                     <FolderOpen size={16} />
