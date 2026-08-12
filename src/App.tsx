@@ -77,6 +77,7 @@ function App() {
   const toastId = useRef(0);
   const initialized = useRef(false);
   const actionLocks = useRef<Set<string>>(new Set());
+  const catalogRequestInFlight = useRef(false);
   const launchLock = useRef(false);
 
   const notify = useCallback((kind: ToastKind, title: string, detail?: string) => {
@@ -112,6 +113,8 @@ function App() {
   }, []);
 
   const fetchCatalogPage = useCallback(async (page: number, reset = false) => {
+    if (catalogRequestInFlight.current) return;
+    catalogRequestInFlight.current = true;
     setCatalogLoading(true);
     setCatalogError(null);
     try {
@@ -123,6 +126,7 @@ function App() {
     } catch (error) {
       setCatalogError(errorText(error));
     } finally {
+      catalogRequestInFlight.current = false;
       setCatalogLoading(false);
     }
   }, []);
@@ -428,6 +432,9 @@ function App() {
   const hasMoreVersions = catalog.totalCount
     ? catalog.versions.length < catalog.totalCount
     : catalog.loadedPages.length > 0 && catalog.versions.length >= catalog.loadedPages.length * 10;
+  const loadMoreCatalog = useCallback(() => {
+    void fetchCatalogPage(nextCatalogPage);
+  }, [fetchCatalogPage, nextCatalogPage]);
   const settingsChanged = Boolean(
     config && draftConfig && JSON.stringify(config) !== JSON.stringify(draftConfig),
   );
@@ -514,7 +521,7 @@ function App() {
             }
             onRefreshInstalled={() => void refreshInstalled()}
             onRefreshCatalog={() => void fetchCatalogPage(1, true)}
-            onLoadMore={() => void fetchCatalogPage(nextCatalogPage)}
+            onLoadMore={loadMoreCatalog}
             onLaunch={(version) => void launchVersion(version)}
             onInstall={askInstall}
             onUninstall={askUninstall}
@@ -630,6 +637,27 @@ function StudioView({
   onUninstall: (version: StudioVersion) => void;
   onCancelDownload: () => void;
 }) {
+  const loadMoreSentinel = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const sentinel = loadMoreSentinel.current;
+    if (!sentinel || !hasMore || catalogLoading || catalogError) return undefined;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return;
+        observer.disconnect();
+        onLoadMore();
+      },
+      {
+        root: sentinel.closest(".page"),
+        rootMargin: "0px 0px 240px 0px",
+      },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [catalogError, catalogLoading, hasMore, onLoadMore]);
+
   return (
     <div className="studio-page">
       <PageTitle
@@ -772,7 +800,7 @@ function StudioView({
           {catalogLoading && available.length === 0 && (
             <div className="loading-inline"><LoaderCircle size={18} className="spin" /> 공식 버전 목록을 불러오는 중입니다</div>
           )}
-          {!catalogLoading && available.length === 0 && !catalogError && (
+          {!catalogLoading && available.length === 0 && !catalogError && !hasMore && (
             <EmptyState
               icon={Download}
               title={search || supportFilters.lts || supportFilters.mts ? "검색 결과가 없습니다" : "버전 목록이 비어 있습니다"}
@@ -785,11 +813,16 @@ function StudioView({
           )}
         </div>
 
-        {hasMore && !search && (
-          <button type="button" className="load-more" onClick={onLoadMore} disabled={catalogLoading}>
-            {catalogLoading ? <LoaderCircle size={15} className="spin" /> : null}
-            이전 버전 더 불러오기
-          </button>
+        {hasMore && (
+          <div
+            ref={loadMoreSentinel}
+            className={`infinite-scroll-sentinel ${catalogLoading ? "loading" : ""}`}
+            aria-live="polite"
+          >
+            {catalogLoading && (
+              <><LoaderCircle size={15} className="spin" /> 이전 버전을 불러오는 중입니다</>
+            )}
+          </div>
         )}
       </section>
     </div>
