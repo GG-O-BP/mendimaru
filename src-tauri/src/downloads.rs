@@ -10,6 +10,11 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
 
 const DOWNLOAD_EVENT: &str = "studio-download-progress";
+const PREPARING_PROGRESS: f64 = 3.0;
+const CHECKING_PROGRESS: f64 = 8.0;
+const DOWNLOAD_PROGRESS_START: f64 = 12.0;
+const DOWNLOAD_PROGRESS_END: f64 = 72.0;
+const INSTALL_PROGRESS_START: f64 = 76.0;
 
 #[derive(Default)]
 pub struct DownloadManager {
@@ -58,7 +63,25 @@ pub async fn download_and_launch(
 ) -> Result<InstallResult, String> {
     validate_version(&version)?;
     let _guard = manager.begin()?;
+    emit_progress(
+        app,
+        &version,
+        "preparing",
+        0,
+        None,
+        Some(PREPARING_PROGRESS),
+        "Mendix에서 설치 정보를 확인하고 있습니다.",
+    );
     let download_url = marketplace::installer_url(&version).await?;
+    emit_progress(
+        app,
+        &version,
+        "checking",
+        0,
+        None,
+        Some(CHECKING_PROGRESS),
+        "설치 파일 저장 위치를 확인하고 있습니다.",
+    );
     let installer_directory = Path::new(&config.shared_directory).join(".mendimaru/installers");
     tokio::fs::create_dir_all(&installer_directory)
         .await
@@ -78,7 +101,7 @@ pub async fn download_and_launch(
             "ready",
             0,
             None,
-            None,
+            Some(DOWNLOAD_PROGRESS_END),
             "기존 설치 파일을 사용합니다.",
         );
         false
@@ -103,7 +126,7 @@ pub async fn download_and_launch(
         "installing",
         0,
         None,
-        None,
+        Some(INSTALL_PROGRESS_START),
         "WinBoat Windows에 설치하고 있습니다. 완료될 때까지 기다려 주세요.",
     );
     let executable_path = install_studio(config, &version, &windows_installer_path).await?;
@@ -146,7 +169,7 @@ async fn download_file(
         "connecting",
         0,
         None,
-        Some(0.0),
+        Some(DOWNLOAD_PROGRESS_START),
         "Mendix 다운로드 서버에 연결하고 있습니다.",
     );
     let client = reqwest::Client::builder()
@@ -181,7 +204,7 @@ async fn download_file(
                 "cancelled",
                 downloaded,
                 total,
-                percentage(downloaded, total),
+                overall_download_percentage(downloaded, total),
                 "다운로드를 취소했습니다.",
             );
             return Err("다운로드가 취소되었습니다.".to_string());
@@ -197,7 +220,7 @@ async fn download_file(
             "downloading",
             downloaded,
             total,
-            percentage(downloaded, total),
+            overall_download_percentage(downloaded, total),
             "Studio Pro 설치 파일을 다운로드하고 있습니다.",
         );
     }
@@ -214,7 +237,7 @@ async fn download_file(
         "downloaded",
         downloaded,
         total,
-        Some(100.0),
+        Some(DOWNLOAD_PROGRESS_END),
         "설치 파일 다운로드를 완료했습니다.",
     );
     Ok(())
@@ -242,10 +265,12 @@ fn emit_progress(
     );
 }
 
-fn percentage(downloaded: u64, total: Option<u64>) -> Option<f64> {
-    total
-        .filter(|value| *value > 0)
-        .map(|value| downloaded as f64 / value as f64 * 100.0)
+fn overall_download_percentage(downloaded: u64, total: Option<u64>) -> Option<f64> {
+    total.filter(|value| *value > 0).map(|value| {
+        let downloaded_ratio = (downloaded as f64 / value as f64).clamp(0.0, 1.0);
+        DOWNLOAD_PROGRESS_START
+            + downloaded_ratio * (DOWNLOAD_PROGRESS_END - DOWNLOAD_PROGRESS_START)
+    })
 }
 
 fn partial_path(destination: &Path) -> PathBuf {
@@ -261,4 +286,32 @@ fn safe_version_filename(version: &str) -> String {
             character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{overall_download_percentage, DOWNLOAD_PROGRESS_END, DOWNLOAD_PROGRESS_START};
+
+    #[test]
+    fn download_percentage_is_mapped_to_the_overall_install_range() {
+        assert_eq!(
+            overall_download_percentage(0, Some(100)),
+            Some(DOWNLOAD_PROGRESS_START)
+        );
+        assert_eq!(overall_download_percentage(50, Some(100)), Some(42.0));
+        assert_eq!(
+            overall_download_percentage(100, Some(100)),
+            Some(DOWNLOAD_PROGRESS_END)
+        );
+    }
+
+    #[test]
+    fn download_percentage_handles_missing_or_invalid_totals() {
+        assert_eq!(overall_download_percentage(10, None), None);
+        assert_eq!(overall_download_percentage(10, Some(0)), None);
+        assert_eq!(
+            overall_download_percentage(120, Some(100)),
+            Some(DOWNLOAD_PROGRESS_END)
+        );
+    }
 }

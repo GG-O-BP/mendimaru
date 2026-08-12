@@ -48,6 +48,10 @@ const TABS: Array<{ key: ViewKey; label: string; icon: LucideIcon }> = [
 ];
 
 type PathField = "sharedDirectory" | "composeFile" | "winboatExecutable";
+type VersionSupportFilter = "lts" | "mts";
+type VersionSupportFilters = Record<VersionSupportFilter, boolean>;
+
+const EMPTY_VERSION_SUPPORT_FILTERS: VersionSupportFilters = { lts: false, mts: false };
 
 function App() {
   const [activeView, setActiveView] = useState<ViewKey>("studio");
@@ -66,6 +70,8 @@ function App() {
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [versionSearch, setVersionSearch] = useState("");
+  const [versionSupportFilters, setVersionSupportFilters] =
+    useState<VersionSupportFilters>(EMPTY_VERSION_SUPPORT_FILTERS);
   const [projectSearch, setProjectSearch] = useState("");
   const [applyMountNow, setApplyMountNow] = useState(true);
   const toastId = useRef(0);
@@ -160,7 +166,14 @@ function App() {
     const interval = window.setInterval(() => void refreshStatus(), 15_000);
     let unlisten: (() => void) | undefined;
     void listen<DownloadProgress>("studio-download-progress", (event) => {
-      setDownloadProgress(event.payload);
+      setDownloadProgress((current) => {
+        const incoming = event.payload;
+        if (!current || current.version !== incoming.version) return incoming;
+        return {
+          ...incoming,
+          percentage: Math.max(current.percentage ?? 0, incoming.percentage ?? 0),
+        };
+      });
     }).then((dispose) => {
       unlisten = dispose;
     });
@@ -252,21 +265,33 @@ function App() {
             version: version.version,
             state: "starting",
             downloadedBytes: 0,
-            percentage: 0,
+            percentage: 2,
             message: "설치를 준비하고 있습니다.",
           });
           try {
             await invoke("install_studio_pro", { version: version.version });
             await refreshInstalled();
             notify("success", `Studio Pro ${version.version} 설치를 완료했습니다`);
-            window.setTimeout(() => setDownloadProgress(null), 5000);
+            window.setTimeout(() => {
+              setDownloadProgress((current) =>
+                current?.version === version.version && current.state === "installed"
+                  ? null
+                  : current,
+              );
+            }, 5000);
           } catch (error) {
-            setDownloadProgress({
+            const message = errorText(error);
+            setDownloadProgress((current) => ({
               version: version.version,
-              state: "failed",
-              downloadedBytes: 0,
-              message: errorText(error),
-            });
+              state: message.includes("취소") ? "cancelled" : "failed",
+              downloadedBytes:
+                current?.version === version.version ? current.downloadedBytes : 0,
+              totalBytes:
+                current?.version === version.version ? current.totalBytes : undefined,
+              percentage:
+                current?.version === version.version ? current.percentage : undefined,
+              message,
+            }));
             throw error;
           }
         }),
@@ -381,10 +406,16 @@ function App() {
   );
   const filteredCatalog = useMemo(() => {
     const needle = versionSearch.trim().toLowerCase();
-    return needle
-      ? catalog.versions.filter((version) => version.version.toLowerCase().includes(needle))
-      : catalog.versions;
-  }, [catalog.versions, versionSearch]);
+    return catalog.versions.filter((version) => {
+      const matchesSearch = !needle || version.version.toLowerCase().includes(needle);
+      const supportFilterEnabled = versionSupportFilters.lts || versionSupportFilters.mts;
+      const matchesSupport =
+        !supportFilterEnabled ||
+        (versionSupportFilters.lts && version.isLts) ||
+        (versionSupportFilters.mts && version.isMts);
+      return matchesSearch && matchesSupport;
+    });
+  }, [catalog.versions, versionSearch, versionSupportFilters]);
   const filteredProjects = useMemo(() => {
     const needle = projectSearch.trim().toLowerCase();
     return needle
@@ -465,6 +496,7 @@ function App() {
             availableTotal={catalog.totalCount}
             loadedCount={catalog.versions.length}
             search={versionSearch}
+            supportFilters={versionSupportFilters}
             catalogLoading={catalogLoading}
             catalogError={catalogError}
             hasMore={hasMoreVersions}
@@ -474,6 +506,12 @@ function App() {
             isInstalling={isInstalling}
             isBusy={isBusy}
             onSearch={setVersionSearch}
+            onToggleSupportFilter={(filter) =>
+              setVersionSupportFilters((current) => ({
+                ...current,
+                [filter]: !current[filter],
+              }))
+            }
             onRefreshInstalled={() => void refreshInstalled()}
             onRefreshCatalog={() => void fetchCatalogPage(1, true)}
             onLoadMore={() => void fetchCatalogPage(nextCatalogPage)}
@@ -500,6 +538,7 @@ function App() {
             onLaunch={launchProject}
             onFindVersion={(version) => {
               setVersionSearch(version);
+              setVersionSupportFilters(EMPTY_VERSION_SUPPORT_FILTERS);
               setActiveView("studio");
             }}
           />
@@ -547,6 +586,7 @@ function StudioView({
   availableTotal,
   loadedCount,
   search,
+  supportFilters,
   catalogLoading,
   catalogError,
   hasMore,
@@ -556,6 +596,7 @@ function StudioView({
   isInstalling,
   isBusy,
   onSearch,
+  onToggleSupportFilter,
   onRefreshInstalled,
   onRefreshCatalog,
   onLoadMore,
@@ -570,6 +611,7 @@ function StudioView({
   availableTotal?: number;
   loadedCount: number;
   search: string;
+  supportFilters: VersionSupportFilters;
   catalogLoading: boolean;
   catalogError: string | null;
   hasMore: boolean;
@@ -579,6 +621,7 @@ function StudioView({
   isInstalling: boolean;
   isBusy: (key: string) => boolean;
   onSearch: (value: string) => void;
+  onToggleSupportFilter: (value: VersionSupportFilter) => void;
   onRefreshInstalled: () => void;
   onRefreshCatalog: () => void;
   onLoadMore: () => void;
@@ -663,6 +706,18 @@ function StudioView({
                   spellCheck={false}
                 />
               </label>
+              <div className="version-filters" role="group" aria-label="지원 유형 필터">
+                {(["lts", "mts"] as const).map((filter) => (
+                  <label key={filter}>
+                    <input
+                      type="checkbox"
+                      checked={supportFilters[filter]}
+                      onChange={() => onToggleSupportFilter(filter)}
+                    />
+                    <span>{filter.toUpperCase()}</span>
+                  </label>
+                ))}
+              </div>
               <button type="button" className="icon-button" title="공식 목록 새로고침" onClick={onRefreshCatalog} disabled={catalogLoading}>
                 <RefreshCw size={16} className={catalogLoading ? "spin" : ""} />
               </button>
@@ -671,19 +726,12 @@ function StudioView({
         />
 
         {downloadProgress && (
-          <div className="download-bar">
-            <div className="download-copy">
-              <strong>Studio Pro {downloadProgress.version}</strong>
-              <span>{downloadProgress.message}</span>
-            </div>
-            <div className="progress-track">
-              <span style={{ width: `${Math.max(2, downloadProgress.percentage ?? 3)}%` }} />
-            </div>
-            <b>{downloadProgress.percentage == null ? "…" : `${Math.round(downloadProgress.percentage)}%`}</b>
-            {isInstalling && ["connecting", "downloading"].includes(downloadProgress.state) && (
-              <button type="button" onClick={onCancelDownload}>취소</button>
-            )}
-          </div>
+          <InstallationProgress
+            key={downloadProgress.version}
+            progress={downloadProgress}
+            isInstalling={isInstalling}
+            onCancel={onCancelDownload}
+          />
         )}
 
         {catalogError && (
@@ -727,8 +775,12 @@ function StudioView({
           {!catalogLoading && available.length === 0 && !catalogError && (
             <EmptyState
               icon={Download}
-              title={search ? "검색 결과가 없습니다" : "버전 목록이 비어 있습니다"}
-              detail={search ? "다른 버전 번호를 검색해 보세요." : "새로고침해 공식 목록을 다시 불러오세요."}
+              title={search || supportFilters.lts || supportFilters.mts ? "검색 결과가 없습니다" : "버전 목록이 비어 있습니다"}
+              detail={
+                search || supportFilters.lts || supportFilters.mts
+                  ? "검색어나 지원 유형 필터를 변경해 보세요."
+                  : "새로고침해 공식 목록을 다시 불러오세요."
+              }
             />
           )}
         </div>
@@ -740,6 +792,120 @@ function StudioView({
           </button>
         )}
       </section>
+    </div>
+  );
+}
+
+const PROGRESS_ANIMATION_TARGETS: Record<string, number> = {
+  starting: 4,
+  preparing: 7,
+  checking: 11,
+  connecting: 14,
+  downloading: 70,
+  downloaded: 74,
+  ready: 74,
+};
+
+const TERMINAL_PROGRESS_STATES = new Set(["installed", "failed", "cancelled"]);
+
+function InstallationProgress({
+  progress,
+  isInstalling,
+  onCancel,
+}: {
+  progress: DownloadProgress;
+  isInstalling: boolean;
+  onCancel: () => void;
+}) {
+  const [displayedPercentage, setDisplayedPercentage] = useState(() =>
+    clampPercentage(progress.percentage ?? 2),
+  );
+  const [installElapsedSeconds, setInstallElapsedSeconds] = useState(0);
+  const previousState = useRef(progress.state);
+  const reportedPercentage = clampPercentage(progress.percentage ?? 0);
+  const animationTarget = PROGRESS_ANIMATION_TARGETS[progress.state];
+  const isActive = !TERMINAL_PROGRESS_STATES.has(progress.state);
+
+  useEffect(() => {
+    const restarted = progress.state === "starting" && previousState.current !== "starting";
+    setDisplayedPercentage((current) => {
+      if (restarted) return Math.max(2, reportedPercentage);
+      return progress.state === "installed" ? 100 : Math.max(current, reportedPercentage);
+    });
+    previousState.current = progress.state;
+  }, [progress.state, reportedPercentage]);
+
+  useEffect(() => {
+    if (animationTarget == null || !isActive) return undefined;
+
+    const interval = window.setInterval(() => {
+      setDisplayedPercentage((current) => {
+        if (current >= animationTarget) return current;
+        const remaining = animationTarget - current;
+        const step =
+          progress.state === "downloading"
+            ? Math.max(0.08, remaining * 0.006)
+            : Math.max(0.25, remaining * 0.08);
+        return Math.min(animationTarget, current + step);
+      });
+    }, 800);
+
+    return () => window.clearInterval(interval);
+  }, [animationTarget, isActive, progress.state]);
+
+  useEffect(() => {
+    if (progress.state !== "installing") {
+      setInstallElapsedSeconds(0);
+      return undefined;
+    }
+
+    const startedAt = Date.now();
+    const updateElapsed = () => {
+      setInstallElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    };
+    updateElapsed();
+    const interval = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(interval);
+  }, [progress.state]);
+
+  const roundedPercentage = Math.round(displayedPercentage);
+  const progressLabel =
+    progress.state === "installed"
+      ? "100%"
+      : progress.state === "installing"
+        ? installElapsedSeconds > 0
+          ? `${formatElapsedTime(installElapsedSeconds)} 경과`
+          : "설치 중"
+      : progress.state === "failed"
+        ? "실패"
+        : progress.state === "cancelled"
+          ? "취소됨"
+          : `약 ${roundedPercentage}%`;
+
+  return (
+    <div className={`download-bar ${progress.state}`} aria-live="polite">
+      <div className="download-copy">
+        <strong>Studio Pro {progress.version}</strong>
+        <span>{progressDescription(progress)}</span>
+      </div>
+      <div
+        className={`progress-track ${progress.state === "installing" ? "indeterminate" : ""}`}
+        role="progressbar"
+        aria-label={`Studio Pro ${progress.version} 설치 진행률`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress.state === "installing" ? undefined : roundedPercentage}
+        aria-valuetext={`${progressDescription(progress)} ${progressLabel}`}
+      >
+        <span
+          className={isActive ? "active" : ""}
+          style={{ width: `${Math.max(2, displayedPercentage)}%` }}
+        />
+      </div>
+      <b>{progressLabel}</b>
+      {isInstalling && ["connecting", "downloading"].includes(progress.state) && (
+        <button type="button" onClick={onCancel}>취소</button>
+      )}
     </div>
   );
 }
@@ -1087,6 +1253,33 @@ function formatModified(value?: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleDateString("ko-KR", { year: "numeric", month: "short", day: "numeric" });
+}
+
+function progressDescription(progress: DownloadProgress) {
+  if (progress.state !== "downloading" || !progress.totalBytes) return progress.message;
+  return `${progress.message} ${formatBytes(progress.downloadedBytes)} / ${formatBytes(progress.totalBytes)}`;
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = value / 1024;
+  let unit = units[0];
+  for (let index = 1; index < units.length && size >= 1024; index += 1) {
+    size /= 1024;
+    unit = units[index];
+  }
+  return `${size >= 100 ? size.toFixed(0) : size.toFixed(1)} ${unit}`;
+}
+
+function formatElapsedTime(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}분 ${seconds}초` : `${seconds}초`;
+}
+
+function clampPercentage(value: number) {
+  return Math.min(100, Math.max(0, value));
 }
 
 function compactPath(path: string) {

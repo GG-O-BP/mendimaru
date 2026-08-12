@@ -34,11 +34,11 @@ Chrome 탐지 순서는 `MENDIMARU_CHROME_PATH`, `google-chrome-stable`, `google
 | Studio Pro 제거 정보 | `C:\ProgramData\Mendix` |
 | 기본 공유 경로 | `\\host.lan\Data` |
 
-설치 파일은 Linux 공유 디렉터리의 `.mendimaru/installers`에 저장합니다. WinBoat RemoteApp에는 따옴표 영향을 받지 않는 UTF-16LE 인코딩 PowerShell 명령으로 전달하며, 설치 프로세스 종료 코드가 성공이고 해당 버전의 `StudioPro.exe`가 생성된 뒤에만 완료로 처리합니다.
+설치 파일은 Linux 공유 디렉터리의 `.mendimaru/installers`에 저장합니다. Windows에서는 공유 경로의 보안 경고가 숨은 상태로 설치를 막지 않도록 파일을 로컬 임시 디렉터리로 복사하고 차단을 해제한 뒤 실행합니다. WinBoat RemoteApp에는 따옴표 영향을 받지 않는 UTF-16LE 인코딩 PowerShell 명령으로 전달하며, 설치 프로세스 종료 코드가 성공이고 해당 버전의 `StudioPro.exe`가 생성된 뒤에만 완료로 처리합니다.
 
 제거할 때도 Windows 제거 프로세스가 끝나고 해당 버전의 `StudioPro.exe`가 사라진 것을 확인한 뒤 설치된 버전 목록을 자동으로 갱신합니다.
 
-Studio Pro 실행 버튼은 Windows 프로세스의 실제 창이 생성되고 FreeRDP가 표시할 준비를 마칠 때까지 비활성화됩니다. 실행 준비 중에는 다른 버전과 프로젝트의 실행 버튼도 잠겨 중복 실행을 방지합니다. 실행 스크립트는 공유 폴더에 저장하고 짧은 호출 명령만 RemoteApp으로 전달해 FreeRDP RAIL의 명령 길이 제한을 넘지 않습니다. Windows Script Host가 PowerShell을 숨김 모드로 실행하므로 Studio Pro와 필요한 권한 요청만 표시되고 PowerShell 콘솔 창은 나타나지 않습니다.
+Studio Pro 실행 버튼은 Windows 프로세스의 실제 창이 생성되고 FreeRDP가 표시할 준비를 마칠 때까지 비활성화됩니다. 실행 준비 중에는 다른 버전과 프로젝트의 실행 버튼도 잠겨 중복 실행을 방지합니다. 실행 스크립트는 공유 폴더에 저장하고 짧은 호출 명령만 RemoteApp으로 전달해 FreeRDP RAIL의 명령 길이 제한을 넘지 않습니다. Windows Script Host가 PowerShell을 숨김 모드로 실행하며, 설치·제거는 이미 관리자 권한인 WinBoat 세션의 토큰을 상속하므로 PowerShell 콘솔이나 별도의 UAC 창을 표시하지 않습니다.
 
 ## 공유 워크스페이스
 

@@ -16,6 +16,8 @@ const STUDIO_LAUNCH_TIMEOUT_SECONDS: u64 = 5 * 60;
 const INSTALL_TIMEOUT_SECONDS: u64 = 45 * 60;
 const UNINSTALL_TIMEOUT_SECONDS: u64 = 15 * 60;
 const REMOTE_APP_START_GRACE_SECONDS: u64 = 20;
+const REMOTE_APP_START_ATTEMPTS: usize = 2;
+const REMOTE_APP_RETRY_DELAY_SECONDS: u64 = 2;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,12 +177,14 @@ pub async fn launch_studio(
         &windows_report_path,
     );
     let script_path = write_command_script(config, &operation_id, &script)?;
-    let mut remote_app = spawn_powershell_file(config, &script_path, &label)?;
-    let report = wait_for_windows_operation(
+    let report = run_windows_operation(
+        config,
+        &script_path,
+        &label,
         &report_path,
-        &mut remote_app,
         STUDIO_LAUNCH_TIMEOUT_SECONDS,
         "Studio Pro 실행",
+        true,
     )
     .await?;
     if report.executable_path.as_deref().is_none_or(str::is_empty) {
@@ -223,17 +227,15 @@ pub async fn install_studio(
     // Keep the exact script next to other commands so a failed installation can
     // be diagnosed without exposing the Windows password or FreeRDP arguments.
     let script_path = write_command_script(config, &operation_id, &script)?;
-    let mut remote_app = spawn_powershell_file(
+    let label = format!("Install Studio Pro {version}");
+    let report = run_windows_operation(
         config,
         &script_path,
-        &format!("Install Studio Pro {version}"),
-    )?;
-
-    let report = wait_for_windows_operation(
+        &label,
         &report_path,
-        &mut remote_app,
         INSTALL_TIMEOUT_SECONDS,
         "Studio Pro 설치",
+        false,
     )
     .await?;
     report
@@ -266,16 +268,15 @@ pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(),
         &windows_report_path,
     );
     let script_path = write_command_script(config, &operation_id, &script)?;
-    let mut remote_app = spawn_powershell_file(
+    let label = format!("Uninstall Studio Pro {version}");
+    run_windows_operation(
         config,
         &script_path,
-        &format!("Uninstall Studio Pro {version}"),
-    )?;
-    wait_for_windows_operation(
+        &label,
         &report_path,
-        &mut remote_app,
         UNINSTALL_TIMEOUT_SECONDS,
         "Studio Pro 제거",
+        false,
     )
     .await?;
     Ok(())
@@ -542,16 +543,18 @@ function Write-LaunchResult {
     Move-Item -LiteralPath $temporaryPath -Destination $resultPath -Force
 }
 
-function Get-ReadyStudioProcess {
-    $matches = @(Get-Process -Name 'studiopro' -ErrorAction SilentlyContinue | Where-Object {
+function Get-StudioProcesses {
+    return @(Get-Process -Name 'studiopro' -ErrorAction SilentlyContinue | Where-Object {
         try {
             $_.Path -and $_.Path.Equals($executable, [System.StringComparison]::OrdinalIgnoreCase)
         } catch {
             $false
         }
     })
+}
 
-    foreach ($candidate in ($matches | Sort-Object StartTime -Descending)) {
+function Get-ReadyStudioProcess {
+    foreach ($candidate in (@(Get-StudioProcesses) | Sort-Object StartTime -Descending)) {
         $candidate.Refresh()
         if ($candidate.MainWindowHandle -ne [IntPtr]::Zero) {
             return $candidate
@@ -597,10 +600,21 @@ try {
     Start-Sleep -Milliseconds 1200
     Write-LaunchResult 'succeeded' 'Studio Pro window is ready.' $null $executable $null
 
-    # The RemoteApp host must stay alive for the Studio Pro child window.
-    try {
-        Wait-Process -Id $readyProcess.Id -ErrorAction SilentlyContinue
-    } catch { }
+    # Studio Pro can hand the sign-in window to another studiopro.exe process.
+    # Keep the RemoteApp host alive across that handoff and only exit after no
+    # process with the selected executable path has existed for 15 seconds.
+    $missingSince = $null
+    while ($true) {
+        $studioProcesses = @(Get-StudioProcesses)
+        if ($studioProcesses.Count -gt 0) {
+            $missingSince = $null
+        } elseif ($null -eq $missingSince) {
+            $missingSince = Get-Date
+        } elseif (((Get-Date) - $missingSince).TotalSeconds -ge 15) {
+            break
+        }
+        Start-Sleep -Milliseconds 500
+    }
     exit 0
 } catch {
     $exitCode = if ($null -ne $process -and $process.HasExited) { [int]$process.ExitCode } else { $null }
@@ -630,6 +644,8 @@ $resultPath = '__RESULT_PATH__'
 $installRoot = '__INSTALL_ROOT__'
 $version = '__VERSION__'
 $process = $null
+$localInstaller = $null
+$scriptExitCode = 0
 
 function Write-InstallResult {
     param(
@@ -672,8 +688,27 @@ try {
         throw "Installer not found: $installer"
     }
 
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal] $identity
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'The WinBoat Windows session does not have administrator privileges.'
+    }
+
+    # Executing an installer directly from the host UNC share can block on an
+    # invisible "Open File - Security Warning" dialog in RemoteApp. Stage it
+    # locally and remove any downloaded-file zone marker before launching it.
+    $sourceInstaller = Get-Item -LiteralPath $installer
+    $stagingDirectory = Join-Path $env:ProgramData 'Mendimaru\Installers'
+    New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
+    $localInstaller = Join-Path $stagingDirectory $sourceInstaller.Name
+    $localInfo = Get-Item -LiteralPath $localInstaller -ErrorAction SilentlyContinue
+    if ($null -eq $localInfo -or $localInfo.Length -ne $sourceInstaller.Length) {
+        Copy-Item -LiteralPath $installer -Destination $localInstaller -Force
+    }
+    Unblock-File -LiteralPath $localInstaller -ErrorAction SilentlyContinue
+
     Write-InstallResult 'running' 'Studio Pro installer is running.' $null $null $null
-    $process = Start-Process -FilePath $installer -ArgumentList @('/SILENT') -Verb RunAs -Wait -PassThru
+    $process = Start-Process -FilePath $localInstaller -ArgumentList @('/SILENT') -Wait -PassThru
     $exitCode = [int]$process.ExitCode
     if (@(0, 1641, 3010) -notcontains $exitCode) {
         throw "Installer exited with code $exitCode."
@@ -692,12 +727,16 @@ try {
     }
 
     Write-InstallResult 'succeeded' 'Studio Pro installation completed.' $exitCode $studioPro $null
-    exit 0
 } catch {
     $exitCode = if ($null -ne $process) { [int]$process.ExitCode } else { $null }
     Write-InstallResult 'failed' 'Studio Pro installation failed.' $exitCode $null $_.Exception.Message
-    exit 1
+    $scriptExitCode = 1
+} finally {
+    if ($null -ne $localInstaller) {
+        Remove-Item -LiteralPath $localInstaller -Force -ErrorAction SilentlyContinue
+    }
 }
+exit $scriptExitCode
 "#;
 
     TEMPLATE
@@ -758,13 +797,91 @@ function Find-StudioPro {
     return $null
 }
 
+function Get-RunningStudioPro {
+    param([string]$ExecutablePath)
+
+    return @(Get-Process -Name 'studiopro' -ErrorAction SilentlyContinue | Where-Object {
+        try {
+            $_.Path -and $_.Path.Equals($ExecutablePath, [System.StringComparison]::OrdinalIgnoreCase)
+        } catch {
+            $false
+        }
+    })
+}
+
+function Close-RunningStudioPro {
+    param([string]$ExecutablePath)
+
+    $running = @(Get-RunningStudioPro $ExecutablePath)
+    if ($running.Count -eq 0) { return }
+
+    foreach ($studioProcess in $running) {
+        if ($studioProcess.MainWindowHandle -ne [IntPtr]::Zero) {
+            $null = $studioProcess.CloseMainWindow()
+        }
+    }
+
+    $deadline = (Get-Date).AddSeconds(20)
+    do {
+        Start-Sleep -Milliseconds 500
+        $running = @(Get-RunningStudioPro $ExecutablePath)
+    } while ($running.Count -gt 0 -and (Get-Date) -lt $deadline)
+
+    if ($running.Count -gt 0) {
+        # The idle Sign In/Select App shells sometimes ignore WM_CLOSE. They
+        # cannot contain an unsaved project, so they are safe to terminate.
+        # Never force-close an actual project window.
+        $safeWindowTitles = @('Mendix Studio Pro - Sign In', 'Mendix Studio Pro - Select App')
+        $unsafeProcesses = @($running | Where-Object {
+            $_.Refresh()
+            -not [string]::IsNullOrWhiteSpace($_.MainWindowTitle) -and
+                $safeWindowTitles -notcontains $_.MainWindowTitle
+        })
+        if ($unsafeProcesses.Count -gt 0) {
+            throw 'Studio Pro is still running with a project open. Close it and try uninstalling again.'
+        }
+        foreach ($studioProcess in $running) {
+            Stop-Process -Id $studioProcess.Id -Force
+        }
+        Start-Sleep -Seconds 2
+        $running = @(Get-RunningStudioPro $ExecutablePath)
+        if ($running.Count -gt 0) {
+            throw 'Studio Pro is still running. Close it and try uninstalling again.'
+        }
+    }
+}
+
 try {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal] $identity
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'The WinBoat Windows session does not have administrator privileges.'
+    }
+
+    $studioPro = Find-StudioPro
+    if ($null -ne $studioPro) {
+        Close-RunningStudioPro $studioPro
+    }
+
     $folder = Get-ChildItem -LiteralPath $dataRoot -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -eq $version -or $_.Name.StartsWith("$version.") } |
         Sort-Object Name -Descending |
         Select-Object -First 1
     if ($null -eq $folder) {
-        throw "Mendix data folder not found for $version."
+        # Recover from an interrupted uninstall that removed its metadata but
+        # could not delete a running Studio Pro executable. Find-StudioPro only
+        # returns a matching child of the configured Mendix install root.
+        Write-UninstallResult 'running' 'Removing files left by a partial uninstall.' $null $null
+        if ($null -ne $studioPro) {
+            $versionFolder = Split-Path -Parent (Split-Path -Parent $studioPro)
+            Remove-Item -LiteralPath $versionFolder -Recurse -Force
+        }
+        $studioPro = Find-StudioPro
+        if ($null -ne $studioPro) {
+            throw "StudioPro.exe still exists after partial uninstall cleanup: $studioPro"
+        }
+        Write-UninstallResult 'succeeded' 'Studio Pro uninstall completed.' 0 $null
+        exit 0
     }
 
     $uninstaller = Join-Path $folder.FullName 'uninst\unins000.exe'
@@ -773,7 +890,7 @@ try {
     }
 
     Write-UninstallResult 'running' 'Studio Pro uninstaller is running.' $null $null
-    $process = Start-Process -FilePath $uninstaller -ArgumentList @('/SILENT') -Verb RunAs -Wait -PassThru
+    $process = Start-Process -FilePath $uninstaller -ArgumentList @('/SILENT') -Wait -PassThru
     $exitCode = [int]$process.ExitCode
     if (@(0, 1641, 3010) -notcontains $exitCode) {
         throw "Uninstaller exited with code $exitCode."
@@ -805,19 +922,69 @@ try {
         .replace("__RESULT_PATH__", &powershell_literal(windows_report_path))
 }
 
+struct WindowsOperationWaitError {
+    message: String,
+    retryable: bool,
+}
+
+async fn run_windows_operation(
+    config: &AppConfig,
+    script_path: &Path,
+    label: &str,
+    report_path: &Path,
+    timeout_seconds: u64,
+    operation: &str,
+    keep_remote_app_alive: bool,
+) -> Result<WindowsOperationReport, String> {
+    for attempt in 0..REMOTE_APP_START_ATTEMPTS {
+        let mut remote_app = spawn_powershell_file(config, script_path, label)?;
+        match wait_for_windows_operation(report_path, &mut remote_app, timeout_seconds, operation)
+            .await
+        {
+            Ok(report) => {
+                if !keep_remote_app_alive {
+                    stop_remote_app(&mut remote_app);
+                }
+                return Ok(report);
+            }
+            Err(error) => {
+                stop_remote_app(&mut remote_app);
+                if error.retryable && attempt + 1 < REMOTE_APP_START_ATTEMPTS {
+                    tokio::time::sleep(Duration::from_secs(REMOTE_APP_RETRY_DELAY_SECONDS)).await;
+                    continue;
+                }
+                return Err(error.message);
+            }
+        }
+    }
+    unreachable!("the RemoteApp attempt loop always returns")
+}
+
+fn stop_remote_app(remote_app: &mut Child) {
+    match remote_app.try_wait() {
+        Ok(Some(_)) => {}
+        Ok(None) | Err(_) => {
+            let _ = remote_app.kill();
+            let _ = remote_app.wait();
+        }
+    }
+}
+
 async fn wait_for_windows_operation(
     report_path: &Path,
     remote_app: &mut Child,
     timeout_seconds: u64,
     operation: &str,
-) -> Result<WindowsOperationReport, String> {
+) -> Result<WindowsOperationReport, WindowsOperationWaitError> {
     let started = tokio::time::Instant::now();
     let timeout = Duration::from_secs(timeout_seconds);
     let mut remote_app_exited_at = None;
+    let mut last_report_state = None;
 
     loop {
         if let Ok(content) = tokio::fs::read_to_string(report_path).await {
             if let Ok(report) = parse_install_report(&content) {
+                last_report_state = Some(report.state.clone());
                 match report.state.as_str() {
                     "succeeded" => return Ok(report),
                     "failed" => {
@@ -829,9 +996,12 @@ async fn wait_for_windows_operation(
                             .exit_code
                             .map(|code| format!(" (종료 코드 {code})"))
                             .unwrap_or_default();
-                        return Err(format!(
-                            "Windows에서 {operation}에 실패했습니다{exit_code}: {reason}"
-                        ));
+                        return Err(WindowsOperationWaitError {
+                            message: format!(
+                                "Windows에서 {operation}에 실패했습니다{exit_code}: {reason}"
+                            ),
+                            retryable: false,
+                        });
                     }
                     _ => {}
                 }
@@ -845,28 +1015,43 @@ async fn wait_for_windows_operation(
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    return Err(format!(
-                        "{operation}용 WinBoat RemoteApp 상태를 확인하지 못했습니다: {error}"
-                    ));
+                    return Err(WindowsOperationWaitError {
+                        message: format!(
+                            "{operation}용 WinBoat RemoteApp 상태를 확인하지 못했습니다: {error}"
+                        ),
+                        retryable: false,
+                    });
                 }
             }
         }
 
         if let Some((exited_at, status)) = remote_app_exited_at {
-            if !report_path.is_file()
-                && exited_at.elapsed() >= Duration::from_secs(REMOTE_APP_START_GRACE_SECONDS)
-            {
-                return Err(format!(
-                    "{operation} 명령이 Windows에서 시작되지 않았습니다 (FreeRDP 상태: {status})."
-                ));
+            if exited_at.elapsed() >= Duration::from_secs(REMOTE_APP_START_GRACE_SECONDS) {
+                return match last_report_state.as_deref() {
+                    Some(state) => Err(WindowsOperationWaitError {
+                        message: format!(
+                            "Windows가 {operation} 완료를 보고하기 전에 RemoteApp 연결이 종료되었습니다 (마지막 상태: {state}, FreeRDP 상태: {status})."
+                        ),
+                        retryable: false,
+                    }),
+                    None => Err(WindowsOperationWaitError {
+                        message: format!(
+                            "{operation} 명령이 Windows에서 시작되지 않았습니다 (FreeRDP 상태: {status})."
+                        ),
+                        retryable: true,
+                    }),
+                };
             }
         }
 
         if started.elapsed() >= timeout {
-            return Err(format!(
-                "{operation}가 {}분 안에 완료되지 않았습니다. WinBoat Windows에서 상태를 확인해 주세요.",
-                timeout_seconds / 60
-            ));
+            return Err(WindowsOperationWaitError {
+                message: format!(
+                    "{operation}가 {}분 안에 완료되지 않았습니다. WinBoat Windows에서 상태를 확인해 주세요.",
+                    timeout_seconds / 60
+                ),
+                retryable: false,
+            });
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -896,6 +1081,10 @@ fn spawn_powershell_file(
     );
     let encoded = encode_powershell_script(&launcher);
     let arguments = powershell_encoded_arguments(&encoded);
+    // Do not publish PowerShell itself as the RemoteApp. FreeRDP can map its
+    // console before WindowStyle Hidden takes effect, which causes a visible
+    // flash. WScript is windowless here and starts PowerShell hidden while
+    // preserving the already-elevated RemoteApp session token.
     let hidden_launcher_path = write_hidden_powershell_launcher(script_path, &arguments)?;
     let windows_hidden_launcher_path = linux_path_to_windows_share(
         Path::new(&config.shared_directory),
@@ -936,7 +1125,7 @@ fn hidden_powershell_launcher(powershell_arguments: &str) -> String {
 
 fn powershell_encoded_arguments(encoded_command: &str) -> String {
     format!(
-        "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded_command}"
+        "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand {encoded_command}"
     )
 }
 
@@ -1054,12 +1243,31 @@ fn powershell_literal(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        encode_powershell_script, hidden_powershell_launcher, launch_studio_script,
+        encode_powershell_script, hidden_powershell_launcher, install_script, install_studio,
+        installed_versions, launch_studio, launch_studio_script, launch_uninstaller,
         parse_install_report, parse_studio_versions, powershell_encoded_arguments,
         uninstall_script, validate_version,
     };
-    use crate::models::WinApp;
+    use crate::{
+        config,
+        models::{AppConfig, WinApp},
+        projects::linux_path_to_windows_share,
+    };
     use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+    use std::path::Path;
+
+    fn live_e2e_context() -> (AppConfig, String) {
+        assert_eq!(
+            std::env::var("MENDIMARU_E2E_ALLOW_MUTATION").as_deref(),
+            Ok("1"),
+            "set MENDIMARU_E2E_ALLOW_MUTATION=1 to mutate the live WinBoat VM"
+        );
+        let version = std::env::var("MENDIMARU_E2E_VERSION")
+            .expect("set MENDIMARU_E2E_VERSION to the exact test version");
+        validate_version(&version).expect("the E2E version must be valid");
+        let config = config::detect_config().expect("the live WinBoat configuration must exist");
+        (config, version)
+    }
 
     #[test]
     fn extracts_versions_from_winboat_apps_using_reference_layout() {
@@ -1133,11 +1341,42 @@ mod tests {
             r"\\host.lan\Data\.mendimaru\operations\uninstall.json",
         );
 
-        assert!(script.contains("-Verb RunAs -Wait -PassThru"));
+        assert!(script.contains("-Wait -PassThru"));
+        assert!(!script.contains("-Verb RunAs"));
+        assert!(script.contains("WindowsBuiltInRole]::Administrator"));
+        assert!(script.contains("CloseMainWindow()"));
+        assert!(script.contains("Close-RunningStudioPro $studioPro"));
+        assert!(script.contains("Mendix Studio Pro - Sign In"));
+        assert!(script.contains("Mendix Studio Pro - Select App"));
+        assert!(script.contains("Stop-Process -Id $studioProcess.Id -Force"));
+        assert!(script.contains("with a project open"));
+        assert!(script.contains("Close it and try uninstalling again"));
+        assert!(script.contains("Removing files left by a partial uninstall"));
+        assert!(script.contains("Remove-Item -LiteralPath $versionFolder -Recurse -Force"));
         assert!(script.contains("StudioPro.exe still exists after uninstall"));
         assert!(script.contains("'C:\\ProgramData\\Mendix'"));
         assert!(script.contains("'11.13.0'"));
         assert!(!script.contains("__VERSION__"));
+    }
+
+    #[test]
+    fn installer_uses_the_existing_elevated_winboat_session() {
+        let script = install_script(
+            r"\\host.lan\Data\.mendimaru\installers\Mendix-11.13.0-Setup.exe",
+            r"\\host.lan\Data\.mendimaru\operations\install.json",
+            r"C:\Program Files\Mendix",
+            "11.13.0",
+        );
+
+        assert!(script.contains("WindowsBuiltInRole]::Administrator"));
+        assert!(script.contains("Join-Path $env:ProgramData 'Mendimaru\\Installers'"));
+        assert!(script.contains("Copy-Item -LiteralPath $installer"));
+        assert!(script.contains("Unblock-File -LiteralPath $localInstaller"));
+        assert!(script.contains(
+            "Start-Process -FilePath $localInstaller -ArgumentList @('/SILENT') -Wait -PassThru"
+        ));
+        assert!(script.contains("Remove-Item -LiteralPath $localInstaller"));
+        assert!(!script.contains("-Verb RunAs"));
     }
 
     #[test]
@@ -1151,7 +1390,9 @@ mod tests {
         assert!(script.contains("MainWindowHandle -ne [IntPtr]::Zero"));
         assert!(script.contains("Start-Process -FilePath $executable"));
         assert!(script.contains("Start-Sleep -Milliseconds 1200"));
-        assert!(script.contains("Wait-Process -Id $readyProcess.Id"));
+        assert!(script.contains("Get-StudioProcesses"));
+        assert!(script.contains("$studioProcesses.Count -gt 0"));
+        assert!(script.contains("TotalSeconds -ge 15"));
         assert!(script.contains(r"'\\host.lan\Data\Orders\Orders.mpr'"));
         assert!(!script.contains("__EXECUTABLE_PATH__"));
     }
@@ -1177,6 +1418,81 @@ mod tests {
         assert!(launcher.contains("shell.Run("));
         assert!(launcher.contains(", 0, True)"));
         assert!(launcher.contains("WScript.Quit exitCode"));
-        assert!(!launcher.contains("WindowStyle Normal"));
+        assert!(arguments.contains("-WindowStyle Hidden"));
+        assert!(arguments.contains("-EncodedCommand QQA="));
+        assert!(!arguments.contains("WindowStyle Normal"));
+    }
+
+    #[test]
+    #[ignore = "installs Studio Pro in the live WinBoat VM"]
+    fn live_e2e_install_studio() {
+        let (config, version) = live_e2e_context();
+        let installer_path = Path::new(&config.shared_directory)
+            .join(".mendimaru/installers")
+            .join(format!("Mendix-{version}-Setup.exe"));
+        assert!(
+            installer_path.is_file(),
+            "cached installer does not exist: {}",
+            installer_path.display()
+        );
+        let windows_installer_path = linux_path_to_windows_share(
+            Path::new(&config.shared_directory),
+            &installer_path,
+            &config.windows_shared_directory,
+        )
+        .expect("the cached installer path must map to the Windows share");
+
+        let executable_path = tauri::async_runtime::block_on(install_studio(
+            &config,
+            &version,
+            &windows_installer_path,
+        ))
+        .expect("Studio Pro installation must succeed");
+        assert!(
+            executable_path
+                .to_ascii_lowercase()
+                .ends_with("studiopro.exe"),
+            "unexpected executable path: {executable_path}"
+        );
+
+        let installed = tauri::async_runtime::block_on(installed_versions(&config))
+            .expect("installed versions must be readable after installation");
+        assert!(
+            installed.iter().any(|item| item.version == version),
+            "the installed version list does not contain {version}"
+        );
+    }
+
+    #[test]
+    #[ignore = "launches Studio Pro in the live WinBoat VM"]
+    fn live_e2e_launch_studio() {
+        let (config, version) = live_e2e_context();
+        let result = tauri::async_runtime::block_on(launch_studio(&config, &version, None))
+            .expect("Studio Pro launch must succeed");
+
+        assert_eq!(result.label, format!("Studio Pro {version}"));
+        assert!(
+            result
+                .executable_path
+                .to_ascii_lowercase()
+                .ends_with("studiopro.exe"),
+            "unexpected executable path: {}",
+            result.executable_path
+        );
+    }
+
+    #[test]
+    #[ignore = "uninstalls Studio Pro from the live WinBoat VM"]
+    fn live_e2e_uninstall_studio() {
+        let (config, version) = live_e2e_context();
+        tauri::async_runtime::block_on(launch_uninstaller(&config, &version))
+            .expect("Studio Pro uninstall must succeed");
+
+        let installed = tauri::async_runtime::block_on(installed_versions(&config))
+            .expect("installed versions must be readable after uninstall");
+        assert!(
+            installed.iter().all(|item| item.version != version),
+            "the installed version list still contains {version}"
+        );
     }
 }

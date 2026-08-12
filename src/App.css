@@ -497,6 +497,35 @@ button:disabled {
   color: #aaadba;
 }
 
+.version-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 10px;
+  background: #f8f8fa;
+  border: 1px solid #e7e8ed;
+  border-radius: 8px;
+}
+
+.version-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #858a99;
+  font-size: 9.5px;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.version-filters input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
 .badges {
   display: inline-flex;
   gap: 4px;
@@ -535,7 +564,7 @@ button:disabled {
 
 .download-bar {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) minmax(160px, 2fr) 38px auto;
+  grid-template-columns: minmax(160px, 1fr) minmax(160px, 2fr) 74px auto;
   align-items: center;
   gap: 12px;
   padding: 10px 18px;
@@ -563,24 +592,77 @@ button:disabled {
 }
 
 .progress-track {
+  position: relative;
   height: 5px;
   overflow: hidden;
   background: #dfdcf3;
   border-radius: 5px;
 }
 
+.progress-track.indeterminate::after {
+  position: absolute;
+  inset-block: 0;
+  width: 24%;
+  background: linear-gradient(90deg, transparent, rgb(112 99 210 / 70%), transparent);
+  content: "";
+  animation: progress-indeterminate 1.5s ease-in-out infinite;
+}
+
 .progress-track span {
+  position: relative;
   display: block;
   height: 100%;
+  overflow: hidden;
   background: var(--primary);
   border-radius: inherit;
-  transition: width 180ms ease;
+  transition: width 320ms ease;
+}
+
+.progress-track span.active::after {
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 55%), transparent);
+  content: "";
+  animation: progress-shimmer 1.35s ease-in-out infinite;
+}
+
+.download-bar.failed .progress-track span,
+.download-bar.cancelled .progress-track span {
+  background: #b95b68;
 }
 
 .download-bar b {
+  min-width: 38px;
   color: #655e97;
   font-size: 9px;
   text-align: right;
+  white-space: nowrap;
+}
+
+.download-bar.failed b,
+.download-bar.cancelled b {
+  color: #a44c59;
+}
+
+@keyframes progress-shimmer {
+  from {
+    transform: translateX(-120%);
+  }
+
+  to {
+    transform: translateX(260%);
+  }
+}
+
+@keyframes progress-indeterminate {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(420%);
+  }
 }
 
 .download-bar button,
