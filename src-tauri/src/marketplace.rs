@@ -41,9 +41,9 @@ pub fn load_cached_catalog(app: &AppHandle) -> Result<StudioVersionCatalog, Stri
     }
 
     let content = fs::read_to_string(&path)
-        .map_err(|error| format!("Studio Pro 버전 캐시를 읽을 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-version-cache-read", error = error))?;
     serde_json::from_str(&content)
-        .map_err(|error| format!("Studio Pro 버전 캐시가 올바르지 않습니다: {error}"))
+        .map_err(|error| crate::tr!("error-version-cache-invalid", error = error))
 }
 
 pub async fn fetch_catalog_page(
@@ -58,7 +58,7 @@ pub async fn fetch_catalog_page(
     };
 
     if fresh_versions.is_empty() {
-        return Err("Mendix Marketplace에서 Studio Pro 버전을 찾지 못했습니다.".to_string());
+        return Err(crate::tr!("error-marketplace-versions-empty"));
     }
 
     let mut catalog = if reset {
@@ -108,22 +108,22 @@ fn cache_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_cache_dir()
         .map(|directory| directory.join(CACHE_FILE_NAME))
-        .map_err(|error| format!("앱 캐시 경로를 찾을 수 없습니다: {error}"))
+        .map_err(|error| crate::tr!("error-app-cache-path", error = error))
 }
 
 fn save_catalog(app: &AppHandle, catalog: &StudioVersionCatalog) -> Result<(), String> {
     let path = cache_path(app)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .map_err(|error| format!("Studio Pro 버전 캐시 폴더를 만들 수 없습니다: {error}"))?;
+            .map_err(|error| crate::tr!("error-version-cache-directory-create", error = error))?;
     }
     let content = serde_json::to_string_pretty(catalog)
-        .map_err(|error| format!("Studio Pro 버전 캐시를 만들 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-version-cache-create", error = error))?;
     let temporary_path = path.with_extension("json.tmp");
     fs::write(&temporary_path, content)
-        .map_err(|error| format!("Studio Pro 버전 캐시를 저장할 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-version-cache-save", error = error))?;
     fs::rename(&temporary_path, &path)
-        .map_err(|error| format!("Studio Pro 버전 캐시를 확정할 수 없습니다: {error}"))
+        .map_err(|error| crate::tr!("error-version-cache-finalize", error = error))
 }
 
 async fn scrape_page(target_page: u32) -> Result<(Vec<DownloadableVersion>, Option<u32>), String> {
@@ -168,9 +168,7 @@ async fn scrape_build_number(version: &str) -> Result<String, String> {
                 }
             }
             if started.elapsed() >= ELEMENT_TIMEOUT {
-                return Err(format!(
-                    "Studio Pro {version}의 Mendix 빌드 번호를 찾지 못했습니다."
-                ));
+                return Err(crate::tr!("error-build-number-missing", version = version));
             }
             tokio::time::sleep(POLL_INTERVAL).await;
         }
@@ -227,8 +225,7 @@ fn parse_datagrid_html(html: &str) -> Result<Vec<DownloadableVersion>, String> {
 }
 
 fn selector(value: &str) -> Result<Selector, String> {
-    Selector::parse(value)
-        .map_err(|error| format!("Marketplace 선택자가 올바르지 않습니다: {error}"))
+    Selector::parse(value).map_err(|error| crate::tr!("error-marketplace-selector", error = error))
 }
 
 fn normalized_text<'a>(parts: impl Iterator<Item = &'a str>) -> String {
@@ -285,7 +282,7 @@ fn major_version(version: &str) -> Result<u32, String> {
         .split('.')
         .next()
         .and_then(|major| major.parse::<u32>().ok())
-        .ok_or_else(|| format!("Studio Pro 버전을 확인할 수 없습니다: {version}"))
+        .ok_or_else(|| crate::tr!("error-version-inspect", version = version))
 }
 
 fn v11_installer_url(version: &str) -> String {
@@ -318,13 +315,13 @@ async fn click_next_page(page: &Page) -> Result<(), String> {
                     "document.querySelector(\"button[aria-label='Go to next page']:not([disabled])\")?.click()",
                 )
                     .await
-                    .map_err(|error| format!("다음 버전 페이지를 열 수 없습니다: {error}"))?;
+                    .map_err(|error| crate::tr!("error-marketplace-open", error = error))?;
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 return Ok(());
             }
         }
         if started.elapsed() >= PAGE_CHANGE_TIMEOUT {
-            return Err("더 이상 불러올 Studio Pro 버전 페이지가 없습니다.".to_string());
+            return Err(crate::tr!("error-marketplace-next-page"));
         }
         tokio::time::sleep(POLL_INTERVAL).await;
     }
@@ -350,8 +347,10 @@ async fn wait_for_page_start(page: &Page, expected_start: u32) -> Result<(), Str
             }
         }
         if started.elapsed() >= PAGE_CHANGE_TIMEOUT {
-            return Err(format!(
-                "Studio Pro 버전 목록의 {expected_start}번째 항목으로 이동하지 못했습니다. 마지막 페이지 상태: {last_status}"
+            return Err(crate::tr!(
+                "error-marketplace-page-position",
+                position = crate::i18n::format_number(u64::from(expected_start)),
+                status = &last_status
             ));
         }
         tokio::time::sleep(POLL_INTERVAL).await;
@@ -385,8 +384,9 @@ async fn wait_for_selector(
             return Ok(());
         }
         if started.elapsed() >= wait_duration {
-            return Err(format!(
-                "Mendix Marketplace 응답 대기 시간이 초과되었습니다: {value}"
+            return Err(crate::tr!(
+                "error-marketplace-response-timeout",
+                selector = value
             ));
         }
         tokio::time::sleep(POLL_INTERVAL).await;
@@ -397,12 +397,12 @@ async fn element_inner_html(page: &Page, value: &str) -> Result<String, String> 
     let element = page
         .find_element(value)
         .await
-        .map_err(|error| format!("Studio Pro 버전 목록을 찾을 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-version-list-find", error = error))?;
     element
         .inner_html()
         .await
-        .map_err(|error| format!("Studio Pro 버전 목록을 읽을 수 없습니다: {error}"))?
-        .ok_or_else(|| "Studio Pro 버전 목록이 비어 있습니다.".to_string())
+        .map_err(|error| crate::tr!("error-version-list-read", error = error))?
+        .ok_or_else(|| crate::tr!("error-version-list-empty"))
 }
 
 async fn dismiss_privacy_modal(page: &Page) {
@@ -446,10 +446,8 @@ struct BrowserSession {
 
 impl BrowserSession {
     async fn new() -> Result<Self, String> {
-        let chrome_path = chrome_executable().ok_or_else(|| {
-            "Studio Pro 버전 목록을 읽으려면 Google Chrome 또는 Chromium이 필요합니다. MENDIMARU_CHROME_PATH로 직접 지정할 수도 있습니다."
-                .to_string()
-        })?;
+        let chrome_path =
+            chrome_executable().ok_or_else(|| crate::tr!("error-browser-required"))?;
         let profile_directory = next_profile_directory();
         let browser_config = BrowserConfig::builder()
             .chrome_executable(&chrome_path)
@@ -467,10 +465,10 @@ impl BrowserSession {
                 "--headless=new",
             ])
             .build()
-            .map_err(|error| format!("Marketplace 브라우저 설정을 만들 수 없습니다: {error}"))?;
+            .map_err(|error| crate::tr!("error-browser-config", error = error))?;
         let (browser, mut handler) = Browser::launch(browser_config)
             .await
-            .map_err(|error| format!("Marketplace 브라우저를 시작할 수 없습니다: {error}"))?;
+            .map_err(|error| crate::tr!("error-browser-start", error = error))?;
         let handler_task = tokio::spawn(async move {
             while let Some(event) = handler.next().await {
                 if event.is_err() {
@@ -490,11 +488,11 @@ impl BrowserSession {
             .browser
             .new_page("about:blank")
             .await
-            .map_err(|error| format!("Marketplace 페이지를 만들 수 없습니다: {error}"))?;
+            .map_err(|error| crate::tr!("error-browser-page", error = error))?;
         timeout(NAVIGATION_TIMEOUT, page.goto(url))
             .await
-            .map_err(|_| "Mendix Marketplace 연결 시간이 초과되었습니다.".to_string())?
-            .map_err(|error| format!("Mendix Marketplace를 열 수 없습니다: {error}"))?;
+            .map_err(|_| crate::tr!("error-marketplace-connection-timeout"))?
+            .map_err(|error| crate::tr!("error-marketplace-open", error = error))?;
         Ok(page)
     }
 

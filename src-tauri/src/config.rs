@@ -13,7 +13,7 @@ pub fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
     let path = config_path(app)?;
     if path.is_file() {
         let content = fs::read_to_string(&path)
-            .map_err(|error| format!("설정 파일을 읽을 수 없습니다: {error}"))?;
+            .map_err(|error| crate::tr!("error-config-read", error = error))?;
         if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
             return Ok(config);
         }
@@ -41,6 +41,7 @@ pub fn detect_config() -> Result<AppConfig, String> {
         .unwrap_or_else(|| compose_candidates[0].clone());
 
     let mut config = AppConfig {
+        language_preference: "system".to_string(),
         winboat_executable: find_binary(&["winboat", "WinBoat"]).unwrap_or_else(|| {
             home.join(".local/bin/winboat")
                 .to_string_lossy()
@@ -109,11 +110,11 @@ pub fn persist_config(app: &AppHandle, config: &AppConfig) -> Result<(), String>
     let path = config_path(app)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .map_err(|error| format!("설정 디렉터리를 만들 수 없습니다: {error}"))?;
+            .map_err(|error| crate::tr!("error-config-directory-create", error = error))?;
     }
     let serialized = serde_json::to_string_pretty(config)
-        .map_err(|error| format!("설정을 직렬화할 수 없습니다: {error}"))?;
-    fs::write(&path, serialized).map_err(|error| format!("설정 파일을 저장할 수 없습니다: {error}"))
+        .map_err(|error| crate::tr!("error-config-serialize", error = error))?;
+    fs::write(&path, serialized).map_err(|error| crate::tr!("error-config-save", error = error))
 }
 
 pub fn compose_shared_directory(compose_file: &str) -> Option<String> {
@@ -166,17 +167,18 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_config_dir()
         .map(|directory| directory.join(CONFIG_FILE_NAME))
-        .map_err(|error| format!("앱 설정 경로를 찾을 수 없습니다: {error}"))
+        .map_err(|error| crate::tr!("error-app-config-path", error = error))
 }
 
 fn home_directory() -> Result<PathBuf, String> {
     env::var_os("HOME")
         .map(PathBuf::from)
         .filter(|path| !path.as_os_str().is_empty())
-        .ok_or_else(|| "Linux 홈 디렉터리를 찾을 수 없습니다.".to_string())
+        .ok_or_else(|| crate::tr!("error-home-directory"))
 }
 
 fn normalize_and_validate(config: &mut AppConfig) -> Result<(), String> {
+    config.language_preference = crate::i18n::normalize_preference(&config.language_preference)?;
     config.winboat_executable = expand_home(config.winboat_executable.trim());
     config.compose_file = expand_home(config.compose_file.trim());
     config.shared_directory = expand_home(config.shared_directory.trim());
@@ -203,32 +205,36 @@ fn normalize_and_validate(config: &mut AppConfig) -> Result<(), String> {
 
     let shared = Path::new(&config.shared_directory);
     if !shared.is_absolute() || !shared.is_dir() {
-        return Err("공유 디렉터리는 현재 존재하는 Linux 절대 경로여야 합니다.".to_string());
+        return Err(crate::tr!("error-shared-directory-invalid"));
     }
     config.shared_directory = shared
         .canonicalize()
-        .map_err(|error| format!("공유 디렉터리를 확인할 수 없습니다: {error}"))?
+        .map_err(|error| crate::tr!("error-shared-directory-inspect", error = error))?
         .to_string_lossy()
         .to_string();
 
     if !Path::new(&config.compose_file).is_file() {
-        return Err(format!(
-            "WinBoat Compose 파일을 찾을 수 없습니다: {}",
-            config.compose_file
+        return Err(crate::tr!(
+            "error-compose-file-not-found",
+            path = &config.compose_file
         ));
     }
     if !matches!(config.container_runtime.as_str(), "docker" | "podman") {
-        return Err("컨테이너 런타임은 docker 또는 podman이어야 합니다.".to_string());
+        return Err(crate::tr!("error-container-runtime-invalid"));
     }
     if config.container_name.is_empty()
         || config.api_url.is_empty()
         || config.rdp_host.is_empty()
         || config.windows_shared_directory.is_empty()
     {
-        return Err("WinBoat 연결 설정에 빈 값이 있습니다.".to_string());
+        return Err(crate::tr!("error-winboat-connection-empty"));
     }
     if config.startup_timeout_seconds == 0 || config.startup_timeout_seconds > 900 {
-        return Err("시작 대기 시간은 1~900초 범위여야 합니다.".to_string());
+        return Err(crate::tr!(
+            "error-startup-timeout-range",
+            minimum = crate::i18n::format_number(1),
+            maximum = crate::i18n::format_number(900)
+        ));
     }
 
     Ok(())
@@ -236,16 +242,14 @@ fn normalize_and_validate(config: &mut AppConfig) -> Result<(), String> {
 
 fn read_compose(path: &Path) -> Result<Value, String> {
     let content = fs::read_to_string(path)
-        .map_err(|error| format!("Compose 파일을 읽을 수 없습니다: {error}"))?;
-    serde_yaml::from_str(&content)
-        .map_err(|error| format!("Compose YAML을 해석할 수 없습니다: {error}"))
+        .map_err(|error| crate::tr!("error-compose-read", error = error))?;
+    serde_yaml::from_str(&content).map_err(|error| crate::tr!("error-compose-parse", error = error))
 }
 
 fn write_compose(path: &Path, compose: &Value) -> Result<(), String> {
     let serialized = serde_yaml::to_string(compose)
-        .map_err(|error| format!("Compose YAML을 만들 수 없습니다: {error}"))?;
-    fs::write(path, serialized)
-        .map_err(|error| format!("Compose 파일을 저장할 수 없습니다: {error}"))
+        .map_err(|error| crate::tr!("error-compose-serialize", error = error))?;
+    fs::write(path, serialized).map_err(|error| crate::tr!("error-compose-save", error = error))
 }
 
 fn apply_compose_detection(config: &mut AppConfig, compose: &Value) {
@@ -337,14 +341,14 @@ fn update_shared_mount(
     let backup_path = compose_path.with_extension("yml.mendimaru.bak");
     if !backup_path.exists() {
         fs::copy(compose_path, &backup_path)
-            .map_err(|error| format!("Compose 백업을 만들 수 없습니다: {error}"))?;
+            .map_err(|error| crate::tr!("error-compose-backup", error = error))?;
     }
 
     let service = service_value_mut(&mut compose)
-        .ok_or_else(|| "Compose 파일에서 Windows 서비스를 찾을 수 없습니다.".to_string())?;
+        .ok_or_else(|| crate::tr!("error-compose-windows-service-missing"))?;
     let mapping = service
         .as_mapping_mut()
-        .ok_or_else(|| "Windows 서비스 설정 형식이 올바르지 않습니다.".to_string())?;
+        .ok_or_else(|| crate::tr!("error-compose-windows-service-invalid"))?;
     let volumes_key = Value::String("volumes".to_string());
     if !mapping.contains_key(&volumes_key) {
         mapping.insert(volumes_key.clone(), Value::Sequence(Vec::new()));
@@ -352,7 +356,7 @@ fn update_shared_mount(
     let volumes = mapping
         .get_mut(&volumes_key)
         .and_then(Value::as_sequence_mut)
-        .ok_or_else(|| "Compose volumes 설정 형식이 올바르지 않습니다.".to_string())?;
+        .ok_or_else(|| crate::tr!("error-compose-volumes-invalid"))?;
 
     let replacement = Value::String(format!("{shared_directory}:/shared"));
     if let Some(existing) = volumes

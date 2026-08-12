@@ -1,8 +1,15 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+pub fn default_language_preference() -> String {
+    "system".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
+    #[serde(default = "default_language_preference")]
+    pub language_preference: String,
     pub winboat_executable: String,
     pub compose_file: String,
     pub container_runtime: String,
@@ -119,6 +126,42 @@ pub struct DownloadProgress {
     pub total_bytes: Option<u64>,
     pub percentage: Option<f64>,
     pub message: String,
+    pub downloaded_bytes_label: String,
+    pub total_bytes_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocaleOption {
+    pub id: String,
+    pub native_name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalizationBundle {
+    pub locale: String,
+    pub preference: String,
+    pub direction: String,
+    pub available_locales: Vec<LocaleOption>,
+    pub messages: BTreeMap<String, String>,
+    pub numbers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandError {
+    pub code: String,
+    pub message: String,
+}
+
+impl CommandError {
+    pub fn new(code: &str, message: String) -> Self {
+        Self {
+            code: code.to_string(),
+            message,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -1,5 +1,6 @@
 mod config;
 mod downloads;
+mod i18n;
 mod marketplace;
 mod models;
 mod projects;
@@ -7,8 +8,8 @@ mod winboat;
 
 use downloads::DownloadManager;
 use models::{
-    AppConfig, EnvironmentStatus, InstallResult, LaunchResult, MendixProject, SettingsSaveResult,
-    StudioVersion, StudioVersionCatalog,
+    AppConfig, CommandError, EnvironmentStatus, InstallResult, LaunchResult, LocalizationBundle,
+    MendixProject, SettingsSaveResult, StudioVersion, StudioVersionCatalog,
 };
 use tauri::{AppHandle, State};
 
@@ -18,8 +19,54 @@ fn get_config(app: AppHandle) -> Result<AppConfig, String> {
 }
 
 #[tauri::command]
+fn get_localization(app: AppHandle) -> Result<LocalizationBundle, String> {
+    let config = config::load_config(&app)?;
+    let preference = i18n::normalize_preference(&config.language_preference)?;
+    i18n::set_language(&preference)?;
+    Ok(i18n::bundle(&preference))
+}
+
+#[tauri::command]
+fn set_language_preference(app: AppHandle, language: String) -> Result<LocalizationBundle, String> {
+    let preference = i18n::normalize_preference(&language)?;
+    let mut config = config::load_config(&app)?;
+    let previous_preference = config.language_preference.clone();
+    i18n::set_language(&preference)?;
+    config.language_preference = preference.clone();
+    if let Err(error) = config::persist_config(&app, &config) {
+        let _ = i18n::set_language(&previous_preference);
+        return Err(error);
+    }
+    Ok(i18n::bundle(&preference))
+}
+
+#[tauri::command]
+fn format_localized_dates(values: Vec<String>) -> Vec<String> {
+    i18n::format_dates(&values)
+}
+
+#[tauri::command]
+fn format_localized_numbers(values: Vec<u64>) -> Vec<String> {
+    i18n::format_numbers(&values)
+}
+
+#[tauri::command]
+fn format_localized_bytes(values: Vec<u64>) -> Vec<String> {
+    values.into_iter().map(i18n::format_bytes).collect()
+}
+
+#[tauri::command]
+fn format_localized_duration(total_seconds: u64) -> String {
+    i18n::format_duration(total_seconds)
+}
+
+#[tauri::command]
 fn redetect_config(app: AppHandle) -> Result<AppConfig, String> {
-    let detected = config::detect_config()?;
+    let language_preference = config::load_config(&app)
+        .map(|config| config.language_preference)
+        .unwrap_or_else(|_| "system".to_string());
+    let mut detected = config::detect_config()?;
+    detected.language_preference = language_preference;
     config::persist_config(&app, &detected)?;
     Ok(detected)
 }
@@ -98,9 +145,17 @@ async fn install_studio_pro(
     app: AppHandle,
     manager: State<'_, DownloadManager>,
     version: String,
-) -> Result<InstallResult, String> {
-    let config = config::load_config(&app)?;
-    downloads::download_and_launch(&app, &config, &manager, version).await
+) -> Result<InstallResult, CommandError> {
+    let config = config::load_config(&app)
+        .map_err(|message| CommandError::new("config_load_failed", message))?;
+    downloads::download_and_launch(&app, &config, &manager, version)
+        .await
+        .map_err(|error| match error {
+            downloads::InstallError::Cancelled(message) => {
+                CommandError::new("download_cancelled", message)
+            }
+            downloads::InstallError::Other(message) => CommandError::new("install_failed", message),
+        })
 }
 
 #[tauri::command]
@@ -116,11 +171,24 @@ fn open_linux_folder(path: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            i18n::initialize("system").map_err(std::io::Error::other)?;
+            if let Ok(config) = config::load_config(app.handle()) {
+                i18n::set_language(&config.language_preference).map_err(std::io::Error::other)?;
+            }
+            Ok(())
+        })
         .manage(DownloadManager::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_config,
+            get_localization,
+            set_language_preference,
+            format_localized_dates,
+            format_localized_numbers,
+            format_localized_bytes,
+            format_localized_duration,
             redetect_config,
             save_config,
             get_environment_status,

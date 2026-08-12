@@ -33,6 +33,13 @@ chrono = { version = "0.4", features = ["serde"] }
 chromiumoxide = "0.9"
 scraper = "0.27"
 base64 = "0.22"
+i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10"
+rust-embed = "8"
+icu_datetime = { version = "2.2", features = ["compiled_data"] }
+icu_decimal = { version = "2.2", features = ["compiled_data"] }
+icu_locale = "2.2"
+writeable = "0.6"
 
 [dev-dependencies]
 tempfile = "3"

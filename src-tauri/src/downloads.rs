@@ -23,6 +23,18 @@ pub struct DownloadManager {
     cancellable: AtomicBool,
 }
 
+#[derive(Debug)]
+pub enum InstallError {
+    Cancelled(String),
+    Other(String),
+}
+
+impl From<String> for InstallError {
+    fn from(message: String) -> Self {
+        Self::Other(message)
+    }
+}
+
 impl DownloadManager {
     pub fn cancel(&self) -> bool {
         if self.busy.load(Ordering::SeqCst) && self.cancellable.load(Ordering::SeqCst) {
@@ -36,7 +48,7 @@ impl DownloadManager {
     fn begin(&self) -> Result<DownloadGuard<'_>, String> {
         self.busy
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .map_err(|_| "이미 다른 Studio Pro 설치 파일을 다운로드하고 있습니다.".to_string())?;
+            .map_err(|_| crate::tr!("error-download-busy"))?;
         self.cancelled.store(false, Ordering::SeqCst);
         self.cancellable.store(false, Ordering::SeqCst);
         Ok(DownloadGuard { manager: self })
@@ -60,7 +72,7 @@ pub async fn download_and_launch(
     config: &AppConfig,
     manager: &DownloadManager,
     version: String,
-) -> Result<InstallResult, String> {
+) -> Result<InstallResult, InstallError> {
     validate_version(&version)?;
     let _guard = manager.begin()?;
     emit_progress(
@@ -70,7 +82,7 @@ pub async fn download_and_launch(
         0,
         None,
         Some(PREPARING_PROGRESS),
-        "Mendix에서 설치 정보를 확인하고 있습니다.",
+        &crate::tr!("progress-preparing"),
     );
     let download_url = marketplace::installer_url(&version).await?;
     emit_progress(
@@ -80,12 +92,12 @@ pub async fn download_and_launch(
         0,
         None,
         Some(CHECKING_PROGRESS),
-        "설치 파일 저장 위치를 확인하고 있습니다.",
+        &crate::tr!("progress-checking"),
     );
     let installer_directory = Path::new(&config.shared_directory).join(".mendimaru/installers");
     tokio::fs::create_dir_all(&installer_directory)
         .await
-        .map_err(|error| format!("설치 파일 디렉터리를 만들 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-installer-directory-create", error = error))?;
     let installer_path = installer_directory.join(format!(
         "Mendix-{}-Setup.exe",
         safe_version_filename(&version)
@@ -102,7 +114,7 @@ pub async fn download_and_launch(
             0,
             None,
             Some(DOWNLOAD_PROGRESS_END),
-            "기존 설치 파일을 사용합니다.",
+            &crate::tr!("progress-ready"),
         );
         false
     } else {
@@ -113,7 +125,9 @@ pub async fn download_and_launch(
     };
 
     if manager.cancelled.load(Ordering::SeqCst) {
-        return Err("다운로드가 취소되었습니다.".to_string());
+        return Err(InstallError::Cancelled(crate::tr!(
+            "error-download-cancelled"
+        )));
     }
     let windows_installer_path = linux_path_to_windows_share(
         Path::new(&config.shared_directory),
@@ -127,7 +141,7 @@ pub async fn download_and_launch(
         0,
         None,
         Some(INSTALL_PROGRESS_START),
-        "WinBoat Windows에 설치하고 있습니다. 완료될 때까지 기다려 주세요.",
+        &crate::tr!("progress-installing"),
     );
     let executable_path = install_studio(config, &version, &windows_installer_path).await?;
     emit_progress(
@@ -137,7 +151,7 @@ pub async fn download_and_launch(
         0,
         None,
         Some(100.0),
-        "Studio Pro 설치를 완료했습니다.",
+        &crate::tr!("progress-installed"),
     );
 
     Ok(InstallResult {
@@ -161,7 +175,7 @@ async fn download_file(
     version: &str,
     url: &str,
     destination: &Path,
-) -> Result<(), String> {
+) -> Result<(), InstallError> {
     let partial = partial_path(destination);
     emit_progress(
         app,
@@ -170,28 +184,28 @@ async fn download_file(
         0,
         None,
         Some(DOWNLOAD_PROGRESS_START),
-        "Mendix 다운로드 서버에 연결하고 있습니다.",
+        &crate::tr!("progress-connecting"),
     );
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(60 * 60))
         .user_agent("Mozilla/5.0 (X11; Linux x86_64) mendimaru/0.1")
         .build()
-        .map_err(|error| format!("다운로드 클라이언트를 만들 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-download-client-create", error = error))?;
     let response = client
         .get(url)
         .header("Referer", "https://marketplace.mendix.com/")
         .header("Accept", "application/octet-stream,*/*")
         .send()
         .await
-        .map_err(|error| format!("Studio Pro 다운로드를 시작하지 못했습니다: {error}"))?
+        .map_err(|error| crate::tr!("error-download-start", error = error))?
         .error_for_status()
-        .map_err(|error| format!("Studio Pro 다운로드 서버가 오류를 반환했습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-download-server", error = error))?;
     let total = response.content_length();
     let mut stream = response.bytes_stream();
     let mut file = tokio::fs::File::create(&partial)
         .await
-        .map_err(|error| format!("임시 설치 파일을 만들 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-temp-installer-create", error = error))?;
     let mut downloaded = 0_u64;
 
     while let Some(chunk) = stream.next().await {
@@ -205,14 +219,16 @@ async fn download_file(
                 downloaded,
                 total,
                 overall_download_percentage(downloaded, total),
-                "다운로드를 취소했습니다.",
+                &crate::tr!("progress-cancelled"),
             );
-            return Err("다운로드가 취소되었습니다.".to_string());
+            return Err(InstallError::Cancelled(crate::tr!(
+                "error-download-cancelled"
+            )));
         }
-        let bytes = chunk.map_err(|error| format!("다운로드 데이터를 읽지 못했습니다: {error}"))?;
+        let bytes = chunk.map_err(|error| crate::tr!("error-download-data-read", error = error))?;
         file.write_all(&bytes)
             .await
-            .map_err(|error| format!("설치 파일을 저장하지 못했습니다: {error}"))?;
+            .map_err(|error| crate::tr!("error-installer-write", error = error))?;
         downloaded += bytes.len() as u64;
         emit_progress(
             app,
@@ -221,16 +237,16 @@ async fn download_file(
             downloaded,
             total,
             overall_download_percentage(downloaded, total),
-            "Studio Pro 설치 파일을 다운로드하고 있습니다.",
+            &crate::tr!("progress-downloading"),
         );
     }
     file.flush()
         .await
-        .map_err(|error| format!("설치 파일 저장을 완료하지 못했습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-installer-flush", error = error))?;
     drop(file);
     tokio::fs::rename(&partial, destination)
         .await
-        .map_err(|error| format!("설치 파일을 확정하지 못했습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-installer-finalize", error = error))?;
     emit_progress(
         app,
         version,
@@ -238,7 +254,7 @@ async fn download_file(
         downloaded,
         total,
         Some(DOWNLOAD_PROGRESS_END),
-        "설치 파일 다운로드를 완료했습니다.",
+        &crate::tr!("progress-downloaded"),
     );
     Ok(())
 }
@@ -261,6 +277,8 @@ fn emit_progress(
             total_bytes,
             percentage,
             message: message.to_string(),
+            downloaded_bytes_label: crate::i18n::format_bytes(downloaded_bytes),
+            total_bytes_label: total_bytes.map(crate::i18n::format_bytes),
         },
     );
 }

@@ -8,6 +8,7 @@ import {
   Download,
   FolderKanban,
   FolderOpen,
+  Languages,
   Info,
   LoaderCircle,
   Monitor,
@@ -22,10 +23,12 @@ import {
 } from "lucide-react";
 import type {
   AppConfig,
+  CommandError,
   ConfirmationState,
   DownloadableVersion,
   DownloadProgress,
   EnvironmentStatus,
+  LocalizationBundle,
   MendixProject,
   SettingsSaveResult,
   StudioVersion,
@@ -34,6 +37,16 @@ import type {
   ToastMessage,
   ViewKey,
 } from "./types";
+import {
+  applyDocumentLocale,
+  createTranslate,
+  formatByteValues,
+  formatDates,
+  formatNumbers,
+  loadLocalization,
+  selectLanguage,
+  type Translate,
+} from "./i18n";
 import "./App.css";
 
 const EMPTY_CATALOG: StudioVersionCatalog = {
@@ -41,10 +54,10 @@ const EMPTY_CATALOG: StudioVersionCatalog = {
   loadedPages: [],
 };
 
-const TABS: Array<{ key: ViewKey; label: string; icon: LucideIcon }> = [
-  { key: "studio", label: "Studio Pro", icon: AppWindow },
-  { key: "projects", label: "프로젝트", icon: FolderKanban },
-  { key: "settings", label: "설정", icon: Settings },
+const TABS: Array<{ key: ViewKey; labelKey: string; icon: LucideIcon }> = [
+  { key: "studio", labelKey: "nav-studio", icon: AppWindow },
+  { key: "projects", labelKey: "nav-projects", icon: FolderKanban },
+  { key: "settings", labelKey: "nav-settings", icon: Settings },
 ];
 
 type PathField = "sharedDirectory" | "composeFile" | "winboatExecutable";
@@ -54,6 +67,7 @@ type VersionSupportFilters = Record<VersionSupportFilter, boolean>;
 const EMPTY_VERSION_SUPPORT_FILTERS: VersionSupportFilters = { lts: false, mts: false };
 
 function App() {
+  const [localization, setLocalization] = useState<LocalizationBundle | null>(null);
   const [activeView, setActiveView] = useState<ViewKey>("studio");
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [draftConfig, setDraftConfig] = useState<AppConfig | null>(null);
@@ -74,11 +88,22 @@ function App() {
     useState<VersionSupportFilters>(EMPTY_VERSION_SUPPORT_FILTERS);
   const [projectSearch, setProjectSearch] = useState("");
   const [applyMountNow, setApplyMountNow] = useState(true);
+  const [languageChanging, setLanguageChanging] = useState(false);
   const toastId = useRef(0);
   const initialized = useRef(false);
   const actionLocks = useRef<Set<string>>(new Set());
   const catalogRequestInFlight = useRef(false);
   const launchLock = useRef(false);
+  const languageChangeLock = useRef(false);
+  const localizationRef = useRef<LocalizationBundle | null>(null);
+  const t = useMemo(() => createTranslate(localization), [localization]);
+
+  const applyLocalization = useCallback((bundle: LocalizationBundle) => {
+    localizationRef.current = bundle;
+    setLocalization(bundle);
+    applyDocumentLocale(bundle);
+    return bundle;
+  }, []);
 
   const notify = useCallback((kind: ToastKind, title: string, detail?: string) => {
     const id = ++toastId.current;
@@ -92,25 +117,25 @@ function App() {
     try {
       setStatus(await invoke<EnvironmentStatus>("get_environment_status"));
     } catch (error) {
-      setWarning(errorText(error));
+      setWarning(errorText(error, t));
     }
-  }, []);
+  }, [t]);
 
   const refreshInstalled = useCallback(async () => {
     try {
       setInstalledVersions(await invoke<StudioVersion[]>("get_installed_versions"));
     } catch (error) {
-      setWarning(errorText(error));
+      setWarning(errorText(error, t));
     }
-  }, []);
+  }, [t]);
 
   const refreshProjects = useCallback(async () => {
     try {
-      setProjects(await invoke<MendixProject[]>("get_projects"));
+      setProjects(await localizeProjects(await invoke<MendixProject[]>("get_projects")));
     } catch (error) {
-      setWarning(errorText(error));
+      setWarning(errorText(error, t));
     }
-  }, []);
+  }, [t]);
 
   const fetchCatalogPage = useCallback(async (page: number, reset = false) => {
     if (catalogRequestInFlight.current) return;
@@ -122,19 +147,23 @@ function App() {
         page,
         reset,
       });
-      setCatalog(next);
+      setCatalog(await localizeCatalog(next));
     } catch (error) {
-      setCatalogError(errorText(error));
+      setCatalogError(errorText(error, t));
     } finally {
       catalogRequestInFlight.current = false;
       setCatalogLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const loadInitialData = useCallback(async () => {
     setWarning(null);
     try {
-      const loadedConfig = await invoke<AppConfig>("get_config");
+      const [loadedLocalization, loadedConfig] = await Promise.all([
+        loadLocalization(),
+        invoke<AppConfig>("get_config"),
+      ]);
+      applyLocalization(loadedLocalization);
       setConfig(loadedConfig);
       setDraftConfig(loadedConfig);
 
@@ -147,19 +176,24 @@ function App() {
 
       if (statusResult.status === "fulfilled") setStatus(statusResult.value);
       if (installedResult.status === "fulfilled") setInstalledVersions(installedResult.value);
-      if (projectResult.status === "fulfilled") setProjects(projectResult.value);
-      if (cacheResult.status === "fulfilled") setCatalog(cacheResult.value);
+      if (projectResult.status === "fulfilled") {
+        setProjects(await localizeProjects(projectResult.value));
+      }
+      if (cacheResult.status === "fulfilled") {
+        setCatalog(await localizeCatalog(cacheResult.value));
+      }
 
+      const loadedTranslate = createTranslate(loadedLocalization);
       const errors = [statusResult, installedResult, projectResult]
         .filter((result) => result.status === "rejected")
-        .map((result) => errorText((result as PromiseRejectedResult).reason));
+        .map((result) => errorText((result as PromiseRejectedResult).reason, loadedTranslate));
       if (errors.length) setWarning(errors[0]);
     } catch (error) {
-      setWarning(errorText(error));
+      setWarning(errorText(error, createTranslate(localizationRef.current)));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applyLocalization]);
 
   useEffect(() => {
     if (!initialized.current) {
@@ -196,7 +230,12 @@ function App() {
       try {
         await action();
       } catch (error) {
-        notify("error", "작업을 완료하지 못했습니다", errorText(error));
+        const currentTranslate = createTranslate(localizationRef.current);
+        notify(
+          "error",
+          currentTranslate("generic-action-failed"),
+          errorText(error, currentTranslate),
+        );
       } finally {
         actionLocks.current.delete(key);
         setBusyActions((current) => {
@@ -212,7 +251,7 @@ function App() {
   const startWindows = () =>
     runAction("start-windows", async () => {
       await invoke("start_winboat_windows");
-      notify("info", "WinBoat Windows를 시작했습니다", "준비가 끝나면 상태가 온라인으로 바뀝니다.");
+      notify("info", t("toast-windows-started"), t("toast-windows-started-detail"));
       window.setTimeout(() => void refreshStatus(), 3500);
     });
 
@@ -231,8 +270,8 @@ function App() {
       });
       notify(
         "success",
-        `Studio Pro ${version.version} 창을 열었습니다`,
-        project ? `${project.name} 프로젝트를 열었습니다.` : undefined,
+        t("toast-studio-opened", { version: version.version }),
+        project ? t("toast-project-opened", { project: project.name }) : undefined,
       );
     }).finally(() => {
       launchLock.current = false;
@@ -243,14 +282,16 @@ function App() {
     const exact = installedVersions.find((version) => version.version === project.version);
     const fallback = exact ?? installedVersions[0];
     if (!fallback) {
-      notify("error", "설치된 Studio Pro가 없습니다", "Studio Pro 탭에서 먼저 버전을 설치해 주세요.");
+      notify("error", t("toast-no-studio"), t("toast-no-studio-detail"));
       return;
     }
     if (project.version && !exact) {
       setConfirmation({
-        title: `Studio Pro ${fallback.version}으로 열까요?`,
-        description: `이 프로젝트의 버전은 ${project.version}입니다. 다른 버전으로 열면 프로젝트가 업그레이드될 수 있습니다.`,
-        confirmLabel: "그래도 열기",
+        title: t("confirm-open-fallback-title", { version: fallback.version }),
+        description: t("confirm-project-version-mismatch", {
+          projectVersion: project.version,
+        }),
+        confirmLabel: t("action-open-anyway"),
         action: () => launchVersion(fallback, project),
       });
       return;
@@ -260,22 +301,24 @@ function App() {
 
   const askInstall = (version: DownloadableVersion) => {
     setConfirmation({
-      title: `Studio Pro ${version.version}을 설치할까요?`,
-      description: "공식 설치 파일을 공유 폴더에 받은 뒤 WinBoat Windows에 설치하고 완료를 확인합니다.",
-      confirmLabel: "다운로드 및 설치",
+      title: t("confirm-install-title", { version: version.version }),
+      description: t("confirm-install-description"),
+      confirmLabel: t("action-download-install"),
       action: () =>
         runAction(`install-${version.version}`, async () => {
+          const zeroBytesLabel = (await formatByteValues([0]))[0] ?? "0 B";
           setDownloadProgress({
             version: version.version,
             state: "starting",
             downloadedBytes: 0,
+            downloadedBytesLabel: zeroBytesLabel,
             percentage: 2,
-            message: "설치를 준비하고 있습니다.",
+            message: t("progress-starting"),
           });
           try {
             await invoke("install_studio_pro", { version: version.version });
             await refreshInstalled();
-            notify("success", `Studio Pro ${version.version} 설치를 완료했습니다`);
+            notify("success", t("toast-install-complete", { version: version.version }));
             window.setTimeout(() => {
               setDownloadProgress((current) =>
                 current?.version === version.version && current.state === "installed"
@@ -284,18 +327,26 @@ function App() {
               );
             }, 5000);
           } catch (error) {
-            const message = errorText(error);
+            const message = errorText(error, t);
+            const cancelled = errorCode(error) === "download_cancelled";
             setDownloadProgress((current) => ({
               version: version.version,
-              state: message.includes("취소") ? "cancelled" : "failed",
+              state: cancelled || current?.state === "cancelled" ? "cancelled" : "failed",
               downloadedBytes:
                 current?.version === version.version ? current.downloadedBytes : 0,
+              downloadedBytesLabel:
+                current?.version === version.version
+                  ? current.downloadedBytesLabel
+                  : zeroBytesLabel,
               totalBytes:
                 current?.version === version.version ? current.totalBytes : undefined,
+              totalBytesLabel:
+                current?.version === version.version ? current.totalBytesLabel : undefined,
               percentage:
                 current?.version === version.version ? current.percentage : undefined,
               message,
             }));
+            if (cancelled) return;
             throw error;
           }
         }),
@@ -304,9 +355,9 @@ function App() {
 
   const askUninstall = (version: StudioVersion) => {
     setConfirmation({
-      title: `Studio Pro ${version.version}을 제거할까요?`,
-      description: "WinBoat Windows에서 제거를 완료한 뒤 목록을 자동으로 갱신합니다. 공유 폴더의 프로젝트는 삭제하지 않습니다.",
-      confirmLabel: "제거",
+      title: t("confirm-uninstall-title", { version: version.version }),
+      description: t("confirm-uninstall-description"),
+      confirmLabel: t("action-uninstall"),
       danger: true,
       action: () =>
         runAction(`uninstall-${version.version}`, async () => {
@@ -315,7 +366,7 @@ function App() {
             current.filter((installed) => installed.version !== version.version),
           );
           await refreshInstalled();
-          notify("success", `Studio Pro ${version.version} 제거를 완료했습니다`);
+          notify("success", t("toast-uninstall-complete", { version: version.version }));
         }),
     });
   };
@@ -323,7 +374,7 @@ function App() {
   const cancelDownload = () =>
     runAction("cancel-download", async () => {
       if (await invoke<boolean>("cancel_studio_download")) {
-        notify("info", "다운로드 취소를 요청했습니다");
+        notify("info", t("toast-download-cancel-requested"));
       }
     });
 
@@ -342,20 +393,20 @@ function App() {
         defaultPath: draftConfig[field],
         title:
           field === "sharedDirectory"
-            ? "WinBoat와 공유할 Linux 폴더 선택"
+            ? t("dialog-select-shared-directory")
             : field === "composeFile"
-              ? "WinBoat Compose 파일 선택"
-              : "WinBoat 실행 파일 선택",
+              ? t("dialog-select-compose-file")
+              : t("dialog-select-winboat-file"),
         filters:
           field === "composeFile"
-            ? [{ name: "Compose YAML", extensions: ["yml", "yaml"] }]
+            ? [{ name: t("dialog-compose-filter"), extensions: ["yml", "yaml"] }]
             : undefined,
       });
       if (typeof selected === "string") {
         setDraftConfig((current) => (current ? { ...current, [field]: selected } : current));
       }
     } catch (error) {
-      notify("error", "경로 선택기를 열지 못했습니다", errorText(error));
+      notify("error", t("path-picker-failed"), errorText(error, t));
     }
   };
 
@@ -371,9 +422,9 @@ function App() {
         setDraftConfig(result.config);
         notify(
           "success",
-          result.containerRecreated ? "설정을 저장하고 WinBoat에 적용했습니다" : "설정을 저장했습니다",
+          result.containerRecreated ? t("toast-settings-applied") : t("toast-settings-saved"),
           result.mountChanged && !result.containerRecreated
-            ? "공유 폴더 변경은 WinBoat를 다음에 다시 만들 때 반영됩니다."
+            ? t("toast-mount-deferred")
             : undefined,
         );
         await Promise.all([refreshStatus(), refreshProjects()]);
@@ -381,9 +432,9 @@ function App() {
 
     if (applyMountNow && status?.containerStatus === "running") {
       setConfirmation({
-        title: "공유 폴더 변경을 지금 적용할까요?",
-        description: "WinBoat Windows가 한 번 다시 연결됩니다. 설치된 앱과 가상 디스크는 유지됩니다.",
-        confirmLabel: "저장하고 다시 연결",
+        title: t("confirm-apply-mount-title"),
+        description: t("confirm-apply-mount-description"),
+        confirmLabel: t("action-save-reconnect"),
         action: execute,
       });
     } else {
@@ -396,9 +447,118 @@ function App() {
       const detected = await invoke<AppConfig>("redetect_config");
       setConfig(detected);
       setDraftConfig(detected);
-      notify("success", "현재 WinBoat 구성을 다시 찾았습니다");
+      notify("success", t("toast-redetected"));
       await Promise.all([refreshStatus(), refreshProjects()]);
     });
+
+  const changeLanguage = async (language: string) => {
+    if (languageChangeLock.current) return;
+    languageChangeLock.current = true;
+    setLanguageChanging(true);
+    try {
+      const next = applyLocalization(await selectLanguage(language));
+      setConfig((current) =>
+        current ? { ...current, languagePreference: next.preference } : current,
+      );
+      setDraftConfig((current) =>
+        current ? { ...current, languagePreference: next.preference } : current,
+      );
+      setVersionSearch("");
+      setProjectSearch("");
+      setConfirmation(null);
+      setToasts([]);
+      setWarning(null);
+      setCatalogError(null);
+      const progressSnapshot = downloadProgress;
+      const releaseDateSnapshot = catalog.versions.map((version) => ({
+        id: version.version,
+        source: version.releaseDate ?? "",
+      }));
+      const projectDateSnapshot = projects.map((project) => ({
+        id: project.mprPath,
+        source: project.lastModified ?? "",
+      }));
+      const byteValues = progressSnapshot
+        ? [progressSnapshot.downloadedBytes].concat(
+            progressSnapshot.totalBytes == null ? [] : [progressSnapshot.totalBytes],
+          )
+        : [];
+      const [nextStatus, nextDates, nextByteLabels] = await Promise.all([
+        invoke<EnvironmentStatus>("get_environment_status"),
+        formatDates(
+          releaseDateSnapshot
+            .map(({ source }) => source)
+            .concat(projectDateSnapshot.map(({ source }) => source)),
+        ),
+        formatByteValues(byteValues),
+      ]);
+      setStatus(nextStatus);
+      const releaseDates = new Map(
+        releaseDateSnapshot.map(({ id, source }, index) => [
+          `${id}\0${source}`,
+          nextDates[index],
+        ]),
+      );
+      const projectDateOffset = releaseDateSnapshot.length;
+      const projectDates = new Map(
+        projectDateSnapshot.map(({ id, source }, index) => [
+          `${id}\0${source}`,
+          nextDates[projectDateOffset + index],
+        ]),
+      );
+      setCatalog((current) => ({
+        ...current,
+        versions: current.versions.map((version) => ({
+          ...version,
+          formattedReleaseDate:
+            releaseDates.get(`${version.version}\0${version.releaseDate ?? ""}`) ??
+            version.formattedReleaseDate,
+        })),
+      }));
+      setProjects((current) =>
+        current.map((project) => ({
+          ...project,
+          formattedLastModified:
+            projectDates.get(`${project.mprPath}\0${project.lastModified ?? ""}`) ??
+            project.formattedLastModified,
+        })),
+      );
+      if (progressSnapshot) {
+        const nextTranslate = createTranslate(next);
+        setDownloadProgress((current) =>
+          current
+            ? {
+                ...current,
+                downloadedBytesLabel:
+                  current.downloadedBytes === progressSnapshot.downloadedBytes
+                    ? nextByteLabels[0] ?? current.downloadedBytesLabel
+                    : current.downloadedBytesLabel,
+                totalBytesLabel:
+                  current.totalBytes == null
+                    ? undefined
+                    : current.totalBytes === progressSnapshot.totalBytes
+                      ? nextByteLabels[1] ?? current.totalBytesLabel
+                      : current.totalBytesLabel,
+                message:
+                  current.state === "failed"
+                    ? nextTranslate("progress-failed")
+                    : current.message,
+              }
+            : current,
+        );
+      }
+    } catch (error) {
+      const currentTranslate = createTranslate(localizationRef.current);
+      notify(
+        "error",
+        currentTranslate("generic-action-failed"),
+        errorText(error, currentTranslate),
+      );
+    } finally {
+      languageChangeLock.current = false;
+      setLanguageChanging(false);
+    }
+  };
 
   const online = Boolean(status?.guestOnline);
   const isBusy = (key: string) => busyActions.has(key);
@@ -439,7 +599,7 @@ function App() {
     config && draftConfig && JSON.stringify(config) !== JSON.stringify(draftConfig),
   );
 
-  if (loading) return <LoadingScreen />;
+  if (loading || !localization) return <LoadingScreen />;
 
   return (
     <div className="app-shell">
@@ -449,8 +609,8 @@ function App() {
           <strong>mendimaru</strong>
         </div>
 
-        <nav className="tabs" aria-label="주 메뉴">
-          {TABS.map(({ key, label, icon: Icon }) => (
+        <nav className="tabs" aria-label={t("nav-main-aria")}>
+          {TABS.map(({ key, labelKey, icon: Icon }) => (
             <button
               type="button"
               key={key}
@@ -458,15 +618,31 @@ function App() {
               onClick={() => setActiveView(key)}
             >
               <Icon size={16} />
-              {label}
+              {t(labelKey)}
             </button>
           ))}
         </nav>
 
         <div className="winboat-control">
+          <label className="language-control" title={t("language-label")}>
+            <Languages size={15} />
+            <span className="sr-only">{t("language-label")}</span>
+            <select
+              value={localization.preference}
+              onChange={(event) => void changeLanguage(event.target.value)}
+              aria-label={t("language-label")}
+              aria-busy={languageChanging}
+              disabled={languageChanging}
+            >
+              <option value="system">{t("language-system")}</option>
+              {localization.availableLocales.map((locale) => (
+                <option key={locale.id} value={locale.id}>{locale.nativeName}</option>
+              ))}
+            </select>
+          </label>
           <span className={`connection ${online ? "online" : "offline"}`}>
             <i />
-            {online ? "WinBoat 온라인" : "WinBoat 오프라인"}
+            {online ? t("connection-online") : t("connection-offline")}
           </span>
           <button
             type="button"
@@ -481,7 +657,7 @@ function App() {
             ) : (
               <Play size={15} />
             )}
-            {online ? "Windows 열기" : "Windows 시작"}
+            {online ? t("action-open-windows") : t("action-start-windows")}
           </button>
         </div>
       </header>
@@ -490,13 +666,15 @@ function App() {
         <div className="global-warning">
           <Info size={16} />
           <span>{warning}</span>
-          <button type="button" onClick={() => setWarning(null)} aria-label="알림 닫기"><X size={15} /></button>
+          <button type="button" onClick={() => setWarning(null)} aria-label={t("dismiss-notification")}><X size={15} /></button>
         </div>
       )}
 
       <main className="page">
         {activeView === "studio" && (
           <StudioView
+            t={t}
+            localization={localization}
             online={online}
             installed={installedVersions}
             available={filteredCatalog}
@@ -531,6 +709,8 @@ function App() {
 
         {activeView === "projects" && config && (
           <ProjectsView
+            t={t}
+            localization={localization}
             projects={filteredProjects}
             totalProjects={projects.length}
             search={projectSearch}
@@ -553,6 +733,7 @@ function App() {
 
         {activeView === "settings" && draftConfig && (
           <SettingsView
+            t={t}
             config={draftConfig}
             changed={settingsChanged}
             mountMatches={Boolean(status?.sharedMountMatches)}
@@ -568,11 +749,13 @@ function App() {
       </main>
 
       <ToastStack
+        t={t}
         toasts={toasts}
         onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))}
       />
       {confirmation && (
         <ConfirmDialog
+          t={t}
           state={confirmation}
           onCancel={() => setConfirmation(null)}
           onConfirm={() => {
@@ -587,6 +770,8 @@ function App() {
 }
 
 function StudioView({
+  t,
+  localization,
   online,
   installed,
   available,
@@ -612,6 +797,8 @@ function StudioView({
   onUninstall,
   onCancelDownload,
 }: {
+  t: Translate;
+  localization: LocalizationBundle;
   online: boolean;
   installed: StudioVersion[];
   available: DownloadableVersion[];
@@ -638,6 +825,10 @@ function StudioView({
   onCancelDownload: () => void;
 }) {
   const loadMoreSentinel = useRef<HTMLDivElement>(null);
+  const [installedCountLabel, loadedCountLabel, availableTotalLabel] = useLocalizedNumbers(
+    [installed.length, loadedCount, availableTotal ?? 0],
+    localization,
+  );
 
   useEffect(() => {
     const sentinel = loadMoreSentinel.current;
@@ -661,16 +852,16 @@ function StudioView({
   return (
     <div className="studio-page">
       <PageTitle
-        title="Studio Pro"
-        description="WinBoat Windows에 설치된 버전을 실행하거나, 공식 목록에서 새 버전을 설치합니다."
+        title={t("nav-studio")}
+        description={t("studio-description")}
       />
 
       <section className="section-card installed-section">
         <SectionHeader
-          title="설치된 버전"
-          count={installed.length}
+          title={t("installed-title")}
+          count={installedCountLabel}
           action={
-            <button type="button" className="icon-button" title="설치된 버전 새로고침" onClick={onRefreshInstalled}>
+            <button type="button" className="icon-button" title={t("refresh-installed")} onClick={onRefreshInstalled}>
               <RefreshCw size={16} />
             </button>
           }
@@ -691,12 +882,12 @@ function StudioView({
                   disabled={!online || isLaunching}
                 >
                   {isBusy(`launch-${version.version}`) ? <LoaderCircle size={15} className="spin" /> : <Play size={15} />}
-                  {isBusy(`launch-${version.version}`) ? "실행 중" : "실행"}
+                  {isBusy(`launch-${version.version}`) ? t("action-launching") : t("action-launch")}
                 </button>
                 <button
                   type="button"
                   className="icon-button danger"
-                  title={`${version.version} 제거`}
+                  title={t("remove-version-title", { version: version.version })}
                   onClick={() => onUninstall(version)}
                   disabled={!online || isBusy(`uninstall-${version.version}`)}
                 >
@@ -712,8 +903,8 @@ function StudioView({
           {installed.length === 0 && (
             <EmptyState
               icon={AppWindow}
-              title="설치된 Studio Pro가 없습니다"
-              detail={online ? "아래 공식 목록에서 원하는 버전을 설치하세요." : "WinBoat Windows를 먼저 시작하세요."}
+              title={t("empty-installed-title")}
+              detail={online ? t("empty-installed-online") : t("empty-installed-offline")}
             />
           )}
         </div>
@@ -721,8 +912,17 @@ function StudioView({
 
       <section className="section-card available-section">
         <SectionHeader
-          title="설치할 버전"
-          meta={availableTotal ? `${loadedCount} / ${availableTotal}개 불러옴` : loadedCount ? `${loadedCount}개 불러옴` : "공식 Marketplace"}
+          title={t("available-title")}
+          meta={
+            availableTotal
+              ? t("catalog-loaded-total", {
+                  loaded: loadedCountLabel,
+                  total: availableTotalLabel,
+                })
+              : loadedCount
+                ? t("catalog-loaded", { loaded: loadedCountLabel })
+                : t("official-marketplace")
+          }
           action={
             <div className="catalog-tools">
               <label className="search-field">
@@ -730,11 +930,11 @@ function StudioView({
                 <input
                   value={search}
                   onChange={(event) => onSearch(event.target.value)}
-                  placeholder="버전 검색"
+                  placeholder={t("search-version-placeholder")}
                   spellCheck={false}
                 />
               </label>
-              <div className="version-filters" role="group" aria-label="지원 유형 필터">
+              <div className="version-filters" role="group" aria-label={t("support-filter-aria")}>
                 {(["lts", "mts"] as const).map((filter) => (
                   <label key={filter}>
                     <input
@@ -746,7 +946,7 @@ function StudioView({
                   </label>
                 ))}
               </div>
-              <button type="button" className="icon-button" title="공식 목록 새로고침" onClick={onRefreshCatalog} disabled={catalogLoading}>
+              <button type="button" className="icon-button" title={t("refresh-catalog")} onClick={onRefreshCatalog} disabled={catalogLoading}>
                 <RefreshCw size={16} className={catalogLoading ? "spin" : ""} />
               </button>
             </div>
@@ -755,6 +955,8 @@ function StudioView({
 
         {downloadProgress && (
           <InstallationProgress
+            t={t}
+            localization={localization}
             key={downloadProgress.version}
             progress={downloadProgress}
             isInstalling={isInstalling}
@@ -766,7 +968,7 @@ function StudioView({
           <div className="inline-error">
             <XCircle size={16} />
             <span>{catalogError}</span>
-            <button type="button" onClick={onRefreshCatalog}>다시 시도</button>
+            <button type="button" onClick={onRefreshCatalog}>{t("action-retry")}</button>
           </div>
         )}
 
@@ -780,9 +982,9 @@ function StudioView({
                 <div className="row-main version-copy">
                   <div>
                     <strong>{version.version}</strong>
-                    <VersionBadges version={version} />
+                    <VersionBadges t={t} version={version} />
                   </div>
-                  <span>{formatReleaseDate(version.releaseDate)}</span>
+                  <span>{version.formattedReleaseDate ?? version.releaseDate ?? ""}</span>
                 </div>
                 <button
                   type="button"
@@ -791,23 +993,23 @@ function StudioView({
                   onClick={() => onInstall(version)}
                 >
                   {installingThis ? <LoaderCircle size={15} className="spin" /> : alreadyInstalled ? <CheckCircle2 size={15} /> : <Download size={15} />}
-                  {installingThis ? "설치 중" : alreadyInstalled ? "설치됨" : "설치"}
+                  {installingThis ? t("action-installing") : alreadyInstalled ? t("action-installed") : t("action-install")}
                 </button>
               </div>
             );
           })}
 
           {catalogLoading && available.length === 0 && (
-            <div className="loading-inline"><LoaderCircle size={18} className="spin" /> 공식 버전 목록을 불러오는 중입니다</div>
+            <div className="loading-inline"><LoaderCircle size={18} className="spin" /> {t("catalog-loading")}</div>
           )}
           {!catalogLoading && available.length === 0 && !catalogError && !hasMore && (
             <EmptyState
               icon={Download}
-              title={search || supportFilters.lts || supportFilters.mts ? "검색 결과가 없습니다" : "버전 목록이 비어 있습니다"}
+              title={search || supportFilters.lts || supportFilters.mts ? t("search-no-results") : t("catalog-empty")}
               detail={
                 search || supportFilters.lts || supportFilters.mts
-                  ? "검색어나 지원 유형 필터를 변경해 보세요."
-                  : "새로고침해 공식 목록을 다시 불러오세요."
+                  ? t("filter-no-results-detail")
+                  : t("catalog-empty-detail")
               }
             />
           )}
@@ -820,7 +1022,7 @@ function StudioView({
             aria-live="polite"
           >
             {catalogLoading && (
-              <><LoaderCircle size={15} className="spin" /> 이전 버전을 불러오는 중입니다</>
+              <><LoaderCircle size={15} className="spin" /> {t("catalog-loading-older")}</>
             )}
           </div>
         )}
@@ -842,10 +1044,14 @@ const PROGRESS_ANIMATION_TARGETS: Record<string, number> = {
 const TERMINAL_PROGRESS_STATES = new Set(["installed", "failed", "cancelled"]);
 
 function InstallationProgress({
+  t,
+  localization,
   progress,
   isInstalling,
   onCancel,
 }: {
+  t: Translate;
+  localization: LocalizationBundle;
   progress: DownloadProgress;
   isInstalling: boolean;
   onCancel: () => void;
@@ -904,31 +1110,35 @@ function InstallationProgress({
   const roundedPercentage = Math.round(displayedPercentage);
   const progressLabel =
     progress.state === "installed"
-      ? "100%"
+      ? t("progress-complete", { percentage: localizedNumber(localization, 100) })
       : progress.state === "installing"
         ? installElapsedSeconds > 0
-          ? `${formatElapsedTime(installElapsedSeconds)} 경과`
-          : "설치 중"
+          ? t("progress-elapsed", {
+              duration: formatElapsedTime(installElapsedSeconds, localization, t),
+            })
+          : t("progress-installing-short")
       : progress.state === "failed"
-        ? "실패"
+        ? t("progress-failed-short")
         : progress.state === "cancelled"
-          ? "취소됨"
-          : `약 ${roundedPercentage}%`;
+          ? t("progress-cancelled-short")
+          : t("progress-approximate", {
+              percentage: localizedNumber(localization, roundedPercentage),
+            });
 
   return (
     <div className={`download-bar ${progress.state}`} aria-live="polite">
       <div className="download-copy">
         <strong>Studio Pro {progress.version}</strong>
-        <span>{progressDescription(progress)}</span>
+        <span>{progressDescription(progress, t)}</span>
       </div>
       <div
         className={`progress-track ${progress.state === "installing" ? "indeterminate" : ""}`}
         role="progressbar"
-        aria-label={`Studio Pro ${progress.version} 설치 진행률`}
+        aria-label={t("progress-aria", { version: progress.version })}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={progress.state === "installing" ? undefined : roundedPercentage}
-        aria-valuetext={`${progressDescription(progress)} ${progressLabel}`}
+        aria-valuetext={`${progressDescription(progress, t)} ${progressLabel}`}
       >
         <span
           className={isActive ? "active" : ""}
@@ -937,13 +1147,15 @@ function InstallationProgress({
       </div>
       <b>{progressLabel}</b>
       {isInstalling && ["connecting", "downloading"].includes(progress.state) && (
-        <button type="button" onClick={onCancel}>취소</button>
+        <button type="button" onClick={onCancel}>{t("action-cancel")}</button>
       )}
     </div>
   );
 }
 
 function ProjectsView({
+  t,
+  localization,
   projects,
   totalProjects,
   search,
@@ -958,6 +1170,8 @@ function ProjectsView({
   onLaunch,
   onFindVersion,
 }: {
+  t: Translate;
+  localization: LocalizationBundle;
   projects: MendixProject[];
   totalProjects: number;
   search: string;
@@ -972,30 +1186,32 @@ function ProjectsView({
   onLaunch: (project: MendixProject) => void;
   onFindVersion: (version: string) => void;
 }) {
+  const [totalProjectsLabel] = useLocalizedNumbers([totalProjects], localization);
+
   return (
     <div>
       <PageTitle
-        title="프로젝트"
-        description="설정한 Linux 공유 디렉터리 안의 Mendix 프로젝트만 표시합니다."
+        title={t("projects-title")}
+        description={t("projects-description")}
       />
 
       <div className="workspace-line">
         <FolderOpen size={17} />
         <span title={sharedDirectory}>{sharedDirectory}</span>
-        <button type="button" onClick={onOpenWorkspace}>폴더 열기</button>
+        <button type="button" onClick={onOpenWorkspace}>{t("action-open-folder")}</button>
       </div>
 
       <section className="section-card">
         <SectionHeader
-          title="발견한 프로젝트"
-          count={totalProjects}
+          title={t("projects-found")}
+          count={totalProjectsLabel}
           action={
             <div className="catalog-tools">
               <label className="search-field project-search">
                 <Search size={16} />
-                <input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="프로젝트 검색" />
+                <input value={search} onChange={(event) => onSearch(event.target.value)} placeholder={t("search-project-placeholder")} />
               </label>
-              <button type="button" className="icon-button" title="프로젝트 다시 찾기" onClick={onRefresh}>
+              <button type="button" className="icon-button" title={t("refresh-projects")} onClick={onRefresh}>
                 <RefreshCw size={16} />
               </button>
             </div>
@@ -1015,13 +1231,13 @@ function ProjectsView({
                 </div>
                 <div className={`project-version ${project.version && !exactVersionInstalled ? "missing" : ""}`}>
                   <span>Studio Pro</span>
-                  <strong>{project.version ?? "버전 미상"}</strong>
+                  <strong>{project.version ?? t("version-unknown")}</strong>
                 </div>
-                <span className="modified">{formatModified(project.lastModified)}</span>
+                <span className="modified">{project.formattedLastModified ?? ""}</span>
                 <div className="row-actions">
                   {project.version && !exactVersionInstalled && (
                     <button type="button" className="button quiet compact" onClick={() => onFindVersion(project.version!)}>
-                      버전 찾기
+                      {t("action-find-version")}
                     </button>
                   )}
                   <button
@@ -1035,9 +1251,9 @@ function ProjectsView({
                     ) : (
                       <Play size={15} />
                     )}
-                    {isBusy(`launch-${project.version ?? "unknown"}`) ? "여는 중" : "열기"}
+                    {isBusy(`launch-${project.version ?? "unknown"}`) ? t("action-opening") : t("action-open")}
                   </button>
-                  <button type="button" className="icon-button" title="Linux 폴더 열기" onClick={() => onOpenFolder(project.directory)}>
+                  <button type="button" className="icon-button" title={t("open-linux-folder")} onClick={() => onOpenFolder(project.directory)}>
                     <FolderOpen size={16} />
                   </button>
                 </div>
@@ -1047,8 +1263,8 @@ function ProjectsView({
           {projects.length === 0 && (
             <EmptyState
               icon={FolderKanban}
-              title={totalProjects ? "검색 결과가 없습니다" : "Mendix 프로젝트를 찾지 못했습니다"}
-              detail={totalProjects ? "다른 검색어를 입력해 보세요." : "공유 디렉터리에 .mpr 프로젝트를 두고 다시 찾아보세요."}
+              title={totalProjects ? t("projects-search-empty") : t("projects-empty")}
+              detail={totalProjects ? t("projects-search-detail") : t("projects-empty-detail")}
             />
           )}
         </div>
@@ -1058,6 +1274,7 @@ function ProjectsView({
 }
 
 function SettingsView({
+  t,
   config,
   changed,
   mountMatches,
@@ -1069,6 +1286,7 @@ function SettingsView({
   onSave,
   onRedetect,
 }: {
+  t: Translate;
   config: AppConfig;
   changed: boolean;
   mountMatches: boolean;
@@ -1083,34 +1301,36 @@ function SettingsView({
   return (
     <div className="settings-page">
       <PageTitle
-        title="설정"
-        description="WinBoat 위치와 Linux 공유 워크스페이스만 지정하면 나머지 연결 정보는 Compose에서 감지합니다."
+        title={t("settings-title")}
+        description={t("settings-description")}
       />
 
       <section className="section-card settings-card">
         <div className="settings-heading">
           <div>
             <h2>WinBoat</h2>
-            <p>현재 Linux에 설치된 WinBoat와 컨테이너 구성을 지정합니다.</p>
+            <p>{t("settings-winboat-description")}</p>
           </div>
           <button type="button" className="button secondary compact" onClick={onRedetect} disabled={isBusy("redetect")}>
-            <RefreshCw size={15} className={isBusy("redetect") ? "spin" : ""} /> 자동 감지
+            <RefreshCw size={15} className={isBusy("redetect") ? "spin" : ""} /> {t("action-auto-detect")}
           </button>
         </div>
         <PathInput
-          label="WinBoat 실행 파일"
+          label={t("settings-winboat-executable")}
+          browseLabel={t("action-browse")}
           value={config.winboatExecutable}
           onChange={(value) => onChange({ ...config, winboatExecutable: value })}
           onBrowse={() => onChoose("winboatExecutable")}
         />
         <PathInput
-          label="Compose 파일"
+          label={t("settings-compose-file")}
+          browseLabel={t("action-browse")}
           value={config.composeFile}
           onChange={(value) => onChange({ ...config, composeFile: value })}
           onBrowse={() => onChoose("composeFile")}
         />
         <label className="simple-field runtime-field">
-          <span>컨테이너 런타임</span>
+          <span>{t("settings-container-runtime")}</span>
           <select value={config.containerRuntime} onChange={(event) => onChange({ ...config, containerRuntime: event.target.value })}>
             <option value="docker">Docker</option>
             <option value="podman">Podman</option>
@@ -1121,16 +1341,17 @@ function SettingsView({
       <section className="section-card settings-card">
         <div className="settings-heading">
           <div>
-            <h2>공유 워크스페이스</h2>
-            <p>프로젝트 목록 탐지와 Windows 설치 파일 전달에 함께 사용합니다.</p>
+            <h2>{t("settings-workspace-title")}</h2>
+            <p>{t("settings-workspace-description")}</p>
           </div>
           <span className={`mount-state ${mountMatches ? "ok" : "pending"}`}>
             {mountMatches ? <CheckCircle2 size={14} /> : <Info size={14} />}
-            {mountMatches ? "WinBoat와 연결됨" : "적용 필요"}
+            {mountMatches ? t("mount-connected") : t("mount-pending")}
           </span>
         </div>
         <PathInput
-          label="Linux 공유 디렉터리"
+          label={t("settings-shared-directory")}
+          browseLabel={t("action-browse")}
           value={config.sharedDirectory}
           onChange={(value) => onChange({ ...config, sharedDirectory: value })}
           onBrowse={() => onChoose("sharedDirectory")}
@@ -1138,17 +1359,17 @@ function SettingsView({
         <label className="apply-row">
           <input type="checkbox" checked={applyNow} onChange={(event) => onApplyNow(event.target.checked)} />
           <span>
-            <strong>공유 폴더 변경을 즉시 적용</strong>
-            <small>필요하면 WinBoat Windows를 한 번 다시 연결합니다.</small>
+            <strong>{t("settings-apply-now-title")}</strong>
+            <small>{t("settings-apply-now-detail")}</small>
           </span>
         </label>
       </section>
 
       <div className="settings-actions">
-        <span>{changed ? "저장하지 않은 변경 사항이 있습니다." : "설정이 저장되어 있습니다."}</span>
+        <span>{changed ? t("settings-unsaved") : t("settings-saved")}</span>
         <button type="button" className="button primary" onClick={onSave} disabled={!changed || isBusy("save-settings")}>
           {isBusy("save-settings") ? <LoaderCircle size={16} className="spin" /> : <CheckCircle2 size={16} />}
-          설정 저장
+          {t("action-save-settings")}
         </button>
       </div>
     </div>
@@ -1166,7 +1387,7 @@ function SectionHeader({
   action,
 }: {
   title: string;
-  count?: number;
+  count?: React.ReactNode;
   meta?: string;
   action?: React.ReactNode;
 }) {
@@ -1178,24 +1399,26 @@ function SectionHeader({
   );
 }
 
-function VersionBadges({ version }: { version: DownloadableVersion }) {
+function VersionBadges({ t, version }: { t: Translate; version: DownloadableVersion }) {
   return (
     <span className="badges">
-      {version.isLatest && <em className="latest">최신</em>}
+      {version.isLatest && <em className="latest">{t("badge-latest")}</em>}
       {version.isLts && <em className="lts">LTS</em>}
       {version.isMts && <em className="mts">MTS</em>}
-      {version.isBeta && <em className="beta">Beta</em>}
+      {version.isBeta && <em className="beta">{t("badge-beta")}</em>}
     </span>
   );
 }
 
 function PathInput({
   label,
+  browseLabel,
   value,
   onChange,
   onBrowse,
 }: {
   label: string;
+  browseLabel: string;
   value: string;
   onChange: (value: string) => void;
   onBrowse: () => void;
@@ -1205,7 +1428,7 @@ function PathInput({
       <span>{label}</span>
       <div>
         <input value={value} onChange={(event) => onChange(event.target.value)} spellCheck={false} />
-        <button type="button" onClick={onBrowse}>찾아보기</button>
+        <button type="button" onClick={onBrowse}>{browseLabel}</button>
       </div>
     </label>
   );
@@ -1238,14 +1461,22 @@ function LoadingScreen() {
   );
 }
 
-function ToastStack({ toasts, onDismiss }: { toasts: ToastMessage[]; onDismiss: (id: number) => void }) {
+function ToastStack({
+  t,
+  toasts,
+  onDismiss,
+}: {
+  t: Translate;
+  toasts: ToastMessage[];
+  onDismiss: (id: number) => void;
+}) {
   return (
     <div className="toast-stack" aria-live="polite">
       {toasts.map((toast) => (
         <div className={`toast ${toast.kind}`} key={toast.id}>
           {toast.kind === "success" ? <CheckCircle2 size={18} /> : toast.kind === "error" ? <XCircle size={18} /> : <Info size={18} />}
           <div><strong>{toast.title}</strong>{toast.detail && <span>{toast.detail}</span>}</div>
-          <button type="button" onClick={() => onDismiss(toast.id)} aria-label="알림 닫기"><X size={14} /></button>
+          <button type="button" onClick={() => onDismiss(toast.id)} aria-label={t("dismiss-notification")}><X size={14} /></button>
         </div>
       ))}
     </div>
@@ -1253,10 +1484,12 @@ function ToastStack({ toasts, onDismiss }: { toasts: ToastMessage[]; onDismiss: 
 }
 
 function ConfirmDialog({
+  t,
   state,
   onCancel,
   onConfirm,
 }: {
+  t: Translate;
   state: ConfirmationState;
   onCancel: () => void;
   onConfirm: () => void;
@@ -1267,7 +1500,7 @@ function ConfirmDialog({
         <h2 id="confirm-title">{state.title}</h2>
         <p>{state.description}</p>
         <div>
-          <button type="button" className="button secondary" onClick={onCancel}>취소</button>
+          <button type="button" className="button secondary" onClick={onCancel}>{t("action-cancel")}</button>
           <button type="button" className={`button ${state.danger ? "danger" : "primary"}`} onClick={onConfirm}>{state.confirmLabel}</button>
         </div>
       </div>
@@ -1275,40 +1508,49 @@ function ConfirmDialog({
   );
 }
 
-function formatReleaseDate(value?: string) {
-  if (!value) return "";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("ko-KR");
+const LOCALIZED_PROGRESS_STATES = new Set([
+  "starting",
+  "preparing",
+  "checking",
+  "connecting",
+  "downloading",
+  "downloaded",
+  "ready",
+  "installing",
+  "installed",
+  "cancelled",
+]);
+
+function progressDescription(progress: DownloadProgress, t: Translate) {
+  const message = LOCALIZED_PROGRESS_STATES.has(progress.state)
+    ? t(`progress-${progress.state}`)
+    : progress.message;
+  if (progress.state !== "downloading" || !progress.totalBytesLabel) return message;
+  return `${message} ${progress.downloadedBytesLabel} / ${progress.totalBytesLabel}`;
 }
 
-function formatModified(value?: string) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString("ko-KR", { year: "numeric", month: "short", day: "numeric" });
-}
-
-function progressDescription(progress: DownloadProgress) {
-  if (progress.state !== "downloading" || !progress.totalBytes) return progress.message;
-  return `${progress.message} ${formatBytes(progress.downloadedBytes)} / ${formatBytes(progress.totalBytes)}`;
-}
-
-function formatBytes(value: number) {
-  if (value < 1024) return `${value} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let size = value / 1024;
-  let unit = units[0];
-  for (let index = 1; index < units.length && size >= 1024; index += 1) {
-    size /= 1024;
-    unit = units[index];
-  }
-  return `${size >= 100 ? size.toFixed(0) : size.toFixed(1)} ${unit}`;
-}
-
-function formatElapsedTime(totalSeconds: number) {
-  const minutes = Math.floor(totalSeconds / 60);
+function formatElapsedTime(
+  totalSeconds: number,
+  localization: LocalizationBundle,
+  t: Translate,
+) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes}분 ${seconds}초` : `${seconds}초`;
+  if (hours > 0) {
+    return t("duration-hours-minutes-seconds", {
+      hours: localizedNumber(localization, hours),
+      minutes: localizedNumber(localization, minutes),
+      seconds: localizedNumber(localization, seconds),
+    });
+  }
+  if (minutes > 0) {
+    return t("duration-minutes-seconds", {
+      minutes: localizedNumber(localization, minutes),
+      seconds: localizedNumber(localization, seconds),
+    });
+  }
+  return t("duration-seconds", { seconds: localizedNumber(localization, seconds) });
 }
 
 function clampPercentage(value: number) {
@@ -1320,14 +1562,76 @@ function compactPath(path: string) {
   return parts.length > 3 ? `…/${parts.slice(-3).join("/")}` : path;
 }
 
-function errorText(error: unknown) {
+function localizedNumber(localization: LocalizationBundle, value: number) {
+  return Number.isInteger(value) && value >= 0 && value < localization.numbers.length
+    ? localization.numbers[value]
+    : String(value);
+}
+
+function useLocalizedNumbers(values: number[], localization: LocalizationBundle) {
+  const requestKey = `${localization.locale}:${values.join(",")}`;
+  const [result, setResult] = useState<{ key: string; values: string[] } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void formatNumbers(values)
+      .then((formatted) => {
+        if (active) setResult({ key: requestKey, values: formatted });
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [requestKey]);
+
+  return result?.key === requestKey
+    ? result.values
+    : values.map((value) => localizedNumber(localization, value));
+}
+
+async function localizeCatalog(catalog: StudioVersionCatalog): Promise<StudioVersionCatalog> {
+  const dates = await formatDates(catalog.versions.map((version) => version.releaseDate ?? ""));
+  return {
+    ...catalog,
+    versions: catalog.versions.map((version, index) => ({
+      ...version,
+      formattedReleaseDate: dates[index] ?? version.releaseDate ?? "",
+    })),
+  };
+}
+
+async function localizeProjects(projects: MendixProject[]): Promise<MendixProject[]> {
+  const dates = await formatDates(projects.map((project) => project.lastModified ?? ""));
+  return projects.map((project, index) => ({
+    ...project,
+    formattedLastModified: dates[index] ?? "",
+  }));
+}
+
+function errorText(error: unknown, t: Translate) {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
+  if (isCommandError(error)) return error.message;
   try {
-    return JSON.stringify(error);
+    return JSON.stringify(error) ?? t("unknown-error");
   } catch {
-    return "알 수 없는 오류가 발생했습니다.";
+    return t("unknown-error");
   }
+}
+
+function errorCode(error: unknown) {
+  return isCommandError(error) ? error.code : undefined;
+}
+
+function isCommandError(error: unknown): error is CommandError {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      typeof error.code === "string" &&
+      "message" in error &&
+      typeof error.message === "string",
+  );
 }
 
 export default App;

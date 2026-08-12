@@ -1,6 +1,7 @@
 export type ViewKey = "studio" | "projects" | "settings";
 
 export interface AppConfig {
+  languagePreference: string;
   winboatExecutable: string;
   composeFile: string;
   containerRuntime: "docker" | "podman" | string;
@@ -44,6 +45,7 @@ export interface DownloadableVersion {
   isBeta: boolean;
   isMts: boolean;
   isLatest: boolean;
+  formattedReleaseDate?: string;
 }
 
 export interface StudioVersionCatalog {
@@ -60,6 +62,7 @@ export interface MendixProject {
   windowsPath: string;
   version?: string;
   lastModified?: string;
+  formattedLastModified?: string;
 }
 
 export interface DownloadProgress {
@@ -68,6 +71,27 @@ export interface DownloadProgress {
   downloadedBytes: number;
   totalBytes?: number;
   percentage?: number;
+  message: string;
+  downloadedBytesLabel: string;
+  totalBytesLabel?: string;
+}
+
+export interface LocaleOption {
+  id: string;
+  nativeName: string;
+}
+
+export interface LocalizationBundle {
+  locale: string;
+  preference: string;
+  direction: "ltr" | "rtl";
+  availableLocales: LocaleOption[];
+  messages: Record<string, string>;
+  numbers: string[];
+}
+
+export interface CommandError {
+  code: string;
   message: string;
 }
 

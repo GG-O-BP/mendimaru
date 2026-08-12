@@ -45,30 +45,29 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
 
     let mut notices = Vec::new();
     if !winboat_available {
-        notices.push("WinBoat 실행 파일을 찾지 못했습니다.".to_string());
+        notices.push(crate::tr!("notice-winboat-missing"));
     }
     if !compose_available {
-        notices.push("WinBoat Compose 파일을 찾지 못했습니다.".to_string());
+        notices.push(crate::tr!("notice-compose-missing"));
     }
     if !runtime_available {
-        notices.push(format!(
-            "{} 컨테이너 런타임을 찾지 못했습니다.",
-            config.container_runtime
+        notices.push(crate::tr!(
+            "notice-runtime-missing",
+            runtime = &config.container_runtime
         ));
     }
     if !freerdp_available {
-        notices.push("FreeRDP 3 실행 파일을 찾지 못했습니다.".to_string());
+        notices.push(crate::tr!("notice-freerdp-missing"));
     }
     if !shared_directory_available {
-        notices.push("설정된 공유 디렉터리가 존재하지 않습니다.".to_string());
+        notices.push(crate::tr!("notice-shared-directory-missing"));
     } else if !shared_mount_matches {
-        notices.push("앱 설정과 Compose의 /shared 마운트가 다릅니다.".to_string());
+        notices.push(crate::tr!("notice-shared-mount-mismatch"));
     }
     if runtime_available && container_status != "running" {
-        notices.push("WinBoat Windows가 실행 중이 아닙니다.".to_string());
+        notices.push(crate::tr!("notice-windows-stopped"));
     } else if container_status == "running" && !guest_online {
-        notices
-            .push("Windows는 실행 중이지만 Guest Server가 아직 준비되지 않았습니다.".to_string());
+        notices.push(crate::tr!("notice-guest-starting"));
     }
 
     EnvironmentStatus {
@@ -86,23 +85,20 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
 
 pub async fn installed_versions(config: &AppConfig) -> Result<Vec<StudioVersion>, String> {
     if !guest_is_online(config).await {
-        return Err(
-            "WinBoat Guest Server가 오프라인입니다. Windows를 시작한 뒤 다시 시도하세요."
-                .to_string(),
-        );
+        return Err(crate::tr!("error-guest-offline"));
     }
     let client = http_client(Duration::from_secs(GUEST_REQUEST_TIMEOUT_SECONDS))?;
     let response = client
         .get(format!("{}/apps", config.api_url))
         .send()
         .await
-        .map_err(|error| format!("Windows 앱 목록을 가져오지 못했습니다: {error}"))?
+        .map_err(|error| crate::tr!("error-windows-apps-fetch", error = error))?
         .error_for_status()
-        .map_err(|error| format!("Windows 앱 목록 응답이 올바르지 않습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-windows-apps-response", error = error))?;
     let apps = response
         .json::<Vec<WinApp>>()
         .await
-        .map_err(|error| format!("Windows 앱 목록을 해석하지 못했습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-windows-apps-parse", error = error))?;
     Ok(parse_studio_versions(apps, &config.mendix_install_root))
 }
 
@@ -117,8 +113,8 @@ pub async fn start_container(config: &AppConfig) -> Result<String, String> {
             .arg("start")
             .arg(&config.container_name)
             .output()
-            .map_err(|error| format!("WinBoat 컨테이너를 시작하지 못했습니다: {error}"))?;
-        ensure_success(output, "WinBoat 컨테이너 시작")?;
+            .map_err(|error| crate::tr!("error-container-start", error = error))?;
+        ensure_success(output, &crate::tr!("operation-container-start"))?;
     } else {
         compose_up(config, false).await?;
     }
@@ -136,7 +132,7 @@ pub fn open_winboat(config: &AppConfig) -> Result<(), String> {
         .stderr(Stdio::null())
         .spawn()
         .map(|_| ())
-        .map_err(|error| format!("WinBoat를 열 수 없습니다: {error}"))
+        .map_err(|error| crate::tr!("error-winboat-open", error = error))
 }
 
 pub async fn launch_studio(
@@ -149,7 +145,7 @@ pub async fn launch_studio(
     let selected = versions
         .into_iter()
         .find(|installed| installed.version == version)
-        .ok_or_else(|| format!("Studio Pro {version} 설치를 찾을 수 없습니다."))?;
+        .ok_or_else(|| crate::tr!("error-studio-install-not-found", version = version))?;
 
     let project_argument = if let Some(project_path) = project_mpr_path {
         validate_project_argument(config, project_path)?
@@ -159,7 +155,7 @@ pub async fn launch_studio(
     let label = format!("Studio Pro {}", selected.version);
     let operation_directory = Path::new(&config.shared_directory).join(".mendimaru/operations");
     fs::create_dir_all(&operation_directory)
-        .map_err(|error| format!("실행 상태 디렉터리를 만들 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-runtime-directory-create", error = error))?;
     let operation_id = format!(
         "launch-{}-{}",
         safe_operation_name(version),
@@ -177,18 +173,19 @@ pub async fn launch_studio(
         &windows_report_path,
     );
     let script_path = write_command_script(config, &operation_id, &script)?;
+    let operation = crate::tr!("operation-studio-launch");
     let report = run_windows_operation(
         config,
         &script_path,
         &label,
         &report_path,
         STUDIO_LAUNCH_TIMEOUT_SECONDS,
-        "Studio Pro 실행",
+        &operation,
         true,
     )
     .await?;
     if report.executable_path.as_deref().is_none_or(str::is_empty) {
-        return Err("Studio Pro 창은 열렸지만 실행 경로를 확인하지 못했습니다.".to_string());
+        return Err(crate::tr!("error-launch-path-missing"));
     }
     Ok(LaunchResult {
         label,
@@ -205,7 +202,7 @@ pub async fn install_studio(
     ensure_guest_online(config).await?;
     let operation_directory = Path::new(&config.shared_directory).join(".mendimaru/operations");
     fs::create_dir_all(&operation_directory)
-        .map_err(|error| format!("설치 상태 디렉터리를 만들 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-install-state-directory-create", error = error))?;
     let operation_id = format!(
         "install-{}-{}",
         safe_operation_name(version),
@@ -228,20 +225,21 @@ pub async fn install_studio(
     // be diagnosed without exposing the Windows password or FreeRDP arguments.
     let script_path = write_command_script(config, &operation_id, &script)?;
     let label = format!("Install Studio Pro {version}");
+    let operation = crate::tr!("operation-studio-install");
     let report = run_windows_operation(
         config,
         &script_path,
         &label,
         &report_path,
         INSTALL_TIMEOUT_SECONDS,
-        "Studio Pro 설치",
+        &operation,
         false,
     )
     .await?;
     report
         .executable_path
         .filter(|path| !path.is_empty())
-        .ok_or_else(|| "설치는 완료됐지만 Studio Pro 실행 경로를 확인하지 못했습니다.".to_string())
+        .ok_or_else(|| crate::tr!("error-install-path-missing"))
 }
 
 pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(), String> {
@@ -249,7 +247,7 @@ pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(),
     ensure_guest_online(config).await?;
     let operation_directory = Path::new(&config.shared_directory).join(".mendimaru/operations");
     fs::create_dir_all(&operation_directory)
-        .map_err(|error| format!("제거 상태 디렉터리를 만들 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-uninstall-state-directory-create", error = error))?;
     let operation_id = format!(
         "uninstall-{}-{}",
         safe_operation_name(version),
@@ -269,13 +267,14 @@ pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(),
     );
     let script_path = write_command_script(config, &operation_id, &script)?;
     let label = format!("Uninstall Studio Pro {version}");
+    let operation = crate::tr!("operation-studio-uninstall");
     run_windows_operation(
         config,
         &script_path,
         &label,
         &report_path,
         UNINSTALL_TIMEOUT_SECONDS,
-        "Studio Pro 제거",
+        &operation,
         false,
     )
     .await?;
@@ -285,7 +284,7 @@ pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(),
 pub fn open_linux_folder(path: &str) -> Result<(), String> {
     let directory = Path::new(path);
     if !directory.is_dir() {
-        return Err(format!("디렉터리를 찾을 수 없습니다: {path}"));
+        return Err(crate::tr!("error-directory-not-found", path = path));
     }
     Command::new("xdg-open")
         .arg(directory)
@@ -294,7 +293,7 @@ pub fn open_linux_folder(path: &str) -> Result<(), String> {
         .stderr(Stdio::null())
         .spawn()
         .map(|_| ())
-        .map_err(|error| format!("파일 관리자를 열 수 없습니다: {error}"))
+        .map_err(|error| crate::tr!("error-file-manager-open", error = error))
 }
 
 pub fn validate_version(version: &str) -> Result<(), String> {
@@ -303,7 +302,7 @@ pub fn validate_version(version: &str) -> Result<(), String> {
     if pattern.is_match(version) {
         Ok(())
     } else {
-        Err("버전은 11.12.2와 같은 Mendix 버전 형식이어야 합니다.".to_string())
+        Err(crate::tr!("error-version-format"))
     }
 }
 
@@ -325,8 +324,8 @@ async fn compose_up(config: &AppConfig, force_recreate: bool) -> Result<(), Stri
     }
     let output = command
         .output()
-        .map_err(|error| format!("WinBoat Compose를 실행하지 못했습니다: {error}"))?;
-    ensure_success(output, "WinBoat Compose 적용")
+        .map_err(|error| crate::tr!("error-compose-run", error = error))?;
+    ensure_success(output, &crate::tr!("operation-compose-apply"))
 }
 
 async fn ensure_guest_online(config: &AppConfig) -> Result<(), String> {
@@ -342,9 +341,9 @@ async fn ensure_guest_online(config: &AppConfig) -> Result<(), String> {
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
-    Err(format!(
-        "{}초 안에 WinBoat Guest Server가 준비되지 않았습니다.",
-        config.startup_timeout_seconds
+    Err(crate::tr!(
+        "error-guest-timeout",
+        seconds = crate::i18n::format_number(config.startup_timeout_seconds)
     ))
 }
 
@@ -364,7 +363,7 @@ fn http_client(timeout: Duration) -> Result<reqwest::Client, String> {
         .timeout(timeout)
         .user_agent("mendimaru/0.1 (WinBoat Studio Pro manager)")
         .build()
-        .map_err(|error| format!("HTTP 클라이언트를 만들 수 없습니다: {error}"))
+        .map_err(|error| crate::tr!("error-http-client-create", error = error))
 }
 
 fn inspect_container_status(config: &AppConfig) -> String {
@@ -388,9 +387,17 @@ fn ensure_success(output: Output, operation: &str) -> Result<(), String> {
     }
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if stderr.is_empty() {
-        Err(format!("{operation}에 실패했습니다: {}", output.status))
+        Err(crate::tr!(
+            "error-operation-status",
+            operation = operation,
+            status = output.status
+        ))
     } else {
-        Err(format!("{operation}에 실패했습니다: {stderr}"))
+        Err(crate::tr!(
+            "error-operation-detail",
+            operation = operation,
+            detail = stderr
+        ))
     }
 }
 
@@ -464,13 +471,13 @@ fn validate_project_argument(
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| extension.eq_ignore_ascii_case("mpr"))
     {
-        return Err("선택한 Mendix .mpr 프로젝트를 찾을 수 없습니다.".to_string());
+        return Err(crate::tr!("error-project-not-found"));
     }
     let projects = scan_projects(config)?;
     let project = projects
         .into_iter()
         .find(|project| paths_refer_to_same_location(&project.mpr_path, requested_path))
-        .ok_or_else(|| "프로젝트는 설정된 공유 워크스페이스 안에 있어야 합니다.".to_string())?;
+        .ok_or_else(|| crate::tr!("error-project-not-shared"))?;
     Ok(Some(project.windows_path))
 }
 
@@ -490,9 +497,9 @@ fn container_credentials(config: &AppConfig) -> Result<(String, String), String>
         .arg("{{range .Config.Env}}{{println .}}{{end}}")
         .arg(&config.container_name)
         .output()
-        .map_err(|error| format!("Windows 계정 정보를 확인할 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-windows-credentials-inspect", error = error))?;
     if !output.status.success() {
-        return Err("실행 중인 WinBoat 컨테이너에서 Windows 계정을 찾지 못했습니다.".to_string());
+        return Err(crate::tr!("error-windows-account-missing"));
     }
     let environment = String::from_utf8_lossy(&output.stdout);
     let username = environment
@@ -500,13 +507,13 @@ fn container_credentials(config: &AppConfig) -> Result<(String, String), String>
         .find_map(|line| line.strip_prefix("USERNAME="))
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
-        .ok_or_else(|| "WinBoat Windows 사용자명이 설정되지 않았습니다.".to_string())?;
+        .ok_or_else(|| crate::tr!("error-windows-username-missing"))?;
     let password = environment
         .lines()
         .find_map(|line| line.strip_prefix("PASSWORD="))
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
-        .ok_or_else(|| "WinBoat Windows 암호가 설정되지 않았습니다.".to_string())?;
+        .ok_or_else(|| crate::tr!("error-windows-password-missing"))?;
     Ok((username, password))
 }
 
@@ -565,7 +572,7 @@ function Get-ReadyStudioProcess {
 
 try {
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
-        throw "Studio Pro executable not found: $executable"
+        throw "MENDIMARU_STUDIO_EXECUTABLE_NOT_FOUND:$executable"
     }
 
     Write-LaunchResult 'starting' 'Studio Pro is starting.' $null $executable $null
@@ -586,13 +593,13 @@ try {
             break
         }
         if ($process.HasExited -and $null -eq $readyProcess -and (Get-Date) -ge $handoffDeadline) {
-            throw "Studio Pro exited before its window opened (code $($process.ExitCode))."
+            throw "MENDIMARU_STUDIO_EXITED_BEFORE_WINDOW:$($process.ExitCode)"
         }
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $deadline)
 
     if ($null -eq $readyProcess) {
-        throw 'Studio Pro window did not appear within 4 minutes.'
+        throw 'MENDIMARU_STUDIO_WINDOW_TIMEOUT'
     }
 
     # Give FreeRDP time to publish the confirmed Windows handle as a local
@@ -685,13 +692,13 @@ function Find-StudioPro {
 
 try {
     if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
-        throw "Installer not found: $installer"
+        throw "MENDIMARU_INSTALLER_NOT_FOUND:$installer"
     }
 
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal] $identity
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw 'The WinBoat Windows session does not have administrator privileges.'
+        throw 'MENDIMARU_ADMIN_REQUIRED'
     }
 
     # Executing an installer directly from the host UNC share can block on an
@@ -711,7 +718,7 @@ try {
     $process = Start-Process -FilePath $localInstaller -ArgumentList @('/SILENT') -Wait -PassThru
     $exitCode = [int]$process.ExitCode
     if (@(0, 1641, 3010) -notcontains $exitCode) {
-        throw "Installer exited with code $exitCode."
+        throw "MENDIMARU_INSTALLER_EXIT_CODE:$exitCode"
     }
 
     $deadline = (Get-Date).AddMinutes(3)
@@ -723,7 +730,7 @@ try {
     } while ((Get-Date) -lt $deadline)
 
     if ($null -eq $studioPro) {
-        throw "StudioPro.exe was not created for version $version."
+        throw "MENDIMARU_STUDIO_NOT_CREATED:$version"
     }
 
     Write-InstallResult 'succeeded' 'Studio Pro installation completed.' $exitCode $studioPro $null
@@ -838,7 +845,7 @@ function Close-RunningStudioPro {
                 $safeWindowTitles -notcontains $_.MainWindowTitle
         })
         if ($unsafeProcesses.Count -gt 0) {
-            throw 'Studio Pro is still running with a project open. Close it and try uninstalling again.'
+            throw 'MENDIMARU_PROJECT_STILL_OPEN'
         }
         foreach ($studioProcess in $running) {
             Stop-Process -Id $studioProcess.Id -Force
@@ -846,7 +853,7 @@ function Close-RunningStudioPro {
         Start-Sleep -Seconds 2
         $running = @(Get-RunningStudioPro $ExecutablePath)
         if ($running.Count -gt 0) {
-            throw 'Studio Pro is still running. Close it and try uninstalling again.'
+            throw 'MENDIMARU_STUDIO_STILL_RUNNING'
         }
     }
 }
@@ -855,7 +862,7 @@ try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal] $identity
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw 'The WinBoat Windows session does not have administrator privileges.'
+        throw 'MENDIMARU_ADMIN_REQUIRED'
     }
 
     $studioPro = Find-StudioPro
@@ -878,7 +885,7 @@ try {
         }
         $studioPro = Find-StudioPro
         if ($null -ne $studioPro) {
-            throw "StudioPro.exe still exists after partial uninstall cleanup: $studioPro"
+            throw "MENDIMARU_PARTIAL_CLEANUP_FAILED:$studioPro"
         }
         Write-UninstallResult 'succeeded' 'Studio Pro uninstall completed.' 0 $null
         exit 0
@@ -886,14 +893,14 @@ try {
 
     $uninstaller = Join-Path $folder.FullName 'uninst\unins000.exe'
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
-        throw "Uninstaller not found: $uninstaller"
+        throw "MENDIMARU_UNINSTALLER_NOT_FOUND:$uninstaller"
     }
 
     Write-UninstallResult 'running' 'Studio Pro uninstaller is running.' $null $null
     $process = Start-Process -FilePath $uninstaller -ArgumentList @('/SILENT') -Wait -PassThru
     $exitCode = [int]$process.ExitCode
     if (@(0, 1641, 3010) -notcontains $exitCode) {
-        throw "Uninstaller exited with code $exitCode."
+        throw "MENDIMARU_UNINSTALLER_EXIT_CODE:$exitCode"
     }
 
     $deadline = (Get-Date).AddMinutes(3)
@@ -903,7 +910,7 @@ try {
         $studioPro = Find-StudioPro
     }
     if ($null -ne $studioPro) {
-        throw "StudioPro.exe still exists after uninstall: $studioPro"
+        throw "MENDIMARU_UNINSTALL_STILL_EXISTS:$studioPro"
     }
 
     Write-UninstallResult 'succeeded' 'Studio Pro uninstall completed.' $exitCode $null
@@ -970,6 +977,76 @@ fn stop_remote_app(remote_app: &mut Child) {
     }
 }
 
+fn localize_windows_reason(reason: &str) -> String {
+    if let Some(path) = reason.strip_prefix("MENDIMARU_STUDIO_EXECUTABLE_NOT_FOUND:") {
+        return crate::tr!("error-script-studio-executable-not-found", path = path);
+    }
+    if let Some(code) = reason.strip_prefix("MENDIMARU_STUDIO_EXITED_BEFORE_WINDOW:") {
+        return crate::tr!(
+            "error-script-studio-exited-before-window",
+            code = localize_numeric_text(code)
+        );
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_INSTALLER_NOT_FOUND:") {
+        return crate::tr!("error-script-installer-not-found", path = path);
+    }
+    if let Some(code) = reason.strip_prefix("MENDIMARU_INSTALLER_EXIT_CODE:") {
+        return crate::tr!(
+            "error-script-installer-exit-code",
+            code = localize_numeric_text(code)
+        );
+    }
+    if let Some(version) = reason.strip_prefix("MENDIMARU_STUDIO_NOT_CREATED:") {
+        return crate::tr!("error-script-studio-not-created", version = version);
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_PARTIAL_CLEANUP_FAILED:") {
+        return crate::tr!("error-script-partial-cleanup-failed", path = path);
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_UNINSTALLER_NOT_FOUND:") {
+        return crate::tr!("error-script-uninstaller-not-found", path = path);
+    }
+    if let Some(code) = reason.strip_prefix("MENDIMARU_UNINSTALLER_EXIT_CODE:") {
+        return crate::tr!(
+            "error-script-uninstaller-exit-code",
+            code = localize_numeric_text(code)
+        );
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_UNINSTALL_STILL_EXISTS:") {
+        return crate::tr!("error-script-uninstall-still-exists", path = path);
+    }
+    match reason {
+        "MENDIMARU_STUDIO_WINDOW_TIMEOUT" => {
+            crate::tr!(
+                "error-script-studio-window-timeout",
+                minutes = crate::i18n::format_number(4)
+            )
+        }
+        "MENDIMARU_ADMIN_REQUIRED" => crate::tr!("error-script-admin-required"),
+        "MENDIMARU_PROJECT_STILL_OPEN" => crate::tr!("error-script-project-still-open"),
+        "MENDIMARU_STUDIO_STILL_RUNNING" => {
+            crate::tr!("error-script-studio-still-running")
+        }
+        _ => reason.to_string(),
+    }
+}
+
+fn localize_numeric_text(value: &str) -> String {
+    value
+        .parse::<u64>()
+        .map(crate::i18n::format_number)
+        .unwrap_or_else(|_| value.to_string())
+}
+
+fn localize_operation_state(state: &str) -> String {
+    match state {
+        "starting" => crate::tr!("operation-state-starting"),
+        "running" => crate::tr!("operation-state-running"),
+        "succeeded" => crate::tr!("operation-state-succeeded"),
+        "failed" => crate::tr!("operation-state-failed"),
+        _ => state.to_string(),
+    }
+}
+
 async fn wait_for_windows_operation(
     report_path: &Path,
     remote_app: &mut Child,
@@ -988,18 +1065,32 @@ async fn wait_for_windows_operation(
                 match report.state.as_str() {
                     "succeeded" => return Ok(report),
                     "failed" => {
-                        let reason = report
+                        let raw_reason = report
                             .error
                             .filter(|message| !message.is_empty())
                             .unwrap_or_else(|| report.message.clone());
-                        let exit_code = report
-                            .exit_code
-                            .map(|code| format!(" (종료 코드 {code})"))
-                            .unwrap_or_default();
+                        let reason = localize_windows_reason(&raw_reason);
+                        let message = if let Some(code) = report.exit_code {
+                            let code = if code >= 0 {
+                                crate::i18n::format_number(code as u64)
+                            } else {
+                                code.to_string()
+                            };
+                            crate::tr!(
+                                "error-windows-operation-code",
+                                operation = operation,
+                                code = &code,
+                                reason = &reason
+                            )
+                        } else {
+                            crate::tr!(
+                                "error-windows-operation",
+                                operation = operation,
+                                reason = &reason
+                            )
+                        };
                         return Err(WindowsOperationWaitError {
-                            message: format!(
-                                "Windows에서 {operation}에 실패했습니다{exit_code}: {reason}"
-                            ),
+                            message,
                             retryable: false,
                         });
                     }
@@ -1016,8 +1107,10 @@ async fn wait_for_windows_operation(
                 Ok(None) => {}
                 Err(error) => {
                     return Err(WindowsOperationWaitError {
-                        message: format!(
-                            "{operation}용 WinBoat RemoteApp 상태를 확인하지 못했습니다: {error}"
+                        message: crate::tr!(
+                            "error-remoteapp-state",
+                            operation = operation,
+                            error = error
                         ),
                         retryable: false,
                     });
@@ -1029,14 +1122,19 @@ async fn wait_for_windows_operation(
             if exited_at.elapsed() >= Duration::from_secs(REMOTE_APP_START_GRACE_SECONDS) {
                 return match last_report_state.as_deref() {
                     Some(state) => Err(WindowsOperationWaitError {
-                        message: format!(
-                            "Windows가 {operation} 완료를 보고하기 전에 RemoteApp 연결이 종료되었습니다 (마지막 상태: {state}, FreeRDP 상태: {status})."
+                        message: crate::tr!(
+                            "error-remoteapp-ended",
+                            operation = operation,
+                            state = localize_operation_state(state),
+                            status = status
                         ),
                         retryable: false,
                     }),
                     None => Err(WindowsOperationWaitError {
-                        message: format!(
-                            "{operation} 명령이 Windows에서 시작되지 않았습니다 (FreeRDP 상태: {status})."
+                        message: crate::tr!(
+                            "error-operation-not-started",
+                            operation = operation,
+                            status = status
                         ),
                         retryable: true,
                     }),
@@ -1046,9 +1144,10 @@ async fn wait_for_windows_operation(
 
         if started.elapsed() >= timeout {
             return Err(WindowsOperationWaitError {
-                message: format!(
-                    "{operation}가 {}분 안에 완료되지 않았습니다. WinBoat Windows에서 상태를 확인해 주세요.",
-                    timeout_seconds / 60
+                message: crate::tr!(
+                    "error-operation-timeout",
+                    operation = operation,
+                    minutes = crate::i18n::format_number(timeout_seconds / 60)
                 ),
                 retryable: false,
             });
@@ -1109,7 +1208,7 @@ fn write_hidden_powershell_launcher(
         &launcher_path,
         hidden_powershell_launcher(powershell_arguments),
     )
-    .map_err(|error| format!("숨김 Windows 명령 래퍼를 저장할 수 없습니다: {error}"))?;
+    .map_err(|error| crate::tr!("error-hidden-wrapper-save", error = error))?;
     Ok(launcher_path)
 }
 
@@ -1184,14 +1283,14 @@ fn spawn_remote_app(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|error| format!("WinBoat RemoteApp을 실행할 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-remoteapp-run", error = error))?;
     let payload = format!("{}\n", arguments.join("\n"));
     child
         .stdin
         .take()
-        .ok_or_else(|| "FreeRDP 보안 입력 채널을 열 수 없습니다.".to_string())?
+        .ok_or_else(|| crate::tr!("error-freerdp-input-open"))?
         .write_all(payload.as_bytes())
-        .map_err(|error| format!("FreeRDP에 연결 정보를 전달할 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-freerdp-credentials-send", error = error))?;
     Ok(child)
 }
 
@@ -1213,12 +1312,12 @@ fn css_slug(value: &str) -> String {
 fn write_command_script(config: &AppConfig, name: &str, content: &str) -> Result<PathBuf, String> {
     let command_directory = Path::new(&config.shared_directory).join(".mendimaru/commands");
     fs::create_dir_all(&command_directory)
-        .map_err(|error| format!("Windows 명령 디렉터리를 만들 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-command-directory-create", error = error))?;
     let timestamp = unix_timestamp_millis();
     let safe_name = safe_operation_name(name);
     let path = command_directory.join(format!("{safe_name}-{timestamp}.ps1"));
     fs::write(&path, content)
-        .map_err(|error| format!("Windows 명령 스크립트를 저장할 수 없습니다: {error}"))?;
+        .map_err(|error| crate::tr!("error-command-script-save", error = error))?;
     Ok(path)
 }
 
@@ -1245,8 +1344,8 @@ mod tests {
     use super::{
         encode_powershell_script, hidden_powershell_launcher, install_script, install_studio,
         installed_versions, launch_studio, launch_studio_script, launch_uninstaller,
-        parse_install_report, parse_studio_versions, powershell_encoded_arguments,
-        uninstall_script, validate_version,
+        localize_windows_reason, parse_install_report, parse_studio_versions,
+        powershell_encoded_arguments, uninstall_script, validate_version,
     };
     use crate::{
         config,
@@ -1349,11 +1448,11 @@ mod tests {
         assert!(script.contains("Mendix Studio Pro - Sign In"));
         assert!(script.contains("Mendix Studio Pro - Select App"));
         assert!(script.contains("Stop-Process -Id $studioProcess.Id -Force"));
-        assert!(script.contains("with a project open"));
-        assert!(script.contains("Close it and try uninstalling again"));
+        assert!(script.contains("MENDIMARU_PROJECT_STILL_OPEN"));
+        assert!(script.contains("MENDIMARU_STUDIO_STILL_RUNNING"));
         assert!(script.contains("Removing files left by a partial uninstall"));
         assert!(script.contains("Remove-Item -LiteralPath $versionFolder -Recurse -Force"));
-        assert!(script.contains("StudioPro.exe still exists after uninstall"));
+        assert!(script.contains("MENDIMARU_UNINSTALL_STILL_EXISTS"));
         assert!(script.contains("'C:\\ProgramData\\Mendix'"));
         assert!(script.contains("'11.13.0'"));
         assert!(!script.contains("__VERSION__"));
@@ -1377,6 +1476,18 @@ mod tests {
         ));
         assert!(script.contains("Remove-Item -LiteralPath $localInstaller"));
         assert!(!script.contains("-Verb RunAs"));
+    }
+
+    #[test]
+    fn converts_script_error_codes_to_current_language() {
+        crate::i18n::initialize("en-US").expect("English localization initializes");
+        let localized =
+            localize_windows_reason(r"MENDIMARU_INSTALLER_NOT_FOUND:C:\Missing\StudioPro.exe");
+        assert!(localized.contains(r"C:\Missing\StudioPro.exe"));
+        assert!(!localized.contains("MENDIMARU_INSTALLER_NOT_FOUND"));
+
+        let localized = localize_windows_reason("MENDIMARU_ADMIN_REQUIRED");
+        assert!(!localized.contains("MENDIMARU_ADMIN_REQUIRED"));
     }
 
     #[test]

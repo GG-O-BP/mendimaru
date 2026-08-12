@@ -1,5 +1,5 @@
 :root {
-  font-family: Inter, Pretendard, "Noto Sans KR", "Segoe UI", sans-serif;
+  font-family: Inter, Pretendard, "Noto Sans KR", "Noto Sans JP", "Segoe UI", sans-serif;
   color: #202331;
   background: #f6f7fa;
   font-synthesis: none;
@@ -58,6 +58,18 @@ select:focus-visible {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.48;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .app-shell {
@@ -142,9 +154,8 @@ button:disabled {
 
 .tabs button.active::after {
   position: absolute;
-  right: 12px;
+  inset-inline: 12px;
   bottom: 0;
-  left: 12px;
   height: 2px;
   background: var(--primary);
   border-radius: 2px 2px 0 0;
@@ -156,6 +167,34 @@ button:disabled {
   align-items: center;
   justify-content: flex-end;
   gap: 11px;
+}
+
+.language-control {
+  display: inline-flex;
+  height: 31px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px 0 8px;
+  color: #74798a;
+  background: #f7f7fa;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.language-control select {
+  max-width: 128px;
+  height: 27px;
+  padding: 0 18px 0 2px;
+  color: #565c6d;
+  font-size: 10px;
+  font-weight: 650;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.language-control select:focus-visible {
+  outline: 0;
 }
 
 .connection {
@@ -636,7 +675,7 @@ button:disabled {
   min-width: 38px;
   color: #655e97;
   font-size: 9px;
-  text-align: right;
+  text-align: end;
   white-space: nowrap;
 }
 
@@ -859,7 +898,7 @@ button:disabled {
   font-weight: 660;
   background: white;
   border: 0;
-  border-left: 1px solid #e2e4e9;
+  border-inline-start: 1px solid #e2e4e9;
   cursor: pointer;
 }
 
@@ -938,7 +977,7 @@ button:disabled {
 .toast-stack {
   position: fixed;
   z-index: 20;
-  right: 20px;
+  inset-inline-end: 20px;
   bottom: 20px;
   display: flex;
   width: 330px;
@@ -1048,7 +1087,7 @@ button:disabled {
 }
 
 .loading-screen strong {
-  margin-right: 8px;
+  margin-inline-end: 8px;
   color: var(--ink);
   font-size: 17px;
 }
@@ -1070,8 +1109,17 @@ button:disabled {
   }
 
   .brand strong,
-  .connection {
+  .connection,
+  .language-control > svg {
     display: none;
+  }
+
+  .language-control {
+    padding-inline-start: 4px;
+  }
+
+  .language-control select {
+    max-width: 112px;
   }
 
   .tabs {

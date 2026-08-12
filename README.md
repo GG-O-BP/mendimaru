@@ -10,6 +10,20 @@ WinBoat를 통해 Linux에서 Mendix Studio Pro를 설치하고, 버전을 선�
 
 대시보드, VM 자원 정보, 고급 다운로드 URL, 수동 빌드 번호, 강제 재다운로드 옵션은 제공하지 않습니다.
 
+## 다국어 지원
+
+영어(`en-US`), 한국어(`ko-KR`), 일본어(`ja-JP`)를 지원합니다. 기본값은 시스템 언어이며, 헤더의 언어 선택 메뉴에서 바꾸면 앱 설정에 저장되어 다음 실행에도 유지됩니다. 지원하지 않는 시스템 언어는 영어로 대체됩니다.
+
+번역과 로케일 처리는 Rust 백엔드가 담당합니다.
+
+- 화면 문구와 백엔드 오류 문구는 `src-tauri/i18n/<locale>/mendimaru.ftl`의 Fluent 리소스에서 함께 관리합니다.
+- `i18n-embed`가 번역 리소스를 실행 파일에 포함하고 시스템 언어 선택과 영어 폴백을 처리합니다.
+- 날짜, 숫자, 다운로드 용량은 ICU4X로 형식화한 값만 프런트엔드에 전달합니다.
+- 프런트엔드는 백엔드가 전달한 번역 번들을 표시하며, 문구를 기준으로 상태를 판별하지 않습니다. 다운로드 취소처럼 동작에 영향을 주는 값은 별도 코드와 상태로 전달합니다.
+- 테스트는 모든 언어의 번역 키·변수 구성이 같은지, React에서 사용하는 정적 번역 키가 백엔드 번들에 포함됐는지 확인합니다.
+
+언어를 추가할 때는 `src-tauri/i18n.rs`의 지원 로케일 목록에 BCP 47 언어 태그와 표시 이름을 등록하고, 기존 영어 파일과 키·변수 구성이 같은 Fluent 파일을 `src-tauri/i18n/<locale>/mendimaru.ftl`에 추가합니다. 새 화면 문구는 Fluent 파일 세 곳과 `UI_MESSAGE_KEYS`에 추가합니다. `cargo test`가 빠진 번역이나 변수 불일치를 검출합니다.
+
 ## Studio Pro 버전 조회와 설치
 
 `kirakiraichigo-mendix-manager`와 같은 방식으로 [Mendix Marketplace Studio Pro 페이지](https://marketplace.mendix.com/link/studiopro)의 데이터그리드를 Chromium으로 읽습니다.

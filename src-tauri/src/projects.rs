@@ -12,9 +12,9 @@ const MAX_WORKSPACE_DEPTH: usize = 8;
 pub fn scan_projects(config: &AppConfig) -> Result<Vec<MendixProject>, String> {
     let workspace = Path::new(&config.shared_directory);
     if !workspace.is_dir() {
-        return Err(format!(
-            "공유 워크스페이스를 찾을 수 없습니다: {}",
-            config.shared_directory
+        return Err(crate::tr!(
+            "error-workspace-not-found",
+            path = &config.shared_directory
         ));
     }
 
@@ -69,12 +69,9 @@ pub fn linux_path_to_windows_share(
     path: &Path,
     windows_root: &str,
 ) -> Result<String, String> {
-    let relative = path.strip_prefix(workspace).map_err(|_| {
-        format!(
-            "프로젝트 경로가 공유 디렉터리 밖에 있습니다: {}",
-            path.display()
-        )
-    })?;
+    let relative = path
+        .strip_prefix(workspace)
+        .map_err(|_| crate::tr!("error-project-outside-workspace", path = path.display()))?;
     let relative_windows = relative
         .components()
         .filter_map(|component| match component {
@@ -158,6 +155,7 @@ mod tests {
 
     fn config_for(path: &std::path::Path) -> AppConfig {
         AppConfig {
+            language_preference: "system".into(),
             winboat_executable: "winboat".into(),
             compose_file: "compose.yml".into(),
             container_runtime: "docker".into(),
