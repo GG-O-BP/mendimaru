@@ -11,6 +11,9 @@
 **/*.rs.bk
 *.pdb
 
+# Local AUR packaging checkout
+/.aur-work/
+
 # Mendimaru runtime files (downloaded installers and operation reports)
 /.mendimaru/
 

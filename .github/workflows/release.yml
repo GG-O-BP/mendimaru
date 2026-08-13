@@ -1,0 +1,206 @@
+name: Release and publish AUR package
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v-prefixed release tag
+        required: true
+        type: string
+      publish:
+        description: Push the generated package to AUR
+        required: true
+        default: false
+        type: boolean
+      initialize_empty:
+        description: Allow the first commit to an empty AUR repository
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+
+jobs:
+  release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Verify release versions
+        shell: bash
+        run: |
+          version="${RELEASE_TAG#v}"
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+(\.[0-9]+){2}$ ]]; then
+            echo "::error::Release tags must use v-prefixed semantic versions."
+            exit 1
+          fi
+
+          package_version="$(jq -r '.version' package.json)"
+          tauri_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          cargo_version="$(
+            sed -n -E 's/^version = "([^"]+)"$/\1/p' \
+              src-tauri/Cargo.toml | head -n 1
+          )"
+
+          for declared in \
+            "$package_version" \
+            "$tauri_version" \
+            "$cargo_version"; do
+            if [[ "$declared" != "$version" ]]; then
+              echo "::error::Declared version '$declared' does not match '$version'."
+              exit 1
+            fi
+          done
+
+      - name: Create GitHub release if needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "GitHub release $RELEASE_TAG already exists."
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "Mendimaru ${RELEASE_TAG#v}" \
+              --generate-notes
+          fi
+
+  publish-aur:
+    name: Publish mendimaru to AUR
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: archlinux:base-devel
+    env:
+      SHOULD_PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+      INITIALIZE_EMPTY: ${{ github.event_name == 'push' && vars.AUR_INITIALIZE_EMPTY == 'true' || inputs.initialize_empty }}
+      AUR_PACKAGE_NAME: mendimaru
+    steps:
+      - name: Install workflow dependencies
+        run: |
+          pacman -Syu --noconfirm git openssh curl jq
+          useradd --create-home --shell /bin/bash aurbuild
+
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Prepare non-root build user
+        run: install -d -o aurbuild -g aurbuild "$RUNNER_TEMP/aur"
+
+      - name: Configure AUR identity
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          AUR_GIT_EMAIL: ${{ vars.AUR_GIT_EMAIL }}
+          AUR_GIT_NAME: ${{ vars.AUR_GIT_NAME }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          if [[ -z "$AUR_SSH_PRIVATE_KEY" ]]; then
+            echo "::error::Repository secret AUR_SSH_PRIVATE_KEY is not configured."
+            exit 1
+          fi
+
+          install -d -m 700 -o aurbuild -g aurbuild /home/aurbuild/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" |
+            tr -d '\r' > /home/aurbuild/.ssh/aur
+          ssh-keyscan -T 15 -t ed25519 aur.archlinux.org \
+            > /home/aurbuild/.ssh/known_hosts
+
+          expected_fingerprint="SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4"
+          mapfile -t actual_fingerprints < <(
+            ssh-keygen -E sha256 -lf /home/aurbuild/.ssh/known_hosts |
+              awk '{ print $2 }' |
+              sort -u
+          )
+          if (( ${#actual_fingerprints[@]} != 1 )) ||
+            [[ "${actual_fingerprints[0]}" != "$expected_fingerprint" ]]; then
+            echo "::error::Unexpected aur.archlinux.org SSH host key."
+            exit 1
+          fi
+
+          chown aurbuild:aurbuild \
+            /home/aurbuild/.ssh/aur \
+            /home/aurbuild/.ssh/known_hosts
+          chmod 600 \
+            /home/aurbuild/.ssh/aur \
+            /home/aurbuild/.ssh/known_hosts
+
+          printf '%s\n' \
+            'Host aur.archlinux.org' \
+            '  User aur' \
+            '  IdentityFile ~/.ssh/aur' \
+            '  IdentitiesOnly yes' \
+            > /home/aurbuild/.ssh/config
+          chown aurbuild:aurbuild /home/aurbuild/.ssh/config
+          chmod 600 /home/aurbuild/.ssh/config
+
+          runuser -u aurbuild -- env HOME=/home/aurbuild \
+            git config --global user.name \
+            "${AUR_GIT_NAME:-Mendimaru release automation}"
+          runuser -u aurbuild -- env HOME=/home/aurbuild \
+            git config --global user.email \
+            "${AUR_GIT_EMAIL:-actions@users.noreply.github.com}"
+
+      - name: Prepare, validate, and publish AUR package
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          args=(
+            --tag "$RELEASE_TAG"
+            --work-dir "$RUNNER_TEMP/aur"
+            --verify-source
+          )
+
+          if [[ "$SHOULD_PUBLISH" == "true" ]]; then
+            if [[ "$INITIALIZE_EMPTY" == "true" ]]; then
+              args+=(--initialize-empty)
+            fi
+            args+=(--push)
+          else
+            args+=(--offline)
+          fi
+
+          runuser -u aurbuild -- env \
+            HOME=/home/aurbuild \
+            PATH="$PATH" \
+            AUR_PACKAGE_NAME="$AUR_PACKAGE_NAME" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+            GITHUB_TOKEN="$GITHUB_TOKEN" \
+            bash scripts/update-mendimaru-aur.sh "${args[@]}"
+
+      - name: Upload dry-run AUR files
+        if: env.SHOULD_PUBLISH != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-${{ env.RELEASE_TAG }}
+          path: |
+            ${{ runner.temp }}/aur/mendimaru/PKGBUILD
+            ${{ runner.temp }}/aur/mendimaru/.SRCINFO
+          if-no-files-found: error

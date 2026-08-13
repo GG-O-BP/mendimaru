@@ -20,6 +20,23 @@ Mendimaru is a Tauri GUI app for installing Mendix Studio Pro on Linux through W
 
 Mendimaru does not provide a dashboard, VM resource information, advanced download URLs, manual build-number entry, or a force-redownload option.
 
+## Arch Linux installation
+
+Install the `mendimaru` package from the AUR:
+
+```bash
+paru -S mendimaru
+```
+
+WinBoat is a required dependency. If no package satisfying `winboat` is
+installed, `paru` installs the AUR `winboat` package automatically. An existing
+`winboat`, `winboat-bin`, `winboat-electron`, or `winboat-git` installation
+satisfies the dependency and is left in place. To select an alternative on a
+new system, install it in the same transaction, for example
+`paru -S winboat-bin mendimaru`.
+
+Chromium or Google Chrome is also needed to discover installable Studio Pro versions from the Mendix Marketplace; both are declared as optional browser alternatives.
+
 ## Initial WinBoat setup
 
 If WinBoat is installed but its Windows VM has not yet been configured, Mendimaru's **Start WinBoat Setup** button opens the official WinBoat setup wizard. WinBoat handles the Windows account, VM resources, Windows image, and Guest Server installation.

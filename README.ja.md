@@ -20,6 +20,23 @@ Mendimaru は、WinBoat を介して Linux 上に Mendix Studio Pro をインス
 
 ダッシュボード、VM リソース情報、高度なダウンロード URL、ビルド番号の手動入力、強制再ダウンロードのオプションは提供しません。
 
+## Arch Linux へのインストール
+
+AUR から `mendimaru` パッケージをインストールします。
+
+```bash
+paru -S mendimaru
+```
+
+WinBoat は必須依存関係です。`winboat` 依存関係を満たすパッケージがない場合、
+`paru` は AUR の `winboat` を自動的にインストールします。`winboat`、
+`winboat-bin`、`winboat-electron`、`winboat-git` のいずれかがすでに
+インストールされている場合は、そのパッケージをそのまま使用し、再インストール
+しません。新しいシステムで別のパッケージを選ぶには、
+`paru -S winboat-bin mendimaru` のように同じコマンドで指定できます。
+
+Mendix Marketplace からインストール可能な Studio Pro バージョンを検索するには Chromium または Google Chrome も必要で、両方を任意のブラウザー依存関係として宣言しています。
+
 ## WinBoat の初期設定
 
 WinBoat がインストール済みで Windows VM がまだ構成されていない場合、Mendimaru の **WinBoat セットアップを開始** ボタンから公式の WinBoat セットアップウィザードを開けます。Windows アカウント、VM リソース、Windows イメージ、Guest Server のインストールは WinBoat が処理します。

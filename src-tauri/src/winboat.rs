@@ -214,12 +214,14 @@ pub async fn launch_studio(
     let operation = crate::tr!("operation-studio-launch");
     let report = run_windows_operation(
         config,
-        &script_path,
-        &label,
-        &report_path,
-        STUDIO_LAUNCH_TIMEOUT_SECONDS,
-        &operation,
-        true,
+        WindowsOperationRequest {
+            script_path: &script_path,
+            label: &label,
+            report_path: &report_path,
+            timeout_seconds: STUDIO_LAUNCH_TIMEOUT_SECONDS,
+            operation: &operation,
+            keep_remote_app_alive: true,
+        },
         |_| {},
     )
     .await?;
@@ -271,12 +273,14 @@ where
     let operation = crate::tr!("operation-studio-install");
     let report = run_windows_operation(
         config,
-        &script_path,
-        &label,
-        &report_path,
-        INSTALL_TIMEOUT_SECONDS,
-        &operation,
-        false,
+        WindowsOperationRequest {
+            script_path: &script_path,
+            label: &label,
+            report_path: &report_path,
+            timeout_seconds: INSTALL_TIMEOUT_SECONDS,
+            operation: &operation,
+            keep_remote_app_alive: false,
+        },
         |report| {
             if report.percentage.is_some() {
                 on_progress(StudioInstallProgress {
@@ -322,12 +326,14 @@ pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(),
     let operation = crate::tr!("operation-studio-uninstall");
     run_windows_operation(
         config,
-        &script_path,
-        &label,
-        &report_path,
-        UNINSTALL_TIMEOUT_SECONDS,
-        &operation,
-        false,
+        WindowsOperationRequest {
+            script_path: &script_path,
+            label: &label,
+            report_path: &report_path,
+            timeout_seconds: UNINSTALL_TIMEOUT_SECONDS,
+            operation: &operation,
+            keep_remote_app_alive: false,
+        },
         |_| {},
     )
     .await?;
@@ -1299,19 +1305,31 @@ struct WindowsOperationWaitError {
     retryable: bool,
 }
 
+struct WindowsOperationRequest<'a> {
+    script_path: &'a Path,
+    label: &'a str,
+    report_path: &'a Path,
+    timeout_seconds: u64,
+    operation: &'a str,
+    keep_remote_app_alive: bool,
+}
+
 async fn run_windows_operation<F>(
     config: &AppConfig,
-    script_path: &Path,
-    label: &str,
-    report_path: &Path,
-    timeout_seconds: u64,
-    operation: &str,
-    keep_remote_app_alive: bool,
+    request: WindowsOperationRequest<'_>,
     mut on_report: F,
 ) -> Result<WindowsOperationReport, String>
 where
     F: FnMut(&WindowsOperationReport) + Send,
 {
+    let WindowsOperationRequest {
+        script_path,
+        label,
+        report_path,
+        timeout_seconds,
+        operation,
+        keep_remote_app_alive,
+    } = request;
     for attempt in 0..REMOTE_APP_START_ATTEMPTS {
         let mut remote_app = spawn_powershell_file(config, script_path, label)?;
         match wait_for_windows_operation(

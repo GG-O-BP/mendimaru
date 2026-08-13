@@ -35,6 +35,16 @@ pub enum InstallError {
     Other(String),
 }
 
+struct DownloadProgressUpdate<'a> {
+    version: &'a str,
+    state: &'a str,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    percentage: Option<f64>,
+    estimated: bool,
+    message: String,
+}
+
 impl From<String> for InstallError {
     fn from(message: String) -> Self {
         Self::Other(message)
@@ -83,24 +93,28 @@ pub async fn download_and_launch(
     let _guard = manager.begin()?;
     emit_progress(
         app,
-        &version,
-        "preparing",
-        0,
-        None,
-        Some(PREPARING_PROGRESS),
-        false,
-        &crate::tr!("progress-preparing"),
+        DownloadProgressUpdate {
+            version: &version,
+            state: "preparing",
+            downloaded_bytes: 0,
+            total_bytes: None,
+            percentage: Some(PREPARING_PROGRESS),
+            estimated: false,
+            message: crate::tr!("progress-preparing"),
+        },
     );
     let download_url = marketplace::installer_url(&version).await?;
     emit_progress(
         app,
-        &version,
-        "checking",
-        0,
-        None,
-        Some(CHECKING_PROGRESS),
-        false,
-        &crate::tr!("progress-checking"),
+        DownloadProgressUpdate {
+            version: &version,
+            state: "checking",
+            downloaded_bytes: 0,
+            total_bytes: None,
+            percentage: Some(CHECKING_PROGRESS),
+            estimated: false,
+            message: crate::tr!("progress-checking"),
+        },
     );
     let installer_directory = Path::new(&config.shared_directory).join(".mendimaru/installers");
     tokio::fs::create_dir_all(&installer_directory)
@@ -117,13 +131,15 @@ pub async fn download_and_launch(
     let downloaded = if existing_installer {
         emit_progress(
             app,
-            &version,
-            "ready",
-            0,
-            None,
-            Some(DOWNLOAD_PROGRESS_END),
-            false,
-            &crate::tr!("progress-ready"),
+            DownloadProgressUpdate {
+                version: &version,
+                state: "ready",
+                downloaded_bytes: 0,
+                total_bytes: None,
+                percentage: Some(DOWNLOAD_PROGRESS_END),
+                estimated: false,
+                message: crate::tr!("progress-ready"),
+            },
         );
         false
     } else {
@@ -145,13 +161,15 @@ pub async fn download_and_launch(
     )?;
     emit_progress(
         app,
-        &version,
-        "staging",
-        0,
-        None,
-        Some(STAGING_PROGRESS_START),
-        false,
-        &crate::tr!("progress-staging"),
+        DownloadProgressUpdate {
+            version: &version,
+            state: "staging",
+            downloaded_bytes: 0,
+            total_bytes: None,
+            percentage: Some(STAGING_PROGRESS_START),
+            estimated: false,
+            message: crate::tr!("progress-staging"),
+        },
     );
     let executable_path = install_studio(config, &version, &windows_installer_path, |progress| {
         emit_install_progress(app, &version, progress)
@@ -159,13 +177,15 @@ pub async fn download_and_launch(
     .await?;
     emit_progress(
         app,
-        &version,
-        "installed",
-        0,
-        None,
-        Some(100.0),
-        false,
-        &crate::tr!("progress-installed"),
+        DownloadProgressUpdate {
+            version: &version,
+            state: "installed",
+            downloaded_bytes: 0,
+            total_bytes: None,
+            percentage: Some(100.0),
+            estimated: false,
+            message: crate::tr!("progress-installed"),
+        },
     );
 
     Ok(InstallResult {
@@ -193,13 +213,15 @@ async fn download_file(
     let partial = partial_path(destination);
     emit_progress(
         app,
-        version,
-        "connecting",
-        0,
-        None,
-        Some(DOWNLOAD_PROGRESS_START),
-        false,
-        &crate::tr!("progress-connecting"),
+        DownloadProgressUpdate {
+            version,
+            state: "connecting",
+            downloaded_bytes: 0,
+            total_bytes: None,
+            percentage: Some(DOWNLOAD_PROGRESS_START),
+            estimated: false,
+            message: crate::tr!("progress-connecting"),
+        },
     );
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
@@ -229,13 +251,15 @@ async fn download_file(
             let _ = tokio::fs::remove_file(&partial).await;
             emit_progress(
                 app,
-                version,
-                "cancelled",
-                downloaded,
-                total,
-                overall_download_percentage(downloaded, total),
-                false,
-                &crate::tr!("progress-cancelled"),
+                DownloadProgressUpdate {
+                    version,
+                    state: "cancelled",
+                    downloaded_bytes: downloaded,
+                    total_bytes: total,
+                    percentage: overall_download_percentage(downloaded, total),
+                    estimated: false,
+                    message: crate::tr!("progress-cancelled"),
+                },
             );
             return Err(InstallError::Cancelled(crate::tr!(
                 "error-download-cancelled"
@@ -248,13 +272,15 @@ async fn download_file(
         downloaded += bytes.len() as u64;
         emit_progress(
             app,
-            version,
-            "downloading",
-            downloaded,
-            total,
-            overall_download_percentage(downloaded, total),
-            false,
-            &crate::tr!("progress-downloading"),
+            DownloadProgressUpdate {
+                version,
+                state: "downloading",
+                downloaded_bytes: downloaded,
+                total_bytes: total,
+                percentage: overall_download_percentage(downloaded, total),
+                estimated: false,
+                message: crate::tr!("progress-downloading"),
+            },
         );
     }
     file.flush()
@@ -266,27 +292,29 @@ async fn download_file(
         .map_err(|error| crate::tr!("error-installer-finalize", error = error))?;
     emit_progress(
         app,
-        version,
-        "downloaded",
-        downloaded,
-        total,
-        Some(DOWNLOAD_PROGRESS_END),
-        false,
-        &crate::tr!("progress-downloaded"),
+        DownloadProgressUpdate {
+            version,
+            state: "downloaded",
+            downloaded_bytes: downloaded,
+            total_bytes: total,
+            percentage: Some(DOWNLOAD_PROGRESS_END),
+            estimated: false,
+            message: crate::tr!("progress-downloaded"),
+        },
     );
     Ok(())
 }
 
-fn emit_progress(
-    app: &AppHandle,
-    version: &str,
-    state: &str,
-    downloaded_bytes: u64,
-    total_bytes: Option<u64>,
-    percentage: Option<f64>,
-    estimated: bool,
-    message: &str,
-) {
+fn emit_progress(app: &AppHandle, update: DownloadProgressUpdate<'_>) {
+    let DownloadProgressUpdate {
+        version,
+        state,
+        downloaded_bytes,
+        total_bytes,
+        percentage,
+        estimated,
+        message,
+    } = update;
     let _ = app.emit(
         DOWNLOAD_EVENT,
         DownloadProgress {
@@ -296,7 +324,7 @@ fn emit_progress(
             total_bytes,
             percentage,
             estimated,
-            message: message.to_string(),
+            message,
             downloaded_bytes_label: crate::i18n::format_bytes(downloaded_bytes),
             total_bytes_label: total_bytes.map(crate::i18n::format_bytes),
         },
@@ -313,13 +341,15 @@ fn emit_install_progress(app: &AppHandle, version: &str, progress: StudioInstall
     };
     emit_progress(
         app,
-        version,
-        &progress.state,
-        0,
-        None,
-        overall_install_percentage(&progress),
-        progress.estimated,
-        &message,
+        DownloadProgressUpdate {
+            version,
+            state: &progress.state,
+            downloaded_bytes: 0,
+            total_bytes: None,
+            percentage: overall_install_percentage(&progress),
+            estimated: progress.estimated,
+            message,
+        },
     );
 }
 
@@ -423,6 +453,6 @@ mod tests {
             overall_install_percentage(&progress("verifying", 100.0)),
             Some(VERIFY_PROGRESS_END)
         );
-        assert!(VERIFY_PROGRESS_END < 100.0);
+        const { assert!(VERIFY_PROGRESS_END < 100.0) };
     }
 }

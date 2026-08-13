@@ -20,6 +20,22 @@ WinBoat를 통해 Linux에서 Mendix Studio Pro를 설치하고, 버전을 선�
 
 대시보드, VM 자원 정보, 고급 다운로드 URL, 수동 빌드 번호, 강제 재다운로드 옵션은 제공하지 않습니다.
 
+## Arch Linux 설치
+
+AUR에서 `mendimaru` 패키지를 설치합니다.
+
+```bash
+paru -S mendimaru
+```
+
+WinBoat는 필수 의존성입니다. `winboat` 의존성을 충족하는 패키지가 없다면
+`paru`가 AUR의 `winboat`를 자동으로 설치합니다. `winboat`, `winboat-bin`,
+`winboat-electron`, `winboat-git` 중 하나가 이미 설치되어 있다면 그대로
+사용하고 다시 설치하지 않습니다. 새 시스템에서 다른 패키지를 선택하려면
+`paru -S winboat-bin mendimaru`처럼 같은 명령에 함께 지정할 수 있습니다.
+
+Mendix Marketplace에서 설치 가능한 Studio Pro 버전을 조회하려면 Chromium 또는 Google Chrome도 필요하며, 두 브라우저는 선택 의존성으로 선언되어 있습니다.
+
 ## WinBoat 초기 설정
 
 WinBoat가 설치되어 있지만 아직 Windows VM이 구성되지 않은 경우, Mendimaru의 **WinBoat 설정 시작** 버튼이 공식 WinBoat 설정 마법사를 엽니다. Windows 계정, VM 자원, Windows 이미지와 Guest Server 설치는 WinBoat가 담당합니다.
