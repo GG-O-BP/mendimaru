@@ -1,4 +1,7 @@
-use crate::config::{compose_shared_directory, path_exists_or_binary};
+use crate::config::{
+    compose_shared_directory, path_exists_or_binary, resolved_api_url, resolved_rdp_port,
+    resolved_winboat_executable,
+};
 use crate::models::{AppConfig, EnvironmentStatus, LaunchResult, StudioVersion, WinApp};
 use crate::projects::{linux_path_to_windows_share, scan_projects};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -16,32 +19,49 @@ const STUDIO_LAUNCH_TIMEOUT_SECONDS: u64 = 5 * 60;
 const INSTALL_TIMEOUT_SECONDS: u64 = 45 * 60;
 const UNINSTALL_TIMEOUT_SECONDS: u64 = 15 * 60;
 const REMOTE_APP_START_GRACE_SECONDS: u64 = 20;
+const INSTALL_REPORT_STALE_SECONDS: u64 = 30;
 const REMOTE_APP_START_ATTEMPTS: usize = 2;
 const REMOTE_APP_RETRY_DELAY_SECONDS: u64 = 2;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WindowsOperationReport {
     state: String,
     #[serde(default)]
     message: String,
+    #[serde(default)]
+    percentage: Option<f64>,
+    #[serde(default)]
+    estimated: bool,
+    #[serde(default)]
+    timestamp: Option<String>,
     exit_code: Option<i32>,
     executable_path: Option<String>,
     error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct StudioInstallProgress {
+    pub state: String,
+    pub percentage: Option<f64>,
+    pub estimated: bool,
+}
+
 pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
-    let winboat_available = path_exists_or_binary(&config.winboat_executable);
+    let winboat_available = resolved_winboat_executable(config).is_some();
     let compose_available = Path::new(&config.compose_file).is_file();
     let runtime_available = path_exists_or_binary(&config.container_runtime);
     let freerdp_available = path_exists_or_binary(&config.freerdp_binary);
     let shared_directory_available = Path::new(&config.shared_directory).is_dir();
     let compose_shared = compose_shared_directory(&config.compose_file);
-    let shared_mount_matches = compose_shared
-        .as_deref()
-        .is_some_and(|current| paths_refer_to_same_location(current, &config.shared_directory));
+    let shared_mount_matches = compose_available
+        && compose_shared
+            .as_deref()
+            .is_some_and(|current| paths_refer_to_same_location(current, &config.shared_directory));
     let container_status = inspect_container_status(config);
-    let guest_online = guest_is_online(config).await;
+    let winboat_initialized = compose_available && container_status != "not-found";
+    let guest_online =
+        winboat_initialized && container_status == "running" && guest_is_online(config).await;
 
     let mut notices = Vec::new();
     if !winboat_available {
@@ -49,6 +69,13 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     }
     if !compose_available {
         notices.push(crate::tr!("notice-compose-missing"));
+    }
+    if winboat_available && !winboat_initialized {
+        notices.push(if config.winboat_setup_pending {
+            crate::tr!("notice-winboat-setup-pending")
+        } else {
+            crate::tr!("notice-winboat-setup-required")
+        });
     }
     if !runtime_available {
         notices.push(crate::tr!(
@@ -61,10 +88,10 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     }
     if !shared_directory_available {
         notices.push(crate::tr!("notice-shared-directory-missing"));
-    } else if !shared_mount_matches {
+    } else if compose_available && !shared_mount_matches {
         notices.push(crate::tr!("notice-shared-mount-mismatch"));
     }
-    if runtime_available && container_status != "running" {
+    if runtime_available && winboat_initialized && container_status != "running" {
         notices.push(crate::tr!("notice-windows-stopped"));
     } else if container_status == "running" && !guest_online {
         notices.push(crate::tr!("notice-guest-starting"));
@@ -72,6 +99,8 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
 
     EnvironmentStatus {
         winboat_available,
+        winboat_initialized,
+        setup_pending: config.winboat_setup_pending,
         compose_available,
         runtime_available,
         freerdp_available,
@@ -88,8 +117,9 @@ pub async fn installed_versions(config: &AppConfig) -> Result<Vec<StudioVersion>
         return Err(crate::tr!("error-guest-offline"));
     }
     let client = http_client(Duration::from_secs(GUEST_REQUEST_TIMEOUT_SECONDS))?;
+    let api_url = resolved_api_url(config);
     let response = client
-        .get(format!("{}/apps", config.api_url))
+        .get(format!("{api_url}/apps"))
         .send()
         .await
         .map_err(|error| crate::tr!("error-windows-apps-fetch", error = error))?
@@ -103,6 +133,12 @@ pub async fn installed_versions(config: &AppConfig) -> Result<Vec<StudioVersion>
 }
 
 pub async fn start_container(config: &AppConfig) -> Result<String, String> {
+    if !Path::new(&config.compose_file).is_file() {
+        return Err(crate::tr!(
+            "error-compose-file-not-found",
+            path = &config.compose_file
+        ));
+    }
     let status = inspect_container_status(config);
     if status == "running" {
         return Ok(status);
@@ -126,7 +162,9 @@ pub async fn recreate_container(config: &AppConfig) -> Result<(), String> {
 }
 
 pub fn open_winboat(config: &AppConfig) -> Result<(), String> {
-    Command::new(&config.winboat_executable)
+    let executable = resolved_winboat_executable(config)
+        .ok_or_else(|| crate::tr!("error-winboat-executable-not-found"))?;
+    Command::new(executable)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -182,6 +220,7 @@ pub async fn launch_studio(
         STUDIO_LAUNCH_TIMEOUT_SECONDS,
         &operation,
         true,
+        |_| {},
     )
     .await?;
     if report.executable_path.as_deref().is_none_or(str::is_empty) {
@@ -193,11 +232,15 @@ pub async fn launch_studio(
     })
 }
 
-pub async fn install_studio(
+pub async fn install_studio<F>(
     config: &AppConfig,
     version: &str,
     windows_installer_path: &str,
-) -> Result<String, String> {
+    mut on_progress: F,
+) -> Result<String, String>
+where
+    F: FnMut(StudioInstallProgress) + Send,
+{
     validate_version(version)?;
     ensure_guest_online(config).await?;
     let operation_directory = Path::new(&config.shared_directory).join(".mendimaru/operations");
@@ -234,6 +277,15 @@ pub async fn install_studio(
         INSTALL_TIMEOUT_SECONDS,
         &operation,
         false,
+        |report| {
+            if report.percentage.is_some() {
+                on_progress(StudioInstallProgress {
+                    state: report.state.clone(),
+                    percentage: report.percentage,
+                    estimated: report.estimated,
+                });
+            }
+        },
     )
     .await?;
     report
@@ -276,6 +328,7 @@ pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(),
         UNINSTALL_TIMEOUT_SECONDS,
         &operation,
         false,
+        |_| {},
     )
     .await?;
     Ok(())
@@ -347,12 +400,13 @@ async fn ensure_guest_online(config: &AppConfig) -> Result<(), String> {
     ))
 }
 
-async fn guest_is_online(config: &AppConfig) -> bool {
+pub async fn guest_is_online(config: &AppConfig) -> bool {
     let Ok(client) = http_client(Duration::from_secs(2)) else {
         return false;
     };
+    let api_url = resolved_api_url(config);
     client
-        .get(format!("{}/health", config.api_url))
+        .get(format!("{api_url}/health"))
         .send()
         .await
         .is_ok_and(|response| response.status().is_success())
@@ -658,6 +712,8 @@ function Write-InstallResult {
     param(
         [string]$State,
         [string]$Message,
+        $Percentage,
+        [bool]$Estimated,
         $ExitCode,
         $ExecutablePath,
         $ErrorMessage
@@ -666,14 +722,234 @@ function Write-InstallResult {
     $payload = [ordered]@{
         state = $State
         message = $Message
+        percentage = $Percentage
+        estimated = $Estimated
         exitCode = $ExitCode
         executablePath = $ExecutablePath
         error = $ErrorMessage
         timestamp = (Get-Date).ToString('o')
     }
     $temporaryPath = "$resultPath.tmp"
-    $payload | ConvertTo-Json -Compress | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
-    Move-Item -LiteralPath $temporaryPath -Destination $resultPath -Force
+    $serialized = $payload | ConvertTo-Json -Compress
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        try {
+            $serialized | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+            Move-Item -LiteralPath $temporaryPath -Destination $resultPath -Force
+            return
+        } catch {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+            if ($attempt -eq 19) { throw }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+}
+
+if (-not ('Mendimaru.NativeProgressReader' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace Mendimaru {
+    public static class NativeProgressReader {
+        private const uint WM_USER = 0x0400;
+        private const uint PBM_GETRANGE = WM_USER + 7;
+        private const uint PBM_GETPOS = WM_USER + 8;
+        private const uint SMTO_ABORTIFHUNG = 0x0002;
+        private static HashSet<int> processIds;
+        private static double bestProgress;
+
+        private delegate bool EnumWindowsProc(IntPtr window, IntPtr parameter);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumChildWindows(
+            IntPtr parent,
+            EnumWindowsProc callback,
+            IntPtr parameter
+        );
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(
+            IntPtr window,
+            StringBuilder className,
+            int maximumCount
+        );
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr window);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr SendMessageTimeout(
+            IntPtr window,
+            uint message,
+            UIntPtr wordParameter,
+            IntPtr longParameter,
+            uint flags,
+            uint timeoutMilliseconds,
+            out UIntPtr result
+        );
+
+        public static double Read(int[] candidateProcessIds) {
+            processIds = new HashSet<int>(candidateProcessIds);
+            bestProgress = -1.0;
+            EnumWindows(new EnumWindowsProc(InspectTopLevelWindow), IntPtr.Zero);
+            return bestProgress;
+        }
+
+        private static bool InspectTopLevelWindow(IntPtr window, IntPtr parameter) {
+            uint processId;
+            GetWindowThreadProcessId(window, out processId);
+            if (!processIds.Contains((int)processId)) {
+                return true;
+            }
+
+            InspectProgressControl(window);
+            EnumChildWindows(window, new EnumWindowsProc(InspectChildWindow), IntPtr.Zero);
+            return true;
+        }
+
+        private static bool InspectChildWindow(IntPtr window, IntPtr parameter) {
+            InspectProgressControl(window);
+            return true;
+        }
+
+        private static void InspectProgressControl(IntPtr window) {
+            if (!IsWindowVisible(window)) {
+                return;
+            }
+            StringBuilder className = new StringBuilder(128);
+            if (GetClassName(window, className, className.Capacity) == 0) {
+                return;
+            }
+            string nativeClass = className.ToString();
+            if (!String.Equals(
+                    nativeClass,
+                    "msctls_progress32",
+                    StringComparison.OrdinalIgnoreCase
+                ) && !String.Equals(
+                    nativeClass,
+                    "TNewProgressBar",
+                    StringComparison.OrdinalIgnoreCase
+                )) {
+                return;
+            }
+
+            int minimum = ReadMessage(window, PBM_GETRANGE, new UIntPtr(1));
+            int maximum = ReadMessage(window, PBM_GETRANGE, UIntPtr.Zero);
+            int position = ReadMessage(window, PBM_GETPOS, UIntPtr.Zero);
+            if (minimum < 0 || maximum <= minimum || position < minimum) {
+                return;
+            }
+
+            double value = Math.Min(
+                1.0,
+                Math.Max(0.0, (double)(position - minimum) / (maximum - minimum))
+            );
+            if (value > bestProgress) {
+                bestProgress = value;
+            }
+        }
+
+        private static int ReadMessage(IntPtr window, uint message, UIntPtr wordParameter) {
+            UIntPtr result;
+            IntPtr succeeded = SendMessageTimeout(
+                window,
+                message,
+                wordParameter,
+                IntPtr.Zero,
+                SMTO_ABORTIFHUNG,
+                250,
+                out result
+            );
+            return succeeded == IntPtr.Zero ? -1 : unchecked((int)result.ToUInt64());
+        }
+    }
+}
+'@
+}
+
+function Get-DescendantProcessIds {
+    param([int]$RootProcessId)
+
+    $processIds = New-Object 'System.Collections.Generic.HashSet[int]'
+    $null = $processIds.Add($RootProcessId)
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $changed = $true
+    while ($changed) {
+        $changed = $false
+        foreach ($candidate in $processes) {
+            if ($processIds.Contains([int]$candidate.ParentProcessId) -and
+                $processIds.Add([int]$candidate.ProcessId)) {
+                $changed = $true
+            }
+        }
+    }
+    return [int[]]@($processIds)
+}
+
+function Get-InstallerProgress {
+    param([int]$RootProcessId)
+
+    $processIds = @(Get-DescendantProcessIds $RootProcessId)
+    if ($processIds.Count -eq 0) { return $null }
+    $value = [Mendimaru.NativeProgressReader]::Read([int[]]$processIds)
+    if ($value -lt 0) { return $null }
+    return [double]$value
+}
+
+function Copy-InstallerWithProgress {
+    param(
+        [string]$Source,
+        [string]$Destination
+    )
+
+    $sourceInfo = Get-Item -LiteralPath $Source
+    $destinationInfo = Get-Item -LiteralPath $Destination -ErrorAction SilentlyContinue
+    if ($null -ne $destinationInfo -and $destinationInfo.Length -eq $sourceInfo.Length) {
+        Write-InstallResult 'staging' 'Installer is ready in Windows.' 100 $false $null $null $null
+        return
+    }
+
+    $inputStream = [System.IO.File]::Open(
+        $sourceInfo.FullName,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::Read
+    )
+    try {
+        $outputStream = [System.IO.File]::Open(
+            $Destination,
+            [System.IO.FileMode]::Create,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None
+        )
+        try {
+            $buffer = New-Object byte[] 4194304
+            [long]$copied = 0
+            $lastPercentage = -1
+            while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $outputStream.Write($buffer, 0, $read)
+                $copied += $read
+                $percentage = [int][Math]::Floor(100.0 * $copied / $sourceInfo.Length)
+                if ($percentage -ne $lastPercentage) {
+                    Write-InstallResult 'staging' 'Copying installer into Windows.' $percentage $false $null $null $null
+                    $lastPercentage = $percentage
+                }
+            }
+            $outputStream.Flush()
+        } finally {
+            $outputStream.Dispose()
+        }
+    } finally {
+        $inputStream.Dispose()
+    }
 }
 
 function Find-StudioPro {
@@ -708,24 +984,112 @@ try {
     $stagingDirectory = Join-Path $env:ProgramData 'Mendimaru\Installers'
     New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
     $localInstaller = Join-Path $stagingDirectory $sourceInstaller.Name
-    $localInfo = Get-Item -LiteralPath $localInstaller -ErrorAction SilentlyContinue
-    if ($null -eq $localInfo -or $localInfo.Length -ne $sourceInstaller.Length) {
-        Copy-Item -LiteralPath $installer -Destination $localInstaller -Force
-    }
+    Write-InstallResult 'staging' 'Preparing the installer in Windows.' 0 $false $null $null $null
+    Copy-InstallerWithProgress $installer $localInstaller
     Unblock-File -LiteralPath $localInstaller -ErrorAction SilentlyContinue
 
-    Write-InstallResult 'running' 'Studio Pro installer is running.' $null $null $null
-    $process = Start-Process -FilePath $localInstaller -ArgumentList @('/SILENT') -Wait -PassThru
+    $logDirectory = Join-Path $env:ProgramData 'Mendimaru\Logs'
+    New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+    $installLog = Join-Path $logDirectory ("install-$version-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $logArgument = '/LOG="' + $installLog + '"'
+    Write-InstallResult 'installing' 'Studio Pro installer is running.' 0 $true $null $null $null
+    $process = Start-Process -FilePath $localInstaller -ArgumentList @(
+        '/SP-',
+        '/SILENT',
+        '/SUPPRESSMSGBOXES',
+        '/NOCANCEL',
+        '/NORESTART',
+        $logArgument
+    ) -PassThru
+
+    $installerStartedAt = Get-Date
+    $bestPhasePercentage = 0.0
+    $bestPhaseEstimated = $true
+    $observedNativeProgress = $false
+    $lastReportedPercentage = -1
+    $lastReportedState = ''
+    $lastReportedEstimated = $null
+    $lastReportWrittenAt = Get-Date
+    while (-not $process.HasExited) {
+        $nativeProgress = Get-InstallerProgress $process.Id
+        if ($null -ne $nativeProgress) {
+            $observedNativeProgress = $true
+            $candidatePercentage = [Math]::Min(100.0, [Math]::Max(0.0, $nativeProgress * 100.0))
+            $isEstimated = $false
+        } elseif ($observedNativeProgress) {
+            # The progress window can briefly disappear during installer-owned
+            # post-install actions. Preserve the last native value in that case.
+            $candidatePercentage = $bestPhasePercentage
+            $isEstimated = $bestPhaseEstimated
+        } else {
+            # Inno Setup does not expose a supported cross-process callback.
+            # Until its native progress control appears, use a deliberately
+            # slowing curve calibrated against live LTS installs and cap it.
+            $elapsedSeconds = ((Get-Date) - $installerStartedAt).TotalSeconds
+            $candidatePercentage = [Math]::Min(
+                95.0,
+                95.0 * (1.0 - [Math]::Exp(-$elapsedSeconds / 105.0))
+            )
+            $isEstimated = $true
+        }
+
+        if ($candidatePercentage -gt $bestPhasePercentage) {
+            $bestPhasePercentage = $candidatePercentage
+            $bestPhaseEstimated = $isEstimated
+        } elseif (-not $isEstimated -and $candidatePercentage -ge $bestPhasePercentage) {
+            $bestPhaseEstimated = $false
+        }
+        $isEstimated = $bestPhaseEstimated
+        $reportState = if ($observedNativeProgress -and $bestPhasePercentage -ge 99.9) {
+            'finalizing'
+        } else {
+            'installing'
+        }
+        $roundedPercentage = [int][Math]::Floor($bestPhasePercentage)
+        if ($roundedPercentage -ne $lastReportedPercentage -or
+            $reportState -ne $lastReportedState -or
+            $isEstimated -ne $lastReportedEstimated -or
+            ((Get-Date) - $lastReportWrittenAt).TotalSeconds -ge 5) {
+            $reportMessage = if ($reportState -eq 'finalizing') {
+                'Completing installer actions.'
+            } elseif ($isEstimated) {
+                'Installing Studio Pro (estimated progress).'
+            } else {
+                'Installing Studio Pro.'
+            }
+            Write-InstallResult $reportState $reportMessage $bestPhasePercentage $isEstimated $null $null $null
+            $lastReportedPercentage = $roundedPercentage
+            $lastReportedState = $reportState
+            $lastReportedEstimated = $isEstimated
+            $lastReportWrittenAt = Get-Date
+        }
+
+        Start-Sleep -Milliseconds 750
+        $process.Refresh()
+    }
+    $process.WaitForExit()
     $exitCode = [int]$process.ExitCode
     if (@(0, 1641, 3010) -notcontains $exitCode) {
         throw "MENDIMARU_INSTALLER_EXIT_CODE:$exitCode"
     }
 
+    Write-InstallResult 'verifying' 'Verifying the Studio Pro installation.' 0 $false $exitCode $null $null
     $deadline = (Get-Date).AddMinutes(3)
+    $verificationStartedAt = Get-Date
+    $lastVerificationPercentage = -1
     $studioPro = $null
     do {
         $studioPro = Find-StudioPro
         if ($null -ne $studioPro) { break }
+        $verificationPercentage = [Math]::Min(
+            95.0,
+            ((Get-Date) - $verificationStartedAt).TotalSeconds / 1.8
+        )
+        $roundedVerificationPercentage = [int][Math]::Floor($verificationPercentage)
+        if ($roundedVerificationPercentage -ne $lastVerificationPercentage) {
+            Write-InstallResult 'verifying' 'Verifying the Studio Pro installation.' $verificationPercentage $false $exitCode $null $null
+            $lastVerificationPercentage = $roundedVerificationPercentage
+        }
         Start-Sleep -Seconds 2
     } while ((Get-Date) -lt $deadline)
 
@@ -733,10 +1097,11 @@ try {
         throw "MENDIMARU_STUDIO_NOT_CREATED:$version"
     }
 
-    Write-InstallResult 'succeeded' 'Studio Pro installation completed.' $exitCode $studioPro $null
+    Write-InstallResult 'verifying' 'Studio Pro installation verified.' 100 $false $exitCode $studioPro $null
+    Write-InstallResult 'succeeded' 'Studio Pro installation completed.' 100 $false $exitCode $studioPro $null
 } catch {
-    $exitCode = if ($null -ne $process) { [int]$process.ExitCode } else { $null }
-    Write-InstallResult 'failed' 'Studio Pro installation failed.' $exitCode $null $_.Exception.Message
+    $exitCode = if ($null -ne $process -and $process.HasExited) { [int]$process.ExitCode } else { $null }
+    Write-InstallResult 'failed' 'Studio Pro installation failed.' $null $false $exitCode $null $_.Exception.Message
     $scriptExitCode = 1
 } finally {
     if ($null -ne $localInstaller) {
@@ -934,7 +1299,7 @@ struct WindowsOperationWaitError {
     retryable: bool,
 }
 
-async fn run_windows_operation(
+async fn run_windows_operation<F>(
     config: &AppConfig,
     script_path: &Path,
     label: &str,
@@ -942,11 +1307,21 @@ async fn run_windows_operation(
     timeout_seconds: u64,
     operation: &str,
     keep_remote_app_alive: bool,
-) -> Result<WindowsOperationReport, String> {
+    mut on_report: F,
+) -> Result<WindowsOperationReport, String>
+where
+    F: FnMut(&WindowsOperationReport) + Send,
+{
     for attempt in 0..REMOTE_APP_START_ATTEMPTS {
         let mut remote_app = spawn_powershell_file(config, script_path, label)?;
-        match wait_for_windows_operation(report_path, &mut remote_app, timeout_seconds, operation)
-            .await
+        match wait_for_windows_operation(
+            report_path,
+            &mut remote_app,
+            timeout_seconds,
+            operation,
+            &mut on_report,
+        )
+        .await
         {
             Ok(report) => {
                 if !keep_remote_app_alive {
@@ -1047,21 +1422,43 @@ fn localize_operation_state(state: &str) -> String {
     }
 }
 
-async fn wait_for_windows_operation(
+async fn wait_for_windows_operation<F>(
     report_path: &Path,
     remote_app: &mut Child,
     timeout_seconds: u64,
     operation: &str,
-) -> Result<WindowsOperationReport, WindowsOperationWaitError> {
+    on_report: &mut F,
+) -> Result<WindowsOperationReport, WindowsOperationWaitError>
+where
+    F: FnMut(&WindowsOperationReport) + Send,
+{
     let started = tokio::time::Instant::now();
     let timeout = Duration::from_secs(timeout_seconds);
     let mut remote_app_exited_at = None;
     let mut last_report_state = None;
+    let mut last_progress_signature: Option<(String, Option<i32>, bool)> = None;
+    let mut last_report_timestamp = None;
+    let mut last_report_changed_at = None;
+    let mut last_report_had_percentage = false;
 
     loop {
         if let Ok(content) = tokio::fs::read_to_string(report_path).await {
             if let Ok(report) = parse_install_report(&content) {
                 last_report_state = Some(report.state.clone());
+                last_report_had_percentage = report.percentage.is_some();
+                if last_report_timestamp != report.timestamp {
+                    last_report_timestamp = report.timestamp.clone();
+                    last_report_changed_at = Some(tokio::time::Instant::now());
+                }
+                let progress_signature = (
+                    report.state.clone(),
+                    report.percentage.map(|value| (value * 10.0).round() as i32),
+                    report.estimated,
+                );
+                if last_progress_signature.as_ref() != Some(&progress_signature) {
+                    on_report(&report);
+                    last_progress_signature = Some(progress_signature);
+                }
                 match report.state.as_str() {
                     "succeeded" => return Ok(report),
                     "failed" => {
@@ -1118,8 +1515,27 @@ async fn wait_for_windows_operation(
             }
         }
 
+        if started.elapsed() >= timeout {
+            return Err(WindowsOperationWaitError {
+                message: crate::tr!(
+                    "error-operation-timeout",
+                    operation = operation,
+                    minutes = crate::i18n::format_number(timeout_seconds / 60)
+                ),
+                retryable: false,
+            });
+        }
+
         if let Some((exited_at, status)) = remote_app_exited_at {
             if exited_at.elapsed() >= Duration::from_secs(REMOTE_APP_START_GRACE_SECONDS) {
+                let install_report_is_live = last_report_had_percentage
+                    && last_report_changed_at.is_some_and(|changed_at| {
+                        changed_at.elapsed() < Duration::from_secs(INSTALL_REPORT_STALE_SECONDS)
+                    });
+                if install_report_is_live {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
                 return match last_report_state.as_deref() {
                     Some(state) => Err(WindowsOperationWaitError {
                         message: crate::tr!(
@@ -1140,17 +1556,6 @@ async fn wait_for_windows_operation(
                     }),
                 };
             }
-        }
-
-        if started.elapsed() >= timeout {
-            return Err(WindowsOperationWaitError {
-                message: crate::tr!(
-                    "error-operation-timeout",
-                    operation = operation,
-                    minutes = crate::i18n::format_number(timeout_seconds / 60)
-                ),
-                retryable: false,
-            });
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -1261,7 +1666,7 @@ fn spawn_remote_app(
         format!("/u:{username}"),
         format!("/p:{password}"),
         format!("/v:{}", config.rdp_host),
-        format!("/port:{}", config.rdp_port),
+        format!("/port:{}", resolved_rdp_port(config)),
         "/cert:ignore".to_string(),
         "+clipboard".to_string(),
         "/sound:sys:pulse".to_string(),
@@ -1364,6 +1769,7 @@ mod tests {
         let version = std::env::var("MENDIMARU_E2E_VERSION")
             .expect("set MENDIMARU_E2E_VERSION to the exact test version");
         validate_version(&version).expect("the E2E version must be valid");
+        crate::i18n::initialize("en-US").expect("English localization initializes");
         let config = config::detect_config().expect("the live WinBoat configuration must exist");
         (config, version)
     }
@@ -1423,12 +1829,12 @@ mod tests {
     #[test]
     fn parses_windows_powershell_utf8_bom_report() {
         let report = parse_install_report(
-            "\u{feff}{\"state\":\"succeeded\",\"message\":\"done\",\"exitCode\":0,\"executablePath\":\"C:\\\\Program Files\\\\Mendix\\\\11.13.0\\\\modeler\\\\studiopro.exe\",\"error\":null}",
+            "\u{feff}{\"state\":\"installing\",\"message\":\"working\",\"percentage\":42.5,\"estimated\":false,\"exitCode\":null,\"executablePath\":null,\"error\":null}",
         )
         .expect("report should parse");
-        assert_eq!(report.state, "succeeded");
-        assert_eq!(report.exit_code, Some(0));
-        assert!(report.executable_path.is_some());
+        assert_eq!(report.state, "installing");
+        assert_eq!(report.percentage, Some(42.5));
+        assert!(!report.estimated);
     }
 
     #[test]
@@ -1469,11 +1875,19 @@ mod tests {
 
         assert!(script.contains("WindowsBuiltInRole]::Administrator"));
         assert!(script.contains("Join-Path $env:ProgramData 'Mendimaru\\Installers'"));
-        assert!(script.contains("Copy-Item -LiteralPath $installer"));
+        assert!(script.contains("Copy-InstallerWithProgress $installer $localInstaller"));
         assert!(script.contains("Unblock-File -LiteralPath $localInstaller"));
-        assert!(script.contains(
-            "Start-Process -FilePath $localInstaller -ArgumentList @('/SILENT') -Wait -PassThru"
-        ));
+        assert!(script.contains("Mendimaru.NativeProgressReader"));
+        assert!(script.contains("PBM_GETPOS"));
+        assert!(script.contains("TNewProgressBar"));
+        assert!(script.contains("IsWindowVisible(window)"));
+        assert!(script.contains("'/SILENT'"));
+        assert!(script.contains("'/SUPPRESSMSGBOXES'"));
+        assert!(script.contains("'/NORESTART'"));
+        assert!(script.contains(") -PassThru"));
+        assert!(!script.contains(") -Wait -PassThru"));
+        assert!(script.contains("Write-InstallResult 'verifying'"));
+        assert!(script.contains("Write-InstallResult 'succeeded'"));
         assert!(script.contains("Remove-Item -LiteralPath $localInstaller"));
         assert!(!script.contains("-Verb RunAs"));
     }
@@ -1557,6 +1971,12 @@ mod tests {
             &config,
             &version,
             &windows_installer_path,
+            |progress| {
+                eprintln!(
+                    "install progress: state={} percentage={:?} estimated={}",
+                    progress.state, progress.percentage, progress.estimated
+                );
+            },
         ))
         .expect("Studio Pro installation must succeed");
         assert!(

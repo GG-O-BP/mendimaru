@@ -156,6 +156,7 @@ mod tests {
     fn config_for(path: &std::path::Path) -> AppConfig {
         AppConfig {
             language_preference: "system".into(),
+            winboat_setup_pending: false,
             winboat_executable: "winboat".into(),
             compose_file: "compose.yml".into(),
             container_runtime: "docker".into(),

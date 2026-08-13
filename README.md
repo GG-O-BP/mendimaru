@@ -10,6 +10,20 @@ WinBoat를 통해 Linux에서 Mendix Studio Pro를 설치하고, 버전을 선�
 
 대시보드, VM 자원 정보, 고급 다운로드 URL, 수동 빌드 번호, 강제 재다운로드 옵션은 제공하지 않습니다.
 
+## WinBoat 초기 설정
+
+WinBoat가 설치되어 있지만 아직 Windows VM이 구성되지 않은 경우, Mendimaru의 **WinBoat 설정 시작** 버튼이 공식 WinBoat 설정 마법사를 엽니다. Windows 계정, VM 자원, Windows 이미지와 Guest Server 설치는 WinBoat가 담당합니다.
+
+Mendimaru는 마법사가 완료될 때까지 상태를 확인한 뒤 다음 작업을 자동으로 마무리합니다.
+
+- AUR `winboat-bin`의 `/opt/winboat/winboat`를 포함한 실행 파일 탐지
+- `~/.winboat/docker-compose.yml` 또는 `podman-compose.yml` 탐지
+- 실행 중인 컨테이너에서 Guest API와 RDP의 실제 동적 호스트 포트 탐지
+- 설정한 Linux 워크스페이스를 Compose의 `/shared`에 적용
+- Compose 원본을 `*.mendimaru.bak`으로 백업하고, 가상 디스크를 유지한 채 컨테이너 한 번 재생성
+
+초기 설정을 취소하거나 창을 닫은 경우 **설정 계속**을 누르면 공식 마법사를 다시 열 수 있습니다. Mendimaru는 Windows 사용자명이나 암호를 별도 설정에 복사하지 않습니다.
+
 ## 다국어 지원
 
 영어(`en-US`), 한국어(`ko-KR`), 일본어(`ja-JP`)를 지원합니다. 기본값은 시스템 언어이며, 헤더의 언어 선택 메뉴에서 바꾸면 앱 설정에 저장되어 다음 실행에도 유지됩니다. 지원하지 않는 시스템 언어는 영어로 대체됩니다.

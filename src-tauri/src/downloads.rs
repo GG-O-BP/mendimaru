@@ -1,7 +1,7 @@
 use crate::marketplace;
 use crate::models::{AppConfig, DownloadProgress, InstallResult};
 use crate::projects::linux_path_to_windows_share;
-use crate::winboat::{install_studio, validate_version};
+use crate::winboat::{install_studio, validate_version, StudioInstallProgress};
 use futures_util::StreamExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,10 +11,16 @@ use tokio::io::AsyncWriteExt;
 
 const DOWNLOAD_EVENT: &str = "studio-download-progress";
 const PREPARING_PROGRESS: f64 = 3.0;
-const CHECKING_PROGRESS: f64 = 8.0;
-const DOWNLOAD_PROGRESS_START: f64 = 12.0;
-const DOWNLOAD_PROGRESS_END: f64 = 72.0;
-const INSTALL_PROGRESS_START: f64 = 76.0;
+const CHECKING_PROGRESS: f64 = 7.0;
+const DOWNLOAD_PROGRESS_START: f64 = 10.0;
+const DOWNLOAD_PROGRESS_END: f64 = 58.0;
+const STAGING_PROGRESS_START: f64 = 60.0;
+const STAGING_PROGRESS_END: f64 = 68.0;
+const INSTALL_PROGRESS_START: f64 = STAGING_PROGRESS_END;
+const INSTALL_PROGRESS_END: f64 = 96.0;
+const FINALIZING_PROGRESS: f64 = 97.0;
+const VERIFY_PROGRESS_START: f64 = FINALIZING_PROGRESS;
+const VERIFY_PROGRESS_END: f64 = 99.0;
 
 #[derive(Default)]
 pub struct DownloadManager {
@@ -82,6 +88,7 @@ pub async fn download_and_launch(
         0,
         None,
         Some(PREPARING_PROGRESS),
+        false,
         &crate::tr!("progress-preparing"),
     );
     let download_url = marketplace::installer_url(&version).await?;
@@ -92,6 +99,7 @@ pub async fn download_and_launch(
         0,
         None,
         Some(CHECKING_PROGRESS),
+        false,
         &crate::tr!("progress-checking"),
     );
     let installer_directory = Path::new(&config.shared_directory).join(".mendimaru/installers");
@@ -114,6 +122,7 @@ pub async fn download_and_launch(
             0,
             None,
             Some(DOWNLOAD_PROGRESS_END),
+            false,
             &crate::tr!("progress-ready"),
         );
         false
@@ -137,13 +146,17 @@ pub async fn download_and_launch(
     emit_progress(
         app,
         &version,
-        "installing",
+        "staging",
         0,
         None,
-        Some(INSTALL_PROGRESS_START),
-        &crate::tr!("progress-installing"),
+        Some(STAGING_PROGRESS_START),
+        false,
+        &crate::tr!("progress-staging"),
     );
-    let executable_path = install_studio(config, &version, &windows_installer_path).await?;
+    let executable_path = install_studio(config, &version, &windows_installer_path, |progress| {
+        emit_install_progress(app, &version, progress)
+    })
+    .await?;
     emit_progress(
         app,
         &version,
@@ -151,6 +164,7 @@ pub async fn download_and_launch(
         0,
         None,
         Some(100.0),
+        false,
         &crate::tr!("progress-installed"),
     );
 
@@ -184,6 +198,7 @@ async fn download_file(
         0,
         None,
         Some(DOWNLOAD_PROGRESS_START),
+        false,
         &crate::tr!("progress-connecting"),
     );
     let client = reqwest::Client::builder()
@@ -219,6 +234,7 @@ async fn download_file(
                 downloaded,
                 total,
                 overall_download_percentage(downloaded, total),
+                false,
                 &crate::tr!("progress-cancelled"),
             );
             return Err(InstallError::Cancelled(crate::tr!(
@@ -237,6 +253,7 @@ async fn download_file(
             downloaded,
             total,
             overall_download_percentage(downloaded, total),
+            false,
             &crate::tr!("progress-downloading"),
         );
     }
@@ -254,6 +271,7 @@ async fn download_file(
         downloaded,
         total,
         Some(DOWNLOAD_PROGRESS_END),
+        false,
         &crate::tr!("progress-downloaded"),
     );
     Ok(())
@@ -266,6 +284,7 @@ fn emit_progress(
     downloaded_bytes: u64,
     total_bytes: Option<u64>,
     percentage: Option<f64>,
+    estimated: bool,
     message: &str,
 ) {
     let _ = app.emit(
@@ -276,10 +295,31 @@ fn emit_progress(
             downloaded_bytes,
             total_bytes,
             percentage,
+            estimated,
             message: message.to_string(),
             downloaded_bytes_label: crate::i18n::format_bytes(downloaded_bytes),
             total_bytes_label: total_bytes.map(crate::i18n::format_bytes),
         },
+    );
+}
+
+fn emit_install_progress(app: &AppHandle, version: &str, progress: StudioInstallProgress) {
+    let message = match progress.state.as_str() {
+        "staging" => crate::tr!("progress-staging"),
+        "installing" => crate::tr!("progress-installing"),
+        "finalizing" => crate::tr!("progress-finalizing"),
+        "verifying" => crate::tr!("progress-verifying"),
+        _ => return,
+    };
+    emit_progress(
+        app,
+        version,
+        &progress.state,
+        0,
+        None,
+        overall_install_percentage(&progress),
+        progress.estimated,
+        &message,
     );
 }
 
@@ -288,6 +328,23 @@ fn overall_download_percentage(downloaded: u64, total: Option<u64>) -> Option<f6
         let downloaded_ratio = (downloaded as f64 / value as f64).clamp(0.0, 1.0);
         DOWNLOAD_PROGRESS_START
             + downloaded_ratio * (DOWNLOAD_PROGRESS_END - DOWNLOAD_PROGRESS_START)
+    })
+}
+
+fn overall_install_percentage(progress: &StudioInstallProgress) -> Option<f64> {
+    let phase = progress.percentage?.clamp(0.0, 100.0) / 100.0;
+    Some(match progress.state.as_str() {
+        "staging" => {
+            STAGING_PROGRESS_START + phase * (STAGING_PROGRESS_END - STAGING_PROGRESS_START)
+        }
+        "installing" => {
+            INSTALL_PROGRESS_START + phase * (INSTALL_PROGRESS_END - INSTALL_PROGRESS_START)
+        }
+        "finalizing" => FINALIZING_PROGRESS,
+        "verifying" => {
+            VERIFY_PROGRESS_START + phase * (VERIFY_PROGRESS_END - VERIFY_PROGRESS_START)
+        }
+        _ => return None,
     })
 }
 
@@ -308,7 +365,12 @@ fn safe_version_filename(version: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{overall_download_percentage, DOWNLOAD_PROGRESS_END, DOWNLOAD_PROGRESS_START};
+    use super::{
+        overall_download_percentage, overall_install_percentage, DOWNLOAD_PROGRESS_END,
+        DOWNLOAD_PROGRESS_START, FINALIZING_PROGRESS, INSTALL_PROGRESS_END, STAGING_PROGRESS_END,
+        STAGING_PROGRESS_START, VERIFY_PROGRESS_END,
+    };
+    use crate::winboat::StudioInstallProgress;
 
     #[test]
     fn download_percentage_is_mapped_to_the_overall_install_range() {
@@ -316,7 +378,7 @@ mod tests {
             overall_download_percentage(0, Some(100)),
             Some(DOWNLOAD_PROGRESS_START)
         );
-        assert_eq!(overall_download_percentage(50, Some(100)), Some(42.0));
+        assert_eq!(overall_download_percentage(50, Some(100)), Some(34.0));
         assert_eq!(
             overall_download_percentage(100, Some(100)),
             Some(DOWNLOAD_PROGRESS_END)
@@ -331,5 +393,36 @@ mod tests {
             overall_download_percentage(120, Some(100)),
             Some(DOWNLOAD_PROGRESS_END)
         );
+    }
+
+    #[test]
+    fn windows_phases_fill_the_reserved_install_ranges_without_reaching_completion() {
+        let progress = |state: &str, percentage| StudioInstallProgress {
+            state: state.to_string(),
+            percentage: Some(percentage),
+            estimated: false,
+        };
+
+        assert_eq!(
+            overall_install_percentage(&progress("staging", 0.0)),
+            Some(STAGING_PROGRESS_START)
+        );
+        assert_eq!(
+            overall_install_percentage(&progress("staging", 100.0)),
+            Some(STAGING_PROGRESS_END)
+        );
+        assert_eq!(
+            overall_install_percentage(&progress("installing", 100.0)),
+            Some(INSTALL_PROGRESS_END)
+        );
+        assert_eq!(
+            overall_install_percentage(&progress("finalizing", 100.0)),
+            Some(FINALIZING_PROGRESS)
+        );
+        assert_eq!(
+            overall_install_percentage(&progress("verifying", 100.0)),
+            Some(VERIFY_PROGRESS_END)
+        );
+        assert!(VERIFY_PROGRESS_END < 100.0);
     }
 }

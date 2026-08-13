@@ -62,11 +62,15 @@ fn format_localized_duration(total_seconds: u64) -> String {
 
 #[tauri::command]
 fn redetect_config(app: AppHandle) -> Result<AppConfig, String> {
-    let language_preference = config::load_config(&app)
-        .map(|config| config.language_preference)
-        .unwrap_or_else(|_| "system".to_string());
+    let current = config::load_config(&app).ok();
     let mut detected = config::detect_config()?;
-    detected.language_preference = language_preference;
+    detected.language_preference = current
+        .as_ref()
+        .map(|config| config.language_preference.clone())
+        .unwrap_or_else(|| "system".to_string());
+    detected.winboat_setup_pending = current
+        .as_ref()
+        .is_some_and(|config| config.winboat_setup_pending);
     config::persist_config(&app, &detected)?;
     Ok(detected)
 }
@@ -122,6 +126,45 @@ async fn start_winboat_windows(app: AppHandle) -> Result<String, String> {
 fn open_winboat(app: AppHandle) -> Result<(), String> {
     let config = config::load_config(&app)?;
     winboat::open_winboat(&config)
+}
+
+#[tauri::command]
+fn begin_winboat_setup(app: AppHandle) -> Result<(), String> {
+    let mut config = config::load_config(&app)?;
+    let was_pending = config.winboat_setup_pending;
+    config.winboat_setup_pending = true;
+    config::persist_config(&app, &config)?;
+    if let Err(error) = winboat::open_winboat(&config) {
+        config.winboat_setup_pending = was_pending;
+        let _ = config::persist_config(&app, &config);
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn complete_winboat_setup(app: AppHandle) -> Result<SettingsSaveResult, String> {
+    let preferred = config::load_config(&app)?;
+    if !preferred.winboat_setup_pending {
+        return Err(crate::tr!("error-winboat-setup-not-pending"));
+    }
+    if !winboat::guest_is_online(&preferred).await {
+        return Err(crate::tr!("error-winboat-setup-not-ready"));
+    }
+
+    let mut detected = config::detect_config()?;
+    detected.language_preference = preferred.language_preference;
+    detected.winboat_setup_pending = true;
+    detected.shared_directory = preferred.shared_directory;
+    detected.windows_shared_directory = preferred.windows_shared_directory;
+    detected.mendix_install_root = preferred.mendix_install_root;
+    detected.mendix_data_root = preferred.mendix_data_root;
+    detected.startup_timeout_seconds = preferred.startup_timeout_seconds;
+
+    let mut result = config::save_settings(&app, detected, true).await?;
+    result.config.winboat_setup_pending = false;
+    config::persist_config(&app, &result.config)?;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -198,6 +241,8 @@ pub fn run() {
             get_projects,
             start_winboat_windows,
             open_winboat,
+            begin_winboat_setup,
+            complete_winboat_setup,
             launch_studio_pro,
             uninstall_studio_pro,
             install_studio_pro,

@@ -2,6 +2,7 @@ export type ViewKey = "studio" | "projects" | "settings";
 
 export interface AppConfig {
   languagePreference: string;
+  winboatSetupPending: boolean;
   winboatExecutable: string;
   composeFile: string;
   containerRuntime: "docker" | "podman" | string;
@@ -19,6 +20,8 @@ export interface AppConfig {
 
 export interface EnvironmentStatus {
   winboatAvailable: boolean;
+  winboatInitialized: boolean;
+  setupPending: boolean;
   composeAvailable: boolean;
   runtimeAvailable: boolean;
   freerdpAvailable: boolean;
@@ -71,6 +74,7 @@ export interface DownloadProgress {
   downloadedBytes: number;
   totalBytes?: number;
   percentage?: number;
+  estimated?: boolean;
   message: string;
   downloadedBytesLabel: string;
   totalBytesLabel?: string;

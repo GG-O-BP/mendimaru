@@ -3,18 +3,23 @@ use serde_yaml::Value;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use tauri::{AppHandle, Manager};
 
 const CONFIG_FILE_NAME: &str = "config.json";
-const DEFAULT_API_PORT: u16 = 47271;
-const DEFAULT_RDP_PORT: u16 = 47273;
+const DEFAULT_API_PORT: u16 = 47280;
+const DEFAULT_RDP_PORT: u16 = 47300;
+const WINBOAT_API_GUEST_PORT: u16 = 7148;
+const WINBOAT_RDP_GUEST_PORT: u16 = 3389;
 
 pub fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
     let path = config_path(app)?;
     if path.is_file() {
         let content = fs::read_to_string(&path)
             .map_err(|error| crate::tr!("error-config-read", error = error))?;
-        if let Ok(config) = serde_json::from_str::<AppConfig>(&content) {
+        if let Ok(mut config) = serde_json::from_str::<AppConfig>(&content) {
+            refresh_detected_paths(&mut config);
+            apply_runtime_port_detection(&mut config);
             return Ok(config);
         }
     }
@@ -24,16 +29,8 @@ pub fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
 
 pub fn detect_config() -> Result<AppConfig, String> {
     let home = home_directory()?;
-    let data_home = env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home.join(".local/share"));
-
-    let compose_candidates = [
-        data_home.join("winboat-app/docker-compose.yml"),
-        data_home.join("winboat-app/podman-compose.yml"),
-        home.join(".winboat/docker-compose.yml"),
-        home.join(".config/winboat/docker-compose.yml"),
-    ];
+    let data_home = data_home_directory(&home);
+    let compose_candidates = compose_candidates(&home, &data_home);
     let compose_file = compose_candidates
         .iter()
         .find(|candidate| candidate.is_file())
@@ -42,21 +39,14 @@ pub fn detect_config() -> Result<AppConfig, String> {
 
     let mut config = AppConfig {
         language_preference: "system".to_string(),
-        winboat_executable: find_binary(&["winboat", "WinBoat"]).unwrap_or_else(|| {
+        winboat_setup_pending: false,
+        winboat_executable: discover_winboat_executable_with_home(&home).unwrap_or_else(|| {
             home.join(".local/bin/winboat")
                 .to_string_lossy()
                 .to_string()
         }),
         compose_file: compose_file.to_string_lossy().to_string(),
-        container_runtime: if compose_file
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.contains("podman"))
-        {
-            "podman".to_string()
-        } else {
-            "docker".to_string()
-        },
+        container_runtime: runtime_for_compose(&compose_file).to_string(),
         container_name: "WinBoat".to_string(),
         api_url: format!("http://127.0.0.1:{DEFAULT_API_PORT}"),
         rdp_host: "127.0.0.1".to_string(),
@@ -75,6 +65,7 @@ pub fn detect_config() -> Result<AppConfig, String> {
             apply_compose_detection(&mut config, &compose);
         }
     }
+    apply_runtime_port_detection(&mut config);
 
     Ok(config)
 }
@@ -87,8 +78,11 @@ pub async fn save_settings(
     normalize_and_validate(&mut config)?;
 
     let compose_path = PathBuf::from(&config.compose_file);
-    let (mount_changed, backup_path) =
-        update_shared_mount(&compose_path, &config.shared_directory)?;
+    let (mount_changed, backup_path) = if compose_path.is_file() {
+        update_shared_mount(&compose_path, &config.shared_directory)?
+    } else {
+        (false, None)
+    };
     persist_config(app, &config)?;
 
     let container_recreated = if mount_changed && apply_mount {
@@ -124,13 +118,58 @@ pub fn compose_shared_directory(compose_file: &str) -> Option<String> {
         volume
             .as_str()
             .and_then(shared_mount_source)
-            .map(ToString::to_string)
+            .map(expand_compose_source)
     })
 }
 
 pub fn path_exists_or_binary(path: &str) -> bool {
     let expanded = expand_home(path);
-    Path::new(&expanded).exists() || find_binary(&[path]).is_some()
+    Path::new(&expanded).is_file() || find_binary(&[path]).is_some()
+}
+
+pub fn resolved_winboat_executable(config: &AppConfig) -> Option<String> {
+    let configured = expand_home(config.winboat_executable.trim());
+    if Path::new(&configured).is_file() {
+        return Some(configured);
+    }
+    discover_winboat_executable()
+}
+
+pub fn resolved_api_url(config: &AppConfig) -> String {
+    runtime_host_port(config, WINBOAT_API_GUEST_PORT, "tcp")
+        .map(|port| format!("http://127.0.0.1:{port}"))
+        .unwrap_or_else(|| config.api_url.clone())
+}
+
+pub fn resolved_rdp_port(config: &AppConfig) -> u16 {
+    runtime_host_port(config, WINBOAT_RDP_GUEST_PORT, "tcp").unwrap_or(config.rdp_port)
+}
+
+pub fn runtime_host_port(config: &AppConfig, guest_port: u16, protocol: &str) -> Option<u16> {
+    let private_port = format!("{guest_port}/{protocol}");
+    let output = Command::new(&config.container_runtime)
+        .arg("port")
+        .arg(&config.container_name)
+        .arg(&private_port)
+        .output()
+        .ok()?;
+    if output.status.success() {
+        if let Some(port) = parse_runtime_port_output(&String::from_utf8_lossy(&output.stdout)) {
+            return Some(port);
+        }
+    }
+
+    let inspect = Command::new(&config.container_runtime)
+        .arg("inspect")
+        .arg("--format")
+        .arg("{{json .NetworkSettings.Ports}}")
+        .arg(&config.container_name)
+        .output()
+        .ok()?;
+    if !inspect.status.success() {
+        return None;
+    }
+    inspect_host_port(&String::from_utf8_lossy(&inspect.stdout), &private_port)
 }
 
 pub fn find_binary(names: &[&str]) -> Option<String> {
@@ -148,6 +187,83 @@ pub fn find_binary(names: &[&str]) -> Option<String> {
         }
     }
     None
+}
+
+fn discover_winboat_executable() -> Option<String> {
+    let home = home_directory().ok()?;
+    discover_winboat_executable_with_home(&home)
+}
+
+fn discover_winboat_executable_with_home(home: &Path) -> Option<String> {
+    find_binary(&["winboat", "WinBoat"]).or_else(|| {
+        [
+            PathBuf::from("/opt/winboat/winboat"),
+            PathBuf::from("/usr/local/bin/winboat"),
+            PathBuf::from("/usr/bin/winboat"),
+            home.join(".local/bin/winboat"),
+        ]
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .map(|candidate| candidate.to_string_lossy().to_string())
+    })
+}
+
+fn data_home_directory(home: &Path) -> PathBuf {
+    env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".local/share"))
+}
+
+fn compose_candidates(home: &Path, data_home: &Path) -> Vec<PathBuf> {
+    vec![
+        home.join(".winboat/docker-compose.yml"),
+        home.join(".winboat/podman-compose.yml"),
+        data_home.join("winboat-app/docker-compose.yml"),
+        data_home.join("winboat-app/podman-compose.yml"),
+        home.join(".config/winboat/docker-compose.yml"),
+        home.join(".config/winboat/podman-compose.yml"),
+    ]
+}
+
+fn refresh_detected_paths(config: &mut AppConfig) {
+    let Ok(home) = home_directory() else {
+        return;
+    };
+    if !Path::new(&expand_home(&config.winboat_executable)).is_file() {
+        if let Some(executable) = discover_winboat_executable_with_home(&home) {
+            config.winboat_executable = executable;
+        }
+    }
+
+    if Path::new(&config.compose_file).is_file() {
+        return;
+    }
+    let data_home = data_home_directory(&home);
+    let Some(compose_file) = compose_candidates(&home, &data_home)
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+    else {
+        return;
+    };
+    config.compose_file = compose_file.to_string_lossy().to_string();
+    config.container_runtime = runtime_for_compose(&compose_file).to_string();
+    if let Ok(compose) = read_compose(&compose_file) {
+        let preferred_shared_directory = config.shared_directory.clone();
+        apply_compose_detection(config, &compose);
+        config.shared_directory = preferred_shared_directory;
+    }
+}
+
+fn runtime_for_compose(compose_file: &Path) -> &'static str {
+    if compose_file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.contains("podman"))
+    {
+        "podman"
+    } else {
+        "docker"
+    }
 }
 
 pub fn expand_home(value: &str) -> String {
@@ -213,16 +329,11 @@ fn normalize_and_validate(config: &mut AppConfig) -> Result<(), String> {
         .to_string_lossy()
         .to_string();
 
-    if !Path::new(&config.compose_file).is_file() {
-        return Err(crate::tr!(
-            "error-compose-file-not-found",
-            path = &config.compose_file
-        ));
-    }
     if !matches!(config.container_runtime.as_str(), "docker" | "podman") {
         return Err(crate::tr!("error-container-runtime-invalid"));
     }
-    if config.container_name.is_empty()
+    if config.compose_file.is_empty()
+        || config.container_name.is_empty()
         || config.api_url.is_empty()
         || config.rdp_host.is_empty()
         || config.windows_shared_directory.is_empty()
@@ -268,7 +379,7 @@ fn apply_compose_detection(config: &mut AppConfig, compose: &Value) {
                 .and_then(shared_mount_source)
                 .map(ToString::to_string)
         }) {
-            config.shared_directory = expand_home(&shared.replace("${HOME}", &home_string()));
+            config.shared_directory = expand_compose_source(&shared);
         }
     }
 
@@ -279,6 +390,15 @@ fn apply_compose_detection(config: &mut AppConfig, compose: &Value) {
         if let Some(port) = host_port_for_guest(ports, 3389) {
             config.rdp_port = port;
         }
+    }
+}
+
+fn apply_runtime_port_detection(config: &mut AppConfig) {
+    if let Some(port) = runtime_host_port(config, WINBOAT_API_GUEST_PORT, "tcp") {
+        config.api_url = format!("http://127.0.0.1:{port}");
+    }
+    if let Some(port) = runtime_host_port(config, WINBOAT_RDP_GUEST_PORT, "tcp") {
+        config.rdp_port = port;
     }
 }
 
@@ -300,11 +420,31 @@ fn host_port_for_guest(ports: &[Value], guest_port: u16) -> Option<u16> {
         if guest != guest_port {
             return None;
         }
-        parts
-            .get(parts.len().saturating_sub(2))?
-            .parse::<u16>()
-            .ok()
+        let host = parts.get(parts.len().saturating_sub(2))?;
+        host.split('-').next()?.parse::<u16>().ok()
     })
+}
+
+fn parse_runtime_port_output(output: &str) -> Option<u16> {
+    output.lines().find_map(|line| {
+        line.trim()
+            .rsplit_once(':')
+            .and_then(|(_, port)| port.trim().parse::<u16>().ok())
+    })
+}
+
+fn inspect_host_port(output: &str, private_port: &str) -> Option<u16> {
+    let ports = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
+    ports
+        .get(private_port)?
+        .as_array()?
+        .iter()
+        .find_map(|binding| binding.get("HostPort")?.as_str()?.parse::<u16>().ok())
+}
+
+fn expand_compose_source(source: &str) -> String {
+    let home = home_string();
+    expand_home(&source.replace("${HOME}", &home).replace("$HOME", &home))
 }
 
 fn shared_mount_source(volume: &str) -> Option<&str> {
@@ -334,7 +474,7 @@ fn update_shared_mount(
             })
         });
 
-    if current.as_deref() == Some(shared_directory) {
+    if current.as_deref().map(expand_compose_source).as_deref() == Some(shared_directory) {
         return Ok((false, None));
     }
 
@@ -392,7 +532,10 @@ fn service_value_mut(compose: &mut Value) -> Option<&mut Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{host_port_for_guest, shared_mount_source, update_shared_mount};
+    use super::{
+        home_string, host_port_for_guest, inspect_host_port, parse_runtime_port_output,
+        shared_mount_source, update_shared_mount,
+    };
     use serde_yaml::Value;
     use std::fs;
 
@@ -419,6 +562,30 @@ mod tests {
     }
 
     #[test]
+    fn extracts_winboat_09_port_range_fallbacks() {
+        let ports: Vec<Value> = serde_yaml::from_str(
+            "- 127.0.0.1:47280-47289:7148\n- 127.0.0.1:47300-47309:3389/tcp\n- 127.0.0.1::8006\n",
+        )
+        .expect("ports yaml");
+        assert_eq!(host_port_for_guest(&ports, 7148), Some(47280));
+        assert_eq!(host_port_for_guest(&ports, 3389), Some(47300));
+        assert_eq!(host_port_for_guest(&ports, 8006), None);
+    }
+
+    #[test]
+    fn parses_runtime_ports_from_docker_and_podman_output() {
+        assert_eq!(parse_runtime_port_output("127.0.0.1:47283\n"), Some(47283));
+        assert_eq!(parse_runtime_port_output("[::1]:47304\n"), Some(47304));
+        assert_eq!(
+            inspect_host_port(
+                r#"{"7148/tcp":[{"HostIp":"127.0.0.1","HostPort":"47284"}]}"#,
+                "7148/tcp"
+            ),
+            Some(47284)
+        );
+    }
+
+    #[test]
     fn updates_only_shared_volume_and_creates_backup() {
         let temporary = tempfile::tempdir().expect("temp dir");
         let compose = temporary.path().join("docker-compose.yml");
@@ -435,5 +602,21 @@ mod tests {
         let updated = fs::read_to_string(compose).expect("read compose");
         assert!(updated.contains("/new/workspace:/shared"));
         assert!(updated.contains("data:/storage"));
+    }
+
+    #[test]
+    fn treats_home_variable_mount_as_the_same_directory() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("docker-compose.yml");
+        fs::write(
+            &compose,
+            "services:\n  windows:\n    image: test\n    volumes:\n      - ${HOME}:/shared\n",
+        )
+        .expect("write compose");
+
+        let (changed, backup) =
+            update_shared_mount(&compose, &home_string()).expect("compare mount");
+        assert!(!changed);
+        assert!(backup.is_none());
     }
 }

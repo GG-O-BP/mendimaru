@@ -10,6 +10,8 @@ pub fn default_language_preference() -> String {
 pub struct AppConfig {
     #[serde(default = "default_language_preference")]
     pub language_preference: String,
+    #[serde(default)]
+    pub winboat_setup_pending: bool,
     pub winboat_executable: String,
     pub compose_file: String,
     pub container_runtime: String,
@@ -74,6 +76,8 @@ pub struct MendixProject {
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentStatus {
     pub winboat_available: bool,
+    pub winboat_initialized: bool,
+    pub setup_pending: bool,
     pub compose_available: bool,
     pub runtime_available: bool,
     pub freerdp_available: bool,
@@ -125,6 +129,7 @@ pub struct DownloadProgress {
     pub downloaded_bytes: u64,
     pub total_bytes: Option<u64>,
     pub percentage: Option<f64>,
+    pub estimated: bool,
     pub message: String,
     pub downloaded_bytes_label: String,
     pub total_bytes_label: Option<String>,
