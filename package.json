@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Manage Mendix Studio Pro on Linux through WinBoat",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
