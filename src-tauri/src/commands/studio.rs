@@ -2,8 +2,8 @@ use super::{load_command_config, CommandResult};
 use crate::contracts::StudioSessionStatus;
 use crate::downloads::{DownloadManager, InstallError};
 use crate::models::{
-    CommandError, CommandErrorCode, DownloadProgress, DownloadState, OperationKind,
-    OperationRecord, OperationStage, StudioVersion, StudioVersionCatalog,
+    CommandError, CommandErrorCode, DownloadProgress, DownloadState, DownloadableVersion,
+    OperationKind, OperationRecord, OperationStage, StudioVersion, StudioVersionCatalog,
 };
 use crate::operations::{OperationTracker, SessionActionGuard};
 use tauri::{AppHandle, State};
@@ -55,6 +55,14 @@ pub(crate) async fn fetch_downloadable_versions(
     reset: bool,
 ) -> CommandResult<StudioVersionCatalog> {
     Ok(crate::marketplace::fetch_catalog_page(&app, page, reset).await?)
+}
+
+#[tauri::command]
+pub(crate) async fn resolve_downloadable_version(
+    app: AppHandle,
+    version: String,
+) -> CommandResult<DownloadableVersion> {
+    Ok(crate::marketplace::resolve_downloadable_version(&app, &version).await?)
 }
 
 #[tauri::command]

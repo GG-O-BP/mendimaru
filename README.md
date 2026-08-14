@@ -21,6 +21,12 @@ Mendimaru is a Tauri GUI app for discovering, installing, launching, and removin
 
 Mendimaru does not provide a dashboard, VM resource information, advanced download URLs, or manual build-number entry.
 
+### Safe project launch
+
+Projects whose exact Studio Pro version is installed open directly. If that version is missing, unknown, or differs from an explicitly selected version, a launch assistant resolves the exact Marketplace release, installs it when needed, verifies that the same version was detected, and only then opens the original `.mpr`. Mendimaru never silently substitutes another installed version. A mismatched or unknown-version launch requires an explicit selection and backup acknowledgement.
+
+The selected version and unfinished launch intent survive cancellation, installation failure, and app restart so the flow can be resumed. This preference store lives in the host-only application configuration directory and identifies projects by a SHA-256 digest of their canonical path; it does not persist project paths.
+
 ### Environment diagnostics
 
 Settings checks the WinBoat executable, Compose structure, container runtime daemon, FreeRDP, shared workspace and mount, container state, Guest API, loopback RDP port, and Marketplace browser independently. A failed check offers only an explicit safe next action such as redetection, starting Windows, opening WinBoat, or focusing the relevant setting. Diagnostic reports can be copied or exported as JSON; they contain allowlisted status fields and omit configured paths, credentials, tokens, and command payloads.

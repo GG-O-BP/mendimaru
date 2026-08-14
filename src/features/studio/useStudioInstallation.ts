@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { errorCode, errorText } from "../../api/errors";
 import { tauriApi } from "../../api/tauri";
-import type { DownloadableVersion, DownloadProgress } from "../../domain/types";
+import type {
+  DownloadableVersion,
+  DownloadProgress,
+  StudioVersion,
+} from "../../domain/types";
 import { useTauriSubscription } from "../../shared/hooks/useTauriSubscription";
 import type { StudioInstallationDependencies } from "./dependencies";
 
 interface InstallationDependencies extends StudioInstallationDependencies {
-  refreshInstalled: () => Promise<void>;
+  refreshInstalled: () => Promise<StudioVersion[] | undefined>;
 }
 
 export function useStudioInstallation({
@@ -56,6 +60,73 @@ export function useStudioInstallation({
     return () => window.clearTimeout(timeout);
   }, [downloadProgress?.state, downloadProgress?.version]);
 
+  const installVersion = useCallback(
+    (
+      version: DownloadableVersion,
+      forceRedownload = false,
+      afterInstall?: (installed: StudioVersion) => Promise<void>,
+    ) =>
+      runAction(`install-${version.version}`, async () => {
+        setDownloadProgress({
+          version: version.version,
+          state: "starting",
+          downloadedBytes: 0,
+          percentage: 2,
+          estimated: true,
+          message: t("progress-starting"),
+        });
+        let installed: StudioVersion;
+        try {
+          await tauriApi.installStudioPro(version.version, forceRedownload);
+          const detected = await refreshInstalled();
+          const exact = detected?.find(
+            (candidate) => candidate.version === version.version,
+          );
+          if (!exact) {
+            throw new Error(
+              t("project-launch-install-not-detected", {
+                version: version.version,
+              }),
+            );
+          }
+          installed = exact;
+        } catch (error) {
+          const message = errorText(error, t);
+          const cancelled = errorCode(error) === "download_cancelled";
+          setDownloadProgress((current) => ({
+            version: version.version,
+            state:
+              cancelled || current?.state === "cancelled"
+                ? "cancelled"
+                : "failed",
+            downloadedBytes:
+              current?.version === version.version
+                ? current.downloadedBytes
+                : 0,
+            totalBytes:
+              current?.version === version.version
+                ? current.totalBytes
+                : undefined,
+            percentage:
+              current?.version === version.version
+                ? current.percentage
+                : undefined,
+            estimated:
+              current?.version === version.version ? current.estimated : false,
+            message,
+          }));
+          if (!cancelled) throw error;
+          return;
+        }
+        notify(
+          "success",
+          t("toast-install-complete", { version: version.version }),
+        );
+        await afterInstall?.(installed);
+      }),
+    [notify, refreshInstalled, runAction, t],
+  );
+
   const askInstall = useCallback(
     (version: DownloadableVersion, forceRedownload = false) => {
       requestConfirmation({
@@ -75,56 +146,10 @@ export function useStudioInstallation({
             ? "action-force-redownload-install"
             : "action-download-install",
         ),
-        action: () =>
-          runAction(`install-${version.version}`, async () => {
-            setDownloadProgress({
-              version: version.version,
-              state: "starting",
-              downloadedBytes: 0,
-              percentage: 2,
-              estimated: true,
-              message: t("progress-starting"),
-            });
-            try {
-              await tauriApi.installStudioPro(version.version, forceRedownload);
-              notify(
-                "success",
-                t("toast-install-complete", { version: version.version }),
-              );
-              await refreshInstalled();
-            } catch (error) {
-              const message = errorText(error, t);
-              const cancelled = errorCode(error) === "download_cancelled";
-              setDownloadProgress((current) => ({
-                version: version.version,
-                state:
-                  cancelled || current?.state === "cancelled"
-                    ? "cancelled"
-                    : "failed",
-                downloadedBytes:
-                  current?.version === version.version
-                    ? current.downloadedBytes
-                    : 0,
-                totalBytes:
-                  current?.version === version.version
-                    ? current.totalBytes
-                    : undefined,
-                percentage:
-                  current?.version === version.version
-                    ? current.percentage
-                    : undefined,
-                estimated:
-                  current?.version === version.version
-                    ? current.estimated
-                    : false,
-                message,
-              }));
-              if (!cancelled) throw error;
-            }
-          }),
+        action: () => installVersion(version, forceRedownload),
       });
     },
-    [notify, refreshInstalled, requestConfirmation, runAction, t],
+    [installVersion, requestConfirmation, t],
   );
 
   const cancelDownload = useCallback(
@@ -141,6 +166,7 @@ export function useStudioInstallation({
     downloadProgress,
     isInstalling: hasBusyPrefix("install-"),
     askInstall,
+    installVersion,
     cancelDownload,
   };
 }

@@ -9,6 +9,7 @@ mod marketplace;
 pub mod models;
 mod operations;
 pub mod platform;
+mod project_launches;
 mod projects;
 mod settings;
 #[cfg_attr(target_os = "windows", allow(dead_code, unused_imports))]
@@ -47,7 +48,9 @@ pub fn run() {
             get_studio_sessions,
             get_downloadable_versions_cache,
             fetch_downloadable_versions,
+            resolve_downloadable_version,
             get_projects,
+            set_project_launch_preference,
             start_winboat_windows,
             open_winboat,
             begin_winboat_setup,

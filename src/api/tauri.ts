@@ -4,6 +4,7 @@ import type {
   AppConfig,
   BackendId,
   CapabilitySnapshot,
+  DownloadableVersion,
   DownloadProgress,
   EnvironmentStatus,
   LocalizationBundle,
@@ -32,7 +33,9 @@ const commands = {
   getStudioSessions: "get_studio_sessions",
   getDownloadableVersionsCache: "get_downloadable_versions_cache",
   fetchDownloadableVersions: "fetch_downloadable_versions",
+  resolveDownloadableVersion: "resolve_downloadable_version",
   getProjects: "get_projects",
+  setProjectLaunchPreference: "set_project_launch_preference",
   startWinBoatWindows: "start_winboat_windows",
   openWinBoat: "open_winboat",
   beginWinBoatSetup: "begin_winboat_setup",
@@ -85,7 +88,21 @@ export const tauriApi = {
       page,
       reset,
     }),
+  resolveDownloadableVersion: (version: string) =>
+    invoke<DownloadableVersion>(commands.resolveDownloadableVersion, {
+      version,
+    }),
   getProjects: () => invoke<MendixProject[]>(commands.getProjects),
+  setProjectLaunchPreference: (
+    projectMprPath: string,
+    selectedVersion: string | undefined,
+    pending: boolean,
+  ) =>
+    invoke<void>(commands.setProjectLaunchPreference, {
+      projectMprPath,
+      selectedVersion: selectedVersion ?? null,
+      pending,
+    }),
   startWinBoatWindows: () => invoke<void>(commands.startWinBoatWindows),
   openWinBoat: () => invoke<void>(commands.openWinBoat),
   beginWinBoatSetup: () => invoke<void>(commands.beginWinBoatSetup),

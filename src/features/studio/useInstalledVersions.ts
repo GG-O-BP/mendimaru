@@ -38,12 +38,15 @@ export function useInstalledVersions({
 
   const refreshInstalled = useCallback(
     async (silent = false) => {
+      let next: StudioVersion[] | undefined;
       try {
-        setInstalledVersions(await tauriApi.getInstalledVersions());
+        next = await tauriApi.getInstalledVersions();
+        setInstalledVersions(next);
       } catch (error) {
         if (!silent) onWarning(errorText(error, t));
       }
       await refreshSessions(silent);
+      return next;
     },
     [onWarning, refreshSessions, t],
   );
@@ -57,12 +60,18 @@ export function useInstalledVersions({
   }, [refreshInstalled]);
 
   const launchVersion = useCallback(
-    (version: StudioVersion, projectMprPath?: string, projectName?: string) => {
+    (
+      version: StudioVersion,
+      projectMprPath?: string,
+      projectName?: string,
+      afterLaunch?: () => Promise<void>,
+    ) => {
       if (launchLock.current) return Promise.resolve();
       launchLock.current = true;
       return runAction(`launch-${version.version}`, async () => {
         try {
           await tauriApi.launchStudioPro(version.version, projectMprPath);
+          await afterLaunch?.();
         } finally {
           await refreshSessions(true);
         }
