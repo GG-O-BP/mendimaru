@@ -1,0 +1,194 @@
+.manifest-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.manifest-table {
+  width: 100%;
+  border-spacing: 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.manifest-table th {
+  height: 37px;
+  padding: 0 13px;
+  color: #637678;
+  font-size: 9px;
+  font-weight: 800;
+  text-align: start;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: #edf0eb;
+  border-bottom: 1px solid var(--line);
+}
+
+.manifest-table th:first-child,
+.manifest-table td:first-child {
+  padding-inline-start: 21px;
+}
+
+.manifest-table td {
+  height: 62px;
+  padding: 10px 13px;
+  color: var(--muted);
+  font-size: 12px;
+  vertical-align: middle;
+  border-bottom: 1px solid #dce1dc;
+}
+
+.manifest-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.manifest-table tbody tr:hover {
+  background: #f3f8f5;
+}
+
+.manifest-table th:nth-child(1) {
+  width: 27%;
+}
+.manifest-table th:nth-child(2) {
+  width: 19%;
+}
+.manifest-table th:nth-child(3) {
+  width: 18%;
+}
+.manifest-table th:nth-child(4) {
+  width: 18%;
+}
+.manifest-table th:nth-child(5) {
+  width: 150px;
+}
+
+.version-cell,
+.project-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.version-cell > div,
+.project-name-cell > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.version-cell strong,
+.project-name-cell strong {
+  overflow: hidden;
+  color: var(--ink-strong);
+  font-size: 13px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-cell strong {
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.version-cell div span,
+.project-name-cell div span {
+  overflow: hidden;
+  color: var(--subtle);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-beacon {
+  width: 9px;
+  height: 24px;
+  background: linear-gradient(
+    to bottom,
+    var(--amber) 0 35%,
+    var(--navy) 35% 48%,
+    var(--cyan) 48%
+  );
+  border-radius: 1px;
+}
+
+.availability-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #465b5d;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.availability-state i {
+  width: 7px;
+  height: 7px;
+  background: #748689;
+  border-radius: 50%;
+}
+
+.availability-state.available {
+  color: var(--cyan-dark);
+}
+
+.availability-state.available i {
+  background: var(--cyan-dark);
+}
+
+.availability-state.installed {
+  color: var(--success);
+}
+
+.availability-state.installed i {
+  background: var(--success);
+}
+
+.manifest-action,
+.project-actions {
+  text-align: end;
+}
+
+.project-actions {
+  white-space: nowrap;
+}
+
+.project-actions .button,
+.project-actions .icon-button {
+  margin-inline-start: 5px;
+  vertical-align: middle;
+}
+
+.project-actions .icon-button {
+  display: inline-grid;
+}
+
+.empty-state {
+  display: flex;
+  min-height: 122px;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 22px;
+  color: #718385;
+  background: var(--surface);
+}
+
+.installed-grid > .empty-state {
+  grid-column: 1 / -1;
+}
+
+.empty-state div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.empty-state strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.empty-state span {
+  color: var(--muted);
+  font-size: 11px;
+}

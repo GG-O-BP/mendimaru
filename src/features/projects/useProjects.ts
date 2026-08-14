@@ -1,0 +1,53 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { errorText } from "../../api/errors";
+import { tauriApi } from "../../api/tauri";
+import type { MendixProject } from "../../domain/types";
+import type { Translate } from "../../i18n";
+
+export function useProjects(
+  t: Translate,
+  onWarning: (message: string | null) => void,
+  runAction: (key: string, action: () => Promise<void>) => Promise<void>,
+) {
+  const [projects, setProjects] = useState<MendixProject[]>([]);
+  const [search, setSearch] = useState("");
+
+  const refresh = useCallback(async () => {
+    try {
+      setProjects(await tauriApi.getProjects());
+    } catch (error) {
+      onWarning(errorText(error, t));
+    }
+  }, [onWarning, t]);
+
+  useEffect(() => {
+    const initialRefresh = window.setTimeout(() => void refresh(), 0);
+    return () => window.clearTimeout(initialRefresh);
+  }, [refresh]);
+
+  const filteredProjects = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return needle
+      ? projects.filter((project) =>
+          `${project.name} ${project.directory} ${project.version ?? ""}`
+            .toLowerCase()
+            .includes(needle),
+        )
+      : projects;
+  }, [projects, search]);
+
+  const openFolder = useCallback(
+    (path: string) =>
+      runAction(`folder-${path}`, () => tauriApi.openLinuxFolder(path)),
+    [runAction],
+  );
+
+  return {
+    projects,
+    filteredProjects,
+    search,
+    setSearch,
+    refresh,
+    openFolder,
+  };
+}

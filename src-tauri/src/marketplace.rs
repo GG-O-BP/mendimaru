@@ -1,50 +1,13 @@
-use crate::config;
-use crate::models::{DownloadableVersion, StudioVersionCatalog};
-use chromiumoxide::browser::{Browser, BrowserConfig};
-use chromiumoxide::page::Page;
-use futures_util::StreamExt;
-use regex::Regex;
-use scraper::{Html, Selector};
-use std::cmp::Ordering;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager};
-use tokio::sync::Mutex;
-use tokio::time::timeout;
+mod browser;
+mod cache;
+mod parser;
 
-const MARKETPLACE_URL: &str = "https://marketplace.mendix.com/link/studiopro";
-const ARTIFACTS_BASE_URL: &str = "https://artifacts.rnd.mendix.com/modelers";
-const CACHE_FILE_NAME: &str = "studio-version-catalog.json";
-const PROFILE_PREFIX: &str = "mendimaru-marketplace-";
-const PAGE_SIZE: u32 = 10;
-const NAVIGATION_TIMEOUT: Duration = Duration::from_secs(60);
-const ELEMENT_TIMEOUT: Duration = Duration::from_secs(30);
-const PAGE_CHANGE_TIMEOUT: Duration = Duration::from_secs(20);
-const POLL_INTERVAL: Duration = Duration::from_millis(100);
+use crate::models::StudioVersionCatalog;
+use tauri::AppHandle;
 
-const DATAGRID_SELECTOR: &str = "div.widget-datagrid-content";
-const DATAGRID_ROW_SELECTOR: &str =
-    "div.widget-datagrid-content div.widget-datagrid-grid-body div.tr[role=row] a.mx-name-actionButton_VersionName1";
-const NEXT_PAGE_SELECTOR: &str = "button[aria-label='Go to next page']";
-const PAGING_STATUS_SELECTOR: &str = "div.paging-status";
-const BUILD_NUMBER_SELECTOR: &str = "span.mx-text.pds-heading--sm.pds-mb-0";
-
-static SCRAPE_LOCK: Mutex<()> = Mutex::const_new(());
-static PROFILE_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-pub fn load_cached_catalog(app: &AppHandle) -> Result<StudioVersionCatalog, String> {
-    let path = cache_path(app)?;
-    if !path.is_file() {
-        return Ok(StudioVersionCatalog::default());
-    }
-
-    let content = fs::read_to_string(&path)
-        .map_err(|error| crate::tr!("error-version-cache-read", error = error))?;
-    serde_json::from_str(&content)
-        .map_err(|error| crate::tr!("error-version-cache-invalid", error = error))
-}
+use browser::SCRAPE_LOCK;
+pub use cache::load_cached_catalog;
+use parser::{compare_versions_desc, legacy_installer_url, major_version, v11_installer_url};
 
 pub async fn fetch_catalog_page(
     app: &AppHandle,
@@ -54,19 +17,16 @@ pub async fn fetch_catalog_page(
     let target_page = requested_page.max(1);
     let (fresh_versions, total_count) = {
         let _scrape_guard = SCRAPE_LOCK.lock().await;
-        scrape_page(target_page).await?
+        browser::scrape_page(target_page).await?
     };
-
     if fresh_versions.is_empty() {
         return Err(crate::tr!("error-marketplace-versions-empty"));
     }
-
     let mut catalog = if reset {
         StudioVersionCatalog::default()
     } else {
         load_cached_catalog(app).unwrap_or_default()
     };
-
     for fresh in fresh_versions {
         if let Some(index) = catalog
             .versions
@@ -78,7 +38,6 @@ pub async fn fetch_catalog_page(
             catalog.versions.push(fresh);
         }
     }
-
     catalog
         .versions
         .sort_by(|left, right| compare_versions_desc(&left.version, &right.version));
@@ -88,7 +47,7 @@ pub async fn fetch_catalog_page(
     }
     catalog.total_count = total_count.or(catalog.total_count);
     catalog.fetched_at = Some(chrono::Utc::now().to_rfc3339());
-    save_catalog(app, &catalog)?;
+    cache::save_catalog(app, &catalog)?;
     Ok(catalog)
 }
 
@@ -96,429 +55,22 @@ pub async fn installer_url(version: &str) -> Result<String, String> {
     if major_version(version)? >= 11 {
         return Ok(v11_installer_url(version));
     }
-
     let build_number = {
         let _scrape_guard = SCRAPE_LOCK.lock().await;
-        scrape_build_number(version).await?
+        browser::scrape_build_number(version).await?
     };
     Ok(legacy_installer_url(version, &build_number))
 }
 
-fn cache_path(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_cache_dir()
-        .map(|directory| directory.join(CACHE_FILE_NAME))
-        .map_err(|error| crate::tr!("error-app-cache-path", error = error))
-}
-
-fn save_catalog(app: &AppHandle, catalog: &StudioVersionCatalog) -> Result<(), String> {
-    let path = cache_path(app)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| crate::tr!("error-version-cache-directory-create", error = error))?;
-    }
-    let content = serde_json::to_string_pretty(catalog)
-        .map_err(|error| crate::tr!("error-version-cache-create", error = error))?;
-    let temporary_path = path.with_extension("json.tmp");
-    fs::write(&temporary_path, content)
-        .map_err(|error| crate::tr!("error-version-cache-save", error = error))?;
-    fs::rename(&temporary_path, &path)
-        .map_err(|error| crate::tr!("error-version-cache-finalize", error = error))
-}
-
-async fn scrape_page(target_page: u32) -> Result<(Vec<DownloadableVersion>, Option<u32>), String> {
-    let session = BrowserSession::new().await?;
-    let result = async {
-        let page = session.navigate(MARKETPLACE_URL).await?;
-        dismiss_privacy_modal(&page).await;
-        wait_for_selector(&page, DATAGRID_ROW_SELECTOR, ELEMENT_TIMEOUT).await?;
-        navigate_to_page(&page, target_page).await?;
-        let html = element_inner_html(&page, DATAGRID_SELECTOR).await?;
-        let versions = parse_datagrid_html(&html)?;
-        let total_count = read_total_count(&page).await;
-        Ok((versions, total_count))
-    }
-    .await;
-    session.cleanup().await;
-    result
-}
-
-async fn scrape_build_number(version: &str) -> Result<String, String> {
-    let session = BrowserSession::new().await?;
-    let result = async {
-        let page = session
-            .navigate(&format!("{MARKETPLACE_URL}/{version}"))
-            .await?;
-        dismiss_privacy_modal(&page).await;
-        let expression = Regex::new(r"Build\s+(\d+)").expect("valid build number regex");
-        let started = Instant::now();
-
-        loop {
-            if let Ok(elements) = page.find_elements(BUILD_NUMBER_SELECTOR).await {
-                for element in elements {
-                    if let Ok(Some(text)) = element.inner_text().await {
-                        if let Some(build) = expression
-                            .captures(&text)
-                            .and_then(|captures| captures.get(1))
-                            .map(|value| value.as_str().to_string())
-                        {
-                            return Ok(build);
-                        }
-                    }
-                }
-            }
-            if started.elapsed() >= ELEMENT_TIMEOUT {
-                return Err(crate::tr!("error-build-number-missing", version = version));
-            }
-            tokio::time::sleep(POLL_INTERVAL).await;
-        }
-    }
-    .await;
-    session.cleanup().await;
-    result
-}
-
-fn parse_datagrid_html(html: &str) -> Result<Vec<DownloadableVersion>, String> {
-    let document = Html::parse_fragment(html);
-    let row_selector = selector("div.widget-datagrid-grid-body div.tr[role=row]")?;
-    let cell_selector = selector("div[role=gridcell]")?;
-    let version_selector = selector("div > div > a")?;
-    let badge_selector = selector("div > div > span")?;
-    let link_selector = selector("a[href]")?;
-
-    let mut versions = Vec::new();
-    for row in document.select(&row_selector) {
-        let cells = row.select(&cell_selector).collect::<Vec<_>>();
-        if cells.len() < 3 {
-            continue;
-        }
-        let Some(version_link) = cells[0].select(&version_selector).next() else {
-            continue;
-        };
-        let version = normalized_text(version_link.text());
-        if !looks_like_version(&version) {
-            continue;
-        }
-
-        let badges = cells[0]
-            .select(&badge_selector)
-            .map(|badge| normalized_text(badge.text()).to_uppercase())
-            .collect::<Vec<_>>();
-        let release_date = non_empty(normalized_text(cells[1].text()));
-        let release_notes_url = cells[2]
-            .select(&link_selector)
-            .next()
-            .and_then(|link| link.value().attr("href"))
-            .map(ToString::to_string);
-
-        versions.push(DownloadableVersion {
-            version,
-            release_date,
-            release_notes_url,
-            is_lts: badges.iter().any(|badge| badge == "LTS"),
-            is_beta: badges.iter().any(|badge| badge == "BETA"),
-            is_mts: badges.iter().any(|badge| badge == "MTS"),
-            is_latest: badges.iter().any(|badge| badge == "LATEST"),
-        });
-    }
-    Ok(versions)
-}
-
-fn selector(value: &str) -> Result<Selector, String> {
-    Selector::parse(value).map_err(|error| crate::tr!("error-marketplace-selector", error = error))
-}
-
-fn normalized_text<'a>(parts: impl Iterator<Item = &'a str>) -> String {
-    parts
-        .collect::<Vec<_>>()
-        .join(" ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-fn non_empty(value: String) -> Option<String> {
-    (!value.is_empty()).then_some(value)
-}
-
-fn looks_like_version(value: &str) -> bool {
-    let mut parts = value.split('.');
-    parts.next().is_some_and(|part| part.parse::<u32>().is_ok())
-        && parts.next().is_some_and(|part| part.parse::<u32>().is_ok())
-}
-
-fn compare_versions_desc(left: &str, right: &str) -> Ordering {
-    let left_parts = numeric_version_parts(left);
-    let right_parts = numeric_version_parts(right);
-    let length = left_parts.len().max(right_parts.len());
-    for index in 0..length {
-        let comparison = right_parts
-            .get(index)
-            .copied()
-            .unwrap_or_default()
-            .cmp(&left_parts.get(index).copied().unwrap_or_default());
-        if comparison != Ordering::Equal {
-            return comparison;
-        }
-    }
-    right.cmp(left)
-}
-
-fn numeric_version_parts(version: &str) -> Vec<u32> {
-    version
-        .split('.')
-        .map(|part| {
-            part.chars()
-                .take_while(char::is_ascii_digit)
-                .collect::<String>()
-                .parse::<u32>()
-                .unwrap_or_default()
-        })
-        .collect()
-}
-
-fn major_version(version: &str) -> Result<u32, String> {
-    version
-        .split('.')
-        .next()
-        .and_then(|major| major.parse::<u32>().ok())
-        .ok_or_else(|| crate::tr!("error-version-inspect", version = version))
-}
-
-fn v11_installer_url(version: &str) -> String {
-    format!("{ARTIFACTS_BASE_URL}/Mendix-{version}-Setup.exe")
-}
-
-fn legacy_installer_url(version: &str, build_number: &str) -> String {
-    format!("{ARTIFACTS_BASE_URL}/Mendix-{version}.{build_number}-Setup.exe")
-}
-
-async fn navigate_to_page(page: &Page, target_page: u32) -> Result<(), String> {
-    if target_page <= 1 {
-        return Ok(());
-    }
-
-    for current_page in 1..target_page {
-        let expected_start = current_page * PAGE_SIZE + 1;
-        click_next_page(page).await?;
-        wait_for_page_start(page, expected_start).await?;
-    }
-    Ok(())
-}
-
-async fn click_next_page(page: &Page) -> Result<(), String> {
-    let started = Instant::now();
-    loop {
-        if let Ok(button) = page.find_element(NEXT_PAGE_SELECTOR).await {
-            if button.attribute("disabled").await.ok().flatten().is_none() {
-                page.evaluate(
-                    "document.querySelector(\"button[aria-label='Go to next page']:not([disabled])\")?.click()",
-                )
-                    .await
-                    .map_err(|error| crate::tr!("error-marketplace-open", error = error))?;
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                return Ok(());
-            }
-        }
-        if started.elapsed() >= PAGE_CHANGE_TIMEOUT {
-            return Err(crate::tr!("error-marketplace-next-page"));
-        }
-        tokio::time::sleep(POLL_INTERVAL).await;
-    }
-}
-
-async fn wait_for_page_start(page: &Page, expected_start: u32) -> Result<(), String> {
-    let status_pattern =
-        Regex::new(r"(\d+)\s+(?:to|-)\s+(\d+)\s+of\s+(\d+)").expect("valid paging status regex");
-    let started = Instant::now();
-    let mut last_status = String::new();
-    loop {
-        if let Ok(status) = page.find_element(PAGING_STATUS_SELECTOR).await {
-            if let Ok(Some(text)) = status.inner_text().await {
-                last_status = text.trim().to_string();
-                let current_start = status_pattern
-                    .captures(&last_status)
-                    .and_then(|captures| captures.get(1))
-                    .and_then(|value| value.as_str().parse::<u32>().ok());
-                if current_start == Some(expected_start) {
-                    tokio::time::sleep(Duration::from_millis(350)).await;
-                    return Ok(());
-                }
-            }
-        }
-        if started.elapsed() >= PAGE_CHANGE_TIMEOUT {
-            return Err(crate::tr!(
-                "error-marketplace-page-position",
-                position = crate::i18n::format_number(u64::from(expected_start)),
-                status = &last_status
-            ));
-        }
-        tokio::time::sleep(POLL_INTERVAL).await;
-    }
-}
-
-async fn read_total_count(page: &Page) -> Option<u32> {
-    let status = page.find_element(PAGING_STATUS_SELECTOR).await.ok()?;
-    let text = status.inner_text().await.ok().flatten()?;
-    Regex::new(r"of\s+(\d+)")
-        .ok()?
-        .captures(&text)?
-        .get(1)?
-        .as_str()
-        .parse::<u32>()
-        .ok()
-}
-
-async fn wait_for_selector(
-    page: &Page,
-    value: &str,
-    wait_duration: Duration,
-) -> Result<(), String> {
-    let started = Instant::now();
-    loop {
-        if page
-            .find_elements(value)
-            .await
-            .is_ok_and(|elements| !elements.is_empty())
-        {
-            return Ok(());
-        }
-        if started.elapsed() >= wait_duration {
-            return Err(crate::tr!(
-                "error-marketplace-response-timeout",
-                selector = value
-            ));
-        }
-        tokio::time::sleep(POLL_INTERVAL).await;
-    }
-}
-
-async fn element_inner_html(page: &Page, value: &str) -> Result<String, String> {
-    let element = page
-        .find_element(value)
-        .await
-        .map_err(|error| crate::tr!("error-version-list-find", error = error))?;
-    element
-        .inner_html()
-        .await
-        .map_err(|error| crate::tr!("error-version-list-read", error = error))?
-        .ok_or_else(|| crate::tr!("error-version-list-empty"))
-}
-
-async fn dismiss_privacy_modal(page: &Page) {
-    for selector in [
-        "[data-testid='uc-deny-all-button']",
-        "[data-testid='uc-reject-all-button']",
-        "button[class*='reject']",
-        "button[class*='deny']",
-    ] {
-        if let Ok(button) = page.find_element(selector).await {
-            let _ = button.click().await;
-            break;
-        }
-    }
-}
-
-fn chrome_executable() -> Option<String> {
-    if let Ok(custom) = std::env::var("MENDIMARU_CHROME_PATH") {
-        if Path::new(&custom).is_file() {
-            return Some(custom);
-        }
-    }
-    config::find_binary(&[
-        "google-chrome-stable",
-        "google-chrome",
-        "chromium",
-        "chromium-browser",
-    ])
-}
-
-fn next_profile_directory() -> PathBuf {
-    let sequence = PROFILE_COUNTER.fetch_add(1, AtomicOrdering::Relaxed);
-    std::env::temp_dir().join(format!("{PROFILE_PREFIX}{}-{sequence}", std::process::id()))
-}
-
-struct BrowserSession {
-    browser: Browser,
-    handler_task: tokio::task::JoinHandle<()>,
-    profile_directory: PathBuf,
-}
-
-impl BrowserSession {
-    async fn new() -> Result<Self, String> {
-        let chrome_path =
-            chrome_executable().ok_or_else(|| crate::tr!("error-browser-required"))?;
-        let profile_directory = next_profile_directory();
-        let browser_config = BrowserConfig::builder()
-            .chrome_executable(&chrome_path)
-            .user_data_dir(&profile_directory)
-            .args(vec![
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--disable-extensions",
-                "--disable-background-timer-throttling",
-                "--disable-default-apps",
-                "--disable-sync",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--headless=new",
-            ])
-            .build()
-            .map_err(|error| crate::tr!("error-browser-config", error = error))?;
-        let (browser, mut handler) = Browser::launch(browser_config)
-            .await
-            .map_err(|error| crate::tr!("error-browser-start", error = error))?;
-        let handler_task = tokio::spawn(async move {
-            while let Some(event) = handler.next().await {
-                if event.is_err() {
-                    continue;
-                }
-            }
-        });
-        Ok(Self {
-            browser,
-            handler_task,
-            profile_directory,
-        })
-    }
-
-    async fn navigate(&self, url: &str) -> Result<Page, String> {
-        let page = self
-            .browser
-            .new_page("about:blank")
-            .await
-            .map_err(|error| crate::tr!("error-browser-page", error = error))?;
-        timeout(NAVIGATION_TIMEOUT, page.goto(url))
-            .await
-            .map_err(|_| crate::tr!("error-marketplace-connection-timeout"))?
-            .map_err(|error| crate::tr!("error-marketplace-open", error = error))?;
-        Ok(page)
-    }
-
-    async fn cleanup(mut self) {
-        let shutdown_timeout = Duration::from_secs(5);
-        if timeout(shutdown_timeout, self.browser.close())
-            .await
-            .is_err()
-        {
-            let _ = self.browser.kill().await;
-        }
-        let _ = timeout(shutdown_timeout, self.browser.wait()).await;
-        self.handler_task.abort();
-        for _ in 0..4 {
-            match tokio::fs::remove_dir_all(&self.profile_directory).await {
-                Ok(()) => break,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
-                Err(_) => tokio::time::sleep(Duration::from_millis(250)).await,
-            }
-        }
-    }
-}
+#[cfg(test)]
+use browser::{scrape_build_number, scrape_page};
+#[cfg(test)]
+use parser::parse_datagrid_html;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cmp::Ordering;
 
     const SAMPLE_GRID: &str = r##"
       <div class="widget-datagrid-grid-body table-content" role="rowgroup">

@@ -23,6 +23,9 @@ action-check-winboat-settings = WinBoat 경로 확인
 dismiss-notification = 알림 닫기
 generic-action-failed = 작업을 완료하지 못했습니다
 unknown-error = 알 수 없는 오류가 발생했습니다.
+config-recovery-title = 설정을 불러오지 못했습니다
+config-recovery-detail = 저장된 설정이 올바르지 않거나 읽을 수 없습니다. 자동 감지로 유효한 설정을 다시 만들 수 있습니다.
+action-recover-settings = 설정 자동 복구
 
 # 알림과 확인 창
 toast-windows-started = WinBoat Windows를 시작했습니다
@@ -135,9 +138,6 @@ progress-stage-staging = Windows 복사
 progress-stage-install = 설치
 progress-stage-verify = 확인
 action-cancel = 취소
-duration-hours-minutes-seconds = %hours%시간 %minutes%분 %seconds%초
-duration-minutes-seconds = %minutes%분 %seconds%초
-duration-seconds = %seconds%초
 
 # 디지털 저장 용량 단위
 byte-unit-b = %value% B
@@ -198,18 +198,6 @@ settings-saved = 설정이 저장되어 있습니다.
 action-save-settings = 설정 저장
 action-browse = 찾아보기
 
-# 환경 알림
-notice-winboat-missing = WinBoat 실행 파일을 찾지 못했습니다.
-notice-compose-missing = WinBoat Compose 파일을 찾지 못했습니다.
-notice-winboat-setup-required = Windows를 시작하기 전에 WinBoat 초기 설정이 필요합니다.
-notice-winboat-setup-pending = WinBoat 설정이 진행 중입니다. Windows가 준비될 때까지 공식 설정 창을 열어 두세요.
-notice-runtime-missing = { $runtime } 컨테이너 런타임을 찾지 못했습니다.
-notice-freerdp-missing = FreeRDP 3 실행 파일을 찾지 못했습니다.
-notice-shared-directory-missing = 설정된 공유 디렉터리가 존재하지 않습니다.
-notice-shared-mount-mismatch = 앱 설정과 Compose의 /shared 마운트가 다릅니다.
-notice-windows-stopped = WinBoat Windows가 실행 중이 아닙니다.
-notice-guest-starting = Windows는 실행 중이지만 Guest Server가 아직 준비되지 않았습니다.
-
 # 다운로드 백엔드
 error-download-busy = 이미 다른 Studio Pro 설치 파일을 다운로드하고 있습니다.
 error-installer-directory-create = 설치 파일 디렉터리를 만들 수 없습니다: { $error }
@@ -225,15 +213,16 @@ error-installer-finalize = 설치 파일을 확정하지 못했습니다: { $err
 
 # 설정 백엔드
 error-config-read = 설정 파일을 읽을 수 없습니다: { $error }
+error-config-parse = 설정 파일을 해석할 수 없습니다: { $error }
 error-config-directory-create = 설정 디렉터리를 만들 수 없습니다: { $error }
 error-config-serialize = 설정을 직렬화할 수 없습니다: { $error }
 error-config-save = 설정 파일을 저장할 수 없습니다: { $error }
+error-settings-rollback = { $error } 이전 설정을 완전히 복구하지 못했습니다: { $rollback }
 error-app-config-path = 앱 설정 경로를 찾을 수 없습니다: { $error }
 error-home-directory = Linux 홈 디렉터리를 찾을 수 없습니다.
 error-shared-directory-invalid = 공유 디렉터리는 현재 존재하는 Linux 절대 경로여야 합니다.
 error-shared-directory-inspect = 공유 디렉터리를 확인할 수 없습니다: { $error }
 error-compose-file-not-found = WinBoat Compose 파일을 찾을 수 없습니다: { $path }
-error-container-runtime-invalid = 컨테이너 런타임은 docker 또는 podman이어야 합니다.
 error-winboat-connection-empty = WinBoat 연결 설정에 빈 값이 있습니다.
 error-startup-timeout-range = 시작 대기 시간은 { $minimum }~{ $maximum }초 범위여야 합니다.
 error-compose-read = Compose 파일을 읽을 수 없습니다: { $error }

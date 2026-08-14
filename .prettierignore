@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+src-tauri
+public
+aur
+README*.md
+AUR_PUBLISHING.md
+package-lock.json
+LICENSE

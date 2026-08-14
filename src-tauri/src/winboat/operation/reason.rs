@@ -1,0 +1,67 @@
+use super::report::WindowsOperationState;
+
+pub(in crate::winboat) fn localize_windows_reason(reason: &str) -> String {
+    if let Some(path) = reason.strip_prefix("MENDIMARU_STUDIO_EXECUTABLE_NOT_FOUND:") {
+        return crate::tr!("error-script-studio-executable-not-found", path = path);
+    }
+    if let Some(code) = reason.strip_prefix("MENDIMARU_STUDIO_EXITED_BEFORE_WINDOW:") {
+        return crate::tr!(
+            "error-script-studio-exited-before-window",
+            code = localize_numeric_text(code)
+        );
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_INSTALLER_NOT_FOUND:") {
+        return crate::tr!("error-script-installer-not-found", path = path);
+    }
+    if let Some(code) = reason.strip_prefix("MENDIMARU_INSTALLER_EXIT_CODE:") {
+        return crate::tr!(
+            "error-script-installer-exit-code",
+            code = localize_numeric_text(code)
+        );
+    }
+    if let Some(version) = reason.strip_prefix("MENDIMARU_STUDIO_NOT_CREATED:") {
+        return crate::tr!("error-script-studio-not-created", version = version);
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_PARTIAL_CLEANUP_FAILED:") {
+        return crate::tr!("error-script-partial-cleanup-failed", path = path);
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_UNINSTALLER_NOT_FOUND:") {
+        return crate::tr!("error-script-uninstaller-not-found", path = path);
+    }
+    if let Some(code) = reason.strip_prefix("MENDIMARU_UNINSTALLER_EXIT_CODE:") {
+        return crate::tr!(
+            "error-script-uninstaller-exit-code",
+            code = localize_numeric_text(code)
+        );
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_UNINSTALL_STILL_EXISTS:") {
+        return crate::tr!("error-script-uninstall-still-exists", path = path);
+    }
+    match reason {
+        "MENDIMARU_STUDIO_WINDOW_TIMEOUT" => crate::tr!(
+            "error-script-studio-window-timeout",
+            minutes = crate::i18n::format_number(4)
+        ),
+        "MENDIMARU_ADMIN_REQUIRED" => crate::tr!("error-script-admin-required"),
+        "MENDIMARU_PROJECT_STILL_OPEN" => crate::tr!("error-script-project-still-open"),
+        "MENDIMARU_STUDIO_STILL_RUNNING" => crate::tr!("error-script-studio-still-running"),
+        _ => reason.to_string(),
+    }
+}
+
+pub(super) fn localize_operation_state(state: WindowsOperationState) -> String {
+    match state {
+        WindowsOperationState::Starting => crate::tr!("operation-state-starting"),
+        WindowsOperationState::Running => crate::tr!("operation-state-running"),
+        WindowsOperationState::Succeeded => crate::tr!("operation-state-succeeded"),
+        WindowsOperationState::Failed => crate::tr!("operation-state-failed"),
+        _ => state.as_str().to_string(),
+    }
+}
+
+fn localize_numeric_text(value: &str) -> String {
+    value
+        .parse::<u64>()
+        .map(crate::i18n::format_number)
+        .unwrap_or_else(|_| value.to_string())
+}

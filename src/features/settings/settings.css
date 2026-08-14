@@ -1,0 +1,236 @@
+.settings-page {
+  max-width: 960px;
+}
+
+.settings-route {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+
+.settings-route span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.settings-route b {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: #5a6d6f;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  background: #e6e9e4;
+  border-radius: 50%;
+}
+
+.settings-route .active b {
+  color: var(--navy-deep);
+  background: var(--cyan);
+}
+
+.settings-route .complete b {
+  color: white;
+  background: var(--success);
+}
+
+.settings-route > i {
+  width: 38px;
+  height: 1px;
+  background: var(--line-strong);
+}
+
+.settings-card {
+  padding: 23px 24px 26px;
+  overflow: visible;
+}
+
+.settings-heading {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 23px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-heading p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-heading .micro-label {
+  margin-bottom: 3px;
+}
+
+.settings-number {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  color: var(--navy-deep);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  background: var(--cyan);
+  border-radius: 50% 50% 3px 50%;
+}
+
+.settings-number.amber {
+  background: var(--amber);
+}
+
+.simple-field {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: center;
+  gap: 15px;
+  margin-top: 15px;
+}
+
+.simple-field > span {
+  color: #334d50;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.path-field > div {
+  display: flex;
+  min-height: 42px;
+  overflow: hidden;
+  background: #f6f5ef;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+}
+
+.path-field > div:focus-within {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px rgba(0, 123, 138, 0.13);
+}
+
+.path-field input {
+  min-width: 0;
+  flex: 1;
+  padding: 0 12px;
+  color: var(--ink);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.path-field button {
+  min-width: 84px;
+  padding: 0 13px;
+  color: var(--cyan-dark);
+  font-size: 11px;
+  font-weight: 720;
+  background: var(--surface);
+  border: 0;
+  border-inline-start: 1px solid var(--line-strong);
+  cursor: pointer;
+}
+
+.path-field button:hover {
+  background: var(--cyan-soft);
+}
+
+.runtime-field select {
+  width: 170px;
+  height: 42px;
+  padding: 0 10px;
+  color: var(--ink);
+  font-size: 12px;
+  background: #f6f5ef;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+}
+
+.mount-state {
+  display: inline-flex;
+  min-height: 31px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  font-size: 10px;
+  font-weight: 720;
+  border-radius: 2px;
+}
+
+.mount-state.ok {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.mount-state.pending {
+  color: var(--amber-dark);
+  background: var(--amber-soft);
+}
+
+.apply-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 20px 0 0 195px;
+  cursor: pointer;
+}
+
+.apply-row input {
+  width: 17px;
+  height: 17px;
+  margin: 1px 0 0;
+  accent-color: var(--cyan-dark);
+}
+
+.apply-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.apply-row strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.apply-row small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.settings-actions {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 11px 13px 11px 17px;
+  background: rgba(255, 253, 247, 0.96);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+}
+
+.settings-actions > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--success);
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.settings-actions.changed > span {
+  color: var(--amber-dark);
+}

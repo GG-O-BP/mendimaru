@@ -63,7 +63,7 @@ Mendimaru はウィザードが完了するまで状態を監視し、その後�
 - フロントエンドはバックエンドから渡された翻訳バンドルを表示し、翻訳された文言から状態を判定しません。ダウンロードのキャンセルなど、動作に影響する値は個別のコードと状態として渡されます。
 - テストでは、全言語の翻訳キーと変数の構成が一致すること、および React が使用する静的な翻訳キーがすべてバックエンドのバンドルに含まれることを確認します。
 
-言語を追加するには、`src-tauri/i18n.rs` の対応ロケール一覧に BCP 47 言語タグと表示名を登録し、英語ファイルと同じキーおよび変数を持つ Fluent ファイルを `src-tauri/i18n/<locale>/mendimaru.ftl` に追加します。新しい UI テキストは 3 つの Fluent ファイルと `UI_MESSAGE_KEYS` に追加してください。`cargo test` により、翻訳の欠落や変数の不一致を検出できます。
+言語を追加するには、`src-tauri/src/i18n.rs` の対応ロケール一覧に BCP 47 言語タグと表示名を登録し、英語ファイルと同じキーおよび変数を持つ Fluent ファイルを `src-tauri/i18n/<locale>/mendimaru.ftl` に追加します。新しい UI テキストは 3 つの Fluent ファイルと `src/shared/contracts/uiMessages.json` に追加してください。このレジストリは TypeScript の翻訳キー型と Rust の UI バンドルの両方で使用され、`cargo test` により翻訳の欠落や変数の不一致を検出できます。
 
 ## Studio Pro バージョンの検索とインストール
 
@@ -114,9 +114,10 @@ npm run tauri dev
 
 ```bash
 npm run check
-cd src-tauri && cargo clippy --all-targets -- -D warnings
 npm run tauri build
 ```
+
+Rust と TypeScript で共有するシリアライズ済み enum 値は `src/shared/contracts/enumValues.json` で管理します。TypeScript はこのレジストリから union 型を導出し、Rust テストが契約のずれを検出します。
 
 実際の Marketplace と連携するテストは、既定のテスト実行から除外されています。次のコマンドで実行できます。
 

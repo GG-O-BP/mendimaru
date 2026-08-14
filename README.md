@@ -63,7 +63,7 @@ The Rust backend handles translations and locale-sensitive formatting.
 - The frontend displays the translation bundle supplied by the backend and does not infer state from translated text. Values that affect behavior, such as download cancellation, are delivered as separate codes and state.
 - Tests verify that every language has the same translation keys and variables and that the backend bundle contains all static translation keys used by React.
 
-To add a language, register its BCP 47 language tag and display name in the supported-locale list in `src-tauri/i18n.rs`, then add a Fluent file with the same keys and variables as the English file at `src-tauri/i18n/<locale>/mendimaru.ftl`. Add new UI text to all three Fluent files and to `UI_MESSAGE_KEYS`. `cargo test` detects missing translations and variable mismatches.
+To add a language, register its BCP 47 language tag and display name in the supported-locale list in `src-tauri/src/i18n.rs`, then add a Fluent file with the same keys and variables as the English file at `src-tauri/i18n/<locale>/mendimaru.ftl`. Add new UI text to all three Fluent files and to `src/shared/contracts/uiMessages.json`, which supplies both the TypeScript translation-key type and the Rust UI bundle. `cargo test` detects missing translations and variable mismatches.
 
 ## Discovering and installing Studio Pro versions
 
@@ -114,9 +114,10 @@ To validate the project and build an application bundle:
 
 ```bash
 npm run check
-cd src-tauri && cargo clippy --all-targets -- -D warnings
 npm run tauri build
 ```
+
+Serialized enum values shared by Rust and TypeScript are registered in `src/shared/contracts/enumValues.json`. TypeScript derives its union types from this registry, and a Rust test rejects contract drift.
 
 Live Marketplace integration tests are excluded from the default test run. Run them with:
 

@@ -23,6 +23,9 @@ action-check-winboat-settings = Check WinBoat path
 dismiss-notification = Dismiss notification
 generic-action-failed = Could not complete the action
 unknown-error = An unknown error occurred.
+config-recovery-title = Settings could not be loaded
+config-recovery-detail = The saved settings are invalid or unreadable. You can rebuild a valid configuration with automatic detection.
+action-recover-settings = Recover settings automatically
 
 # Notifications and confirmation dialogs
 toast-windows-started = WinBoat Windows started
@@ -135,9 +138,6 @@ progress-stage-staging = Copy
 progress-stage-install = Install
 progress-stage-verify = Verify
 action-cancel = Cancel
-duration-hours-minutes-seconds = %hours% hr %minutes% min %seconds% sec
-duration-minutes-seconds = %minutes% min %seconds% sec
-duration-seconds = %seconds% sec
 
 # Digital storage units
 byte-unit-b = %value% B
@@ -198,18 +198,6 @@ settings-saved = Settings are saved.
 action-save-settings = Save settings
 action-browse = Browse
 
-# Environment notices
-notice-winboat-missing = The WinBoat executable was not found.
-notice-compose-missing = The WinBoat Compose file was not found.
-notice-winboat-setup-required = WinBoat needs to be set up before Windows can start.
-notice-winboat-setup-pending = WinBoat setup is in progress. Keep the official setup window open until Windows is ready.
-notice-runtime-missing = The { $runtime } container runtime was not found.
-notice-freerdp-missing = The FreeRDP 3 executable was not found.
-notice-shared-directory-missing = The configured shared directory does not exist.
-notice-shared-mount-mismatch = The app setting and Compose /shared mount do not match.
-notice-windows-stopped = WinBoat Windows is not running.
-notice-guest-starting = Windows is running, but Guest Server is not ready yet.
-
 # Download backend
 error-download-busy = Another Studio Pro installer is already being downloaded.
 error-installer-directory-create = Could not create the installer directory: { $error }
@@ -225,15 +213,16 @@ error-installer-finalize = Could not finalize the installer: { $error }
 
 # Configuration backend
 error-config-read = Could not read the configuration file: { $error }
+error-config-parse = Could not parse the configuration file: { $error }
 error-config-directory-create = Could not create the configuration directory: { $error }
 error-config-serialize = Could not serialize the settings: { $error }
 error-config-save = Could not save the configuration file: { $error }
+error-settings-rollback = { $error } The previous settings could not be fully restored: { $rollback }
 error-app-config-path = Could not locate the app configuration directory: { $error }
 error-home-directory = Could not locate the Linux home directory.
 error-shared-directory-invalid = The shared directory must be an existing absolute Linux path.
 error-shared-directory-inspect = Could not inspect the shared directory: { $error }
 error-compose-file-not-found = Could not find the WinBoat Compose file: { $path }
-error-container-runtime-invalid = The container runtime must be docker or podman.
 error-winboat-connection-empty = One or more WinBoat connection settings are empty.
 error-startup-timeout-range = The startup timeout must be between { $minimum } and { $maximum } seconds.
 error-compose-read = Could not read the Compose file: { $error }

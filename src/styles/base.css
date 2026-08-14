@@ -1,0 +1,86 @@
+:root {
+  font-family:
+    Inter, Pretendard, "Noto Sans KR", "Noto Sans JP", "Segoe UI", sans-serif;
+  color: #142f33;
+  background: #f2efe6;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --ink: #142f33;
+  --ink-strong: #0b2428;
+  --muted: #52676a;
+  --subtle: #607476;
+  --paper: #f6f3ea;
+  --surface: #fffdf7;
+  --surface-cool: #e8f3f2;
+  --navy: #0e3439;
+  --navy-deep: #08282d;
+  --cyan: #20bed0;
+  --cyan-dark: #087b88;
+  --cyan-soft: #dff5f5;
+  --amber: #ffc131;
+  --amber-dark: #865a00;
+  --amber-soft: #fff0bf;
+  --line: #cbd3cd;
+  --line-strong: #7c918f;
+  --success: #147258;
+  --success-soft: #e1f2e9;
+  --danger: #a83b3b;
+  --danger-dark: #812b2b;
+  --danger-soft: #fbe7e3;
+  --focus: #007b8a;
+  --shadow: 0 14px 34px rgba(24, 48, 48, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 720px;
+  height: 100%;
+  min-height: 560px;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--paper);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(0, 123, 138, 0.34);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

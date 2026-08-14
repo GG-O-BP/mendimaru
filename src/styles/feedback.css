@@ -1,0 +1,226 @@
+.toast-stack {
+  position: fixed;
+  z-index: 20;
+  inset-inline-end: 22px;
+  bottom: 22px;
+  display: flex;
+  width: min(370px, calc(100vw - 44px));
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-inline-start: 4px solid var(--cyan-dark);
+  border-radius: 3px;
+  box-shadow: 0 13px 34px rgba(11, 36, 40, 0.18);
+}
+
+.toast.success {
+  border-inline-start-color: var(--success);
+}
+
+.toast.error {
+  border-inline-start-color: var(--danger);
+}
+
+.toast.success > svg {
+  color: var(--success);
+}
+.toast.error > svg {
+  color: var(--danger);
+}
+
+.toast > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toast strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.toast span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.toast button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  color: #617577;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.modal-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(5, 28, 32, 0.66);
+  backdrop-filter: blur(3px);
+}
+
+.confirm-dialog {
+  position: relative;
+  width: min(100%, 440px);
+  padding: 28px 27px 25px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-top: 5px solid var(--cyan);
+  border-radius: 3px;
+  box-shadow: 0 24px 65px rgba(5, 27, 31, 0.3);
+}
+
+.dialog-symbol {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  margin-bottom: 16px;
+  color: var(--navy-deep);
+  background: var(--amber);
+  border-radius: 50% 50% 3px 50%;
+}
+
+.confirm-dialog h2 {
+  margin: 0;
+  color: var(--ink-strong);
+  font-size: 20px;
+  letter-spacing: -0.035em;
+}
+
+.confirm-dialog p {
+  margin: 11px 0 24px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.confirm-dialog > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.loading-screen {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  color: var(--muted);
+  background:
+    radial-gradient(
+      circle at center,
+      rgba(32, 190, 208, 0.1),
+      transparent 20rem
+    ),
+    var(--paper);
+}
+
+.loading-screen > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.loading-screen strong {
+  color: var(--ink-strong);
+  font-size: 20px;
+  letter-spacing: -0.025em;
+}
+
+.loading-screen span:not(.harbor-mark) {
+  margin-top: 3px;
+  color: var(--cyan-dark);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.recovery-screen {
+  display: flex;
+  width: min(520px, calc(100% - 40px));
+  min-height: 100%;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  flex-direction: column;
+  text-align: center;
+}
+
+.recovery-symbol {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  margin: 20px 0 14px;
+  color: var(--navy-deep);
+  background: var(--amber);
+  border-radius: 50% 50% 3px 50%;
+}
+
+.recovery-screen h1 {
+  margin: 0;
+  color: var(--ink-strong);
+  font-size: 24px;
+}
+
+.recovery-screen p {
+  max-width: 430px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.recovery-screen code {
+  width: 100%;
+  margin: 18px 0;
+  padding: 12px 14px;
+  overflow-wrap: anywhere;
+  color: var(--danger);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.recovery-screen .button {
+  margin-top: 20px;
+}
+
+.recovery-screen code + .button {
+  margin-top: 0;
+}
+
+.spin {
+  animation: spin 850ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

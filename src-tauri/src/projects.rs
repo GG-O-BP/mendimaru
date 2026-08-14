@@ -150,7 +150,7 @@ fn extract_project_version(settings_path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{linux_path_to_windows_share, scan_projects};
-    use crate::models::AppConfig;
+    use crate::models::{AppConfig, ContainerRuntime};
     use std::fs;
 
     fn config_for(path: &std::path::Path) -> AppConfig {
@@ -159,7 +159,7 @@ mod tests {
             winboat_setup_pending: false,
             winboat_executable: "winboat".into(),
             compose_file: "compose.yml".into(),
-            container_runtime: "docker".into(),
+            container_runtime: ContainerRuntime::Docker,
             container_name: "WinBoat".into(),
             api_url: "http://127.0.0.1:47271".into(),
             rdp_host: "127.0.0.1".into(),

@@ -1,11 +1,20 @@
+import enumValues from "../shared/contracts/enumValues.json";
+
 export type ViewKey = "studio" | "projects" | "settings";
+
+export type ContainerRuntime = keyof typeof enumValues.containerRuntime;
+
+export type ContainerStatus = keyof typeof enumValues.containerStatus;
+
+export type DownloadState = keyof typeof enumValues.downloadState;
+export type TextDirection = keyof typeof enumValues.textDirection;
 
 export interface AppConfig {
   languagePreference: string;
   winboatSetupPending: boolean;
   winboatExecutable: string;
   composeFile: string;
-  containerRuntime: "docker" | "podman" | string;
+  containerRuntime: ContainerRuntime;
   containerName: string;
   apiUrl: string;
   rdpHost: string;
@@ -27,9 +36,8 @@ export interface EnvironmentStatus {
   freerdpAvailable: boolean;
   sharedDirectoryAvailable: boolean;
   sharedMountMatches: boolean;
-  containerStatus: string;
+  containerStatus: ContainerStatus;
   guestOnline: boolean;
-  notices: string[];
 }
 
 export interface StudioVersion {
@@ -48,7 +56,6 @@ export interface DownloadableVersion {
   isBeta: boolean;
   isMts: boolean;
   isLatest: boolean;
-  formattedReleaseDate?: string;
 }
 
 export interface StudioVersionCatalog {
@@ -65,19 +72,16 @@ export interface MendixProject {
   windowsPath: string;
   version?: string;
   lastModified?: string;
-  formattedLastModified?: string;
 }
 
 export interface DownloadProgress {
   version: string;
-  state: string;
+  state: DownloadState;
   downloadedBytes: number;
   totalBytes?: number;
   percentage?: number;
-  estimated?: boolean;
+  estimated: boolean;
   message: string;
-  downloadedBytesLabel: string;
-  totalBytesLabel?: string;
 }
 
 export interface LocaleOption {
@@ -88,14 +92,16 @@ export interface LocaleOption {
 export interface LocalizationBundle {
   locale: string;
   preference: string;
-  direction: "ltr" | "rtl";
+  direction: TextDirection;
   availableLocales: LocaleOption[];
   messages: Record<string, string>;
   numbers: string[];
 }
 
+export type CommandErrorCode = keyof typeof enumValues.commandErrorCode;
+
 export interface CommandError {
-  code: string;
+  code: CommandErrorCode;
   message: string;
 }
 
@@ -103,7 +109,6 @@ export interface SettingsSaveResult {
   config: AppConfig;
   mountChanged: boolean;
   containerRecreated: boolean;
-  backupPath?: string;
 }
 
 export type ToastKind = "success" | "error" | "info";

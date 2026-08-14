@@ -1,11 +1,13 @@
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { LocalizationBundle } from "./types";
+import { tauriApi } from "./api/tauri";
+import type { LocalizationBundle } from "./domain/types";
+import uiMessageRegistry from "./shared/contracts/uiMessages.json";
 
 export type TranslationValues = Record<string, string | number>;
-export type Translate = (key: string, values?: TranslationValues) => string;
+export type MessageKey = keyof typeof uiMessageRegistry;
+export type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
-const FALLBACK_MESSAGES: Record<string, string> = {
+const FALLBACK_MESSAGES: Partial<Record<MessageKey, string>> = {
   "app-title": "mendimaru — Studio Pro for Linux",
   "app-description": "Manage Mendix Studio Pro on Linux through WinBoat",
   "language-label": "Language",
@@ -25,32 +27,33 @@ export function createTranslate(bundle: LocalizationBundle | null): Translate {
   };
 }
 
-function isolateIfNeeded(value: string, direction?: LocalizationBundle["direction"]) {
+function isolateIfNeeded(
+  value: string,
+  direction?: LocalizationBundle["direction"],
+) {
   return direction === "rtl" ? `\u2068${value}\u2069` : value;
 }
 
 export async function loadLocalization(): Promise<LocalizationBundle> {
-  return invoke<LocalizationBundle>("get_localization");
+  return tauriApi.getLocalization();
 }
 
-export async function selectLanguage(language: string): Promise<LocalizationBundle> {
-  return invoke<LocalizationBundle>("set_language_preference", { language });
+export async function selectLanguage(
+  language: string,
+): Promise<LocalizationBundle> {
+  return tauriApi.setLanguagePreference(language);
 }
 
 export async function formatDates(values: string[]): Promise<string[]> {
-  return invoke<string[]>("format_localized_dates", { values });
+  return tauriApi.formatDates(values);
 }
 
 export async function formatNumbers(values: number[]): Promise<string[]> {
-  return invoke<string[]>("format_localized_numbers", { values });
-}
-
-export async function formatDuration(totalSeconds: number): Promise<string> {
-  return invoke<string>("format_localized_duration", { totalSeconds });
+  return tauriApi.formatNumbers(values);
 }
 
 export async function formatByteValues(values: number[]): Promise<string[]> {
-  return invoke<string[]>("format_localized_bytes", { values });
+  return tauriApi.formatBytes(values);
 }
 
 export function applyDocumentLocale(bundle: LocalizationBundle) {
@@ -60,6 +63,12 @@ export function applyDocumentLocale(bundle: LocalizationBundle) {
   document.title = title;
   document
     .querySelector('meta[name="description"]')
-    ?.setAttribute("content", bundle.messages["app-description"] ?? FALLBACK_MESSAGES["app-description"]);
-  void getCurrentWindow().setTitle(title).catch(() => undefined);
+    ?.setAttribute(
+      "content",
+      bundle.messages["app-description"] ??
+        FALLBACK_MESSAGES["app-description"],
+    );
+  void getCurrentWindow()
+    .setTitle(title)
+    .catch(() => undefined);
 }

@@ -1,0 +1,233 @@
+.app-workspace {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.app-header {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex: 0 0 72px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 0 30px;
+  background: rgba(255, 253, 247, 0.94);
+  border-bottom: 1px solid var(--line);
+}
+
+.route-status {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.route-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.route-node svg {
+  color: var(--cyan-dark);
+}
+
+.windows-node svg {
+  color: var(--amber-dark);
+}
+
+.route-track {
+  position: relative;
+  display: block;
+  width: clamp(28px, 5vw, 74px);
+  height: 2px;
+  background: repeating-linear-gradient(
+    to right,
+    #a8b7b4 0 5px,
+    transparent 5px 9px
+  );
+}
+
+.route-track::before,
+.route-track::after {
+  position: absolute;
+  top: -5px;
+  width: 8px;
+  height: 8px;
+  background: var(--surface);
+  border: 2px solid #7f9694;
+  border-radius: 50%;
+  content: "";
+}
+
+.route-track::after {
+  inset-inline-end: -2px;
+}
+
+.route-status.online .route-track {
+  background: var(--cyan-dark);
+}
+
+.route-status.online .route-track::before,
+.route-status.online .route-track::after {
+  background: var(--cyan);
+  border-color: var(--cyan-dark);
+}
+
+.route-track i {
+  position: absolute;
+  z-index: 1;
+  top: -2px;
+  inset-inline-start: 5px;
+  display: none;
+  width: 6px;
+  height: 6px;
+  background: var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--cyan);
+}
+
+.route-status.online .route-track i {
+  display: block;
+  animation: route-travel 2.6s ease-in-out infinite;
+}
+
+.route-status > strong {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 7px;
+  margin-inline-start: 3px;
+  padding: 0 10px;
+  color: #6b5550;
+  font-size: 11px;
+  font-weight: 720;
+  background: #f5eae4;
+  border-radius: 3px;
+}
+
+.route-status > strong i {
+  width: 7px;
+  height: 7px;
+  background: #9a594d;
+  border-radius: 50%;
+}
+
+.route-status.online > strong {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.route-status.online > strong i {
+  background: #1c9a72;
+  box-shadow: 0 0 0 3px rgba(28, 154, 114, 0.13);
+}
+
+@keyframes route-travel {
+  0%,
+  100% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(clamp(18px, 4vw, 58px));
+  }
+}
+
+.winboat-control,
+.catalog-tools,
+.row-actions,
+.vessel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.language-control {
+  display: inline-flex;
+  height: 38px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 5px 0 10px;
+  color: var(--muted);
+  background: #f3f1e9;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.language-control select {
+  max-width: 138px;
+  height: 34px;
+  padding: 0 16px 0 3px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.language-control select:focus-visible {
+  outline: 0;
+}
+
+.global-warning {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: 0 0 auto;
+  width: min(calc(100% - 56px), 1180px);
+  align-items: center;
+  gap: 11px;
+  margin: 14px auto -2px;
+  padding: 11px 12px 11px 14px;
+  color: #634918;
+  font-size: 13px;
+  background: #fff1c9;
+  border: 1px solid #d8b861;
+  border-inline-start: 4px solid var(--amber-dark);
+  border-radius: 3px;
+}
+
+.global-warning span {
+  flex: 1;
+}
+
+.global-warning button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.page {
+  flex: 1;
+  min-height: 0;
+  padding: 34px 34px 52px;
+  overflow: auto;
+  scrollbar-color: #9eb0ad transparent;
+  scrollbar-width: thin;
+}
+
+.page > div {
+  width: min(100%, 1180px);
+  margin: 0 auto;
+}

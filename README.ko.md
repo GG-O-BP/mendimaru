@@ -62,7 +62,7 @@ Mendimaru는 마법사가 완료될 때까지 상태를 확인한 뒤 다음 작
 - 프런트엔드는 백엔드가 전달한 번역 번들을 표시하며, 문구를 기준으로 상태를 판별하지 않습니다. 다운로드 취소처럼 동작에 영향을 주는 값은 별도 코드와 상태로 전달합니다.
 - 테스트는 모든 언어의 번역 키·변수 구성이 같은지, React에서 사용하는 정적 번역 키가 백엔드 번들에 포함됐는지 확인합니다.
 
-언어를 추가할 때는 `src-tauri/i18n.rs`의 지원 로케일 목록에 BCP 47 언어 태그와 표시 이름을 등록하고, 기존 영어 파일과 키·변수 구성이 같은 Fluent 파일을 `src-tauri/i18n/<locale>/mendimaru.ftl`에 추가합니다. 새 화면 문구는 Fluent 파일 세 곳과 `UI_MESSAGE_KEYS`에 추가합니다. `cargo test`가 빠진 번역이나 변수 불일치를 검출합니다.
+언어를 추가할 때는 `src-tauri/src/i18n.rs`의 지원 로케일 목록에 BCP 47 언어 태그와 표시 이름을 등록하고, 기존 영어 파일과 키·변수 구성이 같은 Fluent 파일을 `src-tauri/i18n/<locale>/mendimaru.ftl`에 추가합니다. 새 화면 문구는 Fluent 파일 세 곳과 `src/shared/contracts/uiMessages.json`에 추가합니다. 이 레지스트리가 TypeScript 번역 키 타입과 Rust UI 번들에 함께 사용되며, `cargo test`가 빠진 번역이나 변수 불일치를 검출합니다.
 
 ## Studio Pro 버전 조회와 설치
 
@@ -113,9 +113,10 @@ npm run tauri dev
 
 ```bash
 npm run check
-cd src-tauri && cargo clippy --all-targets -- -D warnings
 npm run tauri build
 ```
+
+Rust와 TypeScript가 공유하는 직렬화 enum 값은 `src/shared/contracts/enumValues.json`에서 관리합니다. TypeScript는 여기서 유니언 타입을 만들고, Rust 테스트는 계약 불일치를 차단합니다.
 
 실제 Marketplace 연동 테스트는 기본 테스트에서 제외되며 다음처럼 실행할 수 있습니다.
 

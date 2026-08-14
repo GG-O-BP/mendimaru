@@ -1,0 +1,43 @@
+{
+  "containerRuntime": {
+    "docker": true,
+    "podman": true
+  },
+  "containerStatus": {
+    "created": true,
+    "restarting": true,
+    "running": true,
+    "removing": true,
+    "paused": true,
+    "exited": true,
+    "dead": true,
+    "not-found": true,
+    "unknown": true
+  },
+  "downloadState": {
+    "starting": true,
+    "preparing": true,
+    "checking": true,
+    "connecting": true,
+    "downloading": true,
+    "downloaded": true,
+    "ready": true,
+    "staging": true,
+    "installing": true,
+    "finalizing": true,
+    "verifying": true,
+    "installed": true,
+    "failed": true,
+    "cancelled": true
+  },
+  "commandErrorCode": {
+    "config_load_failed": true,
+    "download_cancelled": true,
+    "install_failed": true,
+    "operation_failed": true
+  },
+  "textDirection": {
+    "ltr": true,
+    "rtl": true
+  }
+}

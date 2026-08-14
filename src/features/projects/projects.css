@@ -1,0 +1,86 @@
+.workspace-berth {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 14px;
+  background: var(--cyan-soft);
+  border: 1px solid #93c6c7;
+  border-radius: 4px;
+}
+
+.berth-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  color: var(--cyan);
+  background: var(--navy);
+  border-radius: 3px 14px 3px 3px;
+}
+
+.workspace-berth > div {
+  min-width: 0;
+}
+
+.workspace-berth strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--ink-strong);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-manifest .manifest-table th:nth-child(1) {
+  width: 38%;
+}
+.project-manifest .manifest-table th:nth-child(2) {
+  width: 18%;
+}
+.project-manifest .manifest-table th:nth-child(3) {
+  width: 18%;
+}
+.project-manifest .manifest-table th:nth-child(4) {
+  width: 310px;
+}
+
+.project-flag {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: #64470b;
+  background: var(--amber-soft);
+  border-radius: 2px 11px 2px 2px;
+}
+
+.version-state {
+  display: flex;
+  flex-direction: column;
+  color: var(--ink);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.version-state small {
+  margin-top: 3px;
+  color: var(--success);
+  font-family: Inter, Pretendard, "Noto Sans KR", sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.version-state.missing,
+.version-state.missing small {
+  color: var(--amber-dark);
+}
+
+.modified-cell {
+  color: var(--subtle);
+  white-space: nowrap;
+}

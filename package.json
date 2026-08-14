@@ -8,26 +8,43 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "check": "npm run build && cargo test --manifest-path src-tauri/Cargo.toml",
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "vitest run",
+    "test:backend": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "lint": "npm run lint:frontend && npm run lint:rust",
+    "lint:frontend": "eslint . --max-warnings=0",
+    "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "format": "prettier --write . && cargo fmt --manifest-path src-tauri/Cargo.toml",
+    "format:check": "prettier --check . && cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
+    "check": "npm run lint && npm run format:check && npm run build && npm run test",
     "preview": "vite preview",
     "tauri": "NO_STRIP=1 tauri"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.2",
-    "@tauri-apps/plugin-opener": "^2",
     "lucide-react": "^1.31.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "eslint": "^10.8.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.4",
+    "globals": "^17.11.0",
+    "jsdom": "^30.0.1",
+    "prettier": "^3.9.6",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "typescript-eslint": "^8.67.0",
+    "vite": "^7.0.4",
+    "vitest": "^4.1.10"
   },
   "allowScripts": {
     "esbuild@0.28.2": true

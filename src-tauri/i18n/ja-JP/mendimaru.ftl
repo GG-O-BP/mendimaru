@@ -23,6 +23,9 @@ action-check-winboat-settings = WinBoatパスを確認
 dismiss-notification = 通知を閉じる
 generic-action-failed = 操作を完了できませんでした
 unknown-error = 不明なエラーが発生しました。
+config-recovery-title = 設定を読み込めませんでした
+config-recovery-detail = 保存された設定が無効か、読み取れません。自動検出で有効な設定を再作成できます。
+action-recover-settings = 設定を自動復旧
 
 # 通知と確認ダイアログ
 toast-windows-started = WinBoat Windowsを起動しました
@@ -135,9 +138,6 @@ progress-stage-staging = コピー
 progress-stage-install = インストール
 progress-stage-verify = 確認
 action-cancel = キャンセル
-duration-hours-minutes-seconds = %hours%時間%minutes%分%seconds%秒
-duration-minutes-seconds = %minutes%分%seconds%秒
-duration-seconds = %seconds%秒
 
 # デジタルストレージ単位
 byte-unit-b = %value% B
@@ -198,18 +198,6 @@ settings-saved = 設定は保存されています。
 action-save-settings = 設定を保存
 action-browse = 参照
 
-# 環境に関する通知
-notice-winboat-missing = WinBoat実行ファイルが見つかりません。
-notice-compose-missing = WinBoat Composeファイルが見つかりません。
-notice-winboat-setup-required = Windowsを起動する前にWinBoatの初期設定が必要です。
-notice-winboat-setup-pending = WinBoatの設定中です。Windowsの準備が完了するまで公式設定画面を開いたままにしてください。
-notice-runtime-missing = { $runtime }コンテナーランタイムが見つかりません。
-notice-freerdp-missing = FreeRDP 3実行ファイルが見つかりません。
-notice-shared-directory-missing = 設定された共有ディレクトリが存在しません。
-notice-shared-mount-mismatch = アプリの設定とComposeの/sharedマウントが一致しません。
-notice-windows-stopped = WinBoat Windowsが実行されていません。
-notice-guest-starting = Windowsは実行中ですが、Guest Serverの準備がまだ完了していません。
-
 # ダウンロードバックエンド
 error-download-busy = 別のStudio Proインストーラーをダウンロードしています。
 error-installer-directory-create = インストーラーディレクトリを作成できませんでした: { $error }
@@ -225,15 +213,16 @@ error-installer-finalize = インストーラーを確定できませんでし�
 
 # 設定バックエンド
 error-config-read = 設定ファイルを読み込めませんでした: { $error }
+error-config-parse = 設定ファイルを解析できませんでした: { $error }
 error-config-directory-create = 設定ディレクトリを作成できませんでした: { $error }
 error-config-serialize = 設定をシリアル化できませんでした: { $error }
 error-config-save = 設定ファイルを保存できませんでした: { $error }
+error-settings-rollback = { $error } 以前の設定を完全に復元できませんでした: { $rollback }
 error-app-config-path = アプリの設定ディレクトリを特定できませんでした: { $error }
 error-home-directory = Linuxホームディレクトリを特定できませんでした。
 error-shared-directory-invalid = 共有ディレクトリには、現在存在するLinuxの絶対パスを指定してください。
 error-shared-directory-inspect = 共有ディレクトリを確認できませんでした: { $error }
 error-compose-file-not-found = WinBoat Composeファイルが見つかりません: { $path }
-error-container-runtime-invalid = コンテナーランタイムにはdockerまたはpodmanを指定してください。
 error-winboat-connection-empty = WinBoat接続設定に空の値があります。
 error-startup-timeout-range = 起動待機時間は{ $minimum }～{ $maximum }秒の範囲で指定してください。
 error-compose-read = Composeファイルを読み込めませんでした: { $error }
