@@ -924,6 +924,14 @@ mod tests {
                 "artifact",
                 include_str!("../../schemas/artifact.schema.json"),
             ),
+            (
+                "cli-response",
+                include_str!("../../schemas/cli-response.schema.json"),
+            ),
+            (
+                "cli-event",
+                include_str!("../../schemas/cli-event.schema.json"),
+            ),
         ] {
             let schema: serde_json::Value = serde_json::from_str(source)
                 .unwrap_or_else(|error| panic!("{name} schema must be valid JSON: {error}"));

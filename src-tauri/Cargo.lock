@@ -2449,6 +2449,7 @@ dependencies = [
  "icu_datetime",
  "icu_decimal",
  "icu_locale",
+ "libc",
  "regex",
  "reqwest 0.12.28",
  "rust-embed",

@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/cli-response.schema.json",
+  "title": "Mendimaru headless CLI result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "command",
+    "ok",
+    "platform",
+    "backend",
+    "sessionId",
+    "capabilitySnapshot"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "command": {
+      "enum": [
+        "capabilities",
+        "env",
+        "env.status",
+        "env.ensure",
+        "studio",
+        "studio.list",
+        "studio.install",
+        "studio.uninstall",
+        "studio.start",
+        "studio.status",
+        "studio.stop",
+        "project",
+        "project.list",
+        "project.version",
+        "operation",
+        "operation.list",
+        "operation.status",
+        "operation.retry",
+        "unknown"
+      ]
+    },
+    "ok": { "type": "boolean" },
+    "platform": { "enum": ["linux", "windows", "macos", "unsupported"] },
+    "backend": { "enum": ["linux-winboat", "windows-native", "mac-native"] },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^session_(?:[0-9a-f]{32}|unavailable)$"
+    },
+    "capabilitySnapshot": {
+      "anyOf": [
+        {
+          "$ref": "https://github.com/GG-O-BP/mendimaru/schemas/capabilities.schema.json#/$defs/capabilitySnapshot"
+        },
+        { "type": "null" }
+      ]
+    },
+    "operationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "studioSessionId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 48,
+      "pattern": "^studio-[0-9]+-[0-9]+$"
+    },
+    "data": {},
+    "error": {
+      "$ref": "https://github.com/GG-O-BP/mendimaru/schemas/backend-error.schema.json"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": { "ok": { "const": true }, "data": {} },
+      "required": ["data"],
+      "not": {
+        "properties": { "error": {} },
+        "required": ["error"]
+      }
+    },
+    {
+      "properties": { "ok": { "const": false }, "error": {} },
+      "required": ["error"],
+      "not": {
+        "anyOf": [
+          { "properties": { "data": {} }, "required": ["data"] },
+          {
+            "properties": { "operationId": {} },
+            "required": ["operationId"]
+          },
+          {
+            "properties": { "studioSessionId": {} },
+            "required": ["studioSessionId"]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+use crate::app_paths::AppPaths;
 use crate::contracts::CONTRACT_SCHEMA_VERSION;
 use crate::models::{
     AppConfig, CommandError, OperationError, OperationKind, OperationRecord, OperationStage,
@@ -10,7 +11,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 const HISTORY_FILE_NAME: &str = "operation-history.json";
 const HISTORY_SCHEMA_VERSION: &str = "1.0.0";
@@ -70,8 +71,8 @@ pub(crate) struct SessionActionGuard {
 }
 
 impl OperationTracker {
-    pub(crate) fn begin(
-        app: &AppHandle,
+    pub(crate) fn begin_with_paths(
+        paths: &AppPaths,
         config: &AppConfig,
         kind: OperationKind,
         target_version: &str,
@@ -79,11 +80,9 @@ impl OperationTracker {
         stage: OperationStage,
         retry_of: Option<String>,
     ) -> Result<Self, String> {
-        validate_target_version(target_version)?;
-        let history_path = history_path(app)?;
         Self::begin_at(
             config,
-            history_path,
+            history_path(paths)?,
             kind,
             target_version,
             protected_project,
@@ -283,12 +282,12 @@ impl OperationTracker {
 }
 
 impl SessionActionGuard {
-    pub(crate) fn begin(
-        app: &AppHandle,
+    pub(crate) fn begin_with_paths(
+        paths: &AppPaths,
         config: &AppConfig,
         target_version: &str,
     ) -> Result<Self, String> {
-        Self::begin_at(config, history_path(app)?, target_version)
+        Self::begin_at(config, history_path(paths)?, target_version)
     }
 
     fn begin_at(
@@ -373,7 +372,14 @@ impl Drop for OperationTracker {
 }
 
 pub(crate) fn list(app: &AppHandle, config: &AppConfig) -> Result<Vec<OperationRecord>, String> {
-    list_at(config, &history_path(app)?)
+    list_with_paths(&AppPaths::from_app(app)?, config)
+}
+
+pub(crate) fn list_with_paths(
+    paths: &AppPaths,
+    config: &AppConfig,
+) -> Result<Vec<OperationRecord>, String> {
+    list_at(config, &history_path(paths)?)
 }
 
 fn list_at(config: &AppConfig, history_path: &Path) -> Result<Vec<OperationRecord>, String> {
@@ -389,12 +395,47 @@ fn list_at(config: &AppConfig, history_path: &Path) -> Result<Vec<OperationRecor
     Ok(history.records)
 }
 
-pub(crate) fn retry_source(
-    app: &AppHandle,
+pub(crate) fn retry_source_with_paths(
+    paths: &AppPaths,
     config: &AppConfig,
     id: &str,
 ) -> Result<OperationRecord, String> {
-    retry_source_at(config, &history_path(app)?, id)
+    retry_source_at(config, &history_path(paths)?, id)
+}
+
+pub(crate) fn interrupt_completed_launch_with_paths(
+    paths: &AppPaths,
+    id: &str,
+) -> Result<(), String> {
+    interrupt_completed_launch_at(&history_path(paths)?, id)
+}
+
+fn interrupt_completed_launch_at(history_path: &Path, id: &str) -> Result<(), String> {
+    validate_identifier(id)?;
+    let _store = lock_store()?;
+    let mut history = load_history(history_path)?;
+    let record = history
+        .records
+        .iter_mut()
+        .find(|record| record.id == id)
+        .filter(|record| {
+            record.kind == OperationKind::Launch && record.state == OperationState::Succeeded
+        })
+        .ok_or_else(|| "the completed launch operation could not be interrupted".to_string())?;
+    let now = Utc::now();
+    record.state = OperationState::Interrupted;
+    record.stage = OperationStage::Interrupted;
+    record.percentage = None;
+    record.estimated = false;
+    record.updated_at = now;
+    record.finished_at = Some(now);
+    record.error = Some(OperationError {
+        code: "operation_interrupted".to_string(),
+        reason: "operation_interrupted".to_string(),
+        exit_code: None,
+    });
+    record.retryable = !record.protected_project;
+    save_history(history_path, &history)
 }
 
 fn retry_source_at(
@@ -411,7 +452,14 @@ fn retry_source_at(
 }
 
 pub(crate) fn clear_completed(app: &AppHandle, config: &AppConfig) -> Result<usize, String> {
-    clear_completed_at(config, &history_path(app)?)
+    clear_completed_with_paths(&AppPaths::from_app(app)?, config)
+}
+
+pub(crate) fn clear_completed_with_paths(
+    paths: &AppPaths,
+    config: &AppConfig,
+) -> Result<usize, String> {
+    clear_completed_at(config, &history_path(paths)?)
 }
 
 fn clear_completed_at(config: &AppConfig, history_path: &Path) -> Result<usize, String> {
@@ -533,19 +581,9 @@ fn reconcile_and_import(
     Ok(changed)
 }
 
-fn history_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let directory = app
-        .path()
-        .app_config_dir()
-        .map_err(|error| format!("could not resolve the app configuration directory: {error}"))?;
-    fs::create_dir_all(&directory)
-        .map_err(|error| format!("could not create the app configuration directory: {error}"))?;
-    let metadata = fs::symlink_metadata(&directory)
-        .map_err(|error| format!("could not inspect the app configuration directory: {error}"))?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err("the app configuration directory must be a direct directory".to_string());
-    }
-    Ok(directory.join(HISTORY_FILE_NAME))
+fn history_path(paths: &AppPaths) -> Result<PathBuf, String> {
+    paths.ensure_config_directory()?;
+    Ok(paths.config_directory().join(HISTORY_FILE_NAME))
 }
 
 fn operation_log_directory(config: &AppConfig) -> PathBuf {
@@ -1156,6 +1194,36 @@ mod tests {
         let records = list(&config).expect("list operations");
         assert_eq!(records[0].state, OperationState::Interrupted);
         assert!(records[0].retryable);
+    }
+
+    #[test]
+    fn an_unaccepted_completed_launch_is_reclassified_as_interrupted() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let config = config(temporary.path());
+        let tracker = begin(
+            &config,
+            OperationKind::Launch,
+            "11.12.2",
+            true,
+            OperationStage::Launching,
+            None,
+        )
+        .expect("begin launch");
+        let id = tracker.id().to_string();
+        tracker.succeed().expect("complete backend launch");
+
+        super::interrupt_completed_launch_at(&history_path(&config), &id)
+            .expect("interrupt unaccepted launch");
+        let record = list(&config).expect("list interrupted launch").remove(0);
+        assert_eq!(record.state, OperationState::Interrupted);
+        assert_eq!(record.stage, OperationStage::Interrupted);
+        assert_eq!(record.percentage, None);
+        assert_eq!(
+            record.error.expect("interruption error").code,
+            "operation_interrupted"
+        );
+        assert!(!record.retryable);
+        assert!(super::interrupt_completed_launch_at(&history_path(&config), &id).is_err());
     }
 
     #[test]

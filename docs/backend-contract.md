@@ -32,8 +32,12 @@ into stdout. A failure is one JSON document on stderr and uses these exit codes:
 | `3`       | Requested backend is unavailable or unsupported |
 
 The Tauri command `get_capabilities` returns the same `CapabilitySnapshot` data
-object. Every snapshot has a cryptographically random ID and capture time so a
-session can retain the exact capabilities it observed when it was created.
+object. The CLI wraps it with the host platform, backend, invocation session ID,
+and the same immutable snapshot used by every other headless command. Every
+snapshot has a cryptographically random ID and capture time so a session can
+retain the exact capabilities it observed when it was created. The complete
+headless surface and stream contract are documented in
+[`headless-cli.md`](headless-cli.md).
 
 ## Platform identity
 

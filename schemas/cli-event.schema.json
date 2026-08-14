@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/cli-event.schema.json",
+  "title": "Mendimaru headless CLI progress event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "command", "event", "sessionId", "progress"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "command": { "enum": ["studio.install", "operation.retry"] },
+    "event": { "const": "progress" },
+    "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
+    "progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "state",
+        "downloadedBytes",
+        "percentage",
+        "estimated",
+        "message"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:\\.[0-9]+)?(?:-(?:beta|rc)(?:\\.?[0-9]+)?)?$"
+        },
+        "state": {
+          "enum": [
+            "starting",
+            "preparing",
+            "checking",
+            "connecting",
+            "downloading",
+            "downloaded",
+            "ready",
+            "staging",
+            "installing",
+            "finalizing",
+            "verifying",
+            "installed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "downloadedBytes": { "type": "integer", "minimum": 0 },
+        "totalBytes": { "type": ["integer", "null"], "minimum": 0 },
+        "percentage": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "estimated": { "type": "boolean" },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

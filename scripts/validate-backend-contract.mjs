@@ -8,6 +8,8 @@ const schemaFiles = [
   "schemas/backend-error.schema.json",
   "schemas/session.schema.json",
   "schemas/artifact.schema.json",
+  "schemas/cli-response.schema.json",
+  "schemas/cli-event.schema.json",
 ];
 const schemas = schemaFiles.map((path) =>
   JSON.parse(fs.readFileSync(path, "utf8")),
@@ -21,9 +23,22 @@ process.stdin.setEncoding("utf8");
 for await (const chunk of process.stdin) input += chunk;
 const response = parseJson(input, "capabilities stdout");
 validate(schemas[0].$id, response, "capabilities response");
+validate(schemas[4].$id, response, "CLI response envelope");
 
 const snapshot = response.data;
 const manifest = snapshot.manifest;
+assert(
+  response.capabilitySnapshot.snapshotId === snapshot.snapshotId,
+  "capability data and envelope snapshot differ",
+);
+assert(
+  response.platform === manifest.hostPlatform,
+  "CLI platform differs from snapshot",
+);
+assert(
+  response.backend === manifest.backend,
+  "CLI backend differs from snapshot",
+);
 const sessionId = `session_${"ab".repeat(16)}`;
 validate(
   schemas[2].$id,
@@ -63,6 +78,70 @@ validate(
     retryable: false,
   },
   "backend error",
+);
+const parseErrorEnvelope = {
+  ...response,
+  command: "studio",
+  ok: false,
+  error: {
+    schemaVersion: "1.0.0",
+    code: "invalid_request",
+    message: "the command request is invalid",
+    backend: manifest.backend,
+    retryable: false,
+  },
+};
+delete parseErrorEnvelope.data;
+validate(schemas[4].$id, parseErrorEnvelope, "CLI parse-error envelope");
+validate(
+  schemas[4].$id,
+  {
+    schemaVersion: "1.0.0",
+    command: "unknown",
+    ok: false,
+    platform: manifest.hostPlatform,
+    backend: manifest.backend,
+    sessionId: "session_unavailable",
+    capabilitySnapshot: null,
+    error: {
+      schemaVersion: "1.0.0",
+      code: "operation_failed",
+      message: "the command could not be completed",
+      backend: manifest.backend,
+      retryable: false,
+    },
+  },
+  "CLI fatal bootstrap envelope",
+);
+validate(
+  schemas[4].$id,
+  {
+    ...response,
+    command: "studio.start",
+    operationId: `launch-11.12.2-${"ef".repeat(16)}`,
+    studioSessionId: "studio-4242-638908128000000000",
+    data: { completed: true },
+  },
+  "CLI Studio start envelope",
+);
+validate(
+  schemas[5].$id,
+  {
+    schemaVersion: "1.0.0",
+    command: "studio.install",
+    event: "progress",
+    sessionId,
+    progress: {
+      version: "11.12.2",
+      state: "downloading",
+      downloadedBytes: 1024,
+      totalBytes: 4096,
+      percentage: 25,
+      estimated: false,
+      message: "Downloading Studio Pro",
+    },
+  },
+  "CLI progress event",
 );
 
 const expectedIds = new Set([

@@ -1,6 +1,7 @@
 use crate::marketplace;
 mod cache;
 mod progress;
+pub(crate) use progress::DOWNLOAD_EVENT;
 
 use crate::contracts::BackendError;
 use crate::models::{AppConfig, DownloadState};
@@ -15,7 +16,6 @@ use reqwest::header::{ETAG, LAST_MODIFIED};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tauri::AppHandle;
 use tokio::io::AsyncWriteExt;
 
 #[derive(Default)]
@@ -77,7 +77,6 @@ impl Drop for DownloadGuard<'_> {
 }
 
 pub async fn download_and_launch(
-    app: &AppHandle,
     config: &AppConfig,
     manager: &DownloadManager,
     version: String,
@@ -88,7 +87,6 @@ pub async fn download_and_launch(
     crate::platform::validate_version(&version)?;
     let _guard = manager.begin()?;
     emit_progress(
-        app,
         DownloadProgressUpdate {
             version: &version,
             state: DownloadState::Preparing,
@@ -102,7 +100,6 @@ pub async fn download_and_launch(
     );
     let download_url = marketplace::installer_url(&version).await?;
     emit_progress(
-        app,
         DownloadProgressUpdate {
             version: &version,
             state: DownloadState::Checking,
@@ -125,7 +122,6 @@ pub async fn download_and_launch(
 
     let cached_installer = if force_redownload {
         emit_progress(
-            app,
             DownloadProgressUpdate {
                 version: &version,
                 state: DownloadState::Checking,
@@ -144,7 +140,6 @@ pub async fn download_and_launch(
             CacheInspection::Valid(metadata) => Some((metadata.size, metadata.sha256)),
             CacheInspection::Invalid(error) => {
                 emit_progress(
-                    app,
                     DownloadProgressUpdate {
                         version: &version,
                         state: DownloadState::Checking,
@@ -165,7 +160,6 @@ pub async fn download_and_launch(
     };
     let installer_sha256 = if let Some((size, sha256)) = cached_installer {
         emit_progress(
-            app,
             DownloadProgressUpdate {
                 version: &version,
                 state: DownloadState::Ready,
@@ -181,7 +175,6 @@ pub async fn download_and_launch(
     } else {
         manager.cancellable.store(true, Ordering::SeqCst);
         let sha256 = download_file(
-            app,
             manager,
             &version,
             &download_url,
@@ -199,7 +192,6 @@ pub async fn download_and_launch(
         )));
     }
     emit_progress(
-        app,
         DownloadProgressUpdate {
             version: &version,
             state: DownloadState::Staging,
@@ -233,11 +225,10 @@ pub async fn download_and_launch(
         operation_id,
         &installer_path,
         &installer_sha256,
-        |progress| emit_install_progress(app, &version, progress, &mut on_progress),
+        |progress| emit_install_progress(&version, progress, &mut on_progress),
     )
     .await?;
     emit_progress(
-        app,
         DownloadProgressUpdate {
             version: &version,
             state: DownloadState::Installed,
@@ -258,7 +249,6 @@ pub fn cancel_download(manager: &DownloadManager) -> bool {
 }
 
 async fn download_file<F>(
-    app: &AppHandle,
     manager: &DownloadManager,
     version: &str,
     url: &str,
@@ -275,7 +265,6 @@ where
         destination,
         |state, downloaded_bytes, total_bytes, percentage, message| {
             emit_progress(
-                app,
                 DownloadProgressUpdate {
                     version,
                     state,

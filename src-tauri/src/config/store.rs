@@ -1,7 +1,8 @@
+use crate::app_paths::AppPaths;
 use crate::models::AppConfig;
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 const CONFIG_FILE_NAME: &str = "config.json";
 
@@ -12,7 +13,11 @@ pub(crate) struct ConfigSnapshot {
 }
 
 pub fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
-    let path = config_path(app)?;
+    load_config_from(&AppPaths::from_app(app)?)
+}
+
+pub(crate) fn load_config_from(paths: &AppPaths) -> Result<AppConfig, String> {
+    let path = config_path(paths);
     if !path.is_file() {
         return super::detect_config();
     }
@@ -23,18 +28,19 @@ pub fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
 }
 
 pub fn persist_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
-    let path = config_path(app)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| crate::tr!("error-config-directory-create", error = error))?;
-    }
+    persist_config_from(&AppPaths::from_app(app)?, config)
+}
+
+pub(crate) fn persist_config_from(paths: &AppPaths, config: &AppConfig) -> Result<(), String> {
+    paths.ensure_config_directory()?;
+    let path = config_path(paths);
     let serialized = serde_json::to_vec_pretty(config)
         .map_err(|error| crate::tr!("error-config-serialize", error = error))?;
     atomic_write(&path, &serialized)
 }
 
 pub(crate) fn snapshot_config(app: &AppHandle) -> Result<ConfigSnapshot, String> {
-    let path = config_path(app)?;
+    let path = config_path(&AppPaths::from_app(app)?);
     let content = if path.is_file() {
         Some(fs::read(&path).map_err(|error| crate::tr!("error-config-read", error = error))?)
     } else {
@@ -60,16 +66,14 @@ fn atomic_write(path: &std::path::Path, content: &[u8]) -> Result<(), String> {
         .map_err(|error| crate::tr!("error-config-save", error = error))
 }
 
-fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_config_dir()
-        .map(|directory| directory.join(CONFIG_FILE_NAME))
-        .map_err(|error| crate::tr!("error-app-config-path", error = error))
+fn config_path(paths: &AppPaths) -> PathBuf {
+    paths.config_directory().join(CONFIG_FILE_NAME)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::atomic_write;
+    use super::{atomic_write, load_config_from, persist_config_from};
+    use crate::app_paths::AppPaths;
     use crate::models::AppConfig;
     use std::fs;
 
@@ -83,6 +87,42 @@ mod tests {
 
         assert_eq!(fs::read(&target).expect("read config"), b"new");
         assert!(!target.with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn headless_and_desktop_stores_share_the_same_explicit_path_contract() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let paths = AppPaths::for_tests(
+            temporary.path().join("config"),
+            temporary.path().join("cache"),
+        );
+        let expected = config_for_store(temporary.path());
+        persist_config_from(&paths, &expected).expect("persist headless config");
+        assert_eq!(
+            load_config_from(&paths).expect("load headless config"),
+            expected
+        );
+    }
+
+    fn config_for_store(workspace: &std::path::Path) -> AppConfig {
+        AppConfig {
+            language_preference: "en-US".into(),
+            winboat_setup_pending: false,
+            winboat_executable: "winboat".into(),
+            compose_file: "compose.yml".into(),
+            container_runtime: crate::models::ContainerRuntime::Docker,
+            container_name: "WinBoat".into(),
+            api_url: "http://127.0.0.1:47280".into(),
+            rdp_host: "127.0.0.1".into(),
+            rdp_port: 47300,
+            shared_directory: workspace.to_string_lossy().into_owned(),
+            windows_shared_directory: r"\\host.lan\Data".into(),
+            freerdp_binary: "xfreerdp3".into(),
+            mendix_install_root: r"C:\Program Files\Mendix".into(),
+            mendix_data_root: r"C:\ProgramData\Mendix".into(),
+            windows_studio_paths: Vec::new(),
+            startup_timeout_seconds: 180,
+        }
     }
 
     #[test]

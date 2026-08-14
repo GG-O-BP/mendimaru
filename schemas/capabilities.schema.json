@@ -4,11 +4,24 @@
   "title": "Mendimaru capabilities response",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "command", "ok", "data"],
+  "required": [
+    "schemaVersion",
+    "command",
+    "ok",
+    "platform",
+    "backend",
+    "sessionId",
+    "capabilitySnapshot",
+    "data"
+  ],
   "properties": {
     "schemaVersion": { "const": "1.0.0" },
     "command": { "const": "capabilities" },
     "ok": { "const": true },
+    "platform": { "$ref": "#/$defs/platformId" },
+    "backend": { "$ref": "#/$defs/backendId" },
+    "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
+    "capabilitySnapshot": { "$ref": "#/$defs/capabilitySnapshot" },
     "data": { "$ref": "#/$defs/capabilitySnapshot" }
   },
   "$defs": {

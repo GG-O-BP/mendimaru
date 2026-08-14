@@ -24,7 +24,12 @@ const WINDOWS_EPOCH_TICKS: i64 = 621_355_968_000_000_000;
 const TICKS_PER_SECOND: i64 = 10_000_000;
 const MAX_PROJECT_NAME_BYTES: usize = 160;
 
-static SESSION_CLIENTS: OnceLock<Mutex<HashMap<String, RemoteAppProcess>>> = OnceLock::new();
+static SESSION_CLIENTS: OnceLock<Mutex<HashMap<String, RegisteredClient>>> = OnceLock::new();
+
+struct RegisteredClient {
+    process: RemoteAppProcess,
+    status: StudioSessionStatus,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SessionIdentity {
@@ -74,18 +79,21 @@ pub(crate) async fn reconnect(
     let sessions = normalize_sessions(&studios, outcome.report.sessions.clone())?;
     let exact = sessions
         .into_iter()
-        .any(|session| session.session_id == session_id && session.reconnectable);
-    if !exact {
+        .find(|session| session.session_id == session_id && session.reconnectable);
+    let Some(mut status) = exact else {
         terminate_outcome_client(&mut outcome);
         return Err(failure(
             "Windows did not confirm the selected reconnectable Studio Pro session",
         ));
-    }
+    };
     let client = outcome
         .remote_app
         .take()
         .ok_or_else(|| failure("the RemoteApp reconnect client was not retained"))?;
-    register_client(session_id, client)?;
+    status.connection = StudioConnectionState::Connected;
+    status.reconnectable = false;
+    status.reconnect_unavailable = Some(StudioReconnectUnavailable::AlreadyConnected);
+    register_client(session_id, client, status)?;
     Ok(())
 }
 
@@ -131,20 +139,37 @@ pub(super) fn register_launch_client(
             return Err(error);
         }
     };
-    let started_at =
-        DateTime::parse_from_rfc3339(&session.started_at).map(|value| value.with_timezone(&Utc));
+    let started_at = DateTime::parse_from_rfc3339(&session.started_at)
+        .map(|value| value.with_timezone(&Utc))
+        .map_err(|_| failure("Windows returned an invalid Studio Pro start time"))?;
     if report.len() != 1
         || identity.process_id != session.process_id
         || session.version != expected_version
         || !session.has_window
-        || started_at.ok().and_then(datetime_ticks) != Some(identity.started_ticks)
+        || datetime_ticks(started_at) != Some(identity.started_ticks)
     {
         terminate_client(client);
         return Err(failure(
             "Windows returned an invalid launched Studio Pro session identity",
         ));
     }
-    register_client(&session.session_id, client)
+    let status = StudioSessionStatus {
+        schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
+        session_id: session.session_id.clone(),
+        version: session.version.clone(),
+        state: StudioProcessState::Running,
+        process_id: Some(session.process_id),
+        started_at: Some(started_at),
+        project_name: session
+            .project_name
+            .as_deref()
+            .filter(|name| safe_project_name(name))
+            .map(|name| name.trim().to_string()),
+        connection: StudioConnectionState::Connected,
+        reconnectable: false,
+        reconnect_unavailable: Some(StudioReconnectUnavailable::AlreadyConnected),
+    };
+    register_client(&session.session_id, client, status)
 }
 
 fn terminate_client(mut client: RemoteAppProcess) {
@@ -311,7 +336,7 @@ fn safe_project_name(value: &str) -> bool {
 }
 
 fn clients() -> Result<
-    std::sync::MutexGuard<'static, HashMap<String, RemoteAppProcess>>,
+    std::sync::MutexGuard<'static, HashMap<String, RegisteredClient>>,
     WindowsOperationFailure,
 > {
     SESSION_CLIENTS
@@ -324,16 +349,54 @@ fn client_is_connected(session_id: &str) -> bool {
     let Ok(mut clients) = clients() else {
         return false;
     };
-    clients.retain(|_, client| match client.try_wait() {
+    clients.retain(|_, client| match client.process.try_wait() {
         Ok(Some(_)) => false,
         Ok(None) | Err(_) => true,
     });
     clients.contains_key(session_id)
 }
 
+pub(crate) fn registered_client_sessions() -> Vec<StudioSessionStatus> {
+    let Ok(mut clients) = clients() else {
+        return Vec::new();
+    };
+    clients.retain(|_, client| match client.process.try_wait() {
+        Ok(Some(_)) => false,
+        Ok(None) | Err(_) => true,
+    });
+    let mut sessions = clients
+        .values()
+        .map(|client| client.status.clone())
+        .collect::<Vec<_>>();
+    sessions.sort_by_key(|session| std::cmp::Reverse(session.started_at));
+    sessions
+}
+
+pub(crate) fn disconnect_all_clients() {
+    if let Ok(mut clients) = clients() {
+        for (_, mut client) in clients.drain() {
+            let _ = client.process.kill();
+            let _ = client.process.wait();
+        }
+    }
+}
+
+pub(crate) fn disconnect_registered_client(session_id: &str) -> bool {
+    let Ok(mut clients) = clients() else {
+        return false;
+    };
+    let Some(mut client) = clients.remove(session_id) else {
+        return false;
+    };
+    let _ = client.process.kill();
+    let _ = client.process.wait();
+    true
+}
+
 fn register_client(
     session_id: &str,
     client: RemoteAppProcess,
+    status: StudioSessionStatus,
 ) -> Result<(), WindowsOperationFailure> {
     let mut clients = match clients() {
         Ok(clients) => clients,
@@ -342,9 +405,15 @@ fn register_client(
             return Err(error);
         }
     };
-    if let Some(mut previous) = clients.insert(session_id.to_string(), client) {
-        let _ = previous.kill();
-        let _ = previous.wait();
+    if let Some(mut previous) = clients.insert(
+        session_id.to_string(),
+        RegisteredClient {
+            process: client,
+            status,
+        },
+    ) {
+        let _ = previous.process.kill();
+        let _ = previous.process.wait();
     }
     Ok(())
 }
@@ -352,8 +421,8 @@ fn register_client(
 fn disconnect_client(session_id: &str) {
     if let Ok(mut clients) = clients() {
         if let Some(mut client) = clients.remove(session_id) {
-            let _ = client.kill();
-            let _ = client.wait();
+            let _ = client.process.kill();
+            let _ = client.process.wait();
         }
     }
 }
