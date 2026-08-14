@@ -7,7 +7,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub use compose::compose_shared_directory;
+pub use compose::{compose_file_is_valid, compose_shared_directory};
 pub(crate) use compose::{restore_file, snapshot_file, update_shared_mount, FileSnapshot};
 pub use store::{load_config, persist_config};
 pub(crate) use store::{restore_config, snapshot_config, ConfigSnapshot};

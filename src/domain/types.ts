@@ -90,6 +90,20 @@ export type ContainerRuntime = keyof typeof enumValues.containerRuntime;
 
 export type ContainerStatus = keyof typeof enumValues.containerStatus;
 
+export type EnvironmentDiagnosticId =
+  keyof typeof enumValues.environmentDiagnosticId;
+export type EnvironmentDiagnosticStatus =
+  keyof typeof enumValues.environmentDiagnosticStatus;
+export type EnvironmentDiagnosticAction =
+  keyof typeof enumValues.environmentDiagnosticAction;
+
+export interface EnvironmentDiagnostic {
+  id: EnvironmentDiagnosticId;
+  status: EnvironmentDiagnosticStatus;
+  observed?: string;
+  action?: EnvironmentDiagnosticAction;
+}
+
 export type DownloadState = keyof typeof enumValues.downloadState;
 export type TextDirection = keyof typeof enumValues.textDirection;
 
@@ -135,6 +149,7 @@ export interface EnvironmentStatus {
   sharedMountMatches: boolean;
   containerStatus: ContainerStatus;
   guestOnline: boolean;
+  diagnostics: EnvironmentDiagnostic[];
 }
 
 export interface StudioVersion {

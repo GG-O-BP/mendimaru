@@ -20,6 +20,10 @@ const BUILD_NUMBER_SELECTOR: &str = "span.mx-text.pds-heading--sm.pds-mb-0";
 
 pub(super) static SCRAPE_LOCK: Mutex<()> = Mutex::const_new(());
 
+pub(crate) fn browser_executable() -> Option<String> {
+    session::chrome_executable()
+}
+
 pub(super) async fn scrape_page(
     target_page: u32,
 ) -> Result<(Vec<DownloadableVersion>, Option<u32>), String> {

@@ -1,14 +1,25 @@
 import {
+  AlertTriangle,
   CheckCircle2,
+  CircleX,
+  Copy,
+  Download,
   Info,
   LoaderCircle,
   Plus,
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import type { AppConfig, ContainerRuntime } from "../../domain/types";
+import type {
+  AppConfig,
+  ContainerRuntime,
+  EnvironmentDiagnostic,
+  EnvironmentDiagnosticAction,
+  EnvironmentDiagnosticId,
+} from "../../domain/types";
 import type { Translate } from "../../i18n";
 import { PageTitle } from "../../shared/components/LayoutPrimitives";
+import { diagnosticText } from "./environmentDiagnostics";
 
 export type PathField = "sharedDirectory" | "composeFile" | "winboatExecutable";
 
@@ -18,6 +29,7 @@ export interface SettingsPageModel {
   changed: boolean;
   mountMatches: boolean;
   applyNow: boolean;
+  diagnostics: EnvironmentDiagnostic[];
   isBusy: (key: string) => boolean;
   onChange: (config: AppConfig) => void;
   onChoose: (field: PathField) => void;
@@ -26,6 +38,12 @@ export interface SettingsPageModel {
   onApplyNow: (value: boolean) => void;
   onSave: () => void;
   onRedetect: () => void;
+  onDiagnosticAction: (
+    action: EnvironmentDiagnosticAction,
+    id: EnvironmentDiagnosticId,
+  ) => void;
+  onCopyDiagnosticReport: () => void;
+  onExportDiagnosticReport: () => void;
 }
 
 export function SettingsPage({
@@ -151,6 +169,7 @@ export function SettingsPage({
         ) : (
           <>
             <PathInput
+              id="winboat-executable-input"
               label={t("settings-winboat-executable")}
               browseLabel={t("action-browse")}
               value={config.winboatExecutable}
@@ -160,6 +179,7 @@ export function SettingsPage({
               onBrowse={() => model.onChoose("winboatExecutable")}
             />
             <PathInput
+              id="compose-file-input"
               label={t("settings-compose-file")}
               browseLabel={t("action-browse")}
               value={config.composeFile}
@@ -171,6 +191,7 @@ export function SettingsPage({
             <label className="simple-field runtime-field">
               <span>{t("settings-container-runtime")}</span>
               <select
+                id="container-runtime-input"
                 value={config.containerRuntime}
                 onChange={(event) =>
                   model.onChange({
@@ -226,6 +247,7 @@ export function SettingsPage({
           </span>
         </div>
         <PathInput
+          id="shared-directory-input"
           label={
             model.nativeWindows
               ? t("settings-native-workspace-directory")
@@ -241,6 +263,7 @@ export function SettingsPage({
         {!model.nativeWindows && (
           <label className="apply-row">
             <input
+              id="apply-mount-input"
               type="checkbox"
               checked={model.applyNow}
               onChange={(event) => model.onApplyNow(event.target.checked)}
@@ -251,6 +274,92 @@ export function SettingsPage({
             </span>
           </label>
         )}
+      </section>
+
+      <section
+        className="section-card settings-card diagnostic-card"
+        aria-labelledby="environment-diagnostics-heading"
+      >
+        <div className="settings-heading diagnostic-heading">
+          <span
+            className="settings-number diagnostic-number"
+            aria-hidden="true"
+          >
+            03
+          </span>
+          <div>
+            <span className="micro-label">{t("diagnostics-eyebrow")}</span>
+            <h2 id="environment-diagnostics-heading">
+              {t("diagnostics-title")}
+            </h2>
+            <p>{t("diagnostics-description")}</p>
+          </div>
+          <div className="diagnostic-report-actions">
+            <button
+              type="button"
+              className="button secondary compact"
+              onClick={model.onCopyDiagnosticReport}
+              disabled={model.isBusy("copy-environment-report")}
+            >
+              <Copy size={15} />
+              {t("action-copy-diagnostic-report")}
+            </button>
+            <button
+              type="button"
+              className="button secondary compact"
+              onClick={model.onExportDiagnosticReport}
+              disabled={model.isBusy("export-environment-report")}
+            >
+              <Download size={15} />
+              {t("action-export-diagnostic-report")}
+            </button>
+          </div>
+        </div>
+        <div className="diagnostic-list" role="list">
+          {model.diagnostics.map((diagnostic) => {
+            const text = diagnosticText(diagnostic, t);
+            const busyKey = diagnosticActionBusyKey(diagnostic.action);
+            return (
+              <article
+                key={diagnostic.id}
+                className={`diagnostic-item ${diagnostic.status}`}
+                role="listitem"
+              >
+                <span className="diagnostic-icon" aria-hidden="true">
+                  {diagnostic.status === "success" ? (
+                    <CheckCircle2 size={18} />
+                  ) : diagnostic.status === "warning" ? (
+                    <AlertTriangle size={18} />
+                  ) : (
+                    <CircleX size={18} />
+                  )}
+                </span>
+                <div>
+                  <div className="diagnostic-item-heading">
+                    <strong>{text.title}</strong>
+                    <span>{text.status}</span>
+                  </div>
+                  <p>{text.detail}</p>
+                </div>
+                {diagnostic.action && text.action && (
+                  <button
+                    type="button"
+                    className="button secondary compact"
+                    disabled={busyKey ? model.isBusy(busyKey) : false}
+                    onClick={() =>
+                      model.onDiagnosticAction(
+                        diagnostic.action!,
+                        diagnostic.id,
+                      )
+                    }
+                  >
+                    {text.action}
+                  </button>
+                )}
+              </article>
+            );
+          })}
+        </div>
       </section>
 
       <div
@@ -280,12 +389,14 @@ export function SettingsPage({
 }
 
 function PathInput({
+  id,
   label,
   browseLabel,
   value,
   onChange,
   onBrowse,
 }: {
+  id?: string;
   label: string;
   browseLabel: string;
   value: string;
@@ -297,6 +408,7 @@ function PathInput({
       <span>{label}</span>
       <div>
         <input
+          id={id}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           spellCheck={false}
@@ -307,4 +419,11 @@ function PathInput({
       </div>
     </label>
   );
+}
+
+function diagnosticActionBusyKey(action?: EnvironmentDiagnosticAction) {
+  if (action === "redetect") return "redetect";
+  if (action === "start-winboat") return "start-windows";
+  if (action === "open-winboat") return "open-winboat";
+  return null;
 }

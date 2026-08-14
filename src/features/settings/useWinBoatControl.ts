@@ -125,6 +125,8 @@ export function useWinBoatControl({
     online,
     offlineGuidance,
     setupCompletion,
+    startWindows,
+    openWinBoat,
     winBoatControl: {
       kind: controlKind,
       key: actionKey,

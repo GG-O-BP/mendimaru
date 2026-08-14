@@ -1,5 +1,5 @@
 import { StrictMode, type PropsWithChildren } from "react";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig, EnvironmentStatus } from "../../domain/types";
 import type { Translate } from "../../i18n";
@@ -8,6 +8,8 @@ import { useEnvironment } from "./useEnvironment";
 const api = vi.hoisted(() => ({
   getConfig: vi.fn(),
   getEnvironmentStatus: vi.fn(),
+  getEnvironmentDiagnosticReport: vi.fn(),
+  exportEnvironmentDiagnosticReport: vi.fn(),
   startWinBoatWindows: vi.fn(),
   openWinBoat: vi.fn(),
   beginWinBoatSetup: vi.fn(),
@@ -59,6 +61,7 @@ const status: EnvironmentStatus = {
   sharedMountMatches: true,
   containerStatus: "running",
   guestOnline: true,
+  diagnostics: [],
 };
 
 const t: Translate = (key) => key;
@@ -71,6 +74,12 @@ describe("useEnvironment initialization", () => {
     vi.clearAllMocks();
     api.getConfig.mockResolvedValue(config);
     api.getEnvironmentStatus.mockResolvedValue(status);
+    api.startWinBoatWindows.mockResolvedValue(undefined);
+    api.openWinBoat.mockResolvedValue(undefined);
+    api.getEnvironmentDiagnosticReport.mockResolvedValue(
+      '{"schemaVersion":"1.0.0"}',
+    );
+    api.exportEnvironmentDiagnosticReport.mockResolvedValue(true);
   });
 
   it("finishes loading when React StrictMode replays mount effects", async () => {
@@ -92,5 +101,49 @@ describe("useEnvironment initialization", () => {
     expect(result.current.config).toEqual(config);
     expect(result.current.online).toBe(true);
     expect(api.getConfig).toHaveBeenCalled();
+  });
+
+  it("routes diagnostic recovery and redacted report actions through the shared action lock", async () => {
+    const notify = vi.fn();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const { result } = renderHook(
+      () =>
+        useEnvironment({
+          t,
+          notify,
+          requestConfirmation: vi.fn(),
+          runAction: async (_key, action) => action(),
+          isBusy: () => false,
+          onWarning: vi.fn(),
+        }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(() =>
+      result.current.runDiagnosticAction("start-winboat", "container"),
+    );
+    await act(() =>
+      result.current.runDiagnosticAction("open-winboat", "guest-api"),
+    );
+    await act(() => result.current.copyDiagnosticReport());
+    await act(() => result.current.exportDiagnosticReport());
+
+    expect(api.startWinBoatWindows).toHaveBeenCalledOnce();
+    expect(api.openWinBoat).toHaveBeenCalledOnce();
+    expect(writeText).toHaveBeenCalledWith('{"schemaVersion":"1.0.0"}');
+    expect(api.exportEnvironmentDiagnosticReport).toHaveBeenCalledOnce();
+    expect(notify).toHaveBeenCalledWith(
+      "success",
+      "toast-diagnostic-report-copied",
+    );
+    expect(notify).toHaveBeenCalledWith(
+      "success",
+      "toast-diagnostic-report-exported",
+    );
   });
 });

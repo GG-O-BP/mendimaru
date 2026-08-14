@@ -20,6 +20,10 @@ Mendimaru is a Tauri GUI app for discovering, installing, launching, and removin
 
 Mendimaru does not provide a dashboard, VM resource information, advanced download URLs, or manual build-number entry.
 
+### Environment diagnostics
+
+Settings checks the WinBoat executable, Compose structure, container runtime daemon, FreeRDP, shared workspace and mount, container state, Guest API, loopback RDP port, and Marketplace browser independently. A failed check offers only an explicit safe next action such as redetection, starting Windows, opening WinBoat, or focusing the relevant setting. Diagnostic reports can be copied or exported as JSON; they contain allowlisted status fields and omit configured paths, credentials, tokens, and command payloads.
+
 ## Windows installation
 
 Download either the MSI or NSIS setup executable from the GitHub release assets. The Windows build does not require WinBoat, Docker, a Guest API, RDP, FreeRDP, or path conversion.

@@ -2,6 +2,7 @@ use super::{load_command_config, CommandResult};
 use crate::contracts::{BackendId, CapabilitySnapshot};
 use crate::models::{EnvironmentStatus, SettingsSaveResult};
 use tauri::AppHandle;
+use tauri_plugin_dialog::DialogExt;
 
 #[tauri::command]
 pub(crate) fn get_capabilities(backend: Option<BackendId>) -> CommandResult<CapabilitySnapshot> {
@@ -12,6 +13,35 @@ pub(crate) fn get_capabilities(backend: Option<BackendId>) -> CommandResult<Capa
 pub(crate) async fn get_environment_status(app: AppHandle) -> CommandResult<EnvironmentStatus> {
     let config = load_command_config(&app)?;
     Ok(crate::platform::environment_status(&config).await)
+}
+
+#[tauri::command]
+pub(crate) async fn get_environment_diagnostic_report(app: AppHandle) -> CommandResult<String> {
+    let config = load_command_config(&app)?;
+    let status = crate::platform::environment_status(&config).await;
+    Ok(crate::models::environment_diagnostic_report(&status)?)
+}
+
+#[tauri::command]
+pub(crate) async fn export_environment_diagnostic_report(app: AppHandle) -> CommandResult<bool> {
+    let config = load_command_config(&app)?;
+    let status = crate::platform::environment_status(&config).await;
+    let report = crate::models::environment_diagnostic_report(&status)?;
+    let selection = app
+        .dialog()
+        .file()
+        .add_filter("JSON", &["json"])
+        .set_file_name("mendimaru-environment-report.json")
+        .blocking_save_file();
+    let Some(selection) = selection else {
+        return Ok(false);
+    };
+    let path = selection
+        .into_path()
+        .map_err(|error| crate::tr!("error-environment-report-path", error = error))?;
+    std::fs::write(&path, report)
+        .map_err(|error| crate::tr!("error-environment-report-write", error = error))?;
+    Ok(true)
 }
 
 #[tauri::command]

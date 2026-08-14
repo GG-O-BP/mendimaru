@@ -3,8 +3,9 @@ mod process;
 mod security;
 
 use crate::models::{
-    AppConfig, ContainerStatus, EnvironmentStatus, StudioInstallPhase, StudioInstallProgress,
-    StudioVersion,
+    AppConfig, ContainerStatus, EnvironmentDiagnostic, EnvironmentDiagnosticAction,
+    EnvironmentDiagnosticId, EnvironmentDiagnosticStatus, EnvironmentStatus, StudioInstallPhase,
+    StudioInstallProgress, StudioVersion,
 };
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -46,6 +47,7 @@ struct StudioLaunchRequest {
 pub(super) fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     let platform = super::capabilities();
     let shared_directory_available = Path::new(&config.shared_directory).is_dir();
+    let browser_available = crate::marketplace::browser_executable().is_some();
     let ready = platform.supports_studio_management && shared_directory_available;
     EnvironmentStatus {
         platform,
@@ -60,6 +62,29 @@ pub(super) fn environment_status(config: &AppConfig) -> EnvironmentStatus {
         shared_mount_matches: shared_directory_available,
         container_status: ContainerStatus::NotFound,
         guest_online: ready,
+        diagnostics: vec![
+            EnvironmentDiagnostic {
+                id: EnvironmentDiagnosticId::SharedDirectory,
+                status: if shared_directory_available {
+                    EnvironmentDiagnosticStatus::Success
+                } else {
+                    EnvironmentDiagnosticStatus::Failure
+                },
+                observed: None,
+                action: (!shared_directory_available)
+                    .then_some(EnvironmentDiagnosticAction::OpenSettings),
+            },
+            EnvironmentDiagnostic {
+                id: EnvironmentDiagnosticId::MarketplaceBrowser,
+                status: if browser_available {
+                    EnvironmentDiagnosticStatus::Success
+                } else {
+                    EnvironmentDiagnosticStatus::Warning
+                },
+                observed: None,
+                action: (!browser_available).then_some(EnvironmentDiagnosticAction::Redetect),
+            },
+        ],
     }
 }
 
