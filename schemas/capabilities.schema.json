@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/capabilities.schema.json",
+  "title": "Mendimaru capabilities response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "command", "ok", "data"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "command": { "const": "capabilities" },
+    "ok": { "const": true },
+    "data": { "$ref": "#/$defs/capabilitySnapshot" }
+  },
+  "$defs": {
+    "backendId": {
+      "enum": ["linux-winboat", "windows-native", "mac-native"]
+    },
+    "platformId": {
+      "enum": ["linux", "windows", "macos", "unsupported"]
+    },
+    "runtimeMode": {
+      "enum": ["portable", "studio-run-locally", "external-url"]
+    },
+    "capabilityId": {
+      "enum": [
+        "studio.detect",
+        "studio.install",
+        "studio.uninstall",
+        "studio.start",
+        "studio.status",
+        "studio.stop",
+        "runtime.build",
+        "runtime.start",
+        "runtime.wait",
+        "runtime.url",
+        "runtime.stop",
+        "runtime.logs",
+        "ui.capabilities",
+        "ui.tree",
+        "ui.find",
+        "ui.action",
+        "ui.wait",
+        "ui.screenshot",
+        "browser.test",
+        "browser.artifacts"
+      ]
+    },
+    "errorCode": {
+      "enum": [
+        "unsupported_capability",
+        "backend_mismatch",
+        "invalid_request",
+        "precondition_failed",
+        "operation_failed"
+      ]
+    },
+    "limitation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "$ref": "#/$defs/errorCode" },
+        "message": { "type": "string", "minLength": 1 },
+        "requiredPermission": { "type": "string", "minLength": 1 },
+        "requiredVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "requiredPermissions", "fallbackAllowed"],
+      "properties": {
+        "id": { "$ref": "#/$defs/capabilityId" },
+        "status": { "enum": ["supported", "unsupported"] },
+        "requiredPermissions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "fallbackAllowed": { "type": "boolean" },
+        "limitation": { "$ref": "#/$defs/limitation" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "const": "unsupported" } },
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "limitation": { "$ref": "#/$defs/limitation" }
+            },
+            "required": ["limitation"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "status": { "const": "supported" } },
+            "required": ["status"]
+          },
+          "then": { "not": { "required": ["limitation"] } }
+        }
+      ]
+    },
+    "capabilityManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "backend",
+        "hostPlatform",
+        "studioPlatform",
+        "architecture",
+        "capabilities"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "backend": { "$ref": "#/$defs/backendId" },
+        "hostPlatform": { "$ref": "#/$defs/platformId" },
+        "studioPlatform": { "$ref": "#/$defs/platformId" },
+        "runtimePlatform": { "$ref": "#/$defs/platformId" },
+        "runtimeMode": { "$ref": "#/$defs/runtimeMode" },
+        "architecture": { "type": "string", "minLength": 1 },
+        "capabilities": {
+          "type": "array",
+          "minItems": 20,
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/capability" }
+        }
+      }
+    },
+    "capabilitySnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "snapshotId", "capturedAt", "manifest"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "snapshotId": { "type": "string", "pattern": "^cap_[0-9a-f]{32}$" },
+        "capturedAt": { "type": "string", "format": "date-time" },
+        "manifest": { "$ref": "#/$defs/capabilityManifest" }
+      }
+    }
+  }
+}

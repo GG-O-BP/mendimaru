@@ -4,6 +4,88 @@ export type ViewKey = "studio" | "projects" | "settings";
 
 export type HostPlatform = keyof typeof enumValues.hostPlatform;
 
+export type BackendId = keyof typeof enumValues.backendId;
+
+export type PlatformId = keyof typeof enumValues.platformId;
+
+export type RuntimeMode = keyof typeof enumValues.runtimeMode;
+
+export type CapabilityId = keyof typeof enumValues.capabilityId;
+
+export type CapabilityStatus = keyof typeof enumValues.capabilityStatus;
+
+export type BackendErrorCode = keyof typeof enumValues.backendErrorCode;
+
+export interface CapabilityLimitation {
+  code: BackendErrorCode;
+  message: string;
+  requiredPermission?: string;
+  requiredVersion?: string;
+}
+
+export interface Capability {
+  id: CapabilityId;
+  status: CapabilityStatus;
+  requiredPermissions: string[];
+  fallbackAllowed: boolean;
+  limitation?: CapabilityLimitation;
+}
+
+export interface CapabilityManifest {
+  schemaVersion: string;
+  backend: BackendId;
+  hostPlatform: PlatformId;
+  studioPlatform: PlatformId;
+  runtimePlatform?: PlatformId;
+  runtimeMode?: RuntimeMode;
+  architecture: string;
+  capabilities: Capability[];
+}
+
+export interface CapabilitySnapshot {
+  schemaVersion: string;
+  snapshotId: string;
+  capturedAt: string;
+  manifest: CapabilityManifest;
+}
+
+export interface BackendError {
+  schemaVersion: string;
+  code: BackendErrorCode;
+  message: string;
+  backend?: BackendId;
+  capability?: CapabilityId;
+  reason?: CapabilityLimitation;
+  retryable: boolean;
+  diagnosticRef?: string;
+}
+
+export type SessionState = keyof typeof enumValues.sessionState;
+
+export interface SessionDescriptor {
+  schemaVersion: string;
+  sessionId: string;
+  createdAt: string;
+  state: SessionState;
+  capabilitySnapshot: CapabilitySnapshot;
+}
+
+export type ArtifactKind = keyof typeof enumValues.artifactKind;
+
+export interface ArtifactDescriptor {
+  schemaVersion: string;
+  artifactId: string;
+  sessionId: string;
+  backend: BackendId;
+  kind: ArtifactKind;
+  createdAt: string;
+  mediaType?: string;
+  location?: string;
+  sha256?: string;
+  sizeBytes?: number;
+  backendDiagnosticRef?: string;
+}
+
 export type ContainerRuntime = keyof typeof enumValues.containerRuntime;
 
 export type ContainerStatus = keyof typeof enumValues.containerStatus;
@@ -119,6 +201,7 @@ export type CommandErrorCode = keyof typeof enumValues.commandErrorCode;
 export interface CommandError {
   code: CommandErrorCode;
   message: string;
+  details?: BackendError;
 }
 
 export interface SettingsSaveResult {

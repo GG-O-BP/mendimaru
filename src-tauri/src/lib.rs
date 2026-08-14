@@ -1,11 +1,13 @@
+pub mod cli;
 mod commands;
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 mod config;
+pub mod contracts;
 mod downloads;
 mod i18n;
 mod marketplace;
-mod models;
-mod platform;
+pub mod models;
+pub mod platform;
 mod projects;
 mod settings;
 #[cfg_attr(target_os = "windows", allow(dead_code, unused_imports))]
@@ -35,6 +37,7 @@ pub fn run() {
             format_localized_bytes,
             redetect_config,
             save_config,
+            get_capabilities,
             get_environment_status,
             get_installed_versions,
             get_downloadable_versions_cache,

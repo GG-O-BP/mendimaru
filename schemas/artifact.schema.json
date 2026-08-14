@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/artifact.schema.json",
+  "title": "Mendimaru artifact descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "artifactId",
+    "sessionId",
+    "backend",
+    "kind",
+    "createdAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "artifactId": { "type": "string", "pattern": "^artifact_[0-9a-f]{32}$" },
+    "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
+    "backend": {
+      "enum": ["linux-winboat", "windows-native", "mac-native"]
+    },
+    "kind": {
+      "enum": [
+        "studio-log",
+        "runtime-log",
+        "browser-trace",
+        "browser-report",
+        "screenshot",
+        "ui-tree",
+        "dom-snapshot",
+        "diagnostic"
+      ]
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "mediaType": { "type": "string", "minLength": 1 },
+    "location": { "type": "string", "minLength": 1 },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sizeBytes": { "type": "integer", "minimum": 0 },
+    "backendDiagnosticRef": { "type": "string", "minLength": 1 }
+  }
+}

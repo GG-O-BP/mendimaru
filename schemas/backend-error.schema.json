@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/backend-error.schema.json",
+  "title": "Mendimaru backend error",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "code", "message", "retryable"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "code": {
+      "enum": [
+        "unsupported_capability",
+        "backend_mismatch",
+        "invalid_request",
+        "precondition_failed",
+        "operation_failed"
+      ]
+    },
+    "message": { "type": "string", "minLength": 1 },
+    "backend": {
+      "enum": ["linux-winboat", "windows-native", "mac-native"]
+    },
+    "capability": {
+      "type": "string",
+      "pattern": "^(studio|runtime|ui|browser)\\.[a-z-]+$"
+    },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "enum": [
+            "unsupported_capability",
+            "backend_mismatch",
+            "invalid_request",
+            "precondition_failed",
+            "operation_failed"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1 },
+        "requiredPermission": { "type": "string", "minLength": 1 },
+        "requiredVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "retryable": { "type": "boolean" },
+    "diagnosticRef": { "type": "string", "minLength": 1 }
+  }
+}

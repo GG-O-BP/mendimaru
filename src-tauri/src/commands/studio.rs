@@ -55,6 +55,7 @@ pub(crate) async fn install_studio_pro(
             InstallError::Cancelled(message) => {
                 CommandError::new(CommandErrorCode::DownloadCancelled, message)
             }
+            InstallError::Backend(error) => error.into(),
             InstallError::Other(message) => {
                 CommandError::new(CommandErrorCode::InstallFailed, message)
             }
