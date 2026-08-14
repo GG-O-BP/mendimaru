@@ -39,8 +39,11 @@ pub fn scan_projects(config: &AppConfig) -> Result<Vec<MendixProject>, String> {
             local.to_rfc3339()
         });
         let project_name = project_name(directory, mpr_path);
-        let windows_path =
-            linux_path_to_windows_share(workspace, mpr_path, &config.windows_shared_directory)?;
+        let windows_path = if crate::platform::is_windows_native() {
+            mpr_path.to_string_lossy().to_string()
+        } else {
+            linux_path_to_windows_share(workspace, mpr_path, &config.windows_shared_directory)?
+        };
         let version = extract_project_version(&directory.join("project-settings.user.json"));
 
         discovered.push((
@@ -169,6 +172,7 @@ mod tests {
             freerdp_binary: "xfreerdp3".into(),
             mendix_install_root: r"C:\Program Files\Mendix".into(),
             mendix_data_root: r"C:\ProgramData\Mendix".into(),
+            windows_studio_paths: Vec::new(),
             startup_timeout_seconds: 180,
         }
     }

@@ -9,18 +9,18 @@ mod studio;
 
 pub use config::{AppConfig, ContainerRuntime, SettingsSaveResult};
 pub use download::{DownloadProgress, DownloadState};
-pub use environment::{ContainerStatus, EnvironmentStatus};
+pub use environment::{ContainerStatus, EnvironmentStatus, HostPlatform, PlatformCapabilities};
 pub use errors::{CommandError, CommandErrorCode};
 pub use localization::{LocaleOption, LocalizationBundle, TextDirection};
 pub use marketplace::{DownloadableVersion, StudioVersionCatalog};
 pub use projects::MendixProject;
-pub use studio::{StudioVersion, WinApp};
+pub use studio::{StudioInstallPhase, StudioInstallProgress, StudioVersion, WinApp};
 
 #[cfg(test)]
 mod tests {
     use super::{
         CommandError, CommandErrorCode, ContainerRuntime, ContainerStatus, DownloadState,
-        TextDirection,
+        HostPlatform, TextDirection,
     };
     use std::collections::BTreeSet;
 
@@ -47,6 +47,10 @@ mod tests {
             ))
             .expect("command error serializes")["code"],
             "operation_failed"
+        );
+        assert_eq!(
+            serde_json::to_string(&HostPlatform::WindowsNative).expect("platform serializes"),
+            r#""windows-native""#
         );
     }
 
@@ -99,6 +103,14 @@ mod tests {
                 DownloadState::Installed,
                 DownloadState::Failed,
                 DownloadState::Cancelled,
+            ],
+        );
+        assert_registry(
+            "hostPlatform",
+            [
+                HostPlatform::LinuxWinboat,
+                HostPlatform::WindowsNative,
+                HostPlatform::Unsupported,
             ],
         );
         assert_registry(

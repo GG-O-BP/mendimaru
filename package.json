@@ -2,7 +2,10 @@
   "name": "mendimaru",
   "private": true,
   "version": "0.1.0",
-  "description": "Manage Mendix Studio Pro on Linux through WinBoat",
+  "description": "Manage Mendix Studio Pro natively on Windows or through WinBoat on Linux",
+  "engines": {
+    "node": ">=22.22.2"
+  },
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -10,6 +13,7 @@
     "build": "tsc && vite build",
     "test": "npm run test:frontend && npm run test:backend",
     "test:frontend": "vitest run",
+    "test:e2e": "vitest run src/App.e2e.test.tsx",
     "test:backend": "cargo test --manifest-path src-tauri/Cargo.toml",
     "lint": "npm run lint:frontend && npm run lint:rust",
     "lint:frontend": "eslint . --max-warnings=0",
@@ -18,7 +22,7 @@
     "format:check": "prettier --check . && cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
     "check": "npm run lint && npm run format:check && npm run build && npm run test",
     "preview": "vite preview",
-    "tauri": "NO_STRIP=1 tauri"
+    "tauri": "cross-env NO_STRIP=1 tauri"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -35,6 +39,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "cross-env": "^10.1.0",
     "eslint": "^10.8.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.4",

@@ -2,6 +2,26 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
+pub enum HostPlatform {
+    LinuxWinboat,
+    WindowsNative,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformCapabilities {
+    pub kind: HostPlatform,
+    pub architecture: String,
+    pub requires_winboat: bool,
+    pub supports_studio_management: bool,
+    pub supports_installation: bool,
+    pub supports_uninstallation: bool,
+    pub supports_projects: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
 pub enum ContainerStatus {
     Created,
     Restarting,
@@ -41,6 +61,8 @@ impl ContainerStatus {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentStatus {
+    pub platform: PlatformCapabilities,
+    pub ready: bool,
     pub winboat_available: bool,
     pub winboat_initialized: bool,
     pub setup_pending: bool,

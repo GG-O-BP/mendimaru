@@ -71,11 +71,17 @@ export function InstalledVersionsSection({
                 <button
                   type="button"
                   className="icon-button danger inverse"
-                  title={t("remove-version-title", {
-                    version: version.version,
-                  })}
+                  title={
+                    version.removable
+                      ? t("remove-version-title", {
+                          version: version.version,
+                        })
+                      : t("removal-unavailable-title")
+                  }
                   onClick={() => model.onUninstall(version)}
-                  disabled={!online || model.isBusy(uninstallKey)}
+                  disabled={
+                    !online || !version.removable || model.isBusy(uninstallKey)
+                  }
                 >
                   {model.isBusy(uninstallKey) ? (
                     <LoaderCircle size={16} className="spin" />

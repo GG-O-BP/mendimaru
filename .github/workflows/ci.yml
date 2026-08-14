@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check frontend formatting and lint
+        run: |
+          npm run format:check
+          npm run lint:frontend
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run frontend unit and native E2E tests
+        run: npm run test:frontend
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+
+      - name: Run Rust clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+  windows-bundle:
+    name: Build Windows MSI and NSIS smoke artifacts
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build MSI and NSIS bundles
+        run: npm run tauri -- build --bundles msi,nsis
+
+      - name: Verify installer outputs
+        shell: pwsh
+        run: |
+          if (-not (Get-ChildItem "src-tauri/target/release/bundle/msi" -Filter "*.msi" -File)) {
+            throw "MSI installer was not generated."
+          }
+          if (-not (Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -File)) {
+            throw "NSIS installer was not generated."
+          }
+
+      - name: Upload Windows smoke artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-windows-installers
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

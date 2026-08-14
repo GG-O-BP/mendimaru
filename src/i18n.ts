@@ -8,8 +8,8 @@ export type MessageKey = keyof typeof uiMessageRegistry;
 export type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 const FALLBACK_MESSAGES: Partial<Record<MessageKey, string>> = {
-  "app-title": "mendimaru — Studio Pro for Linux",
-  "app-description": "Manage Mendix Studio Pro on Linux through WinBoat",
+  "app-title": "mendimaru — Mendix Studio Pro Manager",
+  "app-description": "Manage Mendix Studio Pro on Windows or Linux",
   "language-label": "Language",
   "language-system": "System language",
   "unknown-error": "An unknown error occurred.",

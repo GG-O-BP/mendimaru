@@ -16,7 +16,7 @@ import {
 import type { LocalizationBundle, ViewKey } from "../domain/types";
 import type { MessageKey, Translate } from "../i18n";
 import { HarborMark } from "../shared/components/LayoutPrimitives";
-import type { WinBoatControlKind } from "../features/studio/types";
+import type { EnvironmentControlKind } from "../features/studio/types";
 
 const TABS: Array<{ key: ViewKey; labelKey: MessageKey; icon: LucideIcon }> = [
   { key: "studio", labelKey: "nav-studio", icon: AppWindow },
@@ -44,7 +44,7 @@ export function AppShell({
   warning: string | null;
   languageChanging: boolean;
   winBoatControl: {
-    kind: WinBoatControlKind;
+    kind: EnvironmentControlKind;
     label: string;
     busy: boolean;
     onAction: () => void;
@@ -54,6 +54,7 @@ export function AppShell({
   onLanguageChange: (language: string) => void;
   onDismissWarning: () => void;
 }) {
+  const nativeWindows = winBoatControl.kind === "native";
   return (
     <div className="app-shell">
       <aside className="harbor-sidebar">
@@ -105,20 +106,32 @@ export function AppShell({
             className={`route-status ${online ? "online" : "offline"}`}
             aria-label={t("route-aria")}
           >
-            <span className="route-node host-node">
-              <Server size={16} aria-hidden="true" />
-              <span>{t("route-linux")}</span>
-            </span>
-            <span className="route-track" aria-hidden="true">
-              <i />
-            </span>
+            {!nativeWindows && (
+              <>
+                <span className="route-node host-node">
+                  <Server size={16} aria-hidden="true" />
+                  <span>{t("route-linux")}</span>
+                </span>
+                <span className="route-track" aria-hidden="true">
+                  <i />
+                </span>
+              </>
+            )}
             <span className="route-node windows-node">
               <Monitor size={16} aria-hidden="true" />
-              <span>{t("route-windows")}</span>
+              <span>
+                {nativeWindows ? t("route-native-windows") : t("route-windows")}
+              </span>
             </span>
             <strong>
               <i />
-              {online ? t("connection-online") : t("connection-offline")}
+              {nativeWindows
+                ? online
+                  ? t("connection-native")
+                  : t("connection-native-not-ready")
+                : online
+                  ? t("connection-online")
+                  : t("connection-offline")}
             </strong>
           </div>
 
@@ -141,26 +154,28 @@ export function AppShell({
                 ))}
               </select>
             </label>
-            <button
-              type="button"
-              className={`button ${online ? "secondary" : "primary"}`}
-              onClick={winBoatControl.onAction}
-              disabled={
-                winBoatControl.kind !== "settings" && winBoatControl.busy
-              }
-            >
-              {winBoatControl.busy ? (
-                <LoaderCircle size={17} className="spin" />
-              ) : winBoatControl.kind === "settings" ||
-                winBoatControl.kind === "setup" ? (
-                <Settings size={17} />
-              ) : winBoatControl.kind === "open" ? (
-                <Monitor size={17} />
-              ) : (
-                <Play size={17} />
-              )}
-              {winBoatControl.label}
-            </button>
+            {!nativeWindows && (
+              <button
+                type="button"
+                className={`button ${online ? "secondary" : "primary"}`}
+                onClick={winBoatControl.onAction}
+                disabled={
+                  winBoatControl.kind !== "settings" && winBoatControl.busy
+                }
+              >
+                {winBoatControl.busy ? (
+                  <LoaderCircle size={17} className="spin" />
+                ) : winBoatControl.kind === "settings" ||
+                  winBoatControl.kind === "setup" ? (
+                  <Settings size={17} />
+                ) : winBoatControl.kind === "open" ? (
+                  <Monitor size={17} />
+                ) : (
+                  <Play size={17} />
+                )}
+                {winBoatControl.label}
+              </button>
+            )}
           </div>
         </header>
 

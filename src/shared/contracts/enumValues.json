@@ -1,4 +1,9 @@
 {
+  "hostPlatform": {
+    "linux-winboat": true,
+    "windows-native": true,
+    "unsupported": true
+  },
   "containerRuntime": {
     "docker": true,
     "podman": true

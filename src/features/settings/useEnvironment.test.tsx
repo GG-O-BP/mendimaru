@@ -34,10 +34,21 @@ const config: AppConfig = {
   freerdpBinary: "xfreerdp3",
   mendixInstallRoot: String.raw`C:\Program Files\Mendix`,
   mendixDataRoot: String.raw`C:\ProgramData\Mendix`,
+  windowsStudioPaths: [],
   startupTimeoutSeconds: 180,
 };
 
 const status: EnvironmentStatus = {
+  platform: {
+    kind: "linux-winboat",
+    architecture: "x86_64",
+    requiresWinboat: true,
+    supportsStudioManagement: true,
+    supportsInstallation: true,
+    supportsUninstallation: true,
+    supportsProjects: true,
+  },
+  ready: true,
   winboatAvailable: true,
   winboatInitialized: true,
   setupPending: false,

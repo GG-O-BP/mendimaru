@@ -6,6 +6,16 @@ const translate = (key: string) => key;
 
 function status(overrides: Partial<EnvironmentStatus> = {}): EnvironmentStatus {
   return {
+    platform: {
+      kind: "linux-winboat",
+      architecture: "x86_64",
+      requiresWinboat: true,
+      supportsStudioManagement: true,
+      supportsInstallation: true,
+      supportsUninstallation: true,
+      supportsProjects: true,
+    },
+    ready: false,
     winboatAvailable: true,
     winboatInitialized: true,
     setupPending: false,
@@ -57,5 +67,30 @@ describe("environment presentation", () => {
 
     expect(presentation.online).toBe(true);
     expect(presentation.actionLabel).toBe("action-open-winboat");
+  });
+
+  it("uses native readiness and never exposes WinBoat controls on Windows", () => {
+    const presentation = deriveEnvironmentPresentation(
+      status({
+        platform: {
+          kind: "windows-native",
+          architecture: "x86_64",
+          requiresWinboat: false,
+          supportsStudioManagement: true,
+          supportsInstallation: true,
+          supportsUninstallation: true,
+          supportsProjects: true,
+        },
+        ready: true,
+        guestOnline: false,
+        winboatAvailable: false,
+      }),
+      translate,
+    );
+
+    expect(presentation.online).toBe(true);
+    expect(presentation.controlKind).toBe("native");
+    expect(presentation.actionKey).toBe("native-windows-settings");
+    expect(presentation.actionLabel).toBe("action-open-settings");
   });
 });

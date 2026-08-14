@@ -8,6 +8,14 @@ pub async fn save_settings(
     apply_mount: bool,
 ) -> Result<SettingsSaveResult, String> {
     crate::config::normalize_and_validate(&mut config)?;
+    if crate::platform::is_windows_native() {
+        crate::config::persist_config(app, &config)?;
+        return Ok(SettingsSaveResult {
+            config,
+            mount_changed: false,
+            container_recreated: false,
+        });
+    }
     let previous_config = crate::config::load_config(app).ok();
     let config_snapshot = crate::config::snapshot_config(app)?;
     let compose_path = PathBuf::from(&config.compose_file);

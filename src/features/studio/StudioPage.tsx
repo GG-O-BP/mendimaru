@@ -9,7 +9,7 @@ import type {
   CatalogModel,
   InstallationModel,
   InstalledVersionsModel,
-  WinBoatControlKind,
+  EnvironmentControlKind,
 } from "./types";
 
 export function StudioPage({
@@ -27,7 +27,7 @@ export function StudioPage({
   online: boolean;
   offlineGuidance: { title: string; detail: string };
   winBoatControl: {
-    kind: WinBoatControlKind;
+    kind: EnvironmentControlKind;
     label: string;
     busy: boolean;
     onAction: () => void;
@@ -65,11 +65,16 @@ export function StudioPage({
             type="button"
             className="button primary"
             onClick={winBoatControl.onAction}
-            disabled={winBoatControl.kind !== "settings" && winBoatControl.busy}
+            disabled={
+              winBoatControl.kind !== "settings" &&
+              winBoatControl.kind !== "native" &&
+              winBoatControl.busy
+            }
           >
             {winBoatControl.busy ? (
               <LoaderCircle size={17} className="spin" />
             ) : winBoatControl.kind === "settings" ||
+              winBoatControl.kind === "native" ||
               winBoatControl.kind === "setup" ? (
               <Settings size={17} />
             ) : winBoatControl.kind === "open" ? (

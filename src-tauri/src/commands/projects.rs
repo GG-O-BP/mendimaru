@@ -9,6 +9,6 @@ pub(crate) fn get_projects(app: AppHandle) -> CommandResult<Vec<MendixProject>> 
 }
 
 #[tauri::command]
-pub(crate) fn open_linux_folder(path: String) -> CommandResult<()> {
-    Ok(crate::winboat::open_linux_folder(&path)?)
+pub(crate) fn open_folder(path: String) -> CommandResult<()> {
+    Ok(crate::platform::open_folder(&path)?)
 }

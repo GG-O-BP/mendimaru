@@ -67,6 +67,7 @@ pub(super) fn parse_studio_versions(apps: Vec<WinApp>, install_root: &str) -> Ve
             } else {
                 app.source
             },
+            removable: true,
         });
     }
 

@@ -2,6 +2,8 @@ import enumValues from "../shared/contracts/enumValues.json";
 
 export type ViewKey = "studio" | "projects" | "settings";
 
+export type HostPlatform = keyof typeof enumValues.hostPlatform;
+
 export type ContainerRuntime = keyof typeof enumValues.containerRuntime;
 
 export type ContainerStatus = keyof typeof enumValues.containerStatus;
@@ -24,10 +26,23 @@ export interface AppConfig {
   freerdpBinary: string;
   mendixInstallRoot: string;
   mendixDataRoot: string;
+  windowsStudioPaths: string[];
   startupTimeoutSeconds: number;
 }
 
+export interface PlatformCapabilities {
+  kind: HostPlatform;
+  architecture: string;
+  requiresWinboat: boolean;
+  supportsStudioManagement: boolean;
+  supportsInstallation: boolean;
+  supportsUninstallation: boolean;
+  supportsProjects: boolean;
+}
+
 export interface EnvironmentStatus {
+  platform: PlatformCapabilities;
+  ready: boolean;
   winboatAvailable: boolean;
   winboatInitialized: boolean;
   setupPending: boolean;
@@ -46,6 +61,7 @@ export interface StudioVersion {
   executablePath: string;
   installRoot: string;
   source: string;
+  removable: boolean;
 }
 
 export interface DownloadableVersion {

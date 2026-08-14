@@ -9,10 +9,7 @@ pub use client::installed_versions;
 pub use container::{
     environment_status, guest_is_online, open_winboat, recreate_container, start_container,
 };
-pub use studio::{
-    install_studio, launch_studio, launch_uninstaller, open_linux_folder, validate_version,
-    StudioInstallPhase, StudioInstallProgress,
-};
+pub use studio::{install_studio, launch_studio, launch_uninstaller, open_linux_folder};
 
 #[cfg(test)]
 use client::parse_studio_versions;
@@ -31,11 +28,12 @@ mod tests {
         encode_powershell_script, hidden_powershell_launcher, install_script, install_studio,
         installed_versions, launch_studio, launch_studio_script, launch_uninstaller,
         localize_windows_reason, parse_install_report, parse_studio_versions,
-        powershell_encoded_arguments, uninstall_script, validate_version,
+        powershell_encoded_arguments, uninstall_script,
     };
     use crate::{
         config,
         models::{AppConfig, WinApp},
+        platform::validate_version,
         projects::linux_path_to_windows_share,
     };
     use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -91,6 +89,7 @@ mod tests {
         assert!(validate_version("11.12.2").is_ok());
         assert!(validate_version("10.24.0.12345").is_ok());
         assert!(validate_version("11.0.0-beta1").is_ok());
+        assert!(validate_version("11.6.0-beta.1").is_ok());
         assert!(validate_version("11.12.2; calc.exe").is_err());
     }
 

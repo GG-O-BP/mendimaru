@@ -74,33 +74,36 @@ fn looks_like_version(value: &str) -> bool {
 }
 
 pub(super) fn compare_versions_desc(left: &str, right: &str) -> Ordering {
-    let left_parts = numeric_version_parts(left);
-    let right_parts = numeric_version_parts(right);
-    let length = left_parts.len().max(right_parts.len());
-    for index in 0..length {
-        let comparison = right_parts
-            .get(index)
-            .copied()
-            .unwrap_or_default()
-            .cmp(&left_parts.get(index).copied().unwrap_or_default());
-        if comparison != Ordering::Equal {
-            return comparison;
-        }
-    }
-    right.cmp(left)
+    version_sort_key(right)
+        .cmp(&version_sort_key(left))
+        .then_with(|| right.cmp(left))
 }
 
-fn numeric_version_parts(version: &str) -> Vec<u32> {
-    version
+fn version_sort_key(version: &str) -> (Vec<u32>, u8, u32) {
+    let (core, prerelease) = version
+        .split_once('-')
+        .map_or((version, None), |(core, suffix)| (core, Some(suffix)));
+    let numeric = core
         .split('.')
-        .map(|part| {
-            part.chars()
-                .take_while(char::is_ascii_digit)
-                .collect::<String>()
-                .parse::<u32>()
-                .unwrap_or_default()
-        })
-        .collect()
+        .map(|part| part.parse::<u32>().unwrap_or_default())
+        .collect();
+    let (stage, sequence) = match prerelease {
+        None => (2, u32::MAX),
+        Some(suffix) if suffix.to_ascii_lowercase().starts_with("rc") => {
+            (1, prerelease_sequence(suffix))
+        }
+        Some(suffix) => (0, prerelease_sequence(suffix)),
+    };
+    (numeric, stage, sequence)
+}
+
+fn prerelease_sequence(suffix: &str) -> u32 {
+    suffix
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .unwrap_or_default()
 }
 
 pub(super) fn major_version(version: &str) -> Result<u32, String> {

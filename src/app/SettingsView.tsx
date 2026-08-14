@@ -18,12 +18,15 @@ export function SettingsView({
       t={t}
       model={{
         config: environment.draftConfig,
+        nativeWindows: environment.status?.platform.kind === "windows-native",
         changed: environment.settingsChanged,
         mountMatches: Boolean(environment.status?.sharedMountMatches),
         applyNow: environment.applyMountNow,
         isBusy,
         onChange: environment.setDraftConfig,
         onChoose: (field) => void environment.choosePath(field),
+        onAddStudioPath: () => void environment.addStudioPath(),
+        onRemoveStudioPath: environment.removeStudioPath,
         onApplyNow: environment.setApplyMountNow,
         onSave: environment.saveSettings,
         onRedetect: () => void environment.redetectSettings(),

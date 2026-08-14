@@ -84,7 +84,9 @@ export function useSettingsDraft({
           defaultPath: settings.draft[field],
           title:
             field === "sharedDirectory"
-              ? t("dialog-select-shared-directory")
+              ? environmentStatus?.platform.kind === "windows-native"
+                ? t("dialog-select-workspace-directory")
+                : t("dialog-select-shared-directory")
               : field === "composeFile"
                 ? t("dialog-select-compose-file")
                 : t("dialog-select-winboat-file"),
@@ -112,15 +114,74 @@ export function useSettingsDraft({
         notify("error", t("path-picker-failed"), errorText(error, t));
       }
     },
-    [notify, settings, t],
+    [environmentStatus, notify, settings, t],
   );
+
+  const addStudioPath = useCallback(async () => {
+    if (settings.status !== "ready") return;
+    try {
+      const selected = await open({
+        directory: false,
+        multiple: false,
+        defaultPath:
+          settings.draft.windowsStudioPaths[
+            settings.draft.windowsStudioPaths.length - 1
+          ],
+        title: t("dialog-select-studio-executable"),
+        filters: [
+          {
+            name: t("dialog-studio-executable-filter"),
+            extensions: ["exe"],
+          },
+        ],
+      });
+      if (typeof selected === "string") {
+        setSettings((current) =>
+          current.status === "ready" &&
+          !current.draft.windowsStudioPaths.includes(selected)
+            ? {
+                ...current,
+                draft: {
+                  ...current.draft,
+                  windowsStudioPaths: [
+                    ...current.draft.windowsStudioPaths,
+                    selected,
+                  ],
+                },
+              }
+            : current,
+        );
+      }
+    } catch (error) {
+      notify("error", t("path-picker-failed"), errorText(error, t));
+    }
+  }, [notify, settings, t]);
+
+  const removeStudioPath = useCallback((index: number) => {
+    setSettings((current) =>
+      current.status === "ready"
+        ? {
+            ...current,
+            draft: {
+              ...current.draft,
+              windowsStudioPaths: current.draft.windowsStudioPaths.filter(
+                (_path, pathIndex) => pathIndex !== index,
+              ),
+            },
+          }
+        : current,
+    );
+  }, []);
 
   const saveSettings = useCallback(() => {
     if (settings.status !== "ready") return;
     const draft = settings.draft;
     const execute = () =>
       runAction("save-settings", async () => {
-        const result = await tauriApi.saveConfig(draft, applyMountNow);
+        const applyWinBoatMount = Boolean(
+          applyMountNow && environmentStatus?.platform.requiresWinboat,
+        );
+        const result = await tauriApi.saveConfig(draft, applyWinBoatMount);
         applyConfig(result.config);
         notify(
           "success",
@@ -134,7 +195,11 @@ export function useSettingsDraft({
         await refreshStatus();
       });
 
-    if (applyMountNow && environmentStatus?.containerStatus === "running") {
+    if (
+      applyMountNow &&
+      environmentStatus?.platform.requiresWinboat &&
+      environmentStatus.containerStatus === "running"
+    ) {
       requestConfirmation({
         title: t("confirm-apply-mount-title"),
         description: t("confirm-apply-mount-description"),
@@ -147,7 +212,7 @@ export function useSettingsDraft({
   }, [
     applyConfig,
     applyMountNow,
-    environmentStatus?.containerStatus,
+    environmentStatus,
     notify,
     refreshStatus,
     requestConfirmation,
@@ -196,6 +261,8 @@ export function useSettingsDraft({
     applyConfig,
     updateConfigPair,
     choosePath,
+    addStudioPath,
+    removeStudioPath,
     saveSettings,
     redetectSettings,
     updateLanguagePreference,

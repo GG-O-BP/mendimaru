@@ -10,15 +10,30 @@
 
 <h1 align="center">Mendimaru</h1>
 
-Mendimaru は、WinBoat を介して Linux 上に Mendix Studio Pro をインストールし、使用するバージョンを選んで起動し、共有ワークスペース内のプロジェクトを開くための Tauri GUI アプリです。
+Mendimaru は Mendix Studio Pro の各バージョンを検出・インストール・起動・削除する Tauri GUI アプリです。Windows ではネイティブに動作し、Linux では WinBoat を使用します。
 
 ## 画面構成
 
-- **Studio Pro**: WinBoat の Windows 環境にインストール済みのバージョンの起動・削除、および Mendix Marketplace で実際に入手できるバージョンの検索・インストール
-- **プロジェクト**: 設定した Linux 共有ディレクトリ内の `.mpr` プロジェクトを検出・起動
-- **設定**: WinBoat の実行ファイル、Compose ファイル、Docker または Podman、Linux 共有ディレクトリを設定
+- **Studio Pro**: 現在の Windows 環境にある Studio Pro の検出・起動・インストール・安全な削除
+- **プロジェクト**: 設定したワークスペース内の `.mpr` プロジェクトを検出・起動
+- **設定**: Windows ネイティブワークスペースとポータブル Studio のパス、または Linux の WinBoat 環境を設定
 
 ダッシュボード、VM リソース情報、高度なダウンロード URL、ビルド番号の手動入力、強制再ダウンロードのオプションは提供しません。
+
+## Windows へのインストール
+
+GitHub Release のアセットから MSI または NSIS セットアップをダウンロードします。Windows ビルドでは WinBoat、Docker、Guest API、RDP、FreeRDP、パス変換は不要です。
+
+ネイティブ Windows モードでは次を行います。
+
+- 32/64 ビットのアンインストールレジストリ、Mendix 標準フォルダー、Version Selector の情報、設定したカスタム／ポータブルパスから Studio Pro を検出
+- `StudioPro.exe` を直接起動し、選択した `.mpr` パスをプロセス引数として渡す
+- プロジェクトとインストーラーに Windows ネイティブパスのみを使用
+- UAC を要求する前に、ダウンロードファイルの SHA-256 の安定性と Mendix／Siemens の信頼済み Authenticode 署名を検証
+- 昇格したインストーラーまたは公式登録アンインストーラーの終了コードと実際の結果を確認
+- 対象の `StudioPro.exe` が実行中なら削除を拒否し、公式削除情報がないポータブル版では削除を無効化
+
+以前の設定は自動移行され、新しい `windowsStudioPaths` 一覧は既定で空のため、既存の Linux 設定もそのまま有効です。
 
 ## Arch Linux へのインストール
 
@@ -76,26 +91,27 @@ Mendimaru はウィザードが完了するまで状態を監視し、その後�
 - Studio Pro 10 以前では、バージョン詳細ページから `Build <number>` を自動的に抽出し、`Mendix-<version>.<build>-Setup.exe` を使用します。
 - 一覧からバージョンを選ぶだけでよく、URL やビルド番号を入力する必要はありません。
 
-Chrome は `MENDIMARU_CHROME_PATH`、`google-chrome-stable`、`google-chrome`、`chromium`、`chromium-browser` の順に検出されます。
+Windows ではシステムおよびユーザーの標準場所にある Microsoft Edge と Chrome を検出します。Linux では `MENDIMARU_CHROME_PATH`、`google-chrome-stable`、`google-chrome`、`chromium`、`chromium-browser` の順に検出します。
 
 ## Windows のパス
 
-参照アプリと同じパスを使用します。
+レジストリと Version Selector の情報に加えて、次の既定場所も検出します。
 
 | 用途 | Windows パス |
 | --- | --- |
 | Studio Pro のインストールルート | `C:\Program Files\Mendix` |
 | Studio Pro の実行ファイル | `C:\Program Files\Mendix\<version>\modeler\studiopro.exe` |
 | Studio Pro のアンインストール情報 | `C:\ProgramData\Mendix` |
-| 既定の共有パス | `\\host.lan\Data` |
+| ネイティブの既定ワークスペース | 存在する場合は `%USERPROFILE%\Mendix`、それ以外は `%USERPROFILE%` |
+| Linux WinBoat の共有パス | `\\host.lan\Data` |
 
-インストーラーは Linux 共有ディレクトリ内の `.mendimaru/installers` に保存されます。Windows では、共有パスに対する非表示のセキュリティ警告によってインストールが停止しないよう、ファイルをローカルの一時ディレクトリにコピーし、ブロックを解除してから実行します。引用符の影響を避けるため、PowerShell コマンドは UTF-16LE でエンコードして WinBoat RemoteApp に渡します。インストーラーが正常終了し、対象バージョンの `StudioPro.exe` が作成されたことを確認して初めて、インストール完了と判定します。
+インストーラーは設定したワークスペース内の `.mendimaru/installers` に保存されます。ネイティブモードでは署名を検証し、コマンドシェルを使わず Windows の昇格 API で起動します。Linux モードでは UTF-16LE でエンコードした PowerShell コマンドを WinBoat RemoteApp に渡します。プロセスが正常終了し、対象バージョンの `StudioPro.exe` が検出されて初めて完了と判定します。
 
 削除についても同様に、Windows のアンインストーラーが終了し、対象バージョンの `StudioPro.exe` がなくなったことを確認した後、インストール済みバージョンの一覧を自動的に更新します。
 
-Studio Pro の起動ボタンは、Windows プロセスが実際のウィンドウを作成し、FreeRDP が表示できる状態になるまで無効のままです。起動準備中は、重複起動を防ぐため、ほかのバージョンやプロジェクトの起動ボタンもロックされます。起動スクリプトは共有フォルダーに保存し、短い呼び出しコマンドだけを RemoteApp に渡すことで、FreeRDP RAIL のコマンド長制限を超えないようにしています。Windows Script Host が PowerShell を非表示モードで実行します。インストールと削除は、すでに管理者権限を持つ WinBoat セッションのトークンを継承するため、PowerShell コンソールや別の UAC ウィンドウは表示されません。
+Linux WinBoat モードでは、Studio Pro の起動ボタンは Windows プロセスが実際のウィンドウを作成し、FreeRDP が表示できる状態になるまで無効のままです。起動準備中は、重複起動を防ぐため、ほかのバージョンやプロジェクトの起動ボタンもロックされます。起動スクリプトは共有フォルダーに保存し、短い呼び出しコマンドだけを RemoteApp に渡すことで、FreeRDP RAIL のコマンド長制限を超えないようにしています。Windows Script Host が PowerShell を非表示モードで実行します。インストールと削除は、すでに管理者権限を持つ WinBoat セッションのトークンを継承するため、PowerShell コンソールや別の UAC ウィンドウは表示されません。
 
-## 共有ワークスペース
+## Linux 共有ワークスペース
 
 Linux 共有ディレクトリは、WinBoat の Compose ファイルにある `<host path>:/shared` マウントに接続されます。プロジェクト一覧はこのディレクトリだけを走査し、`.git`、`node_modules`、`deployment`、`.mendix-cache`、`.mendimaru` などの生成ディレクトリやキャッシュディレクトリを除外します。
 
@@ -103,7 +119,7 @@ Linux 共有ディレクトリは、WinBoat の Compose ファイルにある `<
 
 ## 開発
 
-開発には Node.js、Rust、Tauri の Linux 向けシステム依存パッケージ、WinBoat、Docker または Podman、FreeRDP 3、Google Chrome または Chromium が必要です。
+開発には Node.js 22.22.2 以降、Rust、ホスト向け Tauri システム依存パッケージが必要です。Linux 統合には WinBoat、Docker または Podman、FreeRDP 3、Chrome／Chromium が追加で必要で、Windows の一覧取得には Edge または Chrome を使用します。
 
 ```bash
 npm install
@@ -117,6 +133,8 @@ npm run check
 npm run tauri build
 ```
 
+`npm run test:e2e` は OS 境界をモックした Windows ネイティブのアプリ全体フローを実行します。Rust の全テストではレジストリ解析、パス隔離、ファイル整合性、Windows 引数のエンコード、UAC／終了コードの失敗、インストールから削除までの fixture ライフサイクルを検証します。CI は Windows と Linux の両方でテストし、Windows の MSI／NSIS バンドルをスモークビルドします。
+
 Rust と TypeScript で共有するシリアライズ済み enum 値は `src/shared/contracts/enumValues.json` で管理します。TypeScript はこのレジストリから union 型を導出し、Rust テストが契約のずれを検出します。
 
 実際の Marketplace と連携するテストは、既定のテスト実行から除外されています。次のコマンドで実行できます。
@@ -128,7 +146,9 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 ## セキュリティ
 
-Windows のユーザー名とパスワードはアプリ設定に保存しません。RemoteApp の起動時に、実行中の WinBoat コンテナから認証情報を読み取り、FreeRDP 3 の標準入力に渡すため、パスワードがプロセス引数やアプリログに露出することはありません。
+Windows ネイティブのコマンドはパスをコマンドシェルへ挿入しません。インストーラー、インストール済みの Studio 実行ファイル、および登録済みの Mendix アンインストーラーには、Mendix または Siemens が発行した有効で信頼済みの Authenticode 署名が必要で、検証前後のハッシュによりファイル置換も検出します。Windows Installer による削除は製品コードへの `/x` 操作と既知の非対話フラグに限定し、登録アンインストーラーは選択したインストールに属し、許可リスト内のフラグだけを使用する必要があります。UAC のキャンセルや失敗終了コードを成功として扱いません。
+
+Linux では Windows のユーザー名とパスワードをアプリ設定に保存しません。RemoteApp 起動時に実行中の WinBoat コンテナから認証情報を読み、FreeRDP 3 の標準入力へ渡します。
 
 ## ライセンス
 

@@ -6,7 +6,8 @@ import type {
 
 export type VersionSupportFilter = "lts" | "mts";
 export type VersionSupportFilters = Record<VersionSupportFilter, boolean>;
-export type WinBoatControlKind = "settings" | "setup" | "open" | "start";
+export type EnvironmentControlKind =
+  "settings" | "setup" | "open" | "start" | "native";
 
 export const EMPTY_VERSION_SUPPORT_FILTERS: VersionSupportFilters = {
   lts: false,

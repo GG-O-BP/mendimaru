@@ -5,6 +5,10 @@ fn default_language_preference() -> String {
     "system".to_string()
 }
 
+fn default_windows_studio_paths() -> Vec<String> {
+    Vec::new()
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ContainerRuntime {
@@ -46,6 +50,8 @@ pub struct AppConfig {
     pub freerdp_binary: String,
     pub mendix_install_root: String,
     pub mendix_data_root: String,
+    #[serde(default = "default_windows_studio_paths")]
+    pub windows_studio_paths: Vec<String>,
     pub startup_timeout_seconds: u64,
 }
 

@@ -70,6 +70,7 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::atomic_write;
+    use crate::models::AppConfig;
     use std::fs;
 
     #[test]
@@ -82,5 +83,31 @@ mod tests {
 
         assert_eq!(fs::read(&target).expect("read config"), b"new");
         assert!(!target.with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn linux_configuration_from_before_native_windows_support_migrates_safely() {
+        let legacy = r#"{
+          "languagePreference": "system",
+          "winboatSetupPending": false,
+          "winboatExecutable": "/usr/bin/winboat",
+          "composeFile": "/home/dev/.winboat/docker-compose.yml",
+          "containerRuntime": "docker",
+          "containerName": "WinBoat",
+          "apiUrl": "http://127.0.0.1:47280",
+          "rdpHost": "127.0.0.1",
+          "rdpPort": 47300,
+          "sharedDirectory": "/home/dev/Mendix",
+          "windowsSharedDirectory": "\\\\host.lan\\Data",
+          "freerdpBinary": "xfreerdp3",
+          "mendixInstallRoot": "C:\\Program Files\\Mendix",
+          "mendixDataRoot": "C:\\ProgramData\\Mendix",
+          "startupTimeoutSeconds": 180
+        }"#;
+
+        let migrated: AppConfig = serde_json::from_str(legacy).expect("legacy config");
+        assert!(migrated.windows_studio_paths.is_empty());
+        assert_eq!(migrated.winboat_executable, "/usr/bin/winboat");
+        assert_eq!(migrated.shared_directory, "/home/dev/Mendix");
     }
 }

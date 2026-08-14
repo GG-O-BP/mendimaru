@@ -19,6 +19,9 @@ const WINBOAT_API_GUEST_PORT: u16 = 7148;
 const WINBOAT_RDP_GUEST_PORT: u16 = 3389;
 
 pub fn detect_config() -> Result<AppConfig, String> {
+    if crate::platform::is_windows_native() {
+        return detect_windows_config();
+    }
     let home = home_directory()?;
     let data_home = data_home_directory(&home);
     let compose_candidates = compose_candidates(&home, &data_home);
@@ -48,6 +51,7 @@ pub fn detect_config() -> Result<AppConfig, String> {
             .unwrap_or_else(|| "xfreerdp3".to_string()),
         mendix_install_root: r"C:\Program Files\Mendix".to_string(),
         mendix_data_root: r"C:\ProgramData\Mendix".to_string(),
+        windows_studio_paths: Vec::new(),
         startup_timeout_seconds: 180,
     };
 
@@ -58,6 +62,42 @@ pub fn detect_config() -> Result<AppConfig, String> {
     }
     apply_runtime_port_detection(&mut config);
     Ok(config)
+}
+
+fn detect_windows_config() -> Result<AppConfig, String> {
+    let home = home_directory()?;
+    let default_workspace = home.join("Mendix");
+    let shared_directory = if default_workspace.is_dir() {
+        default_workspace
+    } else {
+        home
+    };
+    let program_files = env::var_os("ProgramW6432")
+        .or_else(|| env::var_os("ProgramFiles"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
+    let program_data = env::var_os("ProgramData")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+
+    Ok(AppConfig {
+        language_preference: "system".to_string(),
+        winboat_setup_pending: false,
+        winboat_executable: String::new(),
+        compose_file: String::new(),
+        container_runtime: ContainerRuntime::Docker,
+        container_name: String::new(),
+        api_url: String::new(),
+        rdp_host: String::new(),
+        rdp_port: 0,
+        shared_directory: shared_directory.to_string_lossy().to_string(),
+        windows_shared_directory: String::new(),
+        freerdp_binary: String::new(),
+        mendix_install_root: program_files.join("Mendix").to_string_lossy().to_string(),
+        mendix_data_root: program_data.join("Mendix").to_string_lossy().to_string(),
+        windows_studio_paths: Vec::new(),
+        startup_timeout_seconds: 180,
+    })
 }
 
 pub fn path_exists_or_binary(path: &str) -> bool {
@@ -189,10 +229,26 @@ pub fn expand_home(value: &str) -> String {
 }
 
 pub(super) fn home_directory() -> Result<PathBuf, String> {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty())
-        .ok_or_else(|| crate::tr!("error-home-directory"))
+    preferred_home_directory(
+        env::var_os("HOME"),
+        env::var_os("USERPROFILE"),
+        crate::platform::is_windows_native(),
+    )
+    .filter(|path| !path.as_os_str().is_empty())
+    .ok_or_else(|| crate::tr!("error-home-directory"))
+}
+
+fn preferred_home_directory(
+    home: Option<std::ffi::OsString>,
+    user_profile: Option<std::ffi::OsString>,
+    windows_native: bool,
+) -> Option<PathBuf> {
+    let selected = if windows_native {
+        user_profile.or(home)
+    } else {
+        home.or(user_profile)
+    };
+    selected.map(PathBuf::from)
 }
 
 fn apply_runtime_port_detection(config: &mut AppConfig) {
@@ -230,7 +286,23 @@ pub(super) fn home_string() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{inspect_host_port, parse_runtime_port_output};
+    use super::{inspect_host_port, parse_runtime_port_output, preferred_home_directory};
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    #[test]
+    fn selects_the_platform_native_home_variable_first() {
+        let home = Some(OsString::from("/home/dev"));
+        let user_profile = Some(OsString::from(r"C:\Users\dev"));
+        assert_eq!(
+            preferred_home_directory(home.clone(), user_profile.clone(), true),
+            Some(PathBuf::from(r"C:\Users\dev"))
+        );
+        assert_eq!(
+            preferred_home_directory(home, user_profile, false),
+            Some(PathBuf::from("/home/dev"))
+        );
+    }
 
     #[test]
     fn parses_runtime_ports_from_docker_and_podman_output() {

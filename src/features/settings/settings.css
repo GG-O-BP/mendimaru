@@ -156,6 +156,97 @@
   border-radius: 3px;
 }
 
+.custom-studio-paths {
+  display: grid;
+  gap: 14px;
+}
+
+.custom-path-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.custom-path-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.custom-path-heading strong,
+.custom-path-list label > span {
+  color: #334d50;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.custom-path-heading span,
+.custom-path-empty {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.custom-path-empty {
+  margin: 0;
+  padding: 14px;
+  background: #f6f5ef;
+  border: 1px dashed var(--line-strong);
+  border-radius: 3px;
+}
+
+.custom-path-list {
+  display: grid;
+  gap: 9px;
+}
+
+.custom-path-list label {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: center;
+  gap: 15px;
+}
+
+.custom-path-list label > div {
+  display: flex;
+  min-height: 42px;
+  overflow: hidden;
+  background: #f6f5ef;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+}
+
+.custom-path-list label > div:focus-within {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 2px rgba(0, 123, 138, 0.13);
+}
+
+.custom-path-list input {
+  min-width: 0;
+  flex: 1;
+  padding: 0 12px;
+  color: var(--ink);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.custom-path-list button {
+  width: 42px;
+  color: var(--danger);
+  background: var(--surface);
+  border: 0;
+  border-inline-start: 1px solid var(--line-strong);
+  cursor: pointer;
+}
+
+.custom-path-list button:hover {
+  background: var(--danger-soft);
+}
+
 .mount-state {
   display: inline-flex;
   min-height: 31px;
