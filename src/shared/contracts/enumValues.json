@@ -80,6 +80,16 @@
     "stopped": true,
     "unknown": true
   },
+  "studioConnectionState": {
+    "connected": true,
+    "disconnected": true,
+    "native": true
+  },
+  "studioReconnectUnavailable": {
+    "already-connected": true,
+    "window-unavailable": true,
+    "unsupported": true
+  },
   "runtimeState": {
     "starting": true,
     "running": true,

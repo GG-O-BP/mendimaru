@@ -548,11 +548,20 @@ fn secure_identifier(prefix: &str) -> Result<String, BackendError> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioSessionStatus {
+    pub schema_version: String,
     pub session_id: String,
     pub version: String,
     pub state: StudioProcessState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_name: Option<String>,
+    pub connection: StudioConnectionState,
+    pub reconnectable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reconnect_unavailable: Option<StudioReconnectUnavailable>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -562,6 +571,22 @@ pub enum StudioProcessState {
     Running,
     Stopped,
     Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum StudioConnectionState {
+    Connected,
+    Disconnected,
+    Native,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum StudioReconnectUnavailable {
+    AlreadyConnected,
+    WindowUnavailable,
+    Unsupported,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -779,6 +804,22 @@ mod tests {
                 StudioProcessState::Running,
                 StudioProcessState::Stopped,
                 StudioProcessState::Unknown,
+            ],
+        );
+        assert_registry(
+            "studioConnectionState",
+            [
+                StudioConnectionState::Connected,
+                StudioConnectionState::Disconnected,
+                StudioConnectionState::Native,
+            ],
+        );
+        assert_registry(
+            "studioReconnectUnavailable",
+            [
+                StudioReconnectUnavailable::AlreadyConnected,
+                StudioReconnectUnavailable::WindowUnavailable,
+                StudioReconnectUnavailable::Unsupported,
             ],
         );
         assert_registry(

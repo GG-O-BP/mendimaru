@@ -14,13 +14,20 @@ use std::time::Duration;
 pub(super) use reason::localize_windows_reason;
 #[cfg(test)]
 pub(super) use report::parse_install_report;
-pub(super) use report::{WindowsOperationReport, WindowsOperationState};
+pub(super) use report::{
+    WindowsOperationReport, WindowsOperationState, WindowsStudioSessionReport,
+};
 
 #[derive(Debug)]
 pub(crate) struct WindowsOperationFailure {
     pub(crate) message: String,
     pub(crate) exit_code: Option<i32>,
     pub(crate) retryable: bool,
+}
+
+pub(super) struct WindowsOperationOutcome {
+    pub(super) report: WindowsOperationReport,
+    pub(super) remote_app: Option<RemoteAppProcess>,
 }
 
 impl From<String> for WindowsOperationFailure {
@@ -50,7 +57,7 @@ pub(super) async fn run_windows_operation<F>(
     config: &AppConfig,
     request: WindowsOperationRequest<'_>,
     mut on_report: F,
-) -> Result<WindowsOperationReport, WindowsOperationFailure>
+) -> Result<WindowsOperationOutcome, WindowsOperationFailure>
 where
     F: FnMut(&WindowsOperationReport) + Send,
 {
@@ -72,10 +79,13 @@ where
         .await
         {
             Ok(report) => {
-                if !request.keep_remote_app_alive {
+                let remote_app = if request.keep_remote_app_alive {
+                    Some(remote_app)
+                } else {
                     stop_remote_app(&mut remote_app);
-                }
-                return Ok(report);
+                    None
+                };
+                return Ok(WindowsOperationOutcome { report, remote_app });
             }
             Err(error) => {
                 stop_remote_app(&mut remote_app);

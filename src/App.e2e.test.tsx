@@ -13,6 +13,7 @@ import type {
   LocalizationBundle,
   MendixProject,
   OperationRecord,
+  StudioSessionStatus,
   StudioVersion,
   StudioVersionCatalog,
 } from "./domain/types";
@@ -31,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   getEnvironmentDiagnosticReport: vi.fn(),
   exportEnvironmentDiagnosticReport: vi.fn(),
   getInstalledVersions: vi.fn(),
+  getStudioSessions: vi.fn(),
   getDownloadableVersionsCache: vi.fn(),
   fetchDownloadableVersions: vi.fn(),
   getProjects: vi.fn(),
@@ -39,6 +41,8 @@ const mocks = vi.hoisted(() => ({
   beginWinBoatSetup: vi.fn(),
   completeWinBoatSetup: vi.fn(),
   launchStudioPro: vi.fn(),
+  reconnectStudioSession: vi.fn(),
+  stopStudioSession: vi.fn(),
   uninstallStudioPro: vi.fn(),
   installStudioPro: vi.fn(),
   cancelStudioDownload: vi.fn(),
@@ -67,6 +71,7 @@ vi.mock("./api/tauri", () => ({
     getEnvironmentDiagnosticReport: mocks.getEnvironmentDiagnosticReport,
     exportEnvironmentDiagnosticReport: mocks.exportEnvironmentDiagnosticReport,
     getInstalledVersions: mocks.getInstalledVersions,
+    getStudioSessions: mocks.getStudioSessions,
     getDownloadableVersionsCache: mocks.getDownloadableVersionsCache,
     fetchDownloadableVersions: mocks.fetchDownloadableVersions,
     getProjects: mocks.getProjects,
@@ -75,6 +80,8 @@ vi.mock("./api/tauri", () => ({
     beginWinBoatSetup: mocks.beginWinBoatSetup,
     completeWinBoatSetup: mocks.completeWinBoatSetup,
     launchStudioPro: mocks.launchStudioPro,
+    reconnectStudioSession: mocks.reconnectStudioSession,
+    stopStudioSession: mocks.stopStudioSession,
     uninstallStudioPro: mocks.uninstallStudioPro,
     installStudioPro: mocks.installStudioPro,
     cancelStudioDownload: mocks.cancelStudioDownload,
@@ -199,10 +206,12 @@ const localization: LocalizationBundle = {
 };
 
 let installed: StudioVersion[];
+let sessions: StudioSessionStatus[];
 
 beforeEach(() => {
   vi.clearAllMocks();
   installed = [removableStudio, portableStudio];
+  sessions = [];
   mocks.getConfig.mockResolvedValue({ ...config });
   mocks.getLocalization.mockResolvedValue(localization);
   mocks.setLanguagePreference.mockResolvedValue(localization);
@@ -219,10 +228,26 @@ beforeEach(() => {
   );
   mocks.exportEnvironmentDiagnosticReport.mockResolvedValue(true);
   mocks.getInstalledVersions.mockImplementation(async () => [...installed]);
+  mocks.getStudioSessions.mockImplementation(async () => [...sessions]);
   mocks.getDownloadableVersionsCache.mockResolvedValue(catalog);
   mocks.fetchDownloadableVersions.mockResolvedValue(catalog);
   mocks.getProjects.mockResolvedValue([project]);
   mocks.launchStudioPro.mockResolvedValue(undefined);
+  mocks.reconnectStudioSession.mockImplementation(async (sessionId: string) => {
+    sessions = sessions.map((session) =>
+      session.sessionId === sessionId
+        ? {
+            ...session,
+            connection: "connected",
+            reconnectable: false,
+            reconnectUnavailable: "already-connected",
+          }
+        : session,
+    );
+  });
+  mocks.stopStudioSession.mockImplementation(async (sessionId: string) => {
+    sessions = sessions.filter((session) => session.sessionId !== sessionId);
+  });
   mocks.uninstallStudioPro.mockImplementation(async (version: string) => {
     installed = installed.filter((item) => item.version !== version);
   });
@@ -304,6 +329,140 @@ describe("native Windows application E2E", () => {
     await waitFor(() =>
       expect(mocks.uninstallStudioPro).toHaveBeenCalledWith("11.12.2"),
     );
+  });
+
+  it("manages exact running sessions across versions with reconnect and confirmed safe close", async () => {
+    sessions = [
+      {
+        schemaVersion: "1.0.0",
+        sessionId: "studio-4242-638908236000000000",
+        version: "11.12.2",
+        state: "running",
+        processId: 4242,
+        startedAt: "2026-08-15T03:00:00Z",
+        projectName: "Orders",
+        connection: "disconnected",
+        reconnectable: true,
+      },
+      {
+        schemaVersion: "1.0.0",
+        sessionId: "studio-5151-638908200000000000",
+        version: "10.24.9",
+        state: "running",
+        processId: 5151,
+        startedAt: "2026-08-15T02:00:00Z",
+        connection: "connected",
+        reconnectable: false,
+        reconnectUnavailable: "already-connected",
+      },
+    ];
+
+    await renderReadyApp();
+    expect(await screen.findByText("Orders")).toBeVisible();
+    expect(screen.getAllByText("studio-session-count")).toHaveLength(2);
+    expect(screen.getByText("studio-session-disconnected")).toBeVisible();
+    expect(screen.getByText("studio-session-connected")).toBeVisible();
+
+    const ordersRow = screen
+      .getByText("Orders")
+      .closest<HTMLElement>(".studio-session");
+    expect(ordersRow).not.toBeNull();
+    const ordersCard = ordersRow!.closest("article");
+    expect(ordersCard).not.toBeNull();
+    expect(
+      within(ordersCard!).getByTitle("running-version-title"),
+    ).toBeDisabled();
+
+    fireEvent.click(
+      within(ordersRow!).getByRole("button", {
+        name: "action-reconnect-session",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.reconnectStudioSession).toHaveBeenCalledWith(
+        "studio-4242-638908236000000000",
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        within(ordersRow!).getByTitle("session-reconnect-already-connected"),
+      ).toBeDisabled(),
+    );
+
+    fireEvent.click(within(ordersRow!).getByTitle("action-stop-session"));
+    const closeDialog = await screen.findByRole("dialog");
+    expect(mocks.stopStudioSession).not.toHaveBeenCalled();
+    expect(
+      within(closeDialog).getByText("confirm-stop-session-description"),
+    ).toBeVisible();
+    fireEvent.click(
+      within(closeDialog).getByRole("button", {
+        name: "action-stop-session",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.stopStudioSession).toHaveBeenCalledWith(
+        "studio-4242-638908236000000000",
+      ),
+    );
+    await waitFor(() => expect(screen.queryByText("Orders")).toBeNull());
+    expect(
+      within(ordersCard!).getByTitle("remove-version-title"),
+    ).toBeEnabled();
+
+    const connectedRow = screen
+      .getByText("studio-session-connected")
+      .closest<HTMLElement>(".studio-session");
+    expect(connectedRow).not.toBeNull();
+    expect(
+      within(connectedRow!).getByTitle("session-reconnect-already-connected"),
+    ).toBeDisabled();
+  });
+
+  it("refreshes away an already-ended session after a targeted close fails", async () => {
+    const endedId = "studio-6161-638908164000000000";
+    sessions = [
+      {
+        schemaVersion: "1.0.0",
+        sessionId: endedId,
+        version: "11.12.2",
+        state: "running",
+        processId: 6161,
+        startedAt: "2026-08-15T01:00:00Z",
+        projectName: "EndedOrders",
+        connection: "native",
+        reconnectable: true,
+      },
+    ];
+    mocks.stopStudioSession.mockImplementationOnce(async () => {
+      sessions = [];
+      throw {
+        code: "operation_failed",
+        message: "The selected Studio Pro session has already ended.",
+      };
+    });
+
+    await renderReadyApp();
+    const row = (await screen.findByText("EndedOrders")).closest<HTMLElement>(
+      ".studio-session",
+    );
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row!).getByTitle("action-stop-session"));
+    fireEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "action-stop-session",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.stopStudioSession).toHaveBeenCalledWith(endedId),
+    );
+    expect(
+      await screen.findByText(
+        "The selected Studio Pro session has already ended.",
+      ),
+    ).toBeVisible();
+    await waitFor(() => expect(screen.queryByText("EndedOrders")).toBeNull());
   });
 
   it("forces a fresh installer download only after explicit confirmation", async () => {
@@ -639,11 +798,17 @@ describe("Linux environment diagnostic E2E", () => {
     };
     mocks.getConfig.mockResolvedValue(linuxConfig);
     mocks.getEnvironmentStatus.mockResolvedValue(partialStatus);
+    mocks.getStudioSessions.mockRejectedValue({
+      code: "precondition_failed",
+      message: "WinBoat Guest Server is offline.",
+    });
     mocks.startWinBoatWindows.mockResolvedValue(undefined);
 
     render(<App />);
     await screen.findByText("route-linux");
     expect(screen.getByText("connection-offline")).toBeVisible();
+    await waitFor(() => expect(mocks.getStudioSessions).toHaveBeenCalled());
+    expect(screen.queryByText("studio-session-count")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /nav-settings/ }));
     await screen.findByText("diagnostics-title");
 

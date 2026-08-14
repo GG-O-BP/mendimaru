@@ -20,8 +20,9 @@ pub(crate) use localization::{
 pub(crate) use projects::{get_projects, open_folder};
 pub(crate) use studio::{
     cancel_studio_download, clear_operation_history, fetch_downloadable_versions,
-    get_downloadable_versions_cache, get_installed_versions, get_operations, install_studio_pro,
-    launch_studio_pro, open_operation_logs, retry_operation, uninstall_studio_pro,
+    get_downloadable_versions_cache, get_installed_versions, get_operations, get_studio_sessions,
+    install_studio_pro, launch_studio_pro, open_operation_logs, reconnect_studio_session,
+    retry_operation, stop_studio_session, uninstall_studio_pro,
 };
 
 pub(super) type CommandResult<T> = Result<T, CommandError>;

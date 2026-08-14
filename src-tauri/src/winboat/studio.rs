@@ -50,10 +50,11 @@ pub async fn launch_studio(
         project_argument.as_deref(),
         &windows_report_path,
         &config.mendix_install_root,
+        version,
     );
     let command = write_command_script(config, operation_id, &script)?;
     let operation = crate::tr!("operation-studio-launch");
-    let report = run_windows_operation(
+    let mut outcome = run_windows_operation(
         config,
         WindowsOperationRequest {
             script_path: &command.path,
@@ -67,9 +68,23 @@ pub async fn launch_studio(
         |_| {},
     )
     .await?;
-    if report.executable_path.as_deref().is_none_or(str::is_empty) {
+    if outcome
+        .report
+        .executable_path
+        .as_deref()
+        .is_none_or(str::is_empty)
+    {
+        if let Some(mut client) = outcome.remote_app.take() {
+            let _ = client.kill();
+            let _ = client.wait();
+        }
         return Err(crate::tr!("error-launch-path-missing").into());
     }
+    let client = outcome
+        .remote_app
+        .take()
+        .ok_or_else(|| WindowsOperationFailure::from("RemoteApp was not retained".to_string()))?;
+    super::sessions::register_launch_client(version, &outcome.report.sessions, client)?;
     Ok(())
 }
 
@@ -115,7 +130,7 @@ where
         estimated: false,
     });
     let mut progress_state = InstallProgressState::default();
-    let report = run_windows_operation(
+    let outcome = run_windows_operation(
         config,
         WindowsOperationRequest {
             script_path: &command.path,
@@ -138,7 +153,8 @@ where
         },
     )
     .await?;
-    let executable_path = report
+    let executable_path = outcome
+        .report
         .executable_path
         .filter(|path| !path.is_empty())
         .ok_or_else(|| crate::tr!("error-install-path-missing"))?;
@@ -320,12 +336,12 @@ fn paths_refer_to_same_location(left: &str, right: &str) -> bool {
     }
 }
 
-struct PreparedCommand {
-    path: PathBuf,
-    sha256: String,
+pub(super) struct PreparedCommand {
+    pub(super) path: PathBuf,
+    pub(super) sha256: String,
 }
 
-fn write_command_script(
+pub(super) fn write_command_script(
     config: &AppConfig,
     name: &str,
     content: &str,
@@ -345,7 +361,10 @@ fn write_command_script(
     Ok(PreparedCommand { path, sha256 })
 }
 
-fn secure_shared_directory(config: &AppConfig, relative: &str) -> Result<PathBuf, String> {
+pub(super) fn secure_shared_directory(
+    config: &AppConfig,
+    relative: &str,
+) -> Result<PathBuf, String> {
     let shared = Path::new(&config.shared_directory);
     let shared_metadata = fs::symlink_metadata(shared)
         .map_err(|error| crate::tr!("error-secure-shared-directory", error = error))?;

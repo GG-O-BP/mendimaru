@@ -52,48 +52,6 @@ function Get-RunningStudioPro {
     })
 }
 
-function Close-RunningStudioPro {
-    param([string]$ExecutablePath)
-
-    $running = @(Get-RunningStudioPro $ExecutablePath)
-    if ($running.Count -eq 0) { return }
-
-    foreach ($studioProcess in $running) {
-        if ($studioProcess.MainWindowHandle -ne [IntPtr]::Zero) {
-            $null = $studioProcess.CloseMainWindow()
-        }
-    }
-
-    $deadline = (Get-Date).AddSeconds(20)
-    do {
-        Start-Sleep -Milliseconds 500
-        $running = @(Get-RunningStudioPro $ExecutablePath)
-    } while ($running.Count -gt 0 -and (Get-Date) -lt $deadline)
-
-    if ($running.Count -gt 0) {
-        # The idle Sign In/Select App shells sometimes ignore WM_CLOSE. They
-        # cannot contain an unsaved project, so they are safe to terminate.
-        # Never force-close an actual project window.
-        $safeWindowTitles = @('Mendix Studio Pro - Sign In', 'Mendix Studio Pro - Select App')
-        $unsafeProcesses = @($running | Where-Object {
-            $_.Refresh()
-            -not [string]::IsNullOrWhiteSpace($_.MainWindowTitle) -and
-                $safeWindowTitles -notcontains $_.MainWindowTitle
-        })
-        if ($unsafeProcesses.Count -gt 0) {
-            throw 'MENDIMARU_PROJECT_STILL_OPEN'
-        }
-        foreach ($studioProcess in $running) {
-            Stop-Process -Id $studioProcess.Id -Force
-        }
-        Start-Sleep -Seconds 2
-        $running = @(Get-RunningStudioPro $ExecutablePath)
-        if ($running.Count -gt 0) {
-            throw 'MENDIMARU_STUDIO_STILL_RUNNING'
-        }
-    }
-}
-
 try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal] $identity
@@ -104,7 +62,9 @@ try {
     $studioPro = Find-StudioPro
     if ($null -ne $studioPro) {
         $null = Assert-MendimaruTrustedExecutable -Path $studioPro -Root $installRoot
-        Close-RunningStudioPro $studioPro
+        if (@(Get-RunningStudioPro $studioPro).Count -gt 0) {
+            throw 'MENDIMARU_STUDIO_RUNNING'
+        }
     }
 
     $folder = Get-ChildItem -LiteralPath $dataRoot -Directory -ErrorAction SilentlyContinue |

@@ -88,9 +88,11 @@ executable that happens to exist. A supported action may still return a
 currently available.
 
 The current Linux+WinBoat and Windows native adapters support Studio `detect`,
-`install`, `uninstall`, and `start`. Studio session control, Runtime, UI
-automation, and browser execution remain explicitly unsupported until their
-own issues implement those adapters. `mac-native` is registered but reports all
+`install`, `uninstall`, `start`, `status`, and `stop`. Session identity binds an
+exact process ID to its process start time; adapters also verify the current
+Windows user and the executable path of the detected installation before a
+session can be shown or closed. Runtime, UI automation, and browser execution
+remain explicitly unsupported. `mac-native` is registered but reports all
 operations as unsupported until issue #11 supplies the native implementation.
 
 ## Errors, sessions, and artifacts
@@ -103,6 +105,14 @@ same structured limitation represented by capability discovery.
 `SessionDescriptor` embeds an immutable `CapabilitySnapshot`; later environment
 changes do not rewrite what the caller was told at session creation. Session
 and snapshot IDs use 128 bits of operating-system randomness.
+
+`StudioSessionStatus` is the successful Studio `status` payload. It includes
+the Studio version, process identity, optional start time and project basename,
+connection state, and a machine-readable reconnect availability reason. No
+project path or Windows command line crosses the adapter boundary. Before this
+surface was implemented, both production adapters reported `studio.status` and
+`studio.stop` as unsupported and emitted no successful status payload, so its
+initial supported shape remains within the current `1.0.0` contract.
 
 `ArtifactDescriptor` links every artifact to a session and backend. Local
 location, media type, digest, size, and backend diagnostic reference are
@@ -163,3 +173,13 @@ cargo test --manifest-path src-tauri/Cargo.toml \
 The test normalizes that exact version to absent, installs it through the common
 adapter, verifies all progress phases and exact-version detection, launches a
 real Studio window, uninstalls it officially, and verifies it is absent again.
+The non-destructive live session suite can run against an existing WinBoat VM:
+
+```bash
+cargo test --manifest-path src-tauri/Cargo.toml \
+  winboat::sessions::tests::live_e2e_lists_sessions_and_rejects_an_ended_identity \
+  -- --ignored --exact --nocapture --test-threads=1
+```
+
+It queries current-user sessions through the authenticated RemoteApp transport
+and verifies that reconnect and close both reject a stale PID/start-time pair.

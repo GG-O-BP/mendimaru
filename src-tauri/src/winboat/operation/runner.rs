@@ -259,6 +259,7 @@ mod tests {
             exit_code: Some(1603),
             executable_path: None,
             error: Some("InstallerExitCode".into()),
+            sessions: Vec::new(),
         };
 
         let error = failed_operation(&report, "installing Studio Pro");

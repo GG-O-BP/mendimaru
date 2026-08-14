@@ -4,6 +4,7 @@ mod operation;
 mod remote_app;
 mod scripts;
 mod security;
+mod sessions;
 mod studio;
 
 pub use client::installed_versions;
@@ -11,6 +12,8 @@ pub use container::{
     environment_status, guest_is_online, open_winboat, recreate_container, start_container,
 };
 pub(crate) use operation::WindowsOperationFailure;
+pub(crate) use sessions::stop as stop_studio_session;
+pub(crate) use sessions::{list as studio_sessions, reconnect as reconnect_studio_session};
 pub use studio::{install_studio, launch_studio, launch_uninstaller, open_linux_folder};
 
 #[cfg(test)]
@@ -173,7 +176,9 @@ mod tests {
         let mut report_temporary = report_path.as_os_str().to_os_string();
         report_temporary.push(".tmp");
         let _ = std::fs::remove_file(PathBuf::from(report_temporary));
-        result.map_err(|error| error.message)
+        result
+            .map(|outcome| outcome.report)
+            .map_err(|error| error.message)
     }
 
     struct DirectoryCleanup(PathBuf);
@@ -263,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn uninstaller_waits_for_exit_and_studio_executable_removal() {
+    fn uninstaller_refuses_running_studio_and_waits_for_verified_removal() {
         let script = uninstall_script(
             r"C:\ProgramData\Mendix",
             r"C:\Program Files\Mendix",
@@ -274,13 +279,8 @@ mod tests {
         assert!(script.contains("-Wait -PassThru"));
         assert!(!script.contains("-Verb RunAs"));
         assert!(script.contains("WindowsBuiltInRole]::Administrator"));
-        assert!(script.contains("CloseMainWindow()"));
-        assert!(script.contains("Close-RunningStudioPro $studioPro"));
-        assert!(script.contains("Mendix Studio Pro - Sign In"));
-        assert!(script.contains("Mendix Studio Pro - Select App"));
-        assert!(script.contains("Stop-Process -Id $studioProcess.Id -Force"));
-        assert!(script.contains("MENDIMARU_PROJECT_STILL_OPEN"));
-        assert!(script.contains("MENDIMARU_STUDIO_STILL_RUNNING"));
+        assert!(script.contains("throw 'MENDIMARU_STUDIO_RUNNING'"));
+        assert!(!script.contains("Stop-Process"));
         assert!(script.contains("MENDIMARU_UNINSTALL_METADATA_MISSING"));
         assert!(!script.contains("Remove-Item -LiteralPath $versionFolder -Recurse -Force"));
         assert!(script.contains("Assert-MendimaruTrustedExecutable -Path $uninstaller"));
@@ -332,6 +332,9 @@ mod tests {
 
         let localized = localize_windows_reason("MENDIMARU_ADMIN_REQUIRED");
         assert!(!localized.contains("MENDIMARU_ADMIN_REQUIRED"));
+        let localized = localize_windows_reason("MENDIMARU_STUDIO_SESSION_ENDED");
+        assert!(localized.contains("already ended"));
+        assert!(!localized.contains("MENDIMARU_STUDIO_SESSION_ENDED"));
     }
 
     #[test]
@@ -341,14 +344,20 @@ mod tests {
             Some(r"\\host.lan\Data\Orders\Orders.mpr"),
             r"\\host.lan\Data\.mendimaru\operations\launch.json",
             r"C:\Program Files\Mendix",
+            "11.13.0",
         );
 
         assert!(script.contains("MainWindowHandle -ne [IntPtr]::Zero"));
         assert!(script.contains("Start-Process -FilePath $executable"));
         assert!(script.contains("Start-Sleep -Milliseconds 1200"));
         assert!(script.contains("Get-StudioProcesses"));
-        assert!(script.contains("$studioProcesses.Count -gt 0"));
-        assert!(script.contains("TotalSeconds -ge 15"));
+        assert!(script.contains("ProcessSecurity]::IsCurrentUser"));
+        assert!(script.contains("$baseline.Add"));
+        assert!(script.contains("$record.ParentProcessId -eq $LaunchProcessId"));
+        assert!(script.contains("$current.StartTime.ToUniversalTime().Ticks"));
+        assert!(!script.contains("$studioProcesses.Count -gt 0"));
+        assert!(script.contains("sessionId = $sessionId"));
+        assert!(script.contains("version = '11.13.0'"));
         assert!(script.contains(r"'\\host.lan\Data\Orders\Orders.mpr'"));
         assert!(!script.contains("__EXECUTABLE_PATH__"));
     }

@@ -54,6 +54,14 @@ pub trait StudioBackend: BackendIdentity {
         unsupported(self.backend_id(), CapabilityId::StudioStatus)
     }
 
+    fn sessions(&self) -> BackendFuture<'_, Vec<StudioSessionStatus>> {
+        unsupported(self.backend_id(), CapabilityId::StudioStatus)
+    }
+
+    fn reconnect<'a>(&'a self, _session_id: &'a str) -> BackendFuture<'a, ()> {
+        unsupported(self.backend_id(), CapabilityId::StudioStatus)
+    }
+
     fn stop<'a>(&'a self, _session_id: &'a str) -> BackendFuture<'a, ()> {
         unsupported(self.backend_id(), CapabilityId::StudioStop)
     }
@@ -212,6 +220,8 @@ fn capability_for(backend: BackendId, id: CapabilityId, architecture: &str) -> C
                 | CapabilityId::StudioInstall
                 | CapabilityId::StudioUninstall
                 | CapabilityId::StudioStart
+                | CapabilityId::StudioStatus
+                | CapabilityId::StudioStop
         )
     {
         return Capability::supported(id, required_permissions(backend, id));
@@ -226,6 +236,8 @@ fn capability_for(backend: BackendId, id: CapabilityId, architecture: &str) -> C
                 | CapabilityId::StudioInstall
                 | CapabilityId::StudioUninstall
                 | CapabilityId::StudioStart
+                | CapabilityId::StudioStatus
+                | CapabilityId::StudioStop
         )
     {
         limitation.message =
@@ -239,6 +251,8 @@ fn capability_for(backend: BackendId, id: CapabilityId, architecture: &str) -> C
                 | CapabilityId::StudioInstall
                 | CapabilityId::StudioUninstall
                 | CapabilityId::StudioStart
+                | CapabilityId::StudioStatus
+                | CapabilityId::StudioStop
         )
     {
         limitation.message =
@@ -259,9 +273,13 @@ fn required_permissions(backend: BackendId, id: CapabilityId) -> &'static [&'sta
             &["winboat-interactive-session", "windows-administrator"]
         }
         (BackendId::LinuxWinboat, CapabilityId::StudioStart) => &["winboat-interactive-session"],
+        (BackendId::LinuxWinboat, CapabilityId::StudioStatus)
+        | (BackendId::LinuxWinboat, CapabilityId::StudioStop) => &["winboat-interactive-session"],
         (BackendId::WindowsNative, CapabilityId::StudioInstall)
         | (BackendId::WindowsNative, CapabilityId::StudioUninstall) => &["windows-uac-consent"],
         (BackendId::WindowsNative, CapabilityId::StudioStart) => &["interactive-desktop-session"],
+        (BackendId::WindowsNative, CapabilityId::StudioStatus)
+        | (BackendId::WindowsNative, CapabilityId::StudioStop) => &["interactive-desktop-session"],
         (BackendId::MacNative, CapabilityId::StudioInstall)
         | (BackendId::MacNative, CapabilityId::StudioUninstall) => {
             &["macos-administrator-approval"]
@@ -374,6 +392,52 @@ impl StudioBackend for LinuxWinboatBackend<'_> {
                 })
         })
     }
+
+    fn sessions(&self) -> BackendFuture<'_, Vec<StudioSessionStatus>> {
+        Box::pin(async move {
+            crate::winboat::studio_sessions(self.config)
+                .await
+                .map_err(|error| {
+                    winboat_operation_error(self.backend_id(), CapabilityId::StudioStatus, error)
+                })
+        })
+    }
+
+    fn status<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, StudioSessionStatus> {
+        Box::pin(async move {
+            self.sessions()
+                .await?
+                .into_iter()
+                .find(|session| session.session_id == session_id)
+                .ok_or_else(|| {
+                    BackendError::operation(
+                        self.backend_id(),
+                        CapabilityId::StudioStatus,
+                        crate::tr!("error-script-studio-session-ended"),
+                    )
+                })
+        })
+    }
+
+    fn reconnect<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, ()> {
+        Box::pin(async move {
+            crate::winboat::reconnect_studio_session(self.config, session_id)
+                .await
+                .map_err(|error| {
+                    winboat_operation_error(self.backend_id(), CapabilityId::StudioStatus, error)
+                })
+        })
+    }
+
+    fn stop<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, ()> {
+        Box::pin(async move {
+            crate::winboat::stop_studio_session(self.config, session_id)
+                .await
+                .map_err(|error| {
+                    winboat_operation_error(self.backend_id(), CapabilityId::StudioStop, error)
+                })
+        })
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -465,6 +529,48 @@ impl StudioBackend for WindowsNativeBackend<'_> {
                     retryable_operation_error(self.backend_id(), CapabilityId::StudioStart, error)
                 },
             )
+        })
+    }
+
+    fn sessions(&self) -> BackendFuture<'_, Vec<StudioSessionStatus>> {
+        Box::pin(async move {
+            super::windows_native::studio_sessions(self.config).map_err(|error| {
+                retryable_operation_error(self.backend_id(), CapabilityId::StudioStatus, error)
+            })
+        })
+    }
+
+    fn status<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, StudioSessionStatus> {
+        Box::pin(async move {
+            self.sessions()
+                .await?
+                .into_iter()
+                .find(|session| session.session_id == session_id)
+                .ok_or_else(|| {
+                    BackendError::operation(
+                        self.backend_id(),
+                        CapabilityId::StudioStatus,
+                        crate::tr!("error-script-studio-session-ended"),
+                    )
+                })
+        })
+    }
+
+    fn reconnect<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, ()> {
+        Box::pin(async move {
+            super::windows_native::reconnect_studio_session(self.config, session_id).map_err(
+                |error| {
+                    retryable_operation_error(self.backend_id(), CapabilityId::StudioStatus, error)
+                },
+            )
+        })
+    }
+
+    fn stop<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, ()> {
+        Box::pin(async move {
+            super::windows_native::stop_studio_session(self.config, session_id).map_err(|error| {
+                retryable_operation_error(self.backend_id(), CapabilityId::StudioStop, error)
+            })
         })
     }
 }
@@ -659,6 +765,8 @@ mod tests {
                         | CapabilityId::StudioInstall
                         | CapabilityId::StudioUninstall
                         | CapabilityId::StudioStart
+                        | CapabilityId::StudioStatus
+                        | CapabilityId::StudioStop
                 );
                 assert_eq!(manifest.supports(capability), expected);
             }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorText } from "../../api/errors";
 import { tauriApi } from "../../api/tauri";
-import type { StudioVersion } from "../../domain/types";
+import type { StudioSessionStatus, StudioVersion } from "../../domain/types";
 import type { InstalledVersionsDependencies } from "./dependencies";
 
 export function useInstalledVersions({
@@ -15,7 +15,26 @@ export function useInstalledVersions({
   const [installedVersions, setInstalledVersions] = useState<StudioVersion[]>(
     [],
   );
+  const [sessions, setSessions] = useState<StudioSessionStatus[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const sessionRequest = useRef(0);
   const launchLock = useRef(false);
+
+  const refreshSessions = useCallback(
+    async (silent = false) => {
+      const request = ++sessionRequest.current;
+      setSessionsLoading(true);
+      try {
+        const next = await tauriApi.getStudioSessions();
+        if (request === sessionRequest.current) setSessions(next);
+      } catch (error) {
+        if (!silent) onWarning(errorText(error, t));
+      } finally {
+        if (request === sessionRequest.current) setSessionsLoading(false);
+      }
+    },
+    [onWarning, t],
+  );
 
   const refreshInstalled = useCallback(
     async (silent = false) => {
@@ -24,8 +43,9 @@ export function useInstalledVersions({
       } catch (error) {
         if (!silent) onWarning(errorText(error, t));
       }
+      await refreshSessions(silent);
     },
-    [onWarning, t],
+    [onWarning, refreshSessions, t],
   );
 
   useEffect(() => {
@@ -41,7 +61,11 @@ export function useInstalledVersions({
       if (launchLock.current) return Promise.resolve();
       launchLock.current = true;
       return runAction(`launch-${version.version}`, async () => {
-        await tauriApi.launchStudioPro(version.version, projectMprPath);
+        try {
+          await tauriApi.launchStudioPro(version.version, projectMprPath);
+        } finally {
+          await refreshSessions(true);
+        }
         notify(
           "success",
           t("toast-studio-opened", { version: version.version }),
@@ -53,7 +77,47 @@ export function useInstalledVersions({
         launchLock.current = false;
       });
     },
-    [notify, runAction, t],
+    [notify, refreshSessions, runAction, t],
+  );
+
+  const reconnectSession = useCallback(
+    (session: StudioSessionStatus) =>
+      runAction(`reconnect-${session.sessionId}`, async () => {
+        try {
+          await tauriApi.reconnectStudioSession(session.sessionId);
+        } finally {
+          await refreshSessions(true);
+        }
+        notify(
+          "success",
+          t("toast-session-reconnected", { version: session.version }),
+        );
+      }),
+    [notify, refreshSessions, runAction, t],
+  );
+
+  const askStopSession = useCallback(
+    (session: StudioSessionStatus) => {
+      requestConfirmation({
+        title: t("confirm-stop-session-title", { version: session.version }),
+        description: t("confirm-stop-session-description"),
+        confirmLabel: t("action-stop-session"),
+        danger: true,
+        action: () =>
+          runAction(`stop-${session.sessionId}`, async () => {
+            try {
+              await tauriApi.stopStudioSession(session.sessionId);
+            } finally {
+              await refreshSessions(true);
+            }
+            notify(
+              "success",
+              t("toast-session-stopped", { version: session.version }),
+            );
+          }),
+      });
+    },
+    [notify, refreshSessions, requestConfirmation, runAction, t],
   );
 
   const askUninstall = useCallback(
@@ -90,9 +154,14 @@ export function useInstalledVersions({
   return {
     installedVersions,
     installedSet,
+    sessions,
+    sessionsLoading,
     isLaunching: hasBusyPrefix("launch-"),
     refreshInstalled,
+    refreshSessions,
     launchVersion,
+    reconnectSession,
+    askStopSession,
     askUninstall,
   };
 }

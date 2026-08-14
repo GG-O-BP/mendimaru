@@ -1,7 +1,9 @@
 mod discovery;
 mod process;
 mod security;
+mod sessions;
 
+use crate::contracts::StudioSessionStatus;
 use crate::models::{
     AppConfig, ContainerStatus, EnvironmentDiagnostic, EnvironmentDiagnosticAction,
     EnvironmentDiagnosticId, EnvironmentDiagnosticStatus, EnvironmentStatus, StudioInstallPhase,
@@ -96,6 +98,21 @@ pub(super) fn installed_versions(config: &AppConfig) -> Result<Vec<StudioVersion
         .collect())
 }
 
+pub(super) fn studio_sessions(config: &AppConfig) -> Result<Vec<StudioSessionStatus>, String> {
+    ensure_supported()?;
+    sessions::list(config)
+}
+
+pub(super) fn reconnect_studio_session(config: &AppConfig, session_id: &str) -> Result<(), String> {
+    ensure_supported()?;
+    sessions::reconnect(config, session_id)
+}
+
+pub(super) fn stop_studio_session(config: &AppConfig, session_id: &str) -> Result<(), String> {
+    ensure_supported()?;
+    sessions::stop(config, session_id)
+}
+
 pub(super) fn verify_installer(path: &Path) -> Result<String, String> {
     ensure_supported()?;
     security::verify_mendix_executable(path)
@@ -160,6 +177,12 @@ where
 {
     ensure_supported()?;
     super::validate_version(version)?;
+    if let Some(record) = discovery::find(config, version) {
+        let executable = Path::new(&record.studio.executable_path);
+        if process::studio_is_running(executable)? {
+            return Err(crate::tr!("error-native-studio-running"));
+        }
+    }
     install_lifecycle(
         version,
         installer_path,

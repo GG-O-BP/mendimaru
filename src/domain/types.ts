@@ -70,6 +70,25 @@ export interface SessionDescriptor {
   capabilitySnapshot: CapabilitySnapshot;
 }
 
+export type StudioProcessState = keyof typeof enumValues.studioProcessState;
+export type StudioConnectionState =
+  keyof typeof enumValues.studioConnectionState;
+export type StudioReconnectUnavailable =
+  keyof typeof enumValues.studioReconnectUnavailable;
+
+export interface StudioSessionStatus {
+  schemaVersion: string;
+  sessionId: string;
+  version: string;
+  state: StudioProcessState;
+  processId?: number;
+  startedAt?: string;
+  projectName?: string;
+  connection: StudioConnectionState;
+  reconnectable: boolean;
+  reconnectUnavailable?: StudioReconnectUnavailable;
+}
+
 export type ArtifactKind = keyof typeof enumValues.artifactKind;
 
 export interface ArtifactDescriptor {
