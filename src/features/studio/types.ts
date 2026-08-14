@@ -39,7 +39,7 @@ export interface CatalogModel {
   onToggleSupportFilter: (value: VersionSupportFilter) => void;
   onRefresh: () => void;
   onLoadMore: () => void;
-  onInstall: (version: DownloadableVersion) => void;
+  onInstall: (version: DownloadableVersion, forceRedownload?: boolean) => void;
 }
 
 export interface InstallationModel {

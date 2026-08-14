@@ -252,7 +252,7 @@ describe("native Windows application E2E", () => {
       }),
     );
     await waitFor(() =>
-      expect(mocks.installStudioPro).toHaveBeenCalledWith("11.13.0"),
+      expect(mocks.installStudioPro).toHaveBeenCalledWith("11.13.0", false),
     );
 
     const installedCard = screen.getByText("11.12.2").closest("article");
@@ -264,6 +264,27 @@ describe("native Windows application E2E", () => {
     );
     await waitFor(() =>
       expect(mocks.uninstallStudioPro).toHaveBeenCalledWith("11.12.2"),
+    );
+  });
+
+  it("forces a fresh installer download only after explicit confirmation", async () => {
+    await renderReadyApp();
+
+    fireEvent.click(screen.getByTitle("action-force-redownload"));
+    const redownloadDialog = await screen.findByRole("dialog");
+    expect(
+      within(redownloadDialog).getByText(
+        "confirm-force-redownload-description",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(redownloadDialog).getByRole("button", {
+        name: "action-force-redownload-install",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.installStudioPro).toHaveBeenCalledWith("11.13.0", true),
     );
   });
 

@@ -57,11 +57,24 @@ export function useStudioInstallation({
   }, [downloadProgress?.state, downloadProgress?.version]);
 
   const askInstall = useCallback(
-    (version: DownloadableVersion) => {
+    (version: DownloadableVersion, forceRedownload = false) => {
       requestConfirmation({
-        title: t("confirm-install-title", { version: version.version }),
-        description: t("confirm-install-description"),
-        confirmLabel: t("action-download-install"),
+        title: t(
+          forceRedownload
+            ? "confirm-force-redownload-title"
+            : "confirm-install-title",
+          { version: version.version },
+        ),
+        description: t(
+          forceRedownload
+            ? "confirm-force-redownload-description"
+            : "confirm-install-description",
+        ),
+        confirmLabel: t(
+          forceRedownload
+            ? "action-force-redownload-install"
+            : "action-download-install",
+        ),
         action: () =>
           runAction(`install-${version.version}`, async () => {
             setDownloadProgress({
@@ -73,7 +86,7 @@ export function useStudioInstallation({
               message: t("progress-starting"),
             });
             try {
-              await tauriApi.installStudioPro(version.version);
+              await tauriApi.installStudioPro(version.version, forceRedownload);
               notify(
                 "success",
                 t("toast-install-complete", { version: version.version }),
