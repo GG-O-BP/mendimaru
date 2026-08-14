@@ -84,3 +84,206 @@
   color: var(--subtle);
   white-space: nowrap;
 }
+
+.project-launch-dialog {
+  width: min(100%, 720px);
+  max-height: calc(100vh - 48px);
+  padding: 25px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-top: 5px solid var(--cyan);
+  border-radius: 3px;
+  box-shadow: 0 24px 65px rgba(5, 27, 31, 0.3);
+}
+
+.project-launch-dialog > header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.project-launch-dialog .dialog-symbol {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.project-launch-dialog h2 {
+  margin: 3px 0 0;
+  color: var(--ink-strong);
+  font-size: 20px;
+  letter-spacing: -0.035em;
+}
+
+.project-launch-dialog > p {
+  margin: 13px 0 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.project-launch-requirement {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.project-launch-requirement > div {
+  padding: 10px 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.project-launch-requirement dt,
+.project-version-select > span,
+.project-version-lookup label > span {
+  color: var(--subtle);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.project-launch-requirement dd {
+  margin: 4px 0 0;
+  color: var(--ink-strong);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.project-version-select,
+.project-version-lookup label {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.project-version-select select,
+.project-version-lookup input {
+  width: 100%;
+  min-height: 39px;
+  padding: 0 11px;
+  color: var(--ink-strong);
+  background: white;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+}
+
+.project-version-lookup {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.project-version-lookup .button {
+  min-height: 39px;
+  white-space: nowrap;
+}
+
+.project-launch-dialog .inline-error {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e7bbb3;
+  border-radius: 3px;
+}
+
+.project-launch-selection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  color: var(--muted);
+  background: var(--cyan-soft);
+  border: 1px solid #a5d5d6;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.project-launch-selection strong {
+  color: var(--ink-strong);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+}
+
+.project-launch-safety {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  color: #73520a;
+  background: var(--amber-soft);
+  border: 1px solid #e3c978;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.project-launch-safety > span,
+.project-launch-safety label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.project-launch-safety label {
+  margin-top: 7px;
+  flex-direction: row;
+  align-items: flex-start;
+  color: #5e4712;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.project-launch-safety input {
+  margin-top: 2px;
+}
+
+.project-launch-dialog .download-bar {
+  grid-template-columns: minmax(140px, 0.8fr) minmax(250px, 1.5fr) auto auto;
+  margin-top: 12px;
+  padding-inline: 13px;
+  border: 1px solid #466a6d;
+  border-radius: 3px;
+}
+
+.project-launch-dialog > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+@media (max-width: 680px) {
+  .project-launch-dialog {
+    padding: 20px;
+  }
+
+  .project-launch-requirement {
+    grid-template-columns: 1fr;
+  }
+
+  .project-version-lookup {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .project-launch-dialog .download-bar {
+    grid-template-columns: 1fr auto;
+  }
+
+  .project-launch-dialog .progress-visual {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}

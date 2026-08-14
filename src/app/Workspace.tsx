@@ -68,7 +68,7 @@ export function Workspace({
     onWarning,
   });
   const { refresh: refreshProjects, setSearch: setProjectSearch } = projects;
-  const { refreshInstalled, resetFilters, findVersion: selectVersion } = studio;
+  const { refreshInstalled, resetFilters } = studio;
   const {
     setupCompletion,
     updateLanguagePreference,
@@ -127,13 +127,6 @@ export function Workspace({
     ],
   );
 
-  const findVersion = useCallback(
-    (version: string) => {
-      selectVersion(version);
-      setActiveView("studio");
-    },
-    [selectVersion],
-  );
   const winBoatControl = {
     ...environmentControl,
     onAction:
@@ -174,8 +167,6 @@ export function Workspace({
           studio={studio}
           isBusy={isBusy}
           notify={notify}
-          requestConfirmation={requestConfirmation}
-          onFindVersion={findVersion}
         />
       )}
       {activeView === "settings" && (

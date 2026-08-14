@@ -2,7 +2,7 @@ mod browser;
 mod cache;
 mod parser;
 
-use crate::models::StudioVersionCatalog;
+use crate::models::{DownloadableVersion, StudioVersionCatalog};
 use tauri::AppHandle;
 
 use browser::SCRAPE_LOCK;
@@ -27,6 +27,61 @@ pub async fn fetch_catalog_page(
     } else {
         load_cached_catalog(app).unwrap_or_default()
     };
+    merge_versions(&mut catalog, fresh_versions);
+    if !catalog.loaded_pages.contains(&target_page) {
+        catalog.loaded_pages.push(target_page);
+        catalog.loaded_pages.sort_unstable();
+    }
+    catalog.total_count = total_count.or(catalog.total_count);
+    catalog.fetched_at = Some(chrono::Utc::now().to_rfc3339());
+    cache::save_catalog(app, &catalog)?;
+    Ok(catalog)
+}
+
+pub async fn resolve_downloadable_version(
+    app: &AppHandle,
+    version: &str,
+) -> Result<DownloadableVersion, String> {
+    crate::platform::validate_version(version)?;
+    let mut catalog = load_cached_catalog(app).unwrap_or_default();
+    if let Some(cached) = catalog
+        .versions
+        .iter()
+        .find(|candidate| candidate.version == version)
+    {
+        return Ok(cached.clone());
+    }
+
+    // The version detail route is independent of the paginated catalog. A
+    // matching detail-page heading proves that the exact Marketplace entry
+    // exists; unlike constructing an artifact URL, this never treats arbitrary
+    // input as an available release. Recent v11 pages no longer expose the
+    // legacy numeric build marker, so existence and legacy URL resolution are
+    // deliberately separate checks.
+    {
+        let _scrape_guard = SCRAPE_LOCK.lock().await;
+        browser::verify_version_available(version).await?;
+    }
+    let resolved = direct_version_record(version);
+    merge_versions(&mut catalog, vec![resolved.clone()]);
+    catalog.fetched_at = Some(chrono::Utc::now().to_rfc3339());
+    cache::save_catalog(app, &catalog)?;
+    Ok(resolved)
+}
+
+fn direct_version_record(version: &str) -> DownloadableVersion {
+    DownloadableVersion {
+        version: version.to_string(),
+        release_date: None,
+        release_notes_url: None,
+        is_lts: false,
+        is_beta: version.to_ascii_lowercase().contains("beta"),
+        is_mts: false,
+        is_latest: false,
+    }
+}
+
+fn merge_versions(catalog: &mut StudioVersionCatalog, fresh_versions: Vec<DownloadableVersion>) {
     for fresh in fresh_versions {
         if let Some(index) = catalog
             .versions
@@ -41,14 +96,6 @@ pub async fn fetch_catalog_page(
     catalog
         .versions
         .sort_by(|left, right| compare_versions_desc(&left.version, &right.version));
-    if !catalog.loaded_pages.contains(&target_page) {
-        catalog.loaded_pages.push(target_page);
-        catalog.loaded_pages.sort_unstable();
-    }
-    catalog.total_count = total_count.or(catalog.total_count);
-    catalog.fetched_at = Some(chrono::Utc::now().to_rfc3339());
-    cache::save_catalog(app, &catalog)?;
-    Ok(catalog)
 }
 
 pub async fn installer_url(version: &str) -> Result<String, String> {
@@ -119,6 +166,15 @@ mod tests {
     }
 
     #[test]
+    fn direct_version_records_never_invent_support_labels() {
+        let stable = direct_version_record("11.12.2");
+        assert_eq!(stable.version, "11.12.2");
+        assert!(!stable.is_latest && !stable.is_lts && !stable.is_mts && !stable.is_beta);
+        let beta = direct_version_record("11.14.0-beta.1");
+        assert!(beta.is_beta);
+    }
+
+    #[test]
     fn orders_numeric_versions_newest_first() {
         assert_eq!(compare_versions_desc("11.13.0", "11.9.1"), Ordering::Less);
         assert_eq!(
@@ -161,5 +217,26 @@ mod tests {
             scrape_build_number("10.24.22").await.expect("build number"),
             "113362"
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "uses the installed Chrome to resolve an exact version without catalog paging"]
+    async fn live_resolves_an_exact_unloaded_version() {
+        crate::i18n::initialize("en-US").expect("localization initializes");
+        let _guard = SCRAPE_LOCK.lock().await;
+        browser::verify_version_available("11.12.2")
+            .await
+            .expect("exact Marketplace version resolves");
+    }
+
+    #[tokio::test]
+    #[ignore = "uses the installed Chrome to reject a nonexistent exact version"]
+    async fn live_rejects_a_nonexistent_exact_version() {
+        crate::i18n::initialize("en-US").expect("localization initializes");
+        let _guard = SCRAPE_LOCK.lock().await;
+        let error = browser::verify_version_available("99.99.99")
+            .await
+            .expect_err("a catalog landing page is not an exact version match");
+        assert!(error.contains("99.99.99"));
     }
 }

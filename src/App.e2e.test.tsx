@@ -9,6 +9,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type {
   AppConfig,
+  DownloadableVersion,
+  DownloadProgress,
   EnvironmentStatus,
   LocalizationBundle,
   MendixProject,
@@ -35,7 +37,9 @@ const mocks = vi.hoisted(() => ({
   getStudioSessions: vi.fn(),
   getDownloadableVersionsCache: vi.fn(),
   fetchDownloadableVersions: vi.fn(),
+  resolveDownloadableVersion: vi.fn(),
   getProjects: vi.fn(),
+  setProjectLaunchPreference: vi.fn(),
   startWinBoatWindows: vi.fn(),
   openWinBoat: vi.fn(),
   beginWinBoatSetup: vi.fn(),
@@ -74,7 +78,9 @@ vi.mock("./api/tauri", () => ({
     getStudioSessions: mocks.getStudioSessions,
     getDownloadableVersionsCache: mocks.getDownloadableVersionsCache,
     fetchDownloadableVersions: mocks.fetchDownloadableVersions,
+    resolveDownloadableVersion: mocks.resolveDownloadableVersion,
     getProjects: mocks.getProjects,
+    setProjectLaunchPreference: mocks.setProjectLaunchPreference,
     startWinBoatWindows: mocks.startWinBoatWindows,
     openWinBoat: mocks.openWinBoat,
     beginWinBoatSetup: mocks.beginWinBoatSetup,
@@ -175,6 +181,7 @@ const project: MendixProject = {
   mprPath: String.raw`C:\Users\dev\Mendix\Orders\Orders.mpr`,
   windowsPath: String.raw`C:\Users\dev\Mendix\Orders\Orders.mpr`,
   version: "11.12.2",
+  launchPending: false,
   lastModified: "2026-08-14T03:00:00Z",
 };
 
@@ -231,7 +238,17 @@ beforeEach(() => {
   mocks.getStudioSessions.mockImplementation(async () => [...sessions]);
   mocks.getDownloadableVersionsCache.mockResolvedValue(catalog);
   mocks.fetchDownloadableVersions.mockResolvedValue(catalog);
+  mocks.resolveDownloadableVersion.mockImplementation(
+    async (version: string) => ({
+      version,
+      isLts: false,
+      isBeta: false,
+      isMts: false,
+      isLatest: false,
+    }),
+  );
   mocks.getProjects.mockResolvedValue([project]);
+  mocks.setProjectLaunchPreference.mockResolvedValue(undefined);
   mocks.launchStudioPro.mockResolvedValue(undefined);
   mocks.reconnectStudioSession.mockImplementation(async (sessionId: string) => {
     sessions = sessions.map((session) =>
@@ -503,6 +520,387 @@ describe("native Windows application E2E", () => {
         project.mprPath,
       );
     });
+  });
+
+  it("keeps an explicit version choice when an older exact lookup completes later", async () => {
+    installed = [portableStudio];
+    let finishLookup: (version: DownloadableVersion) => void = () => {
+      throw new Error("lookup resolver was not initialized");
+    };
+    mocks.resolveDownloadableVersion.mockImplementationOnce(
+      () =>
+        new Promise<DownloadableVersion>((resolve) => {
+          finishLookup = resolve;
+        }),
+    );
+    await renderReadyApp();
+    fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+    await screen.findByText("Orders");
+    fireEvent.click(
+      screen.getByRole("button", { name: "project-launch-assist" }),
+    );
+    const assistant = await screen.findByRole("dialog");
+    await waitFor(() =>
+      expect(mocks.resolveDownloadableVersion).toHaveBeenCalledWith("11.12.2"),
+    );
+
+    const versionSelect = within(assistant).getByLabelText(
+      "project-launch-select-version",
+    );
+    fireEvent.change(versionSelect, { target: { value: "10.24.9" } });
+    finishLookup({
+      version: "11.12.2",
+      isLts: true,
+      isBeta: false,
+      isMts: false,
+      isLatest: false,
+    });
+
+    await waitFor(() => expect(versionSelect).toHaveValue("10.24.9"));
+    fireEvent.click(
+      within(assistant).getByLabelText("project-launch-mismatch-acknowledge"),
+    );
+    fireEvent.click(
+      within(assistant).getByRole("button", { name: "project-launch-open" }),
+    );
+    await waitFor(() =>
+      expect(mocks.launchStudioPro).toHaveBeenCalledWith(
+        "10.24.9",
+        project.mprPath,
+      ),
+    );
+    expect(mocks.launchStudioPro).not.toHaveBeenCalledWith(
+      "11.12.2",
+      project.mprPath,
+    );
+  });
+
+  it("resumes the persisted project choice returned after an app restart", async () => {
+    const resumedProject: MendixProject = {
+      ...project,
+      preferredVersion: "10.24.9",
+      launchPending: true,
+    };
+    mocks.getProjects.mockResolvedValue([resumedProject]);
+    await renderReadyApp();
+    fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+    await screen.findByText("Orders");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "project-launch-resume" }),
+    );
+    const assistant = await screen.findByRole("dialog");
+    expect(
+      within(assistant).getByLabelText("project-launch-select-version"),
+    ).toHaveValue("10.24.9");
+    fireEvent.click(
+      within(assistant).getByLabelText("project-launch-mismatch-acknowledge"),
+    );
+    fireEvent.click(
+      within(assistant).getByRole("button", { name: "project-launch-open" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.launchStudioPro).toHaveBeenCalledWith(
+        "10.24.9",
+        resumedProject.mprPath,
+      ),
+    );
+    expect(mocks.resolveDownloadableVersion).not.toHaveBeenCalled();
+    expect(mocks.setProjectLaunchPreference).toHaveBeenLastCalledWith(
+      resumedProject.mprPath,
+      "10.24.9",
+      false,
+    );
+  });
+
+  it("resolves an unloaded exact version, installs it, verifies detection, and opens the original project", async () => {
+    installed = [portableStudio];
+    await renderReadyApp();
+    fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+    await screen.findByText("Orders");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "project-launch-assist" }),
+    );
+    const assistant = await screen.findByRole("dialog");
+    await waitFor(() =>
+      expect(mocks.resolveDownloadableVersion).toHaveBeenCalledWith("11.12.2"),
+    );
+    expect(mocks.launchStudioPro).not.toHaveBeenCalled();
+    expect(
+      within(assistant).queryByText("project-launch-mismatch-title"),
+    ).toBeNull();
+
+    fireEvent.click(
+      await within(assistant).findByRole("button", {
+        name: "project-launch-install-open",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.installStudioPro).toHaveBeenCalledWith("11.12.2", false),
+    );
+    await waitFor(() =>
+      expect(mocks.launchStudioPro).toHaveBeenCalledWith(
+        "11.12.2",
+        project.mprPath,
+      ),
+    );
+    expect(mocks.launchStudioPro).not.toHaveBeenCalledWith(
+      "10.24.9",
+      project.mprPath,
+    );
+    await waitFor(() =>
+      expect(mocks.setProjectLaunchPreference).toHaveBeenLastCalledWith(
+        project.mprPath,
+        "11.12.2",
+        false,
+      ),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("does not open a project when installation returns without detecting the exact version", async () => {
+    installed = [portableStudio];
+    mocks.installStudioPro.mockResolvedValueOnce(undefined);
+    await renderReadyApp();
+    fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+    await screen.findByText("Orders");
+    fireEvent.click(
+      screen.getByRole("button", { name: "project-launch-assist" }),
+    );
+    const assistant = await screen.findByRole("dialog");
+    fireEvent.click(
+      await within(assistant).findByRole("button", {
+        name: "project-launch-install-open",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.installStudioPro).toHaveBeenCalledWith("11.12.2", false),
+    );
+    expect(
+      await within(assistant).findByText("project-launch-install-not-detected"),
+    ).toBeVisible();
+    expect(mocks.launchStudioPro).not.toHaveBeenCalled();
+    expect(mocks.setProjectLaunchPreference).not.toHaveBeenLastCalledWith(
+      project.mprPath,
+      "11.12.2",
+      false,
+    );
+  });
+
+  it("does not auto-open when download cancellation races with successful installation", async () => {
+    installed = [portableStudio];
+    let sendProgress: (progress: DownloadProgress) => void = () => {
+      throw new Error("progress listener was not initialized");
+    };
+    mocks.onStudioDownloadProgress.mockImplementationOnce(async (listener) => {
+      sendProgress = listener;
+      return vi.fn();
+    });
+    let finishInstall: () => void = () => {
+      throw new Error("installer resolver was not initialized");
+    };
+    mocks.installStudioPro.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishInstall = resolve;
+        }),
+    );
+    await renderReadyApp();
+    fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+    await screen.findByText("Orders");
+    fireEvent.click(
+      screen.getByRole("button", { name: "project-launch-assist" }),
+    );
+    const assistant = await screen.findByRole("dialog");
+    fireEvent.click(
+      await within(assistant).findByRole("button", {
+        name: "project-launch-install-open",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.installStudioPro).toHaveBeenCalledWith("11.12.2", false),
+    );
+
+    sendProgress({
+      version: "11.12.2",
+      state: "downloading",
+      downloadedBytes: 512,
+      totalBytes: 1024,
+      percentage: 50,
+      estimated: false,
+      message: "downloading",
+    });
+    await within(assistant).findByText(/progress-downloading/);
+    const cancel = within(assistant).getAllByRole("button", {
+      name: "action-cancel",
+    });
+    fireEvent.click(cancel.find((button) => !button.hasAttribute("disabled"))!);
+    await waitFor(() => expect(mocks.cancelStudioDownload).toHaveBeenCalled());
+
+    installed = [...installed, removableStudio];
+    finishInstall();
+    await within(assistant).findByRole("button", {
+      name: "project-launch-open",
+    });
+    expect(mocks.launchStudioPro).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeVisible();
+  });
+
+  it("requires an explicit remembered choice and safety acknowledgement for an unknown project version", async () => {
+    const unknownProject: MendixProject = {
+      ...project,
+      version: undefined,
+      preferredVersion: undefined,
+      launchPending: false,
+    };
+    mocks.getProjects.mockResolvedValue([unknownProject]);
+    await renderReadyApp();
+    fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+    await screen.findByText("Orders");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "project-launch-assist" }),
+    );
+    let assistant = await screen.findByRole("dialog");
+    const versionSelect = within(assistant).getByLabelText(
+      "project-launch-select-version",
+    );
+    expect(versionSelect).toHaveValue("");
+    fireEvent.change(versionSelect, { target: { value: "10.24.9" } });
+    expect(
+      within(assistant).getByRole("button", { name: "project-launch-open" }),
+    ).toBeDisabled();
+    fireEvent.click(
+      within(assistant).getByRole("button", { name: "action-cancel" }),
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "project-launch-resume" }),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "project-launch-resume" }),
+    );
+    assistant = await screen.findByRole("dialog");
+    expect(
+      within(assistant).getByLabelText("project-launch-select-version"),
+    ).toHaveValue("10.24.9");
+    fireEvent.click(
+      within(assistant).getByLabelText("project-launch-mismatch-acknowledge"),
+    );
+    fireEvent.click(
+      within(assistant).getByRole("button", { name: "project-launch-open" }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.launchStudioPro).toHaveBeenCalledWith(
+        "10.24.9",
+        unknownProject.mprPath,
+      ),
+    );
+    expect(mocks.resolveDownloadableVersion).not.toHaveBeenCalled();
+  });
+
+  it("preserves an exact launch intent through cancellation and failure, then resumes on retry", async () => {
+    installed = [portableStudio];
+    mocks.installStudioPro
+      .mockRejectedValueOnce({
+        code: "download_cancelled",
+        message: "download cancelled",
+      })
+      .mockRejectedValueOnce({
+        code: "install_failed",
+        message: "installer failed",
+      });
+    await renderReadyApp();
+    fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+    await screen.findByText("Orders");
+    fireEvent.click(
+      screen.getByRole("button", { name: "project-launch-assist" }),
+    );
+    const assistant = await screen.findByRole("dialog");
+    const continueButton = await within(assistant).findByRole("button", {
+      name: "project-launch-install-open",
+    });
+
+    fireEvent.click(continueButton);
+    await waitFor(() =>
+      expect(mocks.installStudioPro).toHaveBeenCalledTimes(1),
+    );
+    await waitFor(() => expect(continueButton).toBeEnabled());
+    expect(mocks.launchStudioPro).not.toHaveBeenCalled();
+    expect(within(assistant).getByText("progress-cancelled")).toBeVisible();
+
+    fireEvent.click(continueButton);
+    await waitFor(() =>
+      expect(mocks.installStudioPro).toHaveBeenCalledTimes(2),
+    );
+    expect(within(assistant).getByText("installer failed")).toBeVisible();
+    await waitFor(() => expect(continueButton).toBeEnabled());
+    expect(mocks.launchStudioPro).not.toHaveBeenCalled();
+
+    fireEvent.click(continueButton);
+    await waitFor(() =>
+      expect(mocks.installStudioPro).toHaveBeenCalledTimes(3),
+    );
+    await waitFor(() =>
+      expect(mocks.launchStudioPro).toHaveBeenCalledWith(
+        "11.12.2",
+        project.mprPath,
+      ),
+    );
+    expect(mocks.setProjectLaunchPreference).toHaveBeenCalledWith(
+      project.mprPath,
+      "11.12.2",
+      true,
+    );
+    expect(mocks.setProjectLaunchPreference).toHaveBeenLastCalledWith(
+      project.mprPath,
+      "11.12.2",
+      false,
+    );
+  });
+
+  it("does not fall back after exact lookup failure and gates an explicit mismatch choice", async () => {
+    installed = [portableStudio];
+    mocks.resolveDownloadableVersion.mockRejectedValueOnce({
+      code: "operation_failed",
+      message: "exact version unavailable",
+    });
+    await renderReadyApp();
+    fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+    await screen.findByText("Orders");
+    fireEvent.click(
+      screen.getByRole("button", { name: "project-launch-assist" }),
+    );
+    const assistant = await screen.findByRole("dialog");
+    expect(
+      await within(assistant).findByText("exact version unavailable"),
+    ).toBeVisible();
+    expect(mocks.launchStudioPro).not.toHaveBeenCalled();
+
+    fireEvent.change(
+      within(assistant).getByLabelText("project-launch-select-version"),
+      { target: { value: "10.24.9" } },
+    );
+    const open = within(assistant).getByRole("button", {
+      name: "project-launch-open",
+    });
+    expect(open).toBeDisabled();
+    fireEvent.click(
+      within(assistant).getByLabelText("project-launch-mismatch-acknowledge"),
+    );
+    expect(open).toBeEnabled();
+    fireEvent.click(open);
+    await waitFor(() =>
+      expect(mocks.launchStudioPro).toHaveBeenCalledWith(
+        "10.24.9",
+        project.mprPath,
+      ),
+    );
   });
 
   it("adds a portable Studio path and saves without applying a WinBoat mount", async () => {

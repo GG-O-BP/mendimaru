@@ -5,7 +5,7 @@ use super::parser::parse_datagrid_html;
 use crate::models::DownloadableVersion;
 use page::{
     dismiss_privacy_modal, element_inner_html, find_build_number, navigate_to_page,
-    read_total_count, wait_for_selector,
+    read_total_count, verify_exact_version_page, wait_for_selector,
 };
 use session::BrowserSession;
 use std::time::Duration;
@@ -51,6 +51,20 @@ pub(super) async fn scrape_build_number(version: &str) -> Result<String, String>
             .await?;
         dismiss_privacy_modal(&page).await;
         find_build_number(&page, BUILD_NUMBER_SELECTOR, version, ELEMENT_TIMEOUT).await
+    }
+    .await;
+    session.cleanup().await;
+    result
+}
+
+pub(super) async fn verify_version_available(version: &str) -> Result<(), String> {
+    let session = BrowserSession::new().await?;
+    let result = async {
+        let page = session
+            .navigate(&format!("{MARKETPLACE_URL}/{version}"))
+            .await?;
+        dismiss_privacy_modal(&page).await;
+        verify_exact_version_page(&page, version, ELEMENT_TIMEOUT).await
     }
     .await;
     session.cleanup().await;

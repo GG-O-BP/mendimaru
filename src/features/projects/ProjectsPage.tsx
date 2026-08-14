@@ -28,12 +28,13 @@ export interface ProjectsPageModel {
   isLaunching: boolean;
   isBusy: (key: string) => boolean;
   launchKeyFor: (project: MendixProject) => string;
+  preferredVersionFor: (project: MendixProject) => string | undefined;
+  launchPendingFor: (project: MendixProject) => boolean;
   onSearch: (value: string) => void;
   onRefresh: () => void;
   onOpenWorkspace: () => void;
   onOpenFolder: (path: string) => void;
   onLaunch: (project: MendixProject) => void;
-  onFindVersion: (version: string) => void;
 }
 
 export function ProjectsPage({
@@ -113,10 +114,8 @@ export function ProjectsPage({
                   const exactVersionInstalled = Boolean(
                     project.version && model.installedSet.has(project.version),
                   );
-                  const canOpen =
-                    !project.version ||
-                    exactVersionInstalled ||
-                    model.installedSet.size > 0;
+                  const pending = model.launchPendingFor(project);
+                  const preferred = model.preferredVersionFor(project);
                   const launchKey = model.launchKeyFor(project);
                   return (
                     <tr key={project.mprPath}>
@@ -147,30 +146,24 @@ export function ProjectsPage({
                                 : t("version-missing")}
                             </small>
                           )}
+                          {preferred && preferred !== project.version && (
+                            <small>
+                              {t("project-launch-remembered", {
+                                version: preferred,
+                              })}
+                            </small>
+                          )}
                         </span>
                       </td>
                       <td className="modified-cell">
                         {modifiedDates[index] || "—"}
                       </td>
                       <td className="project-actions">
-                        {project.version && !exactVersionInstalled && (
-                          <button
-                            type="button"
-                            className="button quiet compact"
-                            onClick={() =>
-                              model.onFindVersion(project.version!)
-                            }
-                          >
-                            {t("action-install-version", {
-                              version: project.version,
-                            })}
-                          </button>
-                        )}
                         <button
                           type="button"
                           className="button primary compact"
                           onClick={() => model.onLaunch(project)}
-                          disabled={!canOpen || model.isLaunching}
+                          disabled={model.isLaunching}
                         >
                           {model.isBusy(launchKey) ? (
                             <LoaderCircle size={16} className="spin" />
@@ -179,7 +172,11 @@ export function ProjectsPage({
                           )}
                           {model.isBusy(launchKey)
                             ? t("action-opening")
-                            : t("action-open")}
+                            : pending
+                              ? t("project-launch-resume")
+                              : exactVersionInstalled
+                                ? t("action-open")
+                                : t("project-launch-assist")}
                         </button>
                         <button
                           type="button"

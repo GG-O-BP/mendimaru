@@ -1,9 +1,5 @@
-import type {
-  AppConfig,
-  ConfirmationState,
-  LocalizationBundle,
-  ToastKind,
-} from "../domain/types";
+import type { AppConfig, LocalizationBundle, ToastKind } from "../domain/types";
+import { ProjectLaunchAssistant } from "../features/projects/ProjectLaunchAssistant";
 import {
   ProjectsPage,
   type ProjectsPageModel,
@@ -21,8 +17,6 @@ export function ProjectsView({
   studio,
   isBusy,
   notify,
-  requestConfirmation,
-  onFindVersion,
 }: {
   t: Translate;
   localization: LocalizationBundle;
@@ -31,15 +25,19 @@ export function ProjectsView({
   studio: ReturnType<typeof useStudio>;
   isBusy: (key: string) => boolean;
   notify: (kind: ToastKind, title: string, detail?: string) => void;
-  requestConfirmation: (state: ConfirmationState) => void;
-  onFindVersion: (version: string) => void;
 }) {
-  const { launchProject, launchKeyFor } = useProjectLauncher({
+  const launcher = useProjectLauncher({
     t,
     installedVersions: studio.installedVersions,
+    catalogVersions: studio.catalog.versions,
+    downloadProgress: studio.downloadProgress,
+    isInstalling: studio.isInstalling,
+    isBusy,
+    resolveVersion: studio.resolveVersion,
+    installVersion: studio.installVersion,
+    cancelDownload: studio.cancelDownload,
     launchVersion: studio.launchVersion,
     notify,
-    requestConfirmation,
   });
   const model: ProjectsPageModel = {
     projects: projects.filteredProjects,
@@ -49,14 +47,24 @@ export function ProjectsView({
     installedSet: studio.installedSet,
     isLaunching: studio.isLaunching,
     isBusy,
-    launchKeyFor,
+    launchKeyFor: launcher.launchKeyFor,
+    preferredVersionFor: launcher.preferredVersionFor,
+    launchPendingFor: launcher.launchPendingFor,
     onSearch: projects.setSearch,
     onRefresh: () => void projects.refresh(),
     onOpenWorkspace: () => void projects.openFolder(config.sharedDirectory),
     onOpenFolder: (path) => void projects.openFolder(path),
-    onLaunch: launchProject,
-    onFindVersion,
+    onLaunch: launcher.launchProject,
   };
 
-  return <ProjectsPage t={t} localization={localization} model={model} />;
+  return (
+    <>
+      <ProjectsPage t={t} localization={localization} model={model} />
+      <ProjectLaunchAssistant
+        t={t}
+        localization={localization}
+        launcher={launcher}
+      />
+    </>
+  );
 }

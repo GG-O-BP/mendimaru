@@ -8,5 +8,7 @@ pub struct MendixProject {
     pub mpr_path: String,
     pub windows_path: String,
     pub version: Option<String>,
+    pub preferred_version: Option<String>,
+    pub launch_pending: bool,
     pub last_modified: Option<String>,
 }

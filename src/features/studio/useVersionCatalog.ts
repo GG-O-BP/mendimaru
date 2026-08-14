@@ -93,6 +93,19 @@ export function useVersionCatalog({ t }: VersionCatalogDependencies) {
     () => fetchCatalogPage(nextPage),
     [fetchCatalogPage, nextPage],
   );
+  const resolveVersion = useCallback(async (version: string) => {
+    const resolved = await tauriApi.resolveDownloadableVersion(version);
+    setCatalog((current) => ({
+      ...current,
+      versions: [
+        resolved,
+        ...current.versions.filter(
+          (candidate) => candidate.version !== resolved.version,
+        ),
+      ],
+    }));
+    return resolved;
+  }, []);
 
   return {
     catalog,
@@ -108,5 +121,6 @@ export function useVersionCatalog({ t }: VersionCatalogDependencies) {
     findVersion,
     refreshCatalog,
     loadMore,
+    resolveVersion,
   };
 }

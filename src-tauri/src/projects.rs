@@ -2,6 +2,7 @@ use crate::models::{AppConfig, MendixProject};
 use chrono::{DateTime, Local};
 use regex::Regex;
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path};
 use std::time::SystemTime;
@@ -54,6 +55,8 @@ pub fn scan_projects(config: &AppConfig) -> Result<Vec<MendixProject>, String> {
                 mpr_path: mpr_path.to_string_lossy().to_string(),
                 windows_path,
                 version,
+                preferred_version: None,
+                launch_pending: false,
                 last_modified,
             },
         ));
@@ -137,22 +140,28 @@ fn extract_project_version(settings_path: &Path) -> Option<String> {
     let content = fs::read_to_string(settings_path).ok()?;
     let settings: Value = serde_json::from_str(&content).ok()?;
     let version_regex = Regex::new(r"Version=(\d+\.\d+\.\d+)(?:\.\d+)?").ok()?;
-    settings
+    let mut versions = settings
         .get("settingsParts")?
         .as_array()?
         .iter()
         .filter_map(|part| part.get("type")?.as_str())
-        .find_map(|type_name| {
+        .filter_map(|type_name| {
             version_regex
                 .captures(type_name)
                 .and_then(|captures| captures.get(1))
                 .map(|version| version.as_str().to_string())
         })
+        .collect::<HashSet<_>>();
+    if versions.len() == 1 {
+        versions.drain().next()
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{linux_path_to_windows_share, scan_projects};
+    use super::{extract_project_version, linux_path_to_windows_share, scan_projects};
     use crate::models::{AppConfig, ContainerRuntime};
     use std::fs;
 
@@ -205,5 +214,27 @@ mod tests {
         assert_eq!(projects[0].name, "Orders");
         assert_eq!(projects[0].version.as_deref(), Some("11.12.2"));
         assert!(projects[0].windows_path.ends_with(r"Orders\Orders.mpr"));
+    }
+
+    #[test]
+    fn infers_only_one_distinct_project_version() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let settings = temporary.path().join("project-settings.user.json");
+        fs::write(
+            &settings,
+            r#"{"settingsParts":[{"type":"A, Version=11.12.2.0"},{"type":"B, Version=11.12.2.0"}]}"#,
+        )
+        .expect("unambiguous settings");
+        assert_eq!(
+            extract_project_version(&settings).as_deref(),
+            Some("11.12.2")
+        );
+
+        fs::write(
+            &settings,
+            r#"{"settingsParts":[{"type":"A, Version=11.12.2.0"},{"type":"B, Version=10.24.9.0"}]}"#,
+        )
+        .expect("ambiguous settings");
+        assert_eq!(extract_project_version(&settings), None);
     }
 }

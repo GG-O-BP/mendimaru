@@ -7,6 +7,8 @@ const PAGE_CHANGE_TIMEOUT: Duration = Duration::from_secs(20);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const NEXT_PAGE_SELECTOR: &str = "button[aria-label='Go to next page']";
 const PAGING_STATUS_SELECTOR: &str = "div.paging-status";
+const VERSION_HEADING_SELECTOR: &str = "h1.pds-page-title--md";
+const WINDOWS_INSTALLER_HEADING_SELECTOR: &str = "span.pds-heading--sm";
 
 pub(super) async fn navigate_to_page(page: &Page, target_page: u32) -> Result<(), String> {
     if target_page <= 1 {
@@ -112,6 +114,57 @@ pub(super) async fn find_build_number(
     }
 }
 
+pub(super) async fn verify_exact_version_page(
+    page: &Page,
+    version: &str,
+    timeout: Duration,
+) -> Result<(), String> {
+    let started = Instant::now();
+    loop {
+        let mut exact_heading = false;
+        if let Ok(headings) = page.find_elements(VERSION_HEADING_SELECTOR).await {
+            for heading in headings {
+                if let Ok(Some(text)) = heading.inner_text().await {
+                    if version_heading_matches(&text, version) {
+                        exact_heading = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if exact_heading {
+            if let Ok(headings) = page.find_elements(WINDOWS_INSTALLER_HEADING_SELECTOR).await {
+                for heading in headings {
+                    if let Ok(Some(text)) = heading.inner_text().await {
+                        if windows_installer_heading_matches(&text, version) {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+        if started.elapsed() >= timeout {
+            return Err(crate::tr!(
+                "error-marketplace-version-missing",
+                version = version
+            ));
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+fn version_heading_matches(text: &str, version: &str) -> bool {
+    normalized_text(text) == format!("Studio Pro {version}")
+}
+
+fn windows_installer_heading_matches(text: &str, version: &str) -> bool {
+    normalized_text(text) == format!("Studio Pro {version} for Windows")
+}
+
+fn normalized_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 async fn click_next_page(page: &Page) -> Result<(), String> {
     let started = Instant::now();
     loop {
@@ -160,5 +213,25 @@ async fn wait_for_page_start(page: &Page, expected_start: u32) -> Result<(), Str
             ));
         }
         tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{version_heading_matches, windows_installer_heading_matches};
+
+    #[test]
+    fn exact_version_heading_does_not_accept_a_catalog_or_other_release() {
+        assert!(version_heading_matches(" Studio Pro\n11.12.2 ", "11.12.2"));
+        assert!(!version_heading_matches("Download Studio Pro", "11.12.2"));
+        assert!(!version_heading_matches("Studio Pro 11.12.20", "11.12.2"));
+        assert!(windows_installer_heading_matches(
+            "Studio Pro 11.12.2 for Windows ",
+            "11.12.2"
+        ));
+        assert!(!windows_installer_heading_matches(
+            "Studio Pro 11.12.2 for MacOS",
+            "11.12.2"
+        ));
     }
 }

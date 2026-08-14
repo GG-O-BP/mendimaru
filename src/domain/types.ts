@@ -203,6 +203,8 @@ export interface MendixProject {
   mprPath: string;
   windowsPath: string;
   version?: string;
+  preferredVersion?: string;
+  launchPending: boolean;
   lastModified?: string;
 }
 
