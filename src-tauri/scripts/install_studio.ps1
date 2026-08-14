@@ -3,9 +3,13 @@ $installer = '__INSTALLER_PATH__'
 $resultPath = '__RESULT_PATH__'
 $installRoot = '__INSTALL_ROOT__'
 $version = '__VERSION__'
+$expectedSha256 = '__EXPECTED_SHA256__'
+$sourceRoot = '__SOURCE_ROOT__'
 $process = $null
 $localInstaller = $null
 $scriptExitCode = 0
+
+__SECURITY_PREAMBLE__
 
 function Write-InstallResult {
     param(
@@ -28,19 +32,7 @@ function Write-InstallResult {
         error = $ErrorMessage
         timestamp = (Get-Date).ToString('o')
     }
-    $temporaryPath = "$resultPath.tmp"
-    $serialized = $payload | ConvertTo-Json -Compress
-    for ($attempt = 0; $attempt -lt 20; $attempt++) {
-        try {
-            $serialized | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
-            Move-Item -LiteralPath $temporaryPath -Destination $resultPath -Force
-            return
-        } catch {
-            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
-            if ($attempt -eq 19) { throw }
-            Start-Sleep -Milliseconds 100
-        }
-    }
+    Write-MendimaruReport $payload
 }
 
 if (-not ('Mendimaru.NativeProgressReader' -as [type])) {
@@ -210,12 +202,6 @@ function Copy-InstallerWithProgress {
     )
 
     $sourceInfo = Get-Item -LiteralPath $Source
-    $destinationInfo = Get-Item -LiteralPath $Destination -ErrorAction SilentlyContinue
-    if ($null -ne $destinationInfo -and $destinationInfo.Length -eq $sourceInfo.Length) {
-        Write-InstallResult 'staging' 'Installer is ready in Windows.' 100 $false $null $null $null
-        return
-    }
-
     $inputStream = [System.IO.File]::Open(
         $sourceInfo.FullName,
         [System.IO.FileMode]::Open,
@@ -225,7 +211,7 @@ function Copy-InstallerWithProgress {
     try {
         $outputStream = [System.IO.File]::Open(
             $Destination,
-            [System.IO.FileMode]::Create,
+            [System.IO.FileMode]::CreateNew,
             [System.IO.FileAccess]::Write,
             [System.IO.FileShare]::None
         )
@@ -266,10 +252,6 @@ function Find-StudioPro {
 }
 
 try {
-    if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
-        throw "MENDIMARU_INSTALLER_NOT_FOUND:$installer"
-    }
-
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal] $identity
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -277,21 +259,24 @@ try {
     }
 
     # Executing an installer directly from the host UNC share can block on an
-    # invisible "Open File - Security Warning" dialog in RemoteApp. Stage it
-    # locally and remove any downloaded-file zone marker before launching it.
+    # invisible "Open File - Security Warning" dialog in RemoteApp. Stage a
+    # newly created, hash- and signature-verified private copy before launch.
+    $null = Assert-MendimaruTrustedExecutable -Path $installer -Root $sourceRoot -ExpectedSha256 $expectedSha256
     $sourceInstaller = Get-Item -LiteralPath $installer
     $stagingDirectory = Join-Path $env:ProgramData 'Mendimaru\Installers'
-    New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
-    $localInstaller = Join-Path $stagingDirectory $sourceInstaller.Name
+    $stagingDirectory = New-MendimaruDirectDirectory -Path $stagingDirectory -Root $env:ProgramData
+    $localInstaller = Join-Path $stagingDirectory ("$mendimaruRequestId.exe")
     Write-InstallResult 'staging' 'Preparing the installer in Windows.' 0 $false $null $null $null
     Copy-InstallerWithProgress $installer $localInstaller
-    Unblock-File -LiteralPath $localInstaller -ErrorAction SilentlyContinue
+    $null = Assert-MendimaruTrustedExecutable -Path $installer -Root $sourceRoot -ExpectedSha256 $expectedSha256
+    $null = Assert-MendimaruTrustedExecutable -Path $localInstaller -Root $stagingDirectory -ExpectedSha256 $expectedSha256
 
     $logDirectory = Join-Path $env:ProgramData 'Mendimaru\Logs'
-    New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+    $logDirectory = New-MendimaruDirectDirectory -Path $logDirectory -Root $env:ProgramData
     $installLog = Join-Path $logDirectory ("install-$version-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
     $logArgument = '/LOG="' + $installLog + '"'
     Write-InstallResult 'installing' 'Studio Pro installer is running.' 0 $true $null $null $null
+    $null = Assert-MendimaruTrustedExecutable -Path $localInstaller -Root $stagingDirectory -ExpectedSha256 $expectedSha256
     $process = Start-Process -FilePath $localInstaller -ArgumentList @(
         '/SP-',
         '/SILENT',
@@ -395,6 +380,8 @@ try {
     if ($null -eq $studioPro) {
         throw "MENDIMARU_STUDIO_NOT_CREATED:$version"
     }
+
+    $null = Assert-MendimaruTrustedExecutable -Path $studioPro -Root $installRoot
 
     Write-InstallResult 'verifying' 'Studio Pro installation verified.' 100 $false $exitCode $studioPro $null
     Write-InstallResult 'succeeded' 'Studio Pro installation completed.' 100 $false $exitCode $studioPro $null

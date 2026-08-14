@@ -1,12 +1,54 @@
-use super::scripts::powershell_literal;
+use super::security::{secure_powershell_launcher, OperationSecurity};
 use crate::config::resolved_rdp_port;
 use crate::models::AppConfig;
 use crate::projects::linux_path_to_windows_share;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use std::fs;
-use std::io::Write;
+use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::{Arc, Mutex};
+
+pub(super) const FREERDP_CERTIFICATE_POLICY: &str = "/cert:tofu";
+const MAX_DIAGNOSTIC_BYTES: usize = 64 * 1024;
+
+pub(super) struct RemoteAppProcess {
+    child: Child,
+    diagnostics: Arc<Mutex<Vec<u8>>>,
+}
+
+impl RemoteAppProcess {
+    pub(super) fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+        self.child.try_wait()
+    }
+
+    pub(super) fn kill(&mut self) -> std::io::Result<()> {
+        self.child.kill()
+    }
+
+    pub(super) fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        self.child.wait()
+    }
+
+    pub(super) fn certificate_failed(&self) -> bool {
+        let diagnostics = self
+            .diagnostics
+            .lock()
+            .map(|bytes| String::from_utf8_lossy(&bytes).to_ascii_lowercase())
+            .unwrap_or_default();
+        diagnostics.contains("certificate")
+            && [
+                "mismatch",
+                "verification failure",
+                "verify failed",
+                "not match",
+                "changed",
+                "denied",
+            ]
+            .iter()
+            .any(|pattern| diagnostics.contains(pattern))
+    }
+}
 
 fn container_credentials(config: &AppConfig) -> Result<(String, String), String> {
     let output = Command::new(config.container_runtime.as_str())
@@ -39,66 +81,30 @@ pub(super) fn spawn_powershell_file(
     config: &AppConfig,
     script_path: &Path,
     label: &str,
-) -> Result<Child, String> {
+    security: &OperationSecurity,
+) -> Result<RemoteAppProcess, String> {
     let windows_script_path = linux_path_to_windows_share(
         Path::new(&config.shared_directory),
         script_path,
         &config.windows_shared_directory,
     )?;
-    // RAIL limits RemoteApplicationCmdLine to 16,000 bytes. Encoding the full
-    // script can exceed that limit, so only encode a short command that invokes
-    // the script already stored in the WinBoat shared directory.
-    let launcher = format!(
-        "& '{}'; exit $LASTEXITCODE",
-        powershell_literal(&windows_script_path)
-    );
+    let launcher = secure_powershell_launcher(&windows_script_path, security);
     let encoded = encode_powershell_script(&launcher);
     let arguments = powershell_encoded_arguments(&encoded);
-    // Do not publish PowerShell itself as the RemoteApp. FreeRDP can map its
-    // console before WindowStyle Hidden takes effect, which causes a visible
-    // flash. WScript is windowless here and starts PowerShell hidden while
-    // preserving the already-elevated RemoteApp session token.
-    let hidden_launcher_path = write_hidden_powershell_launcher(script_path, &arguments)?;
-    let windows_hidden_launcher_path = linux_path_to_windows_share(
-        Path::new(&config.shared_directory),
-        &hidden_launcher_path,
-        &config.windows_shared_directory,
-    )?;
+    if arguments.encode_utf16().count() * 2 >= 16_000 {
+        return Err(crate::tr!("error-remoteapp-command-too-long"));
+    }
     spawn_remote_app(
         config,
-        r"C:\Windows\System32\wscript.exe",
-        Some("//B //NoLogo"),
-        Some(&windows_hidden_launcher_path),
+        r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        Some(&arguments),
         label,
-    )
-}
-
-fn write_hidden_powershell_launcher(
-    script_path: &Path,
-    powershell_arguments: &str,
-) -> Result<PathBuf, String> {
-    let launcher_path = script_path.with_extension("vbs");
-    fs::write(
-        &launcher_path,
-        hidden_powershell_launcher(powershell_arguments),
-    )
-    .map_err(|error| crate::tr!("error-hidden-wrapper-save", error = error))?;
-    Ok(launcher_path)
-}
-
-pub(super) fn hidden_powershell_launcher(powershell_arguments: &str) -> String {
-    format!(
-        "Option Explicit\r\n\
-         Dim shell, exitCode\r\n\
-         Set shell = CreateObject(\"WScript.Shell\")\r\n\
-         exitCode = shell.Run(\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe {powershell_arguments}\", 0, True)\r\n\
-         WScript.Quit exitCode\r\n"
     )
 }
 
 pub(super) fn powershell_encoded_arguments(encoded_command: &str) -> String {
     format!(
-        "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand {encoded_command}"
+        "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy RemoteSigned -EncodedCommand {encoded_command}"
     )
 }
 
@@ -114,9 +120,8 @@ fn spawn_remote_app(
     config: &AppConfig,
     executable_path: &str,
     app_arguments: Option<&str>,
-    remote_file: Option<&str>,
     label: &str,
-) -> Result<Child, String> {
+) -> Result<RemoteAppProcess, String> {
     let (username, password) = container_credentials(config)?;
     let safe_label: String = label
         .chars()
@@ -127,16 +132,15 @@ fn spawn_remote_app(
         remote_app.push_str(",cmd:");
         remote_app.push_str(arguments);
     }
-    if let Some(file) = remote_file.filter(|file| !file.is_empty()) {
-        remote_app.push_str(",file:");
-        remote_app.push_str(file);
-    }
+    let trust_store = app_freerdp_config_directory()?;
+    let certificate_policy = certificate_policy(config, &trust_store)?;
     let arguments = [
         format!("/u:{username}"),
         format!("/p:{password}"),
         format!("/v:{}", config.rdp_host),
         format!("/port:{}", resolved_rdp_port(config)),
-        "/cert:ignore".to_string(),
+        certificate_policy,
+        "/log-level:WARN".to_string(),
         "+clipboard".to_string(),
         "/sound:sys:pulse".to_string(),
         "/microphone:sys:pulse".to_string(),
@@ -153,9 +157,10 @@ fn spawn_remote_app(
     // Windows password out of the process list and out of application logs.
     let mut child = Command::new(&config.freerdp_binary)
         .arg("/args-from:stdin")
+        .env("XDG_CONFIG_HOME", &trust_store)
         .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| crate::tr!("error-remoteapp-run", error = error))?;
     let payload = format!("{}\n", arguments.join("\n"));
@@ -165,7 +170,87 @@ fn spawn_remote_app(
         .ok_or_else(|| crate::tr!("error-freerdp-input-open"))?
         .write_all(payload.as_bytes())
         .map_err(|error| crate::tr!("error-freerdp-credentials-send", error = error))?;
-    Ok(child)
+    let diagnostics = Arc::new(Mutex::new(Vec::new()));
+    if let Some(stdout) = child.stdout.take() {
+        collect_diagnostics(stdout, Arc::clone(&diagnostics));
+    }
+    if let Some(stderr) = child.stderr.take() {
+        collect_diagnostics(stderr, Arc::clone(&diagnostics));
+    }
+    Ok(RemoteAppProcess { child, diagnostics })
+}
+
+fn collect_diagnostics<R>(mut reader: R, diagnostics: Arc<Mutex<Vec<u8>>>)
+where
+    R: Read + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let mut buffer = [0_u8; 4096];
+        while let Ok(count) = reader.read(&mut buffer) {
+            if count == 0 {
+                break;
+            }
+            if let Ok(mut collected) = diagnostics.lock() {
+                let remaining = MAX_DIAGNOSTIC_BYTES.saturating_sub(collected.len());
+                collected.extend_from_slice(&buffer[..count.min(remaining)]);
+            }
+        }
+    });
+}
+
+fn certificate_policy(config: &AppConfig, trust_store: &Path) -> Result<String, String> {
+    let pin = trust_store.join("freerdp/server").join(format!(
+        "{}_{}.pem",
+        config.rdp_host,
+        resolved_rdp_port(config)
+    ));
+    match std::fs::read(&pin) {
+        Ok(pem) => fingerprint_policy_from_pem(&pem),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(FREERDP_CERTIFICATE_POLICY.to_string())
+        }
+        Err(error) => Err(crate::tr!("error-freerdp-pin-read", error = error)),
+    }
+}
+
+fn fingerprint_policy_from_pem(pem: &[u8]) -> Result<String, String> {
+    let pem = std::str::from_utf8(pem)
+        .map_err(|error| crate::tr!("error-freerdp-pin-invalid", error = error))?;
+    let body = pem
+        .lines()
+        .skip_while(|line| line.trim() != "-----BEGIN CERTIFICATE-----")
+        .skip(1)
+        .take_while(|line| line.trim() != "-----END CERTIFICATE-----")
+        .map(str::trim)
+        .collect::<String>();
+    if body.is_empty() {
+        return Err(crate::tr!(
+            "error-freerdp-pin-invalid",
+            error = "the certificate body is missing"
+        ));
+    }
+    let certificate = BASE64_STANDARD
+        .decode(body)
+        .map_err(|error| crate::tr!("error-freerdp-pin-invalid", error = error))?;
+    let fingerprint = format!("{:x}", Sha256::digest(certificate));
+    Ok(format!("/cert:fingerprint:sha256:{fingerprint}"))
+}
+
+fn app_freerdp_config_directory() -> Result<PathBuf, String> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+        .ok_or_else(|| crate::tr!("error-freerdp-trust-directory-home"))?;
+    let directory = base.join("mendimaru/freerdp-config");
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| crate::tr!("error-freerdp-trust-directory-create", error = error))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| crate::tr!("error-freerdp-trust-directory-create", error = error))?;
+    }
+    Ok(directory)
 }
 
 fn css_slug(value: &str) -> String {
@@ -181,4 +266,21 @@ fn css_slug(value: &str) -> String {
         .collect::<String>()
         .trim_matches('-')
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fingerprint_policy_from_pem;
+
+    #[test]
+    fn converts_the_app_pin_to_an_exact_sha256_fingerprint_policy() {
+        let policy = fingerprint_policy_from_pem(
+            b"-----BEGIN CERTIFICATE-----\nbWVuZGltYXJ1\n-----END CERTIFICATE-----\n",
+        )
+        .expect("fixture pin parses");
+        assert_eq!(
+            policy,
+            "/cert:fingerprint:sha256:8edde51f9bc00d3fff19237df43bc1c6d058839aa1469b3fbd0c5479c929825d"
+        );
+    }
 }

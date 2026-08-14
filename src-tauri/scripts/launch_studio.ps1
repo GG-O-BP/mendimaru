@@ -2,7 +2,10 @@ $ErrorActionPreference = 'Stop'
 $executable = '__EXECUTABLE_PATH__'
 $projectPath = '__PROJECT_PATH__'
 $resultPath = '__RESULT_PATH__'
+$installRoot = '__INSTALL_ROOT__'
 $process = $null
+
+__SECURITY_PREAMBLE__
 
 function Write-LaunchResult {
     param(
@@ -21,9 +24,7 @@ function Write-LaunchResult {
         error = $ErrorMessage
         timestamp = (Get-Date).ToString('o')
     }
-    $temporaryPath = "$resultPath.tmp"
-    $payload | ConvertTo-Json -Compress | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
-    Move-Item -LiteralPath $temporaryPath -Destination $resultPath -Force
+    Write-MendimaruReport $payload
 }
 
 function Get-StudioProcesses {
@@ -47,11 +48,10 @@ function Get-ReadyStudioProcess {
 }
 
 try {
-    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
-        throw "MENDIMARU_STUDIO_EXECUTABLE_NOT_FOUND:$executable"
-    }
+    $null = Assert-MendimaruTrustedExecutable -Path $executable -Root $installRoot
 
     Write-LaunchResult 'starting' 'Studio Pro is starting.' $null $executable $null
+    $null = Assert-MendimaruTrustedExecutable -Path $executable -Root $installRoot
     if ([string]::IsNullOrWhiteSpace($projectPath)) {
         $process = Start-Process -FilePath $executable -PassThru
     } else {

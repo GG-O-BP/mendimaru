@@ -110,7 +110,7 @@ Windows에서는 시스템 및 사용자 표준 경로의 Microsoft Edge와 Chro
 
 제거할 때도 Windows 제거 프로세스가 끝나고 해당 버전의 `StudioPro.exe`가 사라진 것을 확인한 뒤 설치된 버전 목록을 자동으로 갱신합니다.
 
-Linux WinBoat 모드에서는 Studio Pro 실행 버튼이 Windows 프로세스의 실제 창이 생성되고 FreeRDP가 표시할 준비를 마칠 때까지 비활성화됩니다. 실행 준비 중에는 다른 버전과 프로젝트의 실행 버튼도 잠겨 중복 실행을 방지합니다. 실행 스크립트는 공유 폴더에 저장하고 짧은 호출 명령만 RemoteApp으로 전달해 FreeRDP RAIL의 명령 길이 제한을 넘지 않습니다. Windows Script Host가 PowerShell을 숨김 모드로 실행하며, 설치·제거는 이미 관리자 권한인 WinBoat 세션의 토큰을 상속하므로 PowerShell 콘솔이나 별도의 UAC 창을 표시하지 않습니다.
+Linux WinBoat 모드에서는 Studio Pro 실행 버튼이 Windows 프로세스의 실제 창이 생성되고 FreeRDP가 표시할 준비를 마칠 때까지 비활성화됩니다. 실행 준비 중에는 다른 버전과 프로젝트의 실행 버튼도 잠겨 중복 실행을 방지합니다. Windows는 공유 작업 스크립트의 해시를 고정하고 고유한 전용 경로에 복사해 그 사본만 실행합니다. 설치·제거는 이미 관리자 권한인 WinBoat 세션의 토큰을 상속하므로 별도의 UAC 창을 표시하지 않습니다.
 
 ## Linux 공유 워크스페이스
 
@@ -149,7 +149,9 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 Windows 네이티브 명령은 경로를 명령 셸에 삽입하지 않습니다. 설치 파일, 설치된 Studio 실행 파일과 등록된 Mendix 제거 프로그램은 Mendix 또는 Siemens가 발행한 유효한 신뢰 Authenticode 서명이 있어야 하며 검증 전후 해시로 파일 교체도 탐지합니다. Windows Installer 제거는 제품 코드에 대한 `/x` 작업과 알려진 비대화형 플래그로 제한하고, 등록 제거 프로그램은 선택한 설치본에 속하면서 허용 목록의 플래그만 사용해야 합니다. UAC 취소나 실패 종료 코드는 성공으로 처리하지 않습니다.
 
-Linux에서는 Windows 사용자명과 암호를 앱 설정에 저장하지 않습니다. RemoteApp 실행 시 실행 중인 WinBoat 컨테이너에서 자격 증명을 읽어 FreeRDP 3의 표준 입력으로 전달합니다.
+Linux에서는 Windows 사용자명과 암호를 앱 설정에 저장하지 않습니다. RemoteApp 실행 시 실행 중인 WinBoat 컨테이너에서 자격 증명을 읽어 FreeRDP 3의 표준 입력으로 전달합니다. FreeRDP는 앱 전용 TOFU 인증서 핀을 사용하고, 관리자 권한 작업은 Guest API와 RDP가 loopback에만 바인딩된 경우에만 허용합니다. 공유 작업 결과는 시도별 HMAC 키와 재전송 방지 sequence로 인증합니다.
+
+위협 모델, 실행 파일 신뢰 체인, 컨테이너 권한과 잔여 위험 및 신고 방법은 [보안 정책과 WinBoat 신뢰 경계](SECURITY.md)를 참고하세요.
 
 ## 라이선스
 

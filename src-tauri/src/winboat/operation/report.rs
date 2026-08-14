@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(in crate::winboat) struct WindowsOperationReport {
     pub(in crate::winboat) state: WindowsOperationState,
     #[serde(default)]
@@ -10,8 +10,7 @@ pub(in crate::winboat) struct WindowsOperationReport {
     pub(in crate::winboat) percentage: Option<f64>,
     #[serde(default)]
     pub(in crate::winboat) estimated: bool,
-    #[serde(default)]
-    pub(super) timestamp: Option<String>,
+    pub(super) timestamp: String,
     pub(super) exit_code: Option<i32>,
     pub(in crate::winboat) executable_path: Option<String>,
     pub(super) error: Option<String>,
@@ -49,7 +48,26 @@ impl WindowsOperationState {
 }
 
 pub(in crate::winboat) fn parse_install_report(
-    content: &str,
+    content: &[u8],
 ) -> Result<WindowsOperationReport, serde_json::Error> {
-    serde_json::from_str(content.trim_start_matches('\u{feff}').trim())
+    serde_json::from_slice(content.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(content))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_install_report;
+
+    const VALID: &str = r#"{"state":"succeeded","message":"ok","percentage":null,"estimated":false,"timestamp":"2026-08-14T00:00:00Z","exitCode":0,"executablePath":null,"error":null}"#;
+
+    #[test]
+    fn requires_timestamp_and_rejects_unknown_payload_fields() {
+        assert!(parse_install_report(VALID.as_bytes()).is_ok());
+        assert!(parse_install_report(
+            VALID
+                .replace(",\"timestamp\":\"2026-08-14T00:00:00Z\"", "")
+                .as_bytes()
+        )
+        .is_err());
+        assert!(parse_install_report(VALID.replace("}", ",\"forged\":true}").as_bytes()).is_err());
+    }
 }

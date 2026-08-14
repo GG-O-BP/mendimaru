@@ -111,7 +111,7 @@ pub async fn download_and_launch(
         safe_version_filename(&version)
     ));
 
-    let cached_size = if force_redownload {
+    let cached_installer = if force_redownload {
         emit_progress(
             app,
             DownloadProgressUpdate {
@@ -128,7 +128,7 @@ pub async fn download_and_launch(
     } else {
         match cache::inspect(&installer_path, &version, &download_url).await {
             CacheInspection::Missing => None,
-            CacheInspection::Valid(metadata) => Some(metadata.size),
+            CacheInspection::Valid(metadata) => Some((metadata.size, metadata.sha256)),
             CacheInspection::Invalid(error) => {
                 emit_progress(
                     app,
@@ -149,7 +149,7 @@ pub async fn download_and_launch(
             }
         }
     };
-    if let Some(size) = cached_size {
+    let installer_sha256 = if let Some((size, sha256)) = cached_installer {
         emit_progress(
             app,
             DownloadProgressUpdate {
@@ -162,11 +162,13 @@ pub async fn download_and_launch(
                 message: crate::tr!("progress-ready"),
             },
         );
+        sha256
     } else {
         manager.cancellable.store(true, Ordering::SeqCst);
-        download_file(app, manager, &version, &download_url, &installer_path).await?;
+        let sha256 = download_file(app, manager, &version, &download_url, &installer_path).await?;
         manager.cancellable.store(false, Ordering::SeqCst);
-    }
+        sha256
+    };
 
     if manager.cancelled.load(Ordering::SeqCst) {
         return Err(InstallError::Cancelled(crate::tr!(
@@ -201,9 +203,13 @@ pub async fn download_and_launch(
             return Err(error.into());
         }
     }
-    crate::platform::install_studio(config, &version, &installer_path, |progress| {
-        emit_install_progress(app, &version, progress)
-    })
+    crate::platform::install_studio(
+        config,
+        &version,
+        &installer_path,
+        &installer_sha256,
+        |progress| emit_install_progress(app, &version, progress),
+    )
     .await?;
     emit_progress(
         app,
@@ -231,7 +237,7 @@ async fn download_file(
     version: &str,
     url: &str,
     destination: &Path,
-) -> Result<(), InstallError> {
+) -> Result<String, InstallError> {
     download_file_with_progress(
         manager,
         version,
@@ -261,7 +267,7 @@ async fn download_file_with_progress<F>(
     url: &str,
     destination: &Path,
     mut on_progress: F,
-) -> Result<(), InstallError>
+) -> Result<String, InstallError>
 where
     F: FnMut(DownloadState, u64, Option<u64>, Option<f64>, String),
 {
@@ -368,7 +374,7 @@ where
         Some(DOWNLOAD_PROGRESS_END),
         crate::tr!("progress-downloaded"),
     );
-    Ok(())
+    Ok(validated.sha256)
 }
 
 fn safe_version_filename(version: &str) -> String {
@@ -474,6 +480,7 @@ mod tests {
             |state, _, _, _, _| states.push(state),
         )
         .await
+        .map(|_| ())
     }
 
     #[test]

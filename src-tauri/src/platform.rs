@@ -124,6 +124,7 @@ pub async fn install_studio<F>(
     config: &AppConfig,
     version: &str,
     installer_path: &Path,
+    expected_sha256: &str,
     on_progress: F,
 ) -> Result<String, String>
 where
@@ -131,6 +132,7 @@ where
 {
     #[cfg(target_os = "windows")]
     {
+        let _ = expected_sha256;
         return windows_native::install_studio(config, version, installer_path, on_progress).await;
     }
     #[cfg(target_os = "linux")]
@@ -144,13 +146,20 @@ where
             config,
             version,
             &windows_installer_path,
+            expected_sha256,
             on_progress,
         )
         .await;
     }
     #[allow(unreachable_code)]
     {
-        let _ = (config, version, installer_path, on_progress);
+        let _ = (
+            config,
+            version,
+            installer_path,
+            expected_sha256,
+            on_progress,
+        );
         Err(crate::tr!("error-platform-unsupported"))
     }
 }

@@ -37,6 +37,36 @@ pub(in crate::winboat) fn localize_windows_reason(reason: &str) -> String {
     if let Some(path) = reason.strip_prefix("MENDIMARU_UNINSTALL_STILL_EXISTS:") {
         return crate::tr!("error-script-uninstall-still-exists", path = path);
     }
+    if let Some(version) = reason.strip_prefix("MENDIMARU_UNINSTALL_METADATA_MISSING:") {
+        return crate::tr!("error-script-uninstall-metadata-missing", version = version);
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_EXECUTABLE_NOT_FOUND:") {
+        return crate::tr!("error-script-executable-not-found", path = path);
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_DIRECTORY_NOT_FOUND:") {
+        return crate::tr!("error-script-directory-not-found", path = path);
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_PATH_OUTSIDE_TRUST_ROOT:") {
+        return crate::tr!("error-script-path-outside-root", path = path);
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_REPARSE_POINT:") {
+        return crate::tr!("error-script-reparse-point", path = path);
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_EXECUTABLE_INVALID:") {
+        return crate::tr!("error-script-executable-invalid", path = path);
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_HASH_MISMATCH:") {
+        return crate::tr!("error-script-hash-mismatch", path = path);
+    }
+    if let Some(reason) = reason.strip_prefix("MENDIMARU_SIGNATURE_INVALID:") {
+        return crate::tr!("error-script-signature-invalid", reason = reason);
+    }
+    if let Some(publisher) = reason.strip_prefix("MENDIMARU_PUBLISHER_INVALID:") {
+        return crate::tr!("error-script-publisher-invalid", publisher = publisher);
+    }
+    if let Some(path) = reason.strip_prefix("MENDIMARU_EXECUTABLE_CHANGED:") {
+        return crate::tr!("error-script-executable-changed", path = path);
+    }
     match reason {
         "MENDIMARU_STUDIO_WINDOW_TIMEOUT" => crate::tr!(
             "error-script-studio-window-timeout",
@@ -45,6 +75,7 @@ pub(in crate::winboat) fn localize_windows_reason(reason: &str) -> String {
         "MENDIMARU_ADMIN_REQUIRED" => crate::tr!("error-script-admin-required"),
         "MENDIMARU_PROJECT_STILL_OPEN" => crate::tr!("error-script-project-still-open"),
         "MENDIMARU_STUDIO_STILL_RUNNING" => crate::tr!("error-script-studio-still-running"),
+        "MENDIMARU_PATH_INVALID" => crate::tr!("error-script-path-invalid"),
         _ => reason.to_string(),
     }
 }
