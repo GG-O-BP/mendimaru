@@ -1,6 +1,6 @@
 import enumValues from "../shared/contracts/enumValues.json";
 
-export type ViewKey = "studio" | "projects" | "settings";
+export type ViewKey = "studio" | "projects" | "operations" | "settings";
 
 export type HostPlatform = keyof typeof enumValues.hostPlatform;
 
@@ -195,6 +195,35 @@ export interface DownloadProgress {
   percentage?: number;
   estimated: boolean;
   message: string;
+}
+
+export type OperationKind = keyof typeof enumValues.operationKind;
+export type OperationState = keyof typeof enumValues.operationState;
+export type OperationStage = keyof typeof enumValues.operationStage;
+
+export interface OperationError {
+  code: string;
+  reason: string;
+  exitCode?: number;
+}
+
+export interface OperationRecord {
+  schemaVersion: string;
+  id: string;
+  kind: OperationKind;
+  targetVersion: string;
+  protectedProject: boolean;
+  state: OperationState;
+  stage: OperationStage;
+  percentage?: number;
+  estimated: boolean;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+  error?: OperationError;
+  retryable: boolean;
+  logAvailable: boolean;
+  retryOf?: string;
 }
 
 export interface LocaleOption {

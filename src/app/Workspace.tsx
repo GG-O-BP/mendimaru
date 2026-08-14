@@ -6,11 +6,13 @@ import type {
   ViewKey,
 } from "../domain/types";
 import { useProjects } from "../features/projects/useProjects";
+import { useOperations } from "../features/operations/useOperations";
 import type { EnvironmentController } from "../features/settings/useEnvironment";
 import { useStudio } from "../features/studio/useStudio";
 import type { Translate } from "../i18n";
 import { AppShell } from "./AppShell";
 import { ProjectsView } from "./ProjectsView";
+import { OperationsView } from "./OperationsView";
 import { SettingsView } from "./SettingsView";
 import { StudioView } from "./StudioView";
 
@@ -57,6 +59,14 @@ export function Workspace({
     onWarning,
   });
   const projects = useProjects(t, onWarning, runAction);
+  const operations = useOperations({
+    t,
+    notify,
+    requestConfirmation,
+    runAction,
+    isBusy,
+    onWarning,
+  });
   const { refresh: refreshProjects, setSearch: setProjectSearch } = projects;
   const { refreshInstalled, resetFilters, findVersion: selectVersion } = studio;
   const {
@@ -80,8 +90,13 @@ export function Workspace({
     const handleShortcut = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
       const nextView = (
-        { "1": "studio", "2": "projects", "3": "settings" } as const
-      )[event.key as "1" | "2" | "3"];
+        {
+          "1": "studio",
+          "2": "projects",
+          "3": "operations",
+          "4": "settings",
+        } as const
+      )[event.key as "1" | "2" | "3" | "4"];
       if (!nextView) return;
       event.preventDefault();
       setActiveView(nextView);
@@ -165,6 +180,13 @@ export function Workspace({
       )}
       {activeView === "settings" && (
         <SettingsView t={t} environment={environment} isBusy={isBusy} />
+      )}
+      {activeView === "operations" && (
+        <OperationsView
+          t={t}
+          localization={localization}
+          operations={operations}
+        />
       )}
     </AppShell>
   );

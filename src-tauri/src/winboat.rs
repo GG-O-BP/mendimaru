@@ -10,6 +10,7 @@ pub use client::installed_versions;
 pub use container::{
     environment_status, guest_is_online, open_winboat, recreate_container, start_container,
 };
+pub(crate) use operation::WindowsOperationFailure;
 pub use studio::{install_studio, launch_studio, launch_uninstaller, open_linux_folder};
 
 #[cfg(test)]
@@ -172,7 +173,7 @@ mod tests {
         let mut report_temporary = report_path.as_os_str().to_os_string();
         report_temporary.push(".tmp");
         let _ = std::fs::remove_file(PathBuf::from(report_temporary));
-        result
+        result.map_err(|error| error.message)
     }
 
     struct DirectoryCleanup(PathBuf);
@@ -585,6 +586,7 @@ mod tests {
         let executable_path = tauri::async_runtime::block_on(install_studio(
             &config,
             &version,
+            &format!("install-{version}-live-e2e"),
             &windows_installer_path,
             &expected_sha256,
             |progress| {
@@ -616,16 +618,25 @@ mod tests {
     #[ignore = "launches Studio Pro in the live WinBoat VM"]
     fn live_e2e_launch_studio() {
         let (config, version) = live_e2e_context();
-        tauri::async_runtime::block_on(launch_studio(&config, &version, None))
-            .expect("Studio Pro launch must succeed");
+        tauri::async_runtime::block_on(launch_studio(
+            &config,
+            &version,
+            &format!("launch-{version}-live-e2e"),
+            None,
+        ))
+        .expect("Studio Pro launch must succeed");
     }
 
     #[test]
     #[ignore = "uninstalls Studio Pro from the live WinBoat VM"]
     fn live_e2e_uninstall_studio() {
         let (config, version) = live_e2e_context();
-        tauri::async_runtime::block_on(launch_uninstaller(&config, &version))
-            .expect("Studio Pro uninstall must succeed");
+        tauri::async_runtime::block_on(launch_uninstaller(
+            &config,
+            &version,
+            &format!("uninstall-{version}-live-e2e"),
+        ))
+        .expect("Studio Pro uninstall must succeed");
 
         let installed = tauri::async_runtime::block_on(installed_versions(&config))
             .expect("installed versions must be readable after uninstall");

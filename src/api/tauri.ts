@@ -8,6 +8,7 @@ import type {
   EnvironmentStatus,
   LocalizationBundle,
   MendixProject,
+  OperationRecord,
   SettingsSaveResult,
   StudioVersion,
   StudioVersionCatalog,
@@ -38,6 +39,10 @@ const commands = {
   uninstallStudioPro: "uninstall_studio_pro",
   installStudioPro: "install_studio_pro",
   cancelStudioDownload: "cancel_studio_download",
+  getOperations: "get_operations",
+  retryOperation: "retry_operation",
+  clearOperationHistory: "clear_operation_history",
+  openOperationLogs: "open_operation_logs",
   openFolder: "open_folder",
 } as const;
 
@@ -90,6 +95,10 @@ export const tauriApi = {
   installStudioPro: (version: string, forceRedownload = false) =>
     invoke<void>(commands.installStudioPro, { version, forceRedownload }),
   cancelStudioDownload: () => invoke<boolean>(commands.cancelStudioDownload),
+  getOperations: () => invoke<OperationRecord[]>(commands.getOperations),
+  retryOperation: (id: string) => invoke<void>(commands.retryOperation, { id }),
+  clearOperationHistory: () => invoke<number>(commands.clearOperationHistory),
+  openOperationLogs: () => invoke<void>(commands.openOperationLogs),
   openFolder: (path: string) => invoke<void>(commands.openFolder, { path }),
   onStudioDownloadProgress: (
     handler: (progress: DownloadProgress) => void,

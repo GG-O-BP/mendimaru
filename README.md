@@ -16,6 +16,7 @@ Mendimaru is a Tauri GUI app for discovering, installing, launching, and removin
 
 - **Studio Pro**: Discover, launch, install, and safely remove Studio Pro versions in the active Windows environment
 - **Projects**: Find and launch `.mpr` projects in the configured workspace
+- **Operations**: Review persistent install, removal, and launch progress, failures, and retryability
 - **Settings**: Configure a native Windows workspace and optional portable Studio paths, or the WinBoat environment on Linux
 
 Mendimaru does not provide a dashboard, VM resource information, advanced download URLs, or manual build-number entry.
@@ -23,6 +24,12 @@ Mendimaru does not provide a dashboard, VM resource information, advanced downlo
 ### Environment diagnostics
 
 Settings checks the WinBoat executable, Compose structure, container runtime daemon, FreeRDP, shared workspace and mount, container state, Guest API, loopback RDP port, and Marketplace browser independently. A failed check offers only an explicit safe next action such as redetection, starting Windows, opening WinBoat, or focusing the relevant setting. Diagnostic reports can be copied or exported as JSON; they contain allowlisted status fields and omit configured paths, credentials, tokens, and command payloads.
+
+### Persistent operation history
+
+Install, removal, and launch operations are recorded atomically in the host-only application configuration directory, outside the untrusted shared workspace. The operation center restores this history after a reload or app restart, shows the failed stage, safe reason and Windows exit code when available, and distinguishes retryable work from protected project launches that require the project to be selected again. A running record from a previous app process is marked interrupted instead of trusting an old result whose per-attempt HMAC key no longer exists. Existing Windows report filenames are imported once as untrusted interrupted references; their payloads are never used to infer success.
+
+Clearing completed history removes only terminal host records. It does not delete a running operation, downloaded installer, command script, or Windows report. The history schema stores no project paths, command payloads, URLs, credentials, or HMAC keys.
 
 ## Windows installation
 

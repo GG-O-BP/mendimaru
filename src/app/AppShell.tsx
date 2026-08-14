@@ -6,6 +6,7 @@ import {
   Info,
   Languages,
   LoaderCircle,
+  ListChecks,
   Monitor,
   Play,
   Server,
@@ -21,6 +22,7 @@ import type { EnvironmentControlKind } from "../features/studio/types";
 const TABS: Array<{ key: ViewKey; labelKey: MessageKey; icon: LucideIcon }> = [
   { key: "studio", labelKey: "nav-studio", icon: AppWindow },
   { key: "projects", labelKey: "nav-projects", icon: FolderKanban },
+  { key: "operations", labelKey: "nav-operations", icon: ListChecks },
   { key: "settings", labelKey: "nav-settings", icon: Settings },
 ];
 

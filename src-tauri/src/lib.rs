@@ -7,6 +7,7 @@ mod downloads;
 mod i18n;
 mod marketplace;
 pub mod models;
+mod operations;
 pub mod platform;
 mod projects;
 mod settings;
@@ -23,6 +24,7 @@ pub fn run() {
             i18n::initialize("system").map_err(std::io::Error::other)?;
             if let Ok(config) = config::load_config(app.handle()) {
                 i18n::set_language(&config.language_preference).map_err(std::io::Error::other)?;
+                let _ = operations::list(app.handle(), &config);
             }
             Ok(())
         })
@@ -53,6 +55,10 @@ pub fn run() {
             uninstall_studio_pro,
             install_studio_pro,
             cancel_studio_download,
+            get_operations,
+            retry_operation,
+            clear_operation_history,
+            open_operation_logs,
             open_folder,
         ])
         .run(tauri::generate_context!())

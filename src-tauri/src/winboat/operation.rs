@@ -16,6 +16,23 @@ pub(super) use reason::localize_windows_reason;
 pub(super) use report::parse_install_report;
 pub(super) use report::{WindowsOperationReport, WindowsOperationState};
 
+#[derive(Debug)]
+pub(crate) struct WindowsOperationFailure {
+    pub(crate) message: String,
+    pub(crate) exit_code: Option<i32>,
+    pub(crate) retryable: bool,
+}
+
+impl From<String> for WindowsOperationFailure {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            exit_code: None,
+            retryable: false,
+        }
+    }
+}
+
 const REMOTE_APP_START_ATTEMPTS: usize = 2;
 const REMOTE_APP_RETRY_DELAY_SECONDS: u64 = 2;
 
@@ -33,7 +50,7 @@ pub(super) async fn run_windows_operation<F>(
     config: &AppConfig,
     request: WindowsOperationRequest<'_>,
     mut on_report: F,
-) -> Result<WindowsOperationReport, String>
+) -> Result<WindowsOperationReport, WindowsOperationFailure>
 where
     F: FnMut(&WindowsOperationReport) + Send,
 {
@@ -66,7 +83,11 @@ where
                     tokio::time::sleep(Duration::from_secs(REMOTE_APP_RETRY_DELAY_SECONDS)).await;
                     continue;
                 }
-                return Err(error.message);
+                return Err(WindowsOperationFailure {
+                    message: error.message,
+                    exit_code: error.exit_code,
+                    retryable: error.retryable || error.user_retryable,
+                });
             }
         }
     }

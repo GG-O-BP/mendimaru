@@ -12,6 +12,7 @@ import type {
   EnvironmentStatus,
   LocalizationBundle,
   MendixProject,
+  OperationRecord,
   StudioVersion,
   StudioVersionCatalog,
 } from "./domain/types";
@@ -41,6 +42,10 @@ const mocks = vi.hoisted(() => ({
   uninstallStudioPro: vi.fn(),
   installStudioPro: vi.fn(),
   cancelStudioDownload: vi.fn(),
+  getOperations: vi.fn(),
+  retryOperation: vi.fn(),
+  clearOperationHistory: vi.fn(),
+  openOperationLogs: vi.fn(),
   openFolder: vi.fn(),
   onStudioDownloadProgress: vi.fn(),
   openDialog: vi.fn(),
@@ -73,6 +78,10 @@ vi.mock("./api/tauri", () => ({
     uninstallStudioPro: mocks.uninstallStudioPro,
     installStudioPro: mocks.installStudioPro,
     cancelStudioDownload: mocks.cancelStudioDownload,
+    getOperations: mocks.getOperations,
+    retryOperation: mocks.retryOperation,
+    clearOperationHistory: mocks.clearOperationHistory,
+    openOperationLogs: mocks.openOperationLogs,
     openFolder: mocks.openFolder,
     onStudioDownloadProgress: mocks.onStudioDownloadProgress,
   },
@@ -224,6 +233,10 @@ beforeEach(() => {
     ];
   });
   mocks.cancelStudioDownload.mockResolvedValue(true);
+  mocks.getOperations.mockResolvedValue([]);
+  mocks.retryOperation.mockResolvedValue(undefined);
+  mocks.clearOperationHistory.mockResolvedValue(0);
+  mocks.openOperationLogs.mockResolvedValue(undefined);
   mocks.openFolder.mockResolvedValue(undefined);
   mocks.onStudioDownloadProgress.mockResolvedValue(vi.fn());
   mocks.openDialog.mockResolvedValue(undefined);
@@ -394,6 +407,182 @@ describe("native Windows application E2E", () => {
     );
     await waitFor(() => expect(mocks.redetectConfig).toHaveBeenCalledOnce());
     expect(mocks.startWinBoatWindows).not.toHaveBeenCalled();
+  });
+
+  it("restores persistent operations, exposes safe failure context, retries, and clears only terminal history", async () => {
+    let operationRecords: OperationRecord[] = [
+      {
+        schemaVersion: "1.0.0",
+        id: "install-11.13.0-0123456789abcdef0123456789abcdef",
+        kind: "install",
+        targetVersion: "11.13.0",
+        protectedProject: false,
+        state: "running",
+        stage: "downloading",
+        percentage: 47,
+        estimated: false,
+        startedAt: "2026-08-15T02:00:00Z",
+        updatedAt: "2026-08-15T02:01:00Z",
+        retryable: false,
+        logAvailable: true,
+      },
+      {
+        schemaVersion: "1.0.0",
+        id: "uninstall-11.12.2-fedcba9876543210fedcba9876543210",
+        kind: "uninstall",
+        targetVersion: "11.12.2",
+        protectedProject: false,
+        state: "failed",
+        stage: "uninstalling",
+        estimated: false,
+        startedAt: "2026-08-15T01:00:00Z",
+        updatedAt: "2026-08-15T01:01:00Z",
+        finishedAt: "2026-08-15T01:01:00Z",
+        error: {
+          code: "operation_failed",
+          reason: "operation_failed",
+          exitCode: 1603,
+        },
+        retryable: true,
+        logAvailable: true,
+      },
+      {
+        schemaVersion: "1.0.0",
+        id: "launch-11.12.2-aabbccddeeff00112233445566778899",
+        kind: "launch",
+        targetVersion: "11.12.2",
+        protectedProject: true,
+        state: "interrupted",
+        stage: "interrupted",
+        estimated: false,
+        startedAt: "2026-08-14T23:00:00Z",
+        updatedAt: "2026-08-14T23:01:00Z",
+        finishedAt: "2026-08-14T23:01:00Z",
+        error: {
+          code: "operation_interrupted",
+          reason: "operation_interrupted",
+        },
+        retryable: false,
+        logAvailable: true,
+      },
+      {
+        schemaVersion: "1.0.0",
+        id: "install-11.11.0-11112222333344445555666677778888",
+        kind: "install",
+        targetVersion: "11.11.0",
+        protectedProject: false,
+        state: "succeeded",
+        stage: "completed",
+        percentage: 100,
+        estimated: false,
+        startedAt: "2026-08-14T22:00:00Z",
+        updatedAt: "2026-08-14T22:05:00Z",
+        finishedAt: "2026-08-14T22:05:00Z",
+        retryable: false,
+        logAvailable: true,
+      },
+      {
+        schemaVersion: "1.0.0",
+        id: "install-11.10.0-99990000aaaabbbbccccddddeeeeffff",
+        kind: "install",
+        targetVersion: "11.10.0",
+        protectedProject: false,
+        state: "cancelled",
+        stage: "downloading",
+        percentage: 21,
+        estimated: false,
+        startedAt: "2026-08-14T21:00:00Z",
+        updatedAt: "2026-08-14T21:02:00Z",
+        finishedAt: "2026-08-14T21:02:00Z",
+        error: {
+          code: "download_cancelled",
+          reason: "download_cancelled",
+        },
+        retryable: true,
+        logAvailable: true,
+      },
+    ];
+    mocks.getOperations.mockImplementation(async () => [...operationRecords]);
+    mocks.getLocalization.mockResolvedValue({
+      ...localization,
+      messages: {
+        ...localization.messages,
+        "operation-exit-code": "Exit code %code%",
+      },
+    });
+    mocks.clearOperationHistory.mockImplementation(async () => {
+      const removed = operationRecords.filter(
+        (operation) => operation.state !== "running",
+      ).length;
+      operationRecords = operationRecords.filter(
+        (operation) => operation.state === "running",
+      );
+      return removed;
+    });
+
+    const app = render(<App />);
+    await screen.findByText("route-native-windows");
+    fireEvent.click(screen.getByRole("button", { name: /nav-operations/ }));
+
+    expect(await screen.findByText("operation-state-running")).toBeVisible();
+    expect(screen.getByText("operation-state-succeeded")).toBeVisible();
+    expect(screen.getByText("operation-state-cancelled")).toBeVisible();
+    expect(screen.getByText("47%")).toBeVisible();
+    expect(screen.getByText(/Exit code 1603/)).toBeVisible();
+    expect(screen.getByText("operation-project-protected")).toBeVisible();
+    expect(screen.getByText(/operation-reason-operation-failed/)).toBeVisible();
+
+    const failedItem = screen
+      .getByText("operation-state-failed")
+      .closest("article");
+    expect(failedItem).not.toBeNull();
+    fireEvent.click(
+      within(failedItem!).getByRole("button", {
+        name: "action-retry-operation",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.retryOperation).toHaveBeenCalledWith(
+        "uninstall-11.12.2-fedcba9876543210fedcba9876543210",
+      ),
+    );
+
+    const protectedItem = screen
+      .getByText("operation-project-protected")
+      .closest("article");
+    expect(
+      within(protectedItem!).getByRole("button", {
+        name: "action-retry-operation",
+      }),
+    ).toBeDisabled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "action-open-operation-logs" }),
+    );
+    await waitFor(() => expect(mocks.openOperationLogs).toHaveBeenCalledOnce());
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "action-clear-operation-history" }),
+    );
+    const clearDialog = await screen.findByRole("dialog");
+    fireEvent.click(
+      within(clearDialog).getByRole("button", {
+        name: "action-clear-operation-history",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.clearOperationHistory).toHaveBeenCalledOnce(),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("operation-state-failed")).toBeNull(),
+    );
+    expect(screen.getByText("operation-state-running")).toBeVisible();
+
+    app.unmount();
+    render(<App />);
+    await screen.findByText("route-native-windows");
+    fireEvent.click(screen.getByRole("button", { name: /nav-operations/ }));
+    expect(await screen.findByText("operation-state-running")).toBeVisible();
   });
 });
 

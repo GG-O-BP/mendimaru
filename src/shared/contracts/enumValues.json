@@ -148,6 +148,35 @@
     "failed": true,
     "cancelled": true
   },
+  "operationKind": {
+    "install": true,
+    "uninstall": true,
+    "launch": true
+  },
+  "operationState": {
+    "running": true,
+    "succeeded": true,
+    "failed": true,
+    "cancelled": true,
+    "interrupted": true
+  },
+  "operationStage": {
+    "starting": true,
+    "preparing": true,
+    "checking": true,
+    "connecting": true,
+    "downloading": true,
+    "downloaded": true,
+    "ready": true,
+    "staging": true,
+    "installing": true,
+    "finalizing": true,
+    "verifying": true,
+    "launching": true,
+    "uninstalling": true,
+    "completed": true,
+    "interrupted": true
+  },
   "commandErrorCode": {
     "config_load_failed": true,
     "download_cancelled": true,

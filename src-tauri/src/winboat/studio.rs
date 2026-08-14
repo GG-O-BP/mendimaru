@@ -1,6 +1,8 @@
 use super::client::installed_versions;
 use super::container::ensure_guest_online;
-use super::operation::{run_windows_operation, WindowsOperationRequest, WindowsOperationState};
+use super::operation::{
+    run_windows_operation, WindowsOperationFailure, WindowsOperationRequest, WindowsOperationState,
+};
 use super::scripts::{install_script, launch_studio_script, uninstall_script};
 use crate::models::{AppConfig, StudioInstallPhase, StudioInstallProgress};
 use crate::platform::validate_version;
@@ -19,8 +21,10 @@ const UNINSTALL_TIMEOUT_SECONDS: u64 = 15 * 60;
 pub async fn launch_studio(
     config: &AppConfig,
     version: &str,
+    operation_id: &str,
     project_mpr_path: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), WindowsOperationFailure> {
+    validate_operation_id(operation_id)?;
     ensure_guest_online(config).await?;
     let versions = installed_versions(config).await?;
     let selected = versions
@@ -35,7 +39,6 @@ pub async fn launch_studio(
     };
     let label = format!("Studio Pro {}", selected.version);
     let operation_directory = secure_shared_directory(config, ".mendimaru/operations")?;
-    let operation_id = random_operation_id("launch", version)?;
     let report_path = operation_directory.join(format!("{operation_id}.json"));
     let windows_report_path = linux_path_to_windows_share(
         Path::new(&config.shared_directory),
@@ -48,7 +51,7 @@ pub async fn launch_studio(
         &windows_report_path,
         &config.mendix_install_root,
     );
-    let command = write_command_script(config, &operation_id, &script)?;
+    let command = write_command_script(config, operation_id, &script)?;
     let operation = crate::tr!("operation-studio-launch");
     let report = run_windows_operation(
         config,
@@ -65,7 +68,7 @@ pub async fn launch_studio(
     )
     .await?;
     if report.executable_path.as_deref().is_none_or(str::is_empty) {
-        return Err(crate::tr!("error-launch-path-missing"));
+        return Err(crate::tr!("error-launch-path-missing").into());
     }
     Ok(())
 }
@@ -73,18 +76,19 @@ pub async fn launch_studio(
 pub async fn install_studio<F>(
     config: &AppConfig,
     version: &str,
+    operation_id: &str,
     windows_installer_path: &str,
     expected_sha256: &str,
     mut on_progress: F,
-) -> Result<String, String>
+) -> Result<String, WindowsOperationFailure>
 where
     F: FnMut(StudioInstallProgress) + Send,
 {
     validate_version(version)?;
+    validate_operation_id(operation_id)?;
     validate_sha256(expected_sha256)?;
     ensure_guest_online(config).await?;
     let operation_directory = secure_shared_directory(config, ".mendimaru/operations")?;
-    let operation_id = random_operation_id("install", version)?;
     let report_path = operation_directory.join(format!("{operation_id}.json"));
     let windows_report_path = linux_path_to_windows_share(
         Path::new(&config.shared_directory),
@@ -102,7 +106,7 @@ where
     );
     // Keep the exact script next to other commands so a failed installation can
     // be diagnosed without exposing the Windows password or FreeRDP arguments.
-    let command = write_command_script(config, &operation_id, &script)?;
+    let command = write_command_script(config, operation_id, &script)?;
     let label = format!("Install Studio Pro {version}");
     let operation = crate::tr!("operation-studio-install");
     on_progress(StudioInstallProgress {
@@ -230,11 +234,15 @@ impl InstallProgressState {
     }
 }
 
-pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(), String> {
+pub async fn launch_uninstaller(
+    config: &AppConfig,
+    version: &str,
+    operation_id: &str,
+) -> Result<(), WindowsOperationFailure> {
     validate_version(version)?;
+    validate_operation_id(operation_id)?;
     ensure_guest_online(config).await?;
     let operation_directory = secure_shared_directory(config, ".mendimaru/operations")?;
-    let operation_id = random_operation_id("uninstall", version)?;
     let report_path = operation_directory.join(format!("{operation_id}.json"));
     let windows_report_path = linux_path_to_windows_share(
         Path::new(&config.shared_directory),
@@ -247,7 +255,7 @@ pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(),
         version,
         &windows_report_path,
     );
-    let command = write_command_script(config, &operation_id, &script)?;
+    let command = write_command_script(config, operation_id, &script)?;
     let label = format!("Uninstall Studio Pro {version}");
     let operation = crate::tr!("operation-studio-uninstall");
     run_windows_operation(
@@ -377,16 +385,12 @@ fn secure_shared_directory(config: &AppConfig, relative: &str) -> Result<PathBuf
     Ok(directory)
 }
 
-fn random_operation_id(prefix: &str, version: &str) -> Result<String, String> {
-    let mut random = [0_u8; 16];
-    getrandom::fill(&mut random)
-        .map_err(|error| crate::tr!("error-operation-security-create", error = error))?;
-    let random: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
-    Ok(format!(
-        "{}-{}-{random}",
-        safe_operation_name(prefix),
-        safe_operation_name(version)
-    ))
+fn validate_operation_id(value: &str) -> Result<(), String> {
+    if !value.is_empty() && value.len() <= 160 && safe_operation_name(value) == value {
+        Ok(())
+    } else {
+        Err(crate::tr!("error-operation-id-invalid"))
+    }
 }
 
 fn validate_sha256(value: &str) -> Result<(), String> {
@@ -410,7 +414,7 @@ fn safe_operation_name(value: &str) -> String {
 
 #[cfg(test)]
 mod progress_tests {
-    use super::InstallProgressState;
+    use super::{validate_operation_id, InstallProgressState};
     use crate::models::{StudioInstallPhase, StudioInstallProgress};
 
     #[test]
@@ -434,6 +438,14 @@ mod progress_tests {
             .iter()
             .all(|update| update.percentage == Some(100.0)));
         assert!(!updates.last().expect("verification update").estimated);
+    }
+
+    #[test]
+    fn accepts_only_bounded_filename_safe_host_operation_ids() {
+        assert!(validate_operation_id("install-11.12.2-0123456789abcdef0123456789abcdef").is_ok());
+        assert!(validate_operation_id("").is_err());
+        assert!(validate_operation_id("../operation").is_err());
+        assert!(validate_operation_id(&"a".repeat(161)).is_err());
     }
 
     #[test]
