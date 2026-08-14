@@ -5,7 +5,9 @@ use crate::contracts::{
 };
 use crate::downloads::DownloadManager;
 use crate::models::{CommandError, CommandErrorCode, DownloadProgress};
-use serde::{Deserialize, Serialize};
+#[cfg(target_os = "linux")]
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::io::Write;

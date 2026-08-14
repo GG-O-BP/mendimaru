@@ -403,6 +403,7 @@ pub(crate) fn retry_source_with_paths(
     retry_source_at(config, &history_path(paths)?, id)
 }
 
+#[cfg(target_os = "linux")]
 pub(crate) fn interrupt_completed_launch_with_paths(
     paths: &AppPaths,
     id: &str,
@@ -410,6 +411,7 @@ pub(crate) fn interrupt_completed_launch_with_paths(
     interrupt_completed_launch_at(&history_path(paths)?, id)
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn interrupt_completed_launch_at(history_path: &Path, id: &str) -> Result<(), String> {
     validate_identifier(id)?;
     let _store = lock_store()?;
