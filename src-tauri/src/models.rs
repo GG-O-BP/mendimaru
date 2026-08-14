@@ -203,6 +203,14 @@ mod tests {
                 CommandErrorCode::InvalidRequest,
                 CommandErrorCode::PreconditionFailed,
                 CommandErrorCode::OperationFailed,
+                CommandErrorCode::ToolchainUnavailable,
+                CommandErrorCode::RuntimeVersionUnsupported,
+                CommandErrorCode::ConsistencyFailed,
+                CommandErrorCode::RuntimeBuildFailed,
+                CommandErrorCode::RuntimeInitializationFailed,
+                CommandErrorCode::RuntimeReadinessTimeout,
+                CommandErrorCode::RuntimeSessionNotFound,
+                CommandErrorCode::RuntimeExited,
             ],
         );
         assert_registry("textDirection", [TextDirection::Ltr, TextDirection::Rtl]);

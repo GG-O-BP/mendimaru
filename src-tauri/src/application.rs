@@ -1,6 +1,8 @@
 use crate::app_paths::AppPaths;
 use crate::contracts::{
-    BackendError, BackendErrorCode, CapabilityId, CapabilityLimitation, StudioSessionStatus,
+    BackendError, BackendErrorCode, CapabilityId, CapabilityLimitation, RuntimeBuildRequest,
+    RuntimeBuildResult, RuntimeLogBatch, RuntimeMode, RuntimeStartRequest, RuntimeStatus,
+    StudioSessionStatus,
 };
 use crate::downloads::{DownloadManager, InstallError};
 use crate::models::{
@@ -192,6 +194,89 @@ pub(crate) async fn stop_session(
     let _guard = SessionActionGuard::begin_with_paths(paths, config, &session.version)
         .map_err(session_conflict_error)?;
     Ok(crate::platform::stop_studio_session(config, session_id).await?)
+}
+
+pub(crate) async fn runtime_build(
+    config: &AppConfig,
+    project_id: &str,
+    clean: bool,
+) -> ApplicationResult<RuntimeBuildResult> {
+    let project = resolve_project(config, project_id)?;
+    let required_version = project.version.clone().ok_or_else(|| {
+        precondition_error(
+            CapabilityId::RuntimeBuild,
+            "the project does not declare one unambiguous exact Mendix version",
+            false,
+        )
+    })?;
+    let request = RuntimeBuildRequest {
+        session_id: crate::contracts::secure_identifier("session")?,
+        project_path: project.mpr_path,
+        required_version,
+        clean,
+    };
+    crate::platform::build_runtime(config, &request)
+        .await
+        .map_err(CommandError::from)
+}
+
+pub(crate) async fn runtime_start(
+    config: &AppConfig,
+    project_id: &str,
+    clean: bool,
+    readiness_timeout: Duration,
+) -> ApplicationResult<(RuntimeBuildResult, RuntimeStatus)> {
+    let build = runtime_build(config, project_id, clean).await?;
+    let request = RuntimeStartRequest {
+        session_id: build.session_id.clone(),
+        mode: RuntimeMode::Portable,
+        package_artifact_id: Some(build.package_artifact.artifact_id.clone()),
+        readiness_timeout_seconds: readiness_timeout.as_secs().clamp(1, 3_600),
+    };
+    let status = crate::platform::start_runtime(config, &request)
+        .await
+        .map_err(CommandError::from)?;
+    Ok((build, status))
+}
+
+pub(crate) async fn runtime_status(
+    config: &AppConfig,
+    session_id: &str,
+) -> ApplicationResult<RuntimeStatus> {
+    crate::platform::runtime_status(config, session_id)
+        .await
+        .map_err(CommandError::from)
+}
+
+pub(crate) async fn runtime_wait(
+    config: &AppConfig,
+    session_id: &str,
+) -> ApplicationResult<RuntimeStatus> {
+    crate::platform::wait_runtime(config, session_id)
+        .await
+        .map_err(CommandError::from)
+}
+
+pub(crate) async fn runtime_url(config: &AppConfig, session_id: &str) -> ApplicationResult<String> {
+    crate::platform::runtime_url(config, session_id)
+        .await
+        .map_err(CommandError::from)
+}
+
+pub(crate) async fn runtime_stop(config: &AppConfig, session_id: &str) -> ApplicationResult<()> {
+    crate::platform::stop_runtime(config, session_id)
+        .await
+        .map_err(CommandError::from)
+}
+
+pub(crate) async fn runtime_logs(
+    config: &AppConfig,
+    session_id: &str,
+    cursor: Option<&str>,
+) -> ApplicationResult<RuntimeLogBatch> {
+    crate::platform::runtime_logs(config, session_id, cursor)
+        .await
+        .map_err(CommandError::from)
 }
 
 pub(crate) async fn launch(

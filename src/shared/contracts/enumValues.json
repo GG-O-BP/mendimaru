@@ -29,6 +29,7 @@
     "studio.stop": true,
     "runtime.build": true,
     "runtime.start": true,
+    "runtime.status": true,
     "runtime.wait": true,
     "runtime.url": true,
     "runtime.stop": true,
@@ -51,7 +52,15 @@
     "backend_mismatch": true,
     "invalid_request": true,
     "precondition_failed": true,
-    "operation_failed": true
+    "operation_failed": true,
+    "toolchain_unavailable": true,
+    "runtime_version_unsupported": true,
+    "consistency_failed": true,
+    "runtime_build_failed": true,
+    "runtime_initialization_failed": true,
+    "runtime_readiness_timeout": true,
+    "runtime_session_not_found": true,
+    "runtime_exited": true
   },
   "sessionState": {
     "created": true,
@@ -67,6 +76,9 @@
   "artifactKind": {
     "studio-log": true,
     "runtime-log": true,
+    "runtime-package": true,
+    "consistency-report": true,
+    "build-log": true,
     "browser-trace": true,
     "browser-report": true,
     "screenshot": true,
@@ -195,7 +207,15 @@
     "backend_mismatch": true,
     "invalid_request": true,
     "precondition_failed": true,
-    "operation_failed": true
+    "operation_failed": true,
+    "toolchain_unavailable": true,
+    "runtime_version_unsupported": true,
+    "consistency_failed": true,
+    "runtime_build_failed": true,
+    "runtime_initialization_failed": true,
+    "runtime_readiness_timeout": true,
+    "runtime_session_not_found": true,
+    "runtime_exited": true
   },
   "textDirection": {
     "ltr": true,

@@ -12,6 +12,14 @@ pub enum CommandErrorCode {
     InvalidRequest,
     PreconditionFailed,
     OperationFailed,
+    ToolchainUnavailable,
+    RuntimeVersionUnsupported,
+    ConsistencyFailed,
+    RuntimeBuildFailed,
+    RuntimeInitializationFailed,
+    RuntimeReadinessTimeout,
+    RuntimeSessionNotFound,
+    RuntimeExited,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -41,6 +49,18 @@ impl From<BackendError> for CommandError {
             BackendErrorCode::InvalidRequest => CommandErrorCode::InvalidRequest,
             BackendErrorCode::PreconditionFailed => CommandErrorCode::PreconditionFailed,
             BackendErrorCode::OperationFailed => CommandErrorCode::OperationFailed,
+            BackendErrorCode::ToolchainUnavailable => CommandErrorCode::ToolchainUnavailable,
+            BackendErrorCode::RuntimeVersionUnsupported => {
+                CommandErrorCode::RuntimeVersionUnsupported
+            }
+            BackendErrorCode::ConsistencyFailed => CommandErrorCode::ConsistencyFailed,
+            BackendErrorCode::RuntimeBuildFailed => CommandErrorCode::RuntimeBuildFailed,
+            BackendErrorCode::RuntimeInitializationFailed => {
+                CommandErrorCode::RuntimeInitializationFailed
+            }
+            BackendErrorCode::RuntimeReadinessTimeout => CommandErrorCode::RuntimeReadinessTimeout,
+            BackendErrorCode::RuntimeSessionNotFound => CommandErrorCode::RuntimeSessionNotFound,
+            BackendErrorCode::RuntimeExited => CommandErrorCode::RuntimeExited,
         };
         Self {
             code,

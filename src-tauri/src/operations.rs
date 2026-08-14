@@ -857,6 +857,14 @@ fn failure_classification(error: &CommandError) -> (&'static str, bool) {
                 .as_ref()
                 .is_some_and(|details| details.retryable),
         ),
+        CommandErrorCode::ToolchainUnavailable => ("toolchain_unavailable", false),
+        CommandErrorCode::RuntimeVersionUnsupported => ("runtime_version_unsupported", false),
+        CommandErrorCode::ConsistencyFailed => ("consistency_failed", false),
+        CommandErrorCode::RuntimeBuildFailed => ("runtime_build_failed", false),
+        CommandErrorCode::RuntimeInitializationFailed => ("runtime_initialization_failed", false),
+        CommandErrorCode::RuntimeReadinessTimeout => ("runtime_readiness_timeout", true),
+        CommandErrorCode::RuntimeSessionNotFound => ("runtime_session_not_found", false),
+        CommandErrorCode::RuntimeExited => ("runtime_exited", false),
     }
 }
 

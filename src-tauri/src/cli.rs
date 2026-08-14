@@ -50,6 +50,30 @@ enum CliCommand {
     StudioStop {
         session_id: String,
     },
+    RuntimeBuild {
+        project_id: String,
+        clean: bool,
+    },
+    RuntimeStart {
+        project_id: String,
+        clean: bool,
+    },
+    RuntimeStatus {
+        session_id: String,
+    },
+    RuntimeWait {
+        session_id: String,
+    },
+    RuntimeUrl {
+        session_id: String,
+    },
+    RuntimeStop {
+        session_id: String,
+    },
+    RuntimeLogs {
+        session_id: String,
+        cursor: Option<String>,
+    },
     ProjectList,
     ProjectVersion {
         project_id: String,
@@ -75,6 +99,13 @@ impl CliCommand {
             Self::StudioStart { .. } => "studio.start",
             Self::StudioStatus { .. } => "studio.status",
             Self::StudioStop { .. } => "studio.stop",
+            Self::RuntimeBuild { .. } => "runtime.build",
+            Self::RuntimeStart { .. } => "runtime.start",
+            Self::RuntimeStatus { .. } => "runtime.status",
+            Self::RuntimeWait { .. } => "runtime.wait",
+            Self::RuntimeUrl { .. } => "runtime.url",
+            Self::RuntimeStop { .. } => "runtime.stop",
+            Self::RuntimeLogs { .. } => "runtime.logs",
             Self::ProjectList => "project.list",
             Self::ProjectVersion { .. } => "project.version",
             Self::OperationList => "operation.list",
@@ -106,6 +137,8 @@ struct SuccessEnvelope<'a> {
     operation_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     studio_session_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime_session_id: Option<&'a str>,
     data: &'a Value,
 }
 
@@ -137,6 +170,7 @@ struct CommandOutput {
     data: Value,
     operation_id: Option<String>,
     studio_session_id: Option<String>,
+    runtime_session_id: Option<String>,
     progress: Vec<DownloadProgress>,
 }
 
@@ -151,6 +185,7 @@ impl CommandOutput {
             })?,
             operation_id: None,
             studio_session_id: None,
+            runtime_session_id: None,
             progress: Vec::new(),
         })
     }
@@ -194,6 +229,11 @@ struct SessionKeeperIpcResponse {
 /// `None` means that the process should continue as the desktop application.
 pub fn dispatch_from_env() -> Option<i32> {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if arguments.first().and_then(|value| value.to_str()) == Some("__runtime-supervisor") {
+        return Some(crate::portable_runtime::supervisor_dispatch(
+            &arguments[1..],
+        ));
+    }
     #[cfg(target_os = "linux")]
     if arguments.first().and_then(|value| value.to_str()) == Some("__session-keeper") {
         return Some(session_keeper_dispatch(&arguments[1..]));
@@ -308,6 +348,7 @@ async fn run_command(
                 data: json!({ "completed": true }),
                 operation_id: Some(operation_id),
                 studio_session_id: None,
+                runtime_session_id: None,
                 progress,
             })
         }
@@ -318,6 +359,7 @@ async fn run_command(
                 data: json!({ "completed": true }),
                 operation_id: Some(operation_id),
                 studio_session_id: None,
+                runtime_session_id: None,
                 progress: Vec::new(),
             })
         }
@@ -341,6 +383,7 @@ async fn run_command(
                 data: json!({ "completed": true }),
                 operation_id: Some(operation_id),
                 studio_session_id,
+                runtime_session_id: None,
                 progress: Vec::new(),
             })
         }
@@ -379,8 +422,59 @@ async fn run_command(
                 data: json!({ "completed": true }),
                 operation_id: None,
                 studio_session_id: Some(session_id.clone()),
+                runtime_session_id: None,
                 progress: Vec::new(),
             })
+        }
+        CliCommand::RuntimeBuild { project_id, clean } => CommandOutput::data(
+            crate::application::runtime_build(&config, project_id, *clean).await?,
+        ),
+        CliCommand::RuntimeStart { project_id, clean } => {
+            let readiness_timeout = timeout
+                .checked_sub(Duration::from_secs(1))
+                .unwrap_or(timeout);
+            let (build, status) =
+                crate::application::runtime_start(&config, project_id, *clean, readiness_timeout)
+                    .await?;
+            let runtime_session_id = status.session_id.clone();
+            Ok(CommandOutput {
+                data: json!({ "build": build, "runtime": status }),
+                operation_id: None,
+                studio_session_id: None,
+                runtime_session_id: Some(runtime_session_id),
+                progress: Vec::new(),
+            })
+        }
+        CliCommand::RuntimeStatus { session_id } => {
+            let status = crate::application::runtime_status(&config, session_id).await?;
+            let mut output = CommandOutput::data(status)?;
+            output.runtime_session_id = Some(session_id.clone());
+            Ok(output)
+        }
+        CliCommand::RuntimeWait { session_id } => {
+            let status = crate::application::runtime_wait(&config, session_id).await?;
+            let mut output = CommandOutput::data(status)?;
+            output.runtime_session_id = Some(session_id.clone());
+            Ok(output)
+        }
+        CliCommand::RuntimeUrl { session_id } => {
+            let url = crate::application::runtime_url(&config, session_id).await?;
+            let mut output = CommandOutput::data(json!({ "url": url }))?;
+            output.runtime_session_id = Some(session_id.clone());
+            Ok(output)
+        }
+        CliCommand::RuntimeStop { session_id } => {
+            crate::application::runtime_stop(&config, session_id).await?;
+            let mut output = CommandOutput::data(json!({ "completed": true }))?;
+            output.runtime_session_id = Some(session_id.clone());
+            Ok(output)
+        }
+        CliCommand::RuntimeLogs { session_id, cursor } => {
+            let logs =
+                crate::application::runtime_logs(&config, session_id, cursor.as_deref()).await?;
+            let mut output = CommandOutput::data(logs)?;
+            output.runtime_session_id = Some(session_id.clone());
+            Ok(output)
         }
         CliCommand::ProjectList => CommandOutput::data(crate::application::projects(&config)?),
         CliCommand::ProjectVersion { project_id } => {
@@ -411,6 +505,7 @@ async fn run_command(
                 data: json!({ "completed": true, "retryOf": operation_id }),
                 operation_id: Some(new_operation_id),
                 studio_session_id: None,
+                runtime_session_id: None,
                 progress,
             })
         }
@@ -1077,6 +1172,7 @@ fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
             )),
         },
         Some("studio") => parse_studio_command(&values[1..]),
+        Some("runtime") => parse_runtime_command(&values[1..]),
         Some("project") => match values.get(1).map(String::as_str) {
             Some("list") if values.len() == 2 => Ok(CliCommand::ProjectList),
             Some("version") => Ok(CliCommand::ProjectVersion {
@@ -1102,6 +1198,43 @@ fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
             "capabilities does not accept positional arguments",
         )),
         _ => Err(BackendError::invalid_request("unknown headless command")),
+    }
+}
+
+fn parse_runtime_command(values: &[String]) -> Result<CliCommand, BackendError> {
+    match values.first().map(String::as_str) {
+        Some("build") | Some("start") => {
+            let (options, flags) = parse_options(&values[1..], &["--project-id"], &["--clean"])?;
+            let project_id = required_map_option(&options, "--project-id")?;
+            let clean = flags.contains("--clean");
+            if values.first().is_some_and(|value| value == "build") {
+                Ok(CliCommand::RuntimeBuild { project_id, clean })
+            } else {
+                Ok(CliCommand::RuntimeStart { project_id, clean })
+            }
+        }
+        Some("status") => Ok(CliCommand::RuntimeStatus {
+            session_id: required_option(&values[1..], "--session-id")?,
+        }),
+        Some("wait") => Ok(CliCommand::RuntimeWait {
+            session_id: required_option(&values[1..], "--session-id")?,
+        }),
+        Some("url") => Ok(CliCommand::RuntimeUrl {
+            session_id: required_option(&values[1..], "--session-id")?,
+        }),
+        Some("stop") => Ok(CliCommand::RuntimeStop {
+            session_id: required_option(&values[1..], "--session-id")?,
+        }),
+        Some("logs") => {
+            let (options, _) = parse_options(&values[1..], &["--session-id", "--cursor"], &[])?;
+            Ok(CliCommand::RuntimeLogs {
+                session_id: required_map_option(&options, "--session-id")?,
+                cursor: options.get("--cursor").cloned(),
+            })
+        }
+        _ => Err(BackendError::invalid_request(
+            "expected runtime build, start, status, wait, url, stop, or logs",
+        )),
     }
 }
 
@@ -1248,6 +1381,7 @@ fn success_execution(
         capability_snapshot: &context.snapshot,
         operation_id: output.operation_id.as_deref(),
         studio_session_id: output.studio_session_id.as_deref(),
+        runtime_session_id: output.runtime_session_id.as_deref(),
         data: &output.data,
     };
     let mut stdout = String::new();
@@ -1338,6 +1472,16 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
         CommandErrorCode::BackendMismatch => BackendErrorCode::BackendMismatch,
         CommandErrorCode::InvalidRequest => BackendErrorCode::InvalidRequest,
         CommandErrorCode::PreconditionFailed => BackendErrorCode::PreconditionFailed,
+        CommandErrorCode::ToolchainUnavailable => BackendErrorCode::ToolchainUnavailable,
+        CommandErrorCode::RuntimeVersionUnsupported => BackendErrorCode::RuntimeVersionUnsupported,
+        CommandErrorCode::ConsistencyFailed => BackendErrorCode::ConsistencyFailed,
+        CommandErrorCode::RuntimeBuildFailed => BackendErrorCode::RuntimeBuildFailed,
+        CommandErrorCode::RuntimeInitializationFailed => {
+            BackendErrorCode::RuntimeInitializationFailed
+        }
+        CommandErrorCode::RuntimeReadinessTimeout => BackendErrorCode::RuntimeReadinessTimeout,
+        CommandErrorCode::RuntimeSessionNotFound => BackendErrorCode::RuntimeSessionNotFound,
+        CommandErrorCode::RuntimeExited => BackendErrorCode::RuntimeExited,
         CommandErrorCode::ConfigLoadFailed
         | CommandErrorCode::DownloadCancelled
         | CommandErrorCode::InstallFailed
@@ -1361,6 +1505,9 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
 }
 
 fn sanitize_backend_error(error: BackendError) -> BackendError {
+    let diagnostic_ref = error
+        .diagnostic_ref
+        .filter(|value| is_safe_artifact_reference(value));
     BackendError {
         schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
         code: error.code,
@@ -1369,7 +1516,7 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
         capability: error.capability,
         reason: None,
         retryable: error.retryable,
-        diagnostic_ref: None,
+        diagnostic_ref,
     }
 }
 
@@ -1382,19 +1529,47 @@ fn safe_error_message(code: BackendErrorCode) -> &'static str {
         BackendErrorCode::InvalidRequest => "the command request is invalid",
         BackendErrorCode::PreconditionFailed => "a required precondition was not satisfied",
         BackendErrorCode::OperationFailed => "the command could not be completed",
+        BackendErrorCode::ToolchainUnavailable => {
+            "the exact-version runtime toolchain is unavailable"
+        }
+        BackendErrorCode::RuntimeVersionUnsupported => {
+            "the exact project version requires Windows Studio Pro Run Locally"
+        }
+        BackendErrorCode::ConsistencyFailed => "the Mendix project has consistency errors",
+        BackendErrorCode::RuntimeBuildFailed => "the Portable Runtime package build failed",
+        BackendErrorCode::RuntimeInitializationFailed => {
+            "the Portable Runtime failed during initialization"
+        }
+        BackendErrorCode::RuntimeReadinessTimeout => {
+            "the Portable Runtime did not become HTTP-ready before the timeout"
+        }
+        BackendErrorCode::RuntimeSessionNotFound => "the Portable Runtime session was not found",
+        BackendErrorCode::RuntimeExited => "the Portable Runtime exited unexpectedly",
     }
 }
 
 fn exit_code(error: &BackendError) -> i32 {
     match error.code {
         BackendErrorCode::InvalidRequest => EXIT_INVALID_REQUEST,
-        BackendErrorCode::BackendMismatch | BackendErrorCode::UnsupportedCapability => {
-            EXIT_BACKEND_UNAVAILABLE
-        }
-        BackendErrorCode::PreconditionFailed | BackendErrorCode::OperationFailed => {
-            EXIT_OPERATION_FAILED
-        }
+        BackendErrorCode::BackendMismatch
+        | BackendErrorCode::UnsupportedCapability
+        | BackendErrorCode::RuntimeVersionUnsupported => EXIT_BACKEND_UNAVAILABLE,
+        BackendErrorCode::PreconditionFailed
+        | BackendErrorCode::OperationFailed
+        | BackendErrorCode::ToolchainUnavailable
+        | BackendErrorCode::ConsistencyFailed
+        | BackendErrorCode::RuntimeBuildFailed
+        | BackendErrorCode::RuntimeInitializationFailed
+        | BackendErrorCode::RuntimeReadinessTimeout
+        | BackendErrorCode::RuntimeSessionNotFound
+        | BackendErrorCode::RuntimeExited => EXIT_OPERATION_FAILED,
     }
+}
+
+fn is_safe_artifact_reference(value: &str) -> bool {
+    value.strip_prefix("artifact_").is_some_and(|suffix| {
+        suffix.len() == 32 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
 }
 
 fn json_line<T: Serialize>(value: &T) -> String {
@@ -1409,7 +1584,7 @@ fn json_line<T: Serialize>(value: &T) -> String {
 fn is_headless_command(argument: Option<&OsString>) -> bool {
     matches!(
         argument.and_then(|value| value.to_str()),
-        Some("capabilities" | "env" | "studio" | "project" | "operation")
+        Some("capabilities" | "env" | "studio" | "runtime" | "project" | "operation")
     )
 }
 
@@ -1418,6 +1593,7 @@ fn bootstrap_command_name(arguments: &[OsString]) -> &'static str {
         Some("capabilities") => "capabilities",
         Some("env") => "env",
         Some("studio") => "studio",
+        Some("runtime") => "runtime",
         Some("project") => "project",
         Some("operation") => "operation",
         _ => "unknown",

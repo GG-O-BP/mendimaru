@@ -67,7 +67,7 @@ fn real_binary_emits_a_complete_platform_neutral_capability_snapshot() {
     let capabilities = manifest["capabilities"]
         .as_array()
         .expect("capabilities is an array");
-    assert_eq!(capabilities.len(), 20);
+    assert_eq!(capabilities.len(), 21);
     let ids = capabilities
         .iter()
         .map(|capability| {
