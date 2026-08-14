@@ -4,6 +4,96 @@
     "windows-native": true,
     "unsupported": true
   },
+  "backendId": {
+    "linux-winboat": true,
+    "windows-native": true,
+    "mac-native": true
+  },
+  "platformId": {
+    "linux": true,
+    "windows": true,
+    "macos": true,
+    "unsupported": true
+  },
+  "runtimeMode": {
+    "portable": true,
+    "studio-run-locally": true,
+    "external-url": true
+  },
+  "capabilityId": {
+    "studio.detect": true,
+    "studio.install": true,
+    "studio.uninstall": true,
+    "studio.start": true,
+    "studio.status": true,
+    "studio.stop": true,
+    "runtime.build": true,
+    "runtime.start": true,
+    "runtime.wait": true,
+    "runtime.url": true,
+    "runtime.stop": true,
+    "runtime.logs": true,
+    "ui.capabilities": true,
+    "ui.tree": true,
+    "ui.find": true,
+    "ui.action": true,
+    "ui.wait": true,
+    "ui.screenshot": true,
+    "browser.test": true,
+    "browser.artifacts": true
+  },
+  "capabilityStatus": {
+    "supported": true,
+    "unsupported": true
+  },
+  "backendErrorCode": {
+    "unsupported_capability": true,
+    "backend_mismatch": true,
+    "invalid_request": true,
+    "precondition_failed": true,
+    "operation_failed": true
+  },
+  "sessionState": {
+    "created": true,
+    "environment-ready": true,
+    "studio-ready": true,
+    "project-ready": true,
+    "runtime-ready": true,
+    "testing": true,
+    "completed": true,
+    "failed": true,
+    "blocked": true
+  },
+  "artifactKind": {
+    "studio-log": true,
+    "runtime-log": true,
+    "browser-trace": true,
+    "browser-report": true,
+    "screenshot": true,
+    "ui-tree": true,
+    "dom-snapshot": true,
+    "diagnostic": true
+  },
+  "studioProcessState": {
+    "starting": true,
+    "running": true,
+    "stopped": true,
+    "unknown": true
+  },
+  "runtimeState": {
+    "starting": true,
+    "running": true,
+    "ready": true,
+    "stopped": true,
+    "failed": true
+  },
+  "uiActionKind": {
+    "invoke": true,
+    "click": true,
+    "focus": true,
+    "set-value": true,
+    "keyboard-input": true
+  },
   "containerRuntime": {
     "docker": true,
     "podman": true
@@ -39,6 +129,10 @@
     "config_load_failed": true,
     "download_cancelled": true,
     "install_failed": true,
+    "unsupported_capability": true,
+    "backend_mismatch": true,
+    "invalid_request": true,
+    "precondition_failed": true,
     "operation_failed": true
   },
   "textDirection": {

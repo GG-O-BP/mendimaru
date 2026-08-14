@@ -119,6 +119,16 @@ The Linux shared directory is connected to the `<host path>:/shared` mount in th
 
 When the shared directory changes, Mendimaru backs up the existing Compose file as `*.mendimaru.bak`. If you choose to apply the change immediately in Settings, Mendimaru recreates the WinBoat container while preserving the `/storage` virtual disk and installed Windows apps.
 
+## Backend capability contract
+
+Agents and CI can inspect the platform-neutral backend contract without starting the GUI:
+
+```bash
+mendimaru capabilities --json
+```
+
+The response separates the host, Studio, and optional Runtime platforms and reports every Studio, Runtime, UI automation, and browser action as supported or unsupported. An explicit `--backend` must match the current host; Mendimaru never silently falls back to another backend. See [Platform backend and capability contract](docs/backend-contract.md) and the machine-readable [JSON Schemas](schemas/).
+
 ## Development
 
 Development requires Node.js 22.22.2 or later, Rust, and the Tauri system dependencies for the host platform. Linux integration additionally requires WinBoat, Docker or Podman, FreeRDP 3, and Chrome or Chromium. Native Windows catalog discovery uses Edge or Chrome.

@@ -2,6 +2,7 @@ use crate::marketplace;
 mod cache;
 mod progress;
 
+use crate::contracts::BackendError;
 use crate::models::{AppConfig, DownloadState};
 use cache::{CacheInspection, RemoteMetadata};
 use futures_util::StreamExt;
@@ -27,12 +28,19 @@ pub struct DownloadManager {
 #[derive(Debug)]
 pub enum InstallError {
     Cancelled(String),
+    Backend(BackendError),
     Other(String),
 }
 
 impl From<String> for InstallError {
     fn from(message: String) -> Self {
         Self::Other(message)
+    }
+}
+
+impl From<BackendError> for InstallError {
+    fn from(error: BackendError) -> Self {
+        Self::Backend(error)
     }
 }
 

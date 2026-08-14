@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/session.schema.json",
+  "title": "Mendimaru session descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "sessionId",
+    "createdAt",
+    "state",
+    "capabilitySnapshot"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "state": {
+      "enum": [
+        "created",
+        "environment-ready",
+        "studio-ready",
+        "project-ready",
+        "runtime-ready",
+        "testing",
+        "completed",
+        "failed",
+        "blocked"
+      ]
+    },
+    "capabilitySnapshot": {
+      "$ref": "capabilities.schema.json#/$defs/capabilitySnapshot"
+    }
+  }
+}

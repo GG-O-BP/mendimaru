@@ -118,6 +118,16 @@ Linux 공유 디렉터리는 WinBoat Compose의 `<host path>:/shared` 마운트�
 
 공유 디렉터리를 바꾸면 기존 Compose 파일을 `*.mendimaru.bak`으로 백업합니다. 설정에서 즉시 적용을 선택하면 WinBoat 컨테이너를 다시 만들지만 `/storage` 가상 디스크와 설치된 Windows 앱은 유지됩니다.
 
+## Backend capability 계약
+
+에이전트와 CI는 GUI를 시작하지 않고 플랫폼 중립 backend 계약을 조회할 수 있습니다.
+
+```bash
+mendimaru capabilities --json
+```
+
+응답은 host, Studio와 선택적 Runtime platform을 구분하고 Studio, Runtime, UI 자동화 및 browser의 모든 동작을 지원/미지원으로 명시합니다. `--backend`를 지정하면 현재 host와 정확히 일치해야 하며 다른 backend로 자동 fallback하지 않습니다. 자세한 내용은 [Platform backend와 capability 계약](docs/backend-contract.md) 및 기계 판독용 [JSON Schema](schemas/)를 참고하세요.
+
 ## 개발
 
 필수 환경은 Node.js 22.22.2 이상, Rust와 호스트 플랫폼용 Tauri 시스템 의존성입니다. Linux 통합에는 WinBoat, Docker 또는 Podman, FreeRDP 3, Chrome/Chromium이 추가로 필요하며 Windows 목록 조회에는 Edge 또는 Chrome을 사용합니다.

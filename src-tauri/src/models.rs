@@ -119,6 +119,10 @@ mod tests {
                 CommandErrorCode::ConfigLoadFailed,
                 CommandErrorCode::DownloadCancelled,
                 CommandErrorCode::InstallFailed,
+                CommandErrorCode::UnsupportedCapability,
+                CommandErrorCode::BackendMismatch,
+                CommandErrorCode::InvalidRequest,
+                CommandErrorCode::PreconditionFailed,
                 CommandErrorCode::OperationFailed,
             ],
         );

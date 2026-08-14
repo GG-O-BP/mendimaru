@@ -1,0 +1,165 @@
+# Platform backend and capability contract
+
+Mendimaru uses one versioned contract for Studio Pro, Runtime, UI automation,
+and browser operations. The contract describes equivalent behavior; it does not
+require adapters to share an implementation or transport.
+
+The Rust contract types are in `src-tauri/src/contracts.rs`. Adapter traits and
+selection live in `src-tauri/src/platform/backend.rs`. JSON Schema documents are
+in `schemas/`.
+
+Adapters own their platform configuration. Public trait methods receive only
+operation data such as a version, host installer path, session ID, or portable
+request DTO; they never require the legacy WinBoat-filled `AppConfig` shape.
+
+## Capability discovery
+
+Capability discovery does not initialize Tauri or require a GUI:
+
+```bash
+mendimaru capabilities --json
+mendimaru capabilities --json --backend linux-winboat
+```
+
+Successful output is one JSON document on stdout. Diagnostics are not mixed
+into stdout. A failure is one JSON document on stderr and uses these exit codes:
+
+| Exit code | Meaning                                         |
+| --------- | ----------------------------------------------- |
+| `0`       | Capability snapshot returned                    |
+| `1`       | Operation or precondition failed                |
+| `2`       | Invalid command or argument                     |
+| `3`       | Requested backend is unavailable or unsupported |
+
+The Tauri command `get_capabilities` returns the same `CapabilitySnapshot` data
+object. Every snapshot has a cryptographically random ID and capture time so a
+session can retain the exact capabilities it observed when it was created.
+
+## Platform identity
+
+Do not infer one identity from another:
+
+| Backend          | `hostPlatform` | `studioPlatform` |
+| ---------------- | -------------- | ---------------- |
+| `linux-winboat`  | `linux`        | `windows`        |
+| `windows-native` | `windows`      | `windows`        |
+| `mac-native`     | `macos`        | `macos`          |
+
+`runtimePlatform` and `runtimeMode` are optional and independent. They remain
+absent until a Runtime adapter selects a concrete execution mode. A common
+request, session, error, or artifact must not require RDP, UNC, Compose,
+Windows registry, app-bundle, or TCC fields.
+
+## Backend selection
+
+Automatic selection has exactly one mapping per supported host:
+
+- Linux selects `linux-winboat`.
+- Windows selects `windows-native`.
+- macOS selects `mac-native`.
+
+An explicit override must equal the backend mapped to the current host. A
+different backend returns `backend_mismatch`; Mendimaru never silently retries
+another backend, another Studio version, or another Runtime mode.
+
+## Capability entries
+
+Every manifest contains exactly one entry for every action in these contracts:
+
+- `StudioBackend`: `detect`, `install`, `uninstall`, `start`, `status`, `stop`
+- `RuntimeBackend`: `build`, `start`, `wait`, `url`, `stop`, `logs`
+- `UiAutomationBackend`: `capabilities`, `tree`, `find`, `action`, `wait`,
+  `screenshot`
+- `BrowserBackend`: `test`, `artifacts`
+
+An entry contains:
+
+- a stable dotted capability ID;
+- `supported` or `unsupported` status;
+- all permissions or interactive preconditions known before invocation;
+- an explicit `fallbackAllowed` value (currently always `false`);
+- a structured limitation for unsupported actions, including a stable code and
+  optional required permission or version.
+
+Callers decide which actions to offer by capability ID and status. They must not
+guess support from an OS name, translated error text, screen coordinates, or an
+executable that happens to exist. A supported action may still return a
+`precondition_failed` error when a declared permission or service is not
+currently available.
+
+The current Linux+WinBoat and Windows native adapters support Studio `detect`,
+`install`, `uninstall`, and `start`. Studio session control, Runtime, UI
+automation, and browser execution remain explicitly unsupported until their
+own issues implement those adapters. `mac-native` is registered but reports all
+operations as unsupported until issue #11 supplies the native implementation.
+
+## Errors, sessions, and artifacts
+
+`BackendError` always contains `schemaVersion`, a machine-readable `code`, a
+human message, and `retryable`. Backend and capability IDs are present when the
+error belongs to an adapter operation. `unsupported_capability` includes the
+same structured limitation represented by capability discovery.
+
+`SessionDescriptor` embeds an immutable `CapabilitySnapshot`; later environment
+changes do not rewrite what the caller was told at session creation. Session
+and snapshot IDs use 128 bits of operating-system randomness.
+
+`ArtifactDescriptor` links every artifact to a session and backend. Local
+location, media type, digest, size, and backend diagnostic reference are
+optional. This keeps platform paths out of the portable required shape while
+allowing an adapter to provide a verified local artifact.
+
+## Adding an adapter
+
+1. Add a stable `BackendId` and its exact host/studio platform mapping.
+2. Implement `BackendIdentity` and all four backend traits. Leave an operation
+   on the default implementation only when its manifest marks it unsupported.
+3. Put platform transport details in the adapter or its private implementation;
+   do not add them as required common fields.
+4. Add permissions, version limitations, and support status for every
+   `CapabilityId`. Do not omit entries.
+5. Extend the selection matrix. Reject host/backend mismatches instead of
+   falling back.
+6. Run the same fake-adapter contract suite and add adapter integration tests
+   for every capability marked supported.
+7. Update the JSON Schemas and compatibility notes when the serialized contract
+   changes.
+
+## Compatibility and versioning
+
+The current schema version is `1.0.0` and follows semantic versioning:
+
+- Patch: documentation or validation corrections that do not change accepted
+  data or meaning.
+- Minor: additions already accepted by the current schemas, such as another
+  permission string or optional artifact metadata value with unchanged meaning.
+- Major: added, removed, or renamed serialized fields; new or removed enum
+  values and capability IDs; newly required values; or changed semantics.
+
+Readers must reject an unsupported major version and may reject an unsupported
+minor version when its closed schema cannot validate the document. Writers emit
+only the version they implement. Capability snapshots and artifacts retain
+their original schema version rather than being rewritten in place.
+
+The GUI's existing `EnvironmentStatus` still contains WinBoat diagnostic fields
+for presentation compatibility. It is a legacy UI DTO, not the portable CLI or
+agent contract.
+
+## Verification
+
+`npm run check` runs lint, format, frontend tests, Rust contract/fake-adapter
+tests, real CLI process tests, and JSON Schema validation. Linux maintainers can
+run the destructive full adapter lifecycle only against a disposable WinBoat
+test version with an official installer already in the shared cache:
+
+```bash
+MENDIMARU_E2E_ALLOW_MUTATION=1 \
+MENDIMARU_E2E_VERSION=11.13.0 \
+cargo test --manifest-path src-tauri/Cargo.toml \
+  platform::tests::live_e2e_linux_winboat_backend_lifecycle \
+  -- --ignored --exact --nocapture --test-threads=1
+```
+
+The test normalizes that exact version to absent, installs it through the common
+adapter, verifies all progress phases and exact-version detection, launches a
+real Studio window, uninstalls it officially, and verifies it is absent again.

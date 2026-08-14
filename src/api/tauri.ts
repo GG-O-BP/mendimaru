@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppConfig,
+  BackendId,
+  CapabilitySnapshot,
   DownloadProgress,
   EnvironmentStatus,
   LocalizationBundle,
@@ -20,6 +22,7 @@ const commands = {
   formatLocalizedBytes: "format_localized_bytes",
   redetectConfig: "redetect_config",
   saveConfig: "save_config",
+  getCapabilities: "get_capabilities",
   getEnvironmentStatus: "get_environment_status",
   getInstalledVersions: "get_installed_versions",
   getDownloadableVersionsCache: "get_downloadable_versions_cache",
@@ -50,6 +53,10 @@ export const tauriApi = {
   redetectConfig: () => invoke<AppConfig>(commands.redetectConfig),
   saveConfig: (config: AppConfig, applyMount: boolean) =>
     invoke<SettingsSaveResult>(commands.saveConfig, { config, applyMount }),
+  getCapabilities: (backend?: BackendId) =>
+    invoke<CapabilitySnapshot>(commands.getCapabilities, {
+      backend: backend ?? null,
+    }),
   getEnvironmentStatus: () =>
     invoke<EnvironmentStatus>(commands.getEnvironmentStatus),
   getInstalledVersions: () =>

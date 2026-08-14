@@ -1,6 +1,12 @@
 use super::{load_command_config, CommandResult};
+use crate::contracts::{BackendId, CapabilitySnapshot};
 use crate::models::{EnvironmentStatus, SettingsSaveResult};
 use tauri::AppHandle;
+
+#[tauri::command]
+pub(crate) fn get_capabilities(backend: Option<BackendId>) -> CommandResult<CapabilitySnapshot> {
+    Ok(crate::platform::capability_snapshot(backend)?)
+}
 
 #[tauri::command]
 pub(crate) async fn get_environment_status(app: AppHandle) -> CommandResult<EnvironmentStatus> {
@@ -66,5 +72,26 @@ fn require_winboat() -> CommandResult<()> {
         Ok(())
     } else {
         Err(crate::tr!("error-winboat-not-required").into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::get_capabilities;
+    use crate::contracts::{BackendId, CapabilityId, PlatformId, CONTRACT_SCHEMA_VERSION};
+
+    #[test]
+    fn tauri_capability_command_returns_the_common_snapshot_contract() {
+        let snapshot = get_capabilities(None).expect("current backend is available");
+        assert_eq!(snapshot.schema_version, CONTRACT_SCHEMA_VERSION);
+        assert_eq!(
+            snapshot.manifest.capabilities.len(),
+            CapabilityId::ALL.len()
+        );
+        assert_eq!(snapshot.manifest.host_platform, PlatformId::current());
+        if cfg!(target_os = "linux") {
+            assert_eq!(snapshot.manifest.backend, BackendId::LinuxWinboat);
+            assert_eq!(snapshot.manifest.studio_platform, PlatformId::Windows);
+        }
     }
 }

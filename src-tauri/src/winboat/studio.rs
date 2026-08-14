@@ -105,6 +105,12 @@ where
     let command = write_command_script(config, &operation_id, &script)?;
     let label = format!("Install Studio Pro {version}");
     let operation = crate::tr!("operation-studio-install");
+    on_progress(StudioInstallProgress {
+        phase: StudioInstallPhase::Staging,
+        percentage: Some(0.0),
+        estimated: false,
+    });
+    let mut progress_state = InstallProgressState::default();
     let report = run_windows_operation(
         config,
         WindowsOperationRequest {
@@ -124,20 +130,104 @@ where
                 WindowsOperationState::Verifying => StudioInstallPhase::Verifying,
                 _ => return,
             };
-            if report.percentage.is_some() {
-                on_progress(StudioInstallProgress {
-                    phase,
-                    percentage: report.percentage,
-                    estimated: report.estimated,
-                });
-            }
+            progress_state.observe(phase, report.percentage, report.estimated, &mut on_progress);
         },
     )
     .await?;
-    report
+    let executable_path = report
         .executable_path
         .filter(|path| !path.is_empty())
-        .ok_or_else(|| crate::tr!("error-install-path-missing"))
+        .ok_or_else(|| crate::tr!("error-install-path-missing"))?;
+    progress_state.complete(&mut on_progress);
+    Ok(executable_path)
+}
+
+#[derive(Default)]
+struct InstallProgressState {
+    installing: bool,
+    finalizing: bool,
+    verifying: bool,
+    verification_complete: bool,
+}
+
+impl InstallProgressState {
+    fn observe<F>(
+        &mut self,
+        phase: StudioInstallPhase,
+        percentage: Option<f64>,
+        estimated: bool,
+        on_progress: &mut F,
+    ) where
+        F: FnMut(StudioInstallProgress),
+    {
+        let Some(percentage) = percentage else {
+            return;
+        };
+        match phase {
+            StudioInstallPhase::Staging => {}
+            StudioInstallPhase::Installing => self.installing = true,
+            StudioInstallPhase::Finalizing => {
+                self.ensure_installing(on_progress);
+                self.finalizing = true;
+            }
+            StudioInstallPhase::Verifying => {
+                self.ensure_installing(on_progress);
+                self.ensure_finalizing(on_progress);
+                self.verifying = true;
+                self.verification_complete = percentage >= 100.0;
+            }
+        }
+        on_progress(StudioInstallProgress {
+            phase,
+            percentage: Some(percentage.clamp(0.0, 100.0)),
+            estimated,
+        });
+    }
+
+    fn complete<F>(&mut self, on_progress: &mut F)
+    where
+        F: FnMut(StudioInstallProgress),
+    {
+        self.ensure_installing(on_progress);
+        self.ensure_finalizing(on_progress);
+        if !self.verifying || !self.verification_complete {
+            on_progress(StudioInstallProgress {
+                phase: StudioInstallPhase::Verifying,
+                percentage: Some(100.0),
+                estimated: false,
+            });
+            self.verifying = true;
+            self.verification_complete = true;
+        }
+    }
+
+    fn ensure_installing<F>(&mut self, on_progress: &mut F)
+    where
+        F: FnMut(StudioInstallProgress),
+    {
+        if !self.installing {
+            on_progress(StudioInstallProgress {
+                phase: StudioInstallPhase::Installing,
+                percentage: Some(100.0),
+                estimated: true,
+            });
+            self.installing = true;
+        }
+    }
+
+    fn ensure_finalizing<F>(&mut self, on_progress: &mut F)
+    where
+        F: FnMut(StudioInstallProgress),
+    {
+        if !self.finalizing {
+            on_progress(StudioInstallProgress {
+                phase: StudioInstallPhase::Finalizing,
+                percentage: Some(100.0),
+                estimated: true,
+            });
+            self.finalizing = true;
+        }
+    }
 }
 
 pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(), String> {
@@ -316,4 +406,60 @@ fn safe_operation_name(value: &str) -> String {
         .chars()
         .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '.'))
         .collect()
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::InstallProgressState;
+    use crate::models::{StudioInstallPhase, StudioInstallProgress};
+
+    #[test]
+    fn successful_install_synthesizes_transient_phases_missed_between_polls() {
+        let mut state = InstallProgressState::default();
+        let mut updates = Vec::new();
+        state.complete(&mut |update| updates.push(update));
+
+        assert_eq!(
+            updates
+                .iter()
+                .map(|update| update.phase)
+                .collect::<Vec<_>>(),
+            [
+                StudioInstallPhase::Installing,
+                StudioInstallPhase::Finalizing,
+                StudioInstallPhase::Verifying,
+            ]
+        );
+        assert!(updates
+            .iter()
+            .all(|update| update.percentage == Some(100.0)));
+        assert!(!updates.last().expect("verification update").estimated);
+    }
+
+    #[test]
+    fn verifying_report_preserves_order_and_is_completed_exactly_once() {
+        let mut state = InstallProgressState::default();
+        let mut updates: Vec<StudioInstallProgress> = Vec::new();
+        state.observe(
+            StudioInstallPhase::Verifying,
+            Some(0.0),
+            false,
+            &mut |update| updates.push(update),
+        );
+        state.complete(&mut |update| updates.push(update));
+        state.complete(&mut |update| updates.push(update));
+
+        assert_eq!(
+            updates
+                .iter()
+                .map(|update| (update.phase, update.percentage))
+                .collect::<Vec<_>>(),
+            [
+                (StudioInstallPhase::Installing, Some(100.0)),
+                (StudioInstallPhase::Finalizing, Some(100.0)),
+                (StudioInstallPhase::Verifying, Some(0.0)),
+                (StudioInstallPhase::Verifying, Some(100.0)),
+            ]
+        );
+    }
 }
