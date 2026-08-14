@@ -1,13 +1,19 @@
 const LAUNCH_STUDIO_TEMPLATE: &str = include_str!("../../scripts/launch_studio.ps1");
 const INSTALL_STUDIO_TEMPLATE: &str = include_str!("../../scripts/install_studio.ps1");
 const UNINSTALL_STUDIO_TEMPLATE: &str = include_str!("../../scripts/uninstall_studio.ps1");
+const STUDIO_SESSIONS_TEMPLATE: &str = include_str!("../../scripts/studio_sessions.ps1");
 const OPERATION_SECURITY_PREAMBLE: &str = include_str!("../../scripts/operation_security.ps1");
+
+use crate::models::StudioVersion;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use serde::Serialize;
 
 pub(super) fn launch_studio_script(
     executable_path: &str,
     project_path: Option<&str>,
     windows_report_path: &str,
     install_root: &str,
+    version: &str,
 ) -> String {
     LAUNCH_STUDIO_TEMPLATE
         .replace("__EXECUTABLE_PATH__", &powershell_literal(executable_path))
@@ -17,6 +23,7 @@ pub(super) fn launch_studio_script(
         )
         .replace("__RESULT_PATH__", &powershell_literal(windows_report_path))
         .replace("__INSTALL_ROOT__", &powershell_literal(install_root))
+        .replace("__VERSION__", &powershell_literal(version))
         .replace("__SECURITY_PREAMBLE__", OPERATION_SECURITY_PREAMBLE)
 }
 
@@ -53,6 +60,56 @@ pub(super) fn uninstall_script(
         .replace("__VERSION__", &powershell_literal(version))
         .replace("__RESULT_PATH__", &powershell_literal(windows_report_path))
         .replace("__SECURITY_PREAMBLE__", OPERATION_SECURITY_PREAMBLE)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum StudioSessionScriptMode {
+    Query,
+    Reconnect { process_id: u32, started_ticks: i64 },
+    Stop { process_id: u32, started_ticks: i64 },
+}
+
+pub(super) fn studio_sessions_script(
+    studios: &[StudioVersion],
+    mode: StudioSessionScriptMode,
+    windows_report_path: &str,
+    install_root: &str,
+) -> Result<String, String> {
+    #[derive(Serialize)]
+    struct KnownStudio<'a> {
+        version: &'a str,
+        path: &'a str,
+    }
+
+    let known = studios
+        .iter()
+        .map(|studio| KnownStudio {
+            version: &studio.version,
+            path: &studio.executable_path,
+        })
+        .collect::<Vec<_>>();
+    let known = serde_json::to_vec(&known)
+        .map_err(|error| format!("could not serialize known Studio Pro paths: {error}"))?;
+    let known = BASE64_STANDARD.encode(known);
+    let (mode, process_id, started_ticks) = match mode {
+        StudioSessionScriptMode::Query => ("query", 0, 0),
+        StudioSessionScriptMode::Reconnect {
+            process_id,
+            started_ticks,
+        } => ("reconnect", process_id, started_ticks),
+        StudioSessionScriptMode::Stop {
+            process_id,
+            started_ticks,
+        } => ("stop", process_id, started_ticks),
+    };
+    Ok(STUDIO_SESSIONS_TEMPLATE
+        .replace("__MODE__", mode)
+        .replace("__TARGET_PROCESS_ID__", &process_id.to_string())
+        .replace("__TARGET_STARTED_TICKS__", &started_ticks.to_string())
+        .replace("__KNOWN_STUDIOS_BASE64__", &known)
+        .replace("__RESULT_PATH__", &powershell_literal(windows_report_path))
+        .replace("__INSTALL_ROOT__", &powershell_literal(install_root))
+        .replace("__SECURITY_PREAMBLE__", OPERATION_SECURITY_PREAMBLE))
 }
 
 pub(super) fn powershell_literal(value: &str) -> String {
@@ -170,7 +227,11 @@ if ($null -eq $failure) {{ exit 0 }} else {{ exit 1 }}
 
 #[cfg(test)]
 mod tests {
-    use super::{install_script, launch_studio_script, uninstall_script};
+    use super::{
+        install_script, launch_studio_script, studio_sessions_script, uninstall_script,
+        StudioSessionScriptMode,
+    };
+    use crate::models::StudioVersion;
 
     #[test]
     fn replaces_every_script_placeholder() {
@@ -179,6 +240,7 @@ mod tests {
             Some("project.mpr"),
             "launch.json",
             "install-root",
+            "11.1.0",
         );
         let install = install_script(
             "setup.exe",
@@ -210,6 +272,7 @@ mod tests {
             None,
             r"\\host.lan\Data\launch.json",
             r"C:\Program Files\Mendix",
+            "11.13.0",
         );
         let uninstall = uninstall_script(
             r"C:\ProgramData\Mendix",
@@ -228,10 +291,46 @@ mod tests {
             assert!(script.contains("Write-MendimaruReport"));
         }
         assert!(install.matches("ExpectedSha256 $expectedSha256").count() >= 3);
+        assert!(install.matches("Assert-StudioVersionNotRunning").count() >= 3);
+        assert!(install.contains("MENDIMARU_STUDIO_RUNNING"));
         assert!(install.contains("[System.IO.FileMode]::CreateNew"));
         assert!(!install.contains("Unblock-File"));
         assert!(!install.contains("$destinationInfo.Length -eq $sourceInfo.Length"));
         assert!(uninstall.contains("MENDIMARU_UNINSTALL_METADATA_MISSING"));
+        assert!(uninstall.contains("MENDIMARU_STUDIO_RUNNING"));
+        assert!(!uninstall.contains("Stop-Process"));
         assert!(!uninstall.contains("Remove-Item -LiteralPath $versionFolder -Recurse"));
+    }
+
+    #[test]
+    fn session_scripts_embed_only_validated_modes_and_exact_process_identity() {
+        let studio = StudioVersion {
+            version: "11.13.0".into(),
+            display_name: "Studio Pro 11.13.0".into(),
+            executable_path: r"C:\Program Files\Mendix\11.13.0\modeler\studiopro.exe".into(),
+            install_root: r"C:\Program Files\Mendix\11.13.0".into(),
+            source: "fixture".into(),
+            removable: true,
+        };
+        let script = studio_sessions_script(
+            &[studio],
+            StudioSessionScriptMode::Stop {
+                process_id: 4242,
+                started_ticks: 638_908_128_000_000_000,
+            },
+            r"\\host.lan\Data\session.json",
+            r"C:\Program Files\Mendix",
+        )
+        .expect("session script");
+
+        assert!(script.contains("$mode = 'stop'"));
+        assert!(script.contains("$targetProcessId = [int]4242"));
+        assert!(script.contains("$targetStartedTicks = [long]638908128000000000"));
+        assert!(script.contains("ProcessSecurity]::IsCurrentUser"));
+        assert!(script.contains("return $sessions.ToArray()"));
+        assert!(script.contains("Assert-MendimaruTrustedExecutable"));
+        assert!(script.contains("CloseMainWindow()"));
+        assert!(!script.contains("Stop-Process"));
+        assert!(!script.contains("__"));
     }
 }

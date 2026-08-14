@@ -10,6 +10,7 @@ import type {
   MendixProject,
   OperationRecord,
   SettingsSaveResult,
+  StudioSessionStatus,
   StudioVersion,
   StudioVersionCatalog,
 } from "../domain/types";
@@ -28,6 +29,7 @@ const commands = {
   getEnvironmentDiagnosticReport: "get_environment_diagnostic_report",
   exportEnvironmentDiagnosticReport: "export_environment_diagnostic_report",
   getInstalledVersions: "get_installed_versions",
+  getStudioSessions: "get_studio_sessions",
   getDownloadableVersionsCache: "get_downloadable_versions_cache",
   fetchDownloadableVersions: "fetch_downloadable_versions",
   getProjects: "get_projects",
@@ -36,6 +38,8 @@ const commands = {
   beginWinBoatSetup: "begin_winboat_setup",
   completeWinBoatSetup: "complete_winboat_setup",
   launchStudioPro: "launch_studio_pro",
+  reconnectStudioSession: "reconnect_studio_session",
+  stopStudioSession: "stop_studio_session",
   uninstallStudioPro: "uninstall_studio_pro",
   installStudioPro: "install_studio_pro",
   cancelStudioDownload: "cancel_studio_download",
@@ -72,6 +76,8 @@ export const tauriApi = {
     invoke<boolean>(commands.exportEnvironmentDiagnosticReport),
   getInstalledVersions: () =>
     invoke<StudioVersion[]>(commands.getInstalledVersions),
+  getStudioSessions: () =>
+    invoke<StudioSessionStatus[]>(commands.getStudioSessions),
   getDownloadableVersionsCache: () =>
     invoke<StudioVersionCatalog>(commands.getDownloadableVersionsCache),
   fetchDownloadableVersions: (page: number, reset: boolean) =>
@@ -90,6 +96,10 @@ export const tauriApi = {
       version,
       projectMprPath: projectMprPath ?? null,
     }),
+  reconnectStudioSession: (sessionId: string) =>
+    invoke<void>(commands.reconnectStudioSession, { sessionId }),
+  stopStudioSession: (sessionId: string) =>
+    invoke<void>(commands.stopStudioSession, { sessionId }),
   uninstallStudioPro: (version: string) =>
     invoke<void>(commands.uninstallStudioPro, { version }),
   installStudioPro: (version: string, forceRedownload = false) =>

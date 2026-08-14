@@ -1,6 +1,7 @@
 import type {
   DownloadableVersion,
   DownloadProgress,
+  StudioSessionStatus,
   StudioVersion,
 } from "../../domain/types";
 
@@ -16,11 +17,15 @@ export const EMPTY_VERSION_SUPPORT_FILTERS: VersionSupportFilters = {
 
 export interface InstalledVersionsModel {
   versions: StudioVersion[];
+  sessions: StudioSessionStatus[];
+  sessionsLoading: boolean;
   isLaunching: boolean;
   isBusy: (key: string) => boolean;
   onRefresh: () => void;
   onLaunch: (version: StudioVersion) => void;
   onUninstall: (version: StudioVersion) => void;
+  onReconnect: (session: StudioSessionStatus) => void;
+  onStop: (session: StudioSessionStatus) => void;
 }
 
 export interface CatalogModel {

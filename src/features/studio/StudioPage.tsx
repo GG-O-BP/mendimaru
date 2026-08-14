@@ -89,6 +89,7 @@ export function StudioPage({
 
       <InstalledVersionsSection
         t={t}
+        localization={localization}
         online={online}
         model={installed}
         countLabel={installedCountLabel}

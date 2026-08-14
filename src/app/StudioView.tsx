@@ -26,11 +26,15 @@ export function StudioView({
       winBoatControl={environment.winBoatControl}
       installed={{
         versions: studio.installedVersions,
+        sessions: studio.sessions,
+        sessionsLoading: studio.sessionsLoading,
         isLaunching: studio.isLaunching,
         isBusy,
         onRefresh: () => void studio.refreshInstalled(),
         onLaunch: (version) => void studio.launchVersion(version),
         onUninstall: studio.askUninstall,
+        onReconnect: (session) => void studio.reconnectSession(session),
+        onStop: studio.askStopSession,
       }}
       catalog={{
         versions: studio.filteredCatalog,

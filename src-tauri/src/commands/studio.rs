@@ -1,16 +1,44 @@
 use super::{load_command_config, CommandResult};
+use crate::contracts::StudioSessionStatus;
 use crate::downloads::{DownloadManager, InstallError};
 use crate::models::{
     CommandError, CommandErrorCode, DownloadProgress, DownloadState, OperationKind,
     OperationRecord, OperationStage, StudioVersion, StudioVersionCatalog,
 };
-use crate::operations::OperationTracker;
+use crate::operations::{OperationTracker, SessionActionGuard};
 use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub(crate) async fn get_installed_versions(app: AppHandle) -> CommandResult<Vec<StudioVersion>> {
     let config = load_command_config(&app)?;
     Ok(crate::platform::installed_versions(&config).await?)
+}
+
+#[tauri::command]
+pub(crate) async fn get_studio_sessions(app: AppHandle) -> CommandResult<Vec<StudioSessionStatus>> {
+    let config = load_command_config(&app)?;
+    Ok(crate::platform::studio_sessions(&config).await?)
+}
+
+#[tauri::command]
+pub(crate) async fn reconnect_studio_session(
+    app: AppHandle,
+    session_id: String,
+) -> CommandResult<()> {
+    let config = load_command_config(&app)?;
+    let session = crate::platform::studio_session_status(&config, &session_id).await?;
+    let _guard = SessionActionGuard::begin(&app, &config, &session.version)
+        .map_err(session_conflict_error)?;
+    Ok(crate::platform::reconnect_studio_session(&config, &session_id).await?)
+}
+
+#[tauri::command]
+pub(crate) async fn stop_studio_session(app: AppHandle, session_id: String) -> CommandResult<()> {
+    let config = load_command_config(&app)?;
+    let session = crate::platform::studio_session_status(&config, &session_id).await?;
+    let _guard = SessionActionGuard::begin(&app, &config, &session.version)
+        .map_err(session_conflict_error)?;
+    Ok(crate::platform::stop_studio_session(&config, &session_id).await?)
 }
 
 #[tauri::command]
@@ -148,6 +176,7 @@ async fn run_uninstall(
     version: String,
     retry_of: Option<String>,
 ) -> CommandResult<()> {
+    ensure_no_running_session(config, &version).await?;
     let tracker = OperationTracker::begin(
         app,
         config,
@@ -172,6 +201,7 @@ async fn run_install(
     force_redownload: bool,
     retry_of: Option<String>,
 ) -> CommandResult<()> {
+    ensure_no_running_session(config, &version).await?;
     let mut tracker = OperationTracker::begin(
         app,
         config,
@@ -212,6 +242,30 @@ async fn run_install(
             Err(command_error)
         }
     }
+}
+
+async fn ensure_no_running_session(
+    config: &crate::models::AppConfig,
+    version: &str,
+) -> CommandResult<()> {
+    if crate::platform::studio_sessions(config)
+        .await?
+        .iter()
+        .any(|session| session.version == version)
+    {
+        return Err(CommandError::new(
+            CommandErrorCode::PreconditionFailed,
+            crate::tr!("error-studio-session-version-busy", version = version),
+        ));
+    }
+    Ok(())
+}
+
+fn session_conflict_error(_message: String) -> CommandError {
+    CommandError::new(
+        CommandErrorCode::PreconditionFailed,
+        crate::tr!("error-studio-session-operation-conflict"),
+    )
 }
 
 fn complete_operation(tracker: OperationTracker, result: CommandResult<()>) -> CommandResult<()> {

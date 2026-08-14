@@ -251,12 +251,34 @@ function Find-StudioPro {
     return $null
 }
 
+function Get-RunningStudioPro {
+    param([string]$ExecutablePath)
+
+    return @(Get-Process -Name 'studiopro' -ErrorAction SilentlyContinue | Where-Object {
+        try {
+            $_.Path -and $_.Path.Equals($ExecutablePath, [System.StringComparison]::OrdinalIgnoreCase)
+        } catch {
+            $false
+        }
+    })
+}
+
+function Assert-StudioVersionNotRunning {
+    $existingStudio = Find-StudioPro
+    if ($null -eq $existingStudio) { return }
+    $null = Assert-MendimaruTrustedExecutable -Path $existingStudio -Root $installRoot
+    if (@(Get-RunningStudioPro $existingStudio).Count -gt 0) {
+        throw 'MENDIMARU_STUDIO_RUNNING'
+    }
+}
+
 try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal] $identity
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         throw 'MENDIMARU_ADMIN_REQUIRED'
     }
+    Assert-StudioVersionNotRunning
 
     # Executing an installer directly from the host UNC share can block on an
     # invisible "Open File - Security Warning" dialog in RemoteApp. Stage a
@@ -276,6 +298,7 @@ try {
     $installLog = Join-Path $logDirectory ("install-$version-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
     $logArgument = '/LOG="' + $installLog + '"'
     Write-InstallResult 'installing' 'Studio Pro installer is running.' 0 $true $null $null $null
+    Assert-StudioVersionNotRunning
     $null = Assert-MendimaruTrustedExecutable -Path $localInstaller -Root $stagingDirectory -ExpectedSha256 $expectedSha256
     $process = Start-Process -FilePath $localInstaller -ArgumentList @(
         '/SP-',

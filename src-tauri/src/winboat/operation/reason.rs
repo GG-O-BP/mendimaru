@@ -74,7 +74,28 @@ pub(in crate::winboat) fn localize_windows_reason(reason: &str) -> String {
         ),
         "MENDIMARU_ADMIN_REQUIRED" => crate::tr!("error-script-admin-required"),
         "MENDIMARU_PROJECT_STILL_OPEN" => crate::tr!("error-script-project-still-open"),
-        "MENDIMARU_STUDIO_STILL_RUNNING" => crate::tr!("error-script-studio-still-running"),
+        "MENDIMARU_STUDIO_STILL_RUNNING" | "MENDIMARU_STUDIO_RUNNING" => {
+            crate::tr!("error-script-studio-still-running")
+        }
+        "MENDIMARU_STUDIO_SESSION_ENDED" => crate::tr!("error-script-studio-session-ended"),
+        "MENDIMARU_STUDIO_SESSION_WINDOW_UNAVAILABLE" => {
+            crate::tr!("error-script-studio-session-window-unavailable")
+        }
+        "MENDIMARU_STUDIO_SESSION_CLOSE_PENDING" => {
+            crate::tr!("error-script-studio-session-close-pending")
+        }
+        "MENDIMARU_STUDIO_SESSION_CLOSE_REJECTED" => {
+            crate::tr!("error-script-studio-session-close-rejected")
+        }
+        "MENDIMARU_STUDIO_SESSION_QUERY_FAILED" => {
+            crate::tr!("error-script-studio-session-query-failed")
+        }
+        "MENDIMARU_STUDIO_SESSION_ENUMERATION_FAILED" => {
+            crate::tr!("error-script-studio-session-enumeration-failed")
+        }
+        "MENDIMARU_STUDIO_SESSION_REPORT_FAILED" => {
+            crate::tr!("error-script-studio-session-report-failed")
+        }
         "MENDIMARU_PATH_INVALID" => crate::tr!("error-script-path-invalid"),
         _ => reason.to_string(),
     }

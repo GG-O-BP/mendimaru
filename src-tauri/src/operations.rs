@@ -21,11 +21,18 @@ const MAX_REASON_BYTES: usize = 160;
 
 static STORE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static ACTIVE_OPERATIONS: OnceLock<Mutex<HashSet<ActiveOperation>>> = OnceLock::new();
+static ACTIVE_SESSION_ACTIONS: OnceLock<Mutex<HashSet<ActiveSessionAction>>> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ActiveOperation {
     history_path: PathBuf,
     id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ActiveSessionAction {
+    history_path: PathBuf,
+    target_version: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -55,6 +62,11 @@ pub(crate) struct OperationTracker {
     last_stage: OperationStage,
     last_percentage: Option<f64>,
     last_estimated: bool,
+}
+
+pub(crate) struct SessionActionGuard {
+    history_path: PathBuf,
+    target_version: String,
 }
 
 impl OperationTracker {
@@ -94,6 +106,25 @@ impl OperationTracker {
         let _store = lock_store()?;
         let mut history = load_history(&history_path)?;
         reconcile_and_import(config, &history_path, &mut history)?;
+        if history.records.iter().any(|record| {
+            record.state == OperationState::Running
+                && record.target_version == target_version
+                && operation_kinds_conflict(kind, record.kind)
+        }) {
+            return Err(format!(
+                "another Studio Pro {target_version} operation is already running"
+            ));
+        }
+        if is_mutation(kind)
+            && active_session_actions()?.contains(&ActiveSessionAction {
+                history_path: history_path.clone(),
+                target_version: target_version.to_string(),
+            })
+        {
+            return Err(format!(
+                "a Studio Pro {target_version} session action is already running"
+            ));
+        }
         let id = operation_id(kind, target_version)?;
         let now = Utc::now();
         history.records.push(OperationRecord {
@@ -249,6 +280,74 @@ impl OperationTracker {
         record.log_available |= is_direct_directory(&self.log_directory);
         save_history(&self.history_path, &history)
     }
+}
+
+impl SessionActionGuard {
+    pub(crate) fn begin(
+        app: &AppHandle,
+        config: &AppConfig,
+        target_version: &str,
+    ) -> Result<Self, String> {
+        Self::begin_at(config, history_path(app)?, target_version)
+    }
+
+    fn begin_at(
+        config: &AppConfig,
+        history_path: PathBuf,
+        target_version: &str,
+    ) -> Result<Self, String> {
+        validate_target_version(target_version)?;
+        let _store = lock_store()?;
+        let mut history = load_history(&history_path)?;
+        let changed = reconcile_and_import(config, &history_path, &mut history)?;
+        if changed {
+            trim_history(&mut history.records);
+            save_history(&history_path, &history)?;
+        }
+        if history.records.iter().any(|record| {
+            record.state == OperationState::Running
+                && record.target_version == target_version
+                && is_mutation(record.kind)
+        }) {
+            return Err(format!(
+                "Studio Pro {target_version} is being installed or removed"
+            ));
+        }
+        let action = ActiveSessionAction {
+            history_path: history_path.clone(),
+            target_version: target_version.to_string(),
+        };
+        if !active_session_actions()?.insert(action) {
+            return Err(format!(
+                "another Studio Pro {target_version} session action is already running"
+            ));
+        }
+        Ok(Self {
+            history_path,
+            target_version: target_version.to_string(),
+        })
+    }
+}
+
+impl Drop for SessionActionGuard {
+    fn drop(&mut self) {
+        if let Ok(_store) = lock_store() {
+            if let Ok(mut actions) = active_session_actions() {
+                actions.remove(&ActiveSessionAction {
+                    history_path: self.history_path.clone(),
+                    target_version: self.target_version.clone(),
+                });
+            }
+        }
+    }
+}
+
+fn is_mutation(kind: OperationKind) -> bool {
+    matches!(kind, OperationKind::Install | OperationKind::Uninstall)
+}
+
+fn operation_kinds_conflict(requested: OperationKind, active: OperationKind) -> bool {
+    is_mutation(requested) || is_mutation(active)
 }
 
 impl Drop for OperationTracker {
@@ -812,6 +911,14 @@ fn active_operations() -> Result<std::sync::MutexGuard<'static, HashSet<ActiveOp
         .map_err(|_| "active operation lock is poisoned".to_string())
 }
 
+fn active_session_actions(
+) -> Result<std::sync::MutexGuard<'static, HashSet<ActiveSessionAction>>, String> {
+    ACTIVE_SESSION_ACTIONS
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .map_err(|_| "active session action lock is poisoned".to_string())
+}
+
 fn remove_active(history_path: &Path, id: &str) {
     if let Ok(mut active) = active_operations() {
         active.remove(&ActiveOperation {
@@ -823,7 +930,7 @@ fn remove_active(history_path: &Path, id: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::OperationTracker;
+    use super::{OperationTracker, SessionActionGuard};
     use crate::contracts::{BackendError, BackendId, CapabilityId};
     use crate::models::{
         AppConfig, CommandError, ContainerRuntime, OperationKind, OperationStage, OperationState,
@@ -890,6 +997,118 @@ mod tests {
 
     fn clear_completed(config: &AppConfig) -> Result<usize, String> {
         super::clear_completed_at(config, &history_path(config))
+    }
+
+    fn begin_session_action(
+        config: &AppConfig,
+        target_version: &str,
+    ) -> Result<SessionActionGuard, String> {
+        SessionActionGuard::begin_at(config, history_path(config), target_version)
+    }
+
+    #[test]
+    fn serializes_mutations_against_launches_for_only_the_same_version() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let config = config(temporary.path());
+        let launch = begin(
+            &config,
+            OperationKind::Launch,
+            "11.12.2",
+            false,
+            OperationStage::Launching,
+            None,
+        )
+        .expect("first launch");
+        let parallel_launch = begin(
+            &config,
+            OperationKind::Launch,
+            "11.12.2",
+            false,
+            OperationStage::Launching,
+            None,
+        )
+        .expect("parallel launches remain allowed");
+        assert!(begin(
+            &config,
+            OperationKind::Uninstall,
+            "11.12.2",
+            false,
+            OperationStage::Uninstalling,
+            None,
+        )
+        .is_err());
+        let other_version = begin(
+            &config,
+            OperationKind::Uninstall,
+            "11.13.0",
+            false,
+            OperationStage::Uninstalling,
+            None,
+        )
+        .expect("other versions remain independent");
+        drop(other_version);
+        drop(parallel_launch);
+        drop(launch);
+
+        let install = begin(
+            &config,
+            OperationKind::Install,
+            "11.12.2",
+            false,
+            OperationStage::Installing,
+            None,
+        )
+        .expect("install after launches end");
+        assert!(begin(
+            &config,
+            OperationKind::Launch,
+            "11.12.2",
+            false,
+            OperationStage::Launching,
+            None,
+        )
+        .is_err());
+        assert!(begin(
+            &config,
+            OperationKind::Uninstall,
+            "11.12.2",
+            false,
+            OperationStage::Uninstalling,
+            None,
+        )
+        .is_err());
+        drop(install);
+    }
+
+    #[test]
+    fn serializes_session_actions_against_install_and_uninstall() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let config = config(temporary.path());
+        let action = begin_session_action(&config, "11.12.2").expect("session action");
+        assert!(begin_session_action(&config, "11.12.2").is_err());
+        assert!(begin(
+            &config,
+            OperationKind::Install,
+            "11.12.2",
+            false,
+            OperationStage::Installing,
+            None,
+        )
+        .is_err());
+        drop(action);
+
+        let uninstall = begin(
+            &config,
+            OperationKind::Uninstall,
+            "11.12.2",
+            false,
+            OperationStage::Uninstalling,
+            None,
+        )
+        .expect("uninstall after session action ends");
+        assert!(begin_session_action(&config, "11.12.2").is_err());
+        drop(uninstall);
+        assert!(begin_session_action(&config, "11.12.2").is_ok());
     }
 
     #[test]

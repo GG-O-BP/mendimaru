@@ -4,6 +4,7 @@ mod windows_native;
 
 use crate::contracts::{
     BackendId, BackendResult, CapabilityId, CapabilityManifest, CapabilitySnapshot,
+    StudioSessionStatus,
 };
 use crate::models::{
     AppConfig, ContainerStatus, EnvironmentDiagnostic, EnvironmentDiagnosticAction,
@@ -100,6 +101,62 @@ pub async fn installed_versions(config: &AppConfig) -> BackendResult<Vec<StudioV
     backend::active_backend(config, None)?.detect().await
 }
 
+pub async fn studio_sessions(config: &AppConfig) -> BackendResult<Vec<StudioSessionStatus>> {
+    backend::active_backend(config, None)?.sessions().await
+}
+
+pub async fn studio_session_status(
+    config: &AppConfig,
+    session_id: &str,
+) -> BackendResult<StudioSessionStatus> {
+    validate_studio_session_id(session_id)
+        .map_err(crate::contracts::BackendError::invalid_request)?;
+    backend::active_backend(config, None)?
+        .status(session_id)
+        .await
+}
+
+pub async fn reconnect_studio_session(config: &AppConfig, session_id: &str) -> BackendResult<()> {
+    validate_studio_session_id(session_id)
+        .map_err(crate::contracts::BackendError::invalid_request)?;
+    backend::active_backend(config, None)?
+        .reconnect(session_id)
+        .await
+}
+
+pub async fn stop_studio_session(config: &AppConfig, session_id: &str) -> BackendResult<()> {
+    validate_studio_session_id(session_id)
+        .map_err(crate::contracts::BackendError::invalid_request)?;
+    backend::StudioBackend::stop(backend::active_backend(config, None)?.as_ref(), session_id).await
+}
+
+fn validate_studio_session_id(session_id: &str) -> Result<(), String> {
+    const WINDOWS_EPOCH_TICKS: u64 = 621_355_968_000_000_000;
+    if session_id.len() > 48 {
+        return Err("the Studio Pro session identifier is invalid".to_string());
+    }
+    let value = session_id
+        .strip_prefix("studio-")
+        .ok_or_else(|| "the Studio Pro session identifier is invalid".to_string())?;
+    let (process_id, started_ticks) = value
+        .split_once('-')
+        .ok_or_else(|| "the Studio Pro session identifier is invalid".to_string())?;
+    if process_id
+        .parse::<u32>()
+        .ok()
+        .filter(|value| *value > 0)
+        .is_none()
+        || started_ticks
+            .parse::<u64>()
+            .ok()
+            .filter(|value| *value > WINDOWS_EPOCH_TICKS)
+            .is_none()
+    {
+        return Err("the Studio Pro session identifier is invalid".to_string());
+    }
+    Ok(())
+}
+
 pub async fn launch_studio(
     config: &AppConfig,
     version: &str,
@@ -173,7 +230,7 @@ pub fn validate_version(version: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{capabilities, validate_version};
+    use super::{capabilities, validate_studio_session_id, validate_version};
     use crate::models::HostPlatform;
 
     #[test]
@@ -199,6 +256,15 @@ mod tests {
         assert!(validate_version("11.0.0-rc1").is_ok());
         assert!(validate_version("11.12.2; calc.exe").is_err());
         assert!(validate_version("../11.12.2").is_err());
+    }
+
+    #[test]
+    fn accepts_only_bounded_pid_and_start_time_session_identifiers() {
+        assert!(validate_studio_session_id("studio-4242-638908236000000000").is_ok());
+        assert!(validate_studio_session_id("studio-0-638908236000000000").is_err());
+        assert!(validate_studio_session_id("studio-4242-1").is_err());
+        assert!(validate_studio_session_id("studio-4242-638908236000000000-extra").is_err());
+        assert!(validate_studio_session_id(&format!("studio-{}", "9".repeat(100))).is_err());
     }
 
     #[cfg(target_os = "linux")]

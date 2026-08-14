@@ -78,7 +78,20 @@
 }
 
 .vessel-copy .micro-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   color: #8bc9cc;
+}
+
+.running-badge {
+  padding: 2px 6px;
+  color: #073f33;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+  background: #8ae0b9;
+  border-radius: 999px;
 }
 
 .vessel-copy > strong {
@@ -100,6 +113,87 @@
 .vessel-actions {
   grid-column: 1 / -1;
   justify-content: flex-end;
+}
+
+.studio-session-list {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 7px;
+  padding-top: 11px;
+  border-top: 1px solid rgba(207, 231, 230, 0.16);
+}
+
+.studio-session {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 9px;
+  background: rgba(1, 18, 20, 0.34);
+  border: 1px solid rgba(164, 211, 210, 0.17);
+  border-radius: 3px;
+}
+
+.studio-session-status {
+  width: 8px;
+  height: 8px;
+  background: #63d7a4;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(99, 215, 164, 0.13);
+}
+
+.studio-session-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.studio-session-copy strong {
+  overflow: hidden;
+  color: #edf8f6;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-session-copy > span {
+  overflow: hidden;
+  color: #9db9b8;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-session-copy .studio-session-connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #76cfc7;
+}
+
+.studio-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.button.compact {
+  min-height: 31px;
+  padding: 0 9px;
+  font-size: 10px;
+}
+
+@media (max-width: 620px) {
+  .studio-session {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .studio-session-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
 }
 
 .search-field {
