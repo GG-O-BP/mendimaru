@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub const ENVIRONMENT_DIAGNOSTIC_SCHEMA_VERSION: &str = "1.0.0";
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostPlatform {
@@ -58,7 +60,50 @@ impl ContainerStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "kebab-case")]
+pub enum EnvironmentDiagnosticId {
+    Winboat,
+    Compose,
+    ContainerRuntime,
+    Freerdp,
+    SharedDirectory,
+    SharedMount,
+    Container,
+    GuestApi,
+    Rdp,
+    MarketplaceBrowser,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum EnvironmentDiagnosticStatus {
+    Success,
+    Warning,
+    Failure,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum EnvironmentDiagnosticAction {
+    Redetect,
+    StartWinboat,
+    OpenWinboat,
+    OpenSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentDiagnostic {
+    pub id: EnvironmentDiagnosticId,
+    pub status: EnvironmentDiagnosticStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<EnvironmentDiagnosticAction>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentStatus {
     pub platform: PlatformCapabilities,
@@ -73,4 +118,91 @@ pub struct EnvironmentStatus {
     pub shared_mount_matches: bool,
     pub container_status: ContainerStatus,
     pub guest_online: bool,
+    pub diagnostics: Vec<EnvironmentDiagnostic>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnvironmentDiagnosticReport<'a> {
+    schema_version: &'static str,
+    generated_at: String,
+    platform: &'a PlatformCapabilities,
+    ready: bool,
+    container_status: ContainerStatus,
+    checks: Vec<EnvironmentDiagnosticReportCheck>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnvironmentDiagnosticReportCheck {
+    id: EnvironmentDiagnosticId,
+    status: EnvironmentDiagnosticStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    action: Option<EnvironmentDiagnosticAction>,
+}
+
+pub fn environment_diagnostic_report(status: &EnvironmentStatus) -> Result<String, String> {
+    let report = EnvironmentDiagnosticReport {
+        schema_version: ENVIRONMENT_DIAGNOSTIC_SCHEMA_VERSION,
+        generated_at: chrono::Utc::now().to_rfc3339(),
+        platform: &status.platform,
+        ready: status.ready,
+        container_status: status.container_status,
+        checks: status
+            .diagnostics
+            .iter()
+            .map(|diagnostic| EnvironmentDiagnosticReportCheck {
+                id: diagnostic.id,
+                status: diagnostic.status,
+                action: diagnostic.action,
+            })
+            .collect(),
+    };
+    serde_json::to_string_pretty(&report)
+        .map_err(|error| format!("could not serialize environment report: {error}"))
+}
+
+#[cfg(test)]
+mod diagnostic_report_tests {
+    use super::*;
+
+    #[test]
+    fn report_uses_an_allowlist_and_omits_observed_values() {
+        let secret = "password=hunter2 token=private-value /home/private/workspace";
+        let status = EnvironmentStatus {
+            platform: PlatformCapabilities {
+                kind: HostPlatform::LinuxWinboat,
+                architecture: "x86_64".to_string(),
+                requires_winboat: true,
+                supports_studio_management: true,
+                supports_installation: true,
+                supports_uninstallation: true,
+                supports_projects: true,
+            },
+            ready: false,
+            winboat_available: false,
+            winboat_initialized: false,
+            setup_pending: false,
+            compose_available: false,
+            runtime_available: false,
+            freerdp_available: false,
+            shared_directory_available: false,
+            shared_mount_matches: false,
+            container_status: ContainerStatus::NotFound,
+            guest_online: false,
+            diagnostics: vec![EnvironmentDiagnostic {
+                id: EnvironmentDiagnosticId::Winboat,
+                status: EnvironmentDiagnosticStatus::Failure,
+                observed: Some(secret.to_string()),
+                action: Some(EnvironmentDiagnosticAction::Redetect),
+            }],
+        };
+
+        let report = environment_diagnostic_report(&status).expect("report serializes");
+        assert!(!report.contains("hunter2"));
+        assert!(!report.contains("private-value"));
+        assert!(!report.contains("/home/private"));
+        assert!(report.contains("\"id\": \"winboat\""));
+        assert!(report.contains("\"action\": \"redetect\""));
+    }
 }

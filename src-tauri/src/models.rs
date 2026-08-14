@@ -9,7 +9,11 @@ mod studio;
 
 pub use config::{AppConfig, ContainerRuntime, SettingsSaveResult};
 pub use download::{DownloadProgress, DownloadState};
-pub use environment::{ContainerStatus, EnvironmentStatus, HostPlatform, PlatformCapabilities};
+pub use environment::{
+    environment_diagnostic_report, ContainerStatus, EnvironmentDiagnostic,
+    EnvironmentDiagnosticAction, EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
+    EnvironmentStatus, HostPlatform, PlatformCapabilities,
+};
 pub use errors::{CommandError, CommandErrorCode};
 pub use localization::{LocaleOption, LocalizationBundle, TextDirection};
 pub use marketplace::{DownloadableVersion, StudioVersionCatalog};
@@ -20,6 +24,7 @@ pub use studio::{StudioInstallPhase, StudioInstallProgress, StudioVersion, WinAp
 mod tests {
     use super::{
         CommandError, CommandErrorCode, ContainerRuntime, ContainerStatus, DownloadState,
+        EnvironmentDiagnosticAction, EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
         HostPlatform, TextDirection,
     };
     use std::collections::BTreeSet;
@@ -84,6 +89,38 @@ mod tests {
                 ContainerStatus::Dead,
                 ContainerStatus::NotFound,
                 ContainerStatus::Unknown,
+            ],
+        );
+        assert_registry(
+            "environmentDiagnosticId",
+            [
+                EnvironmentDiagnosticId::Winboat,
+                EnvironmentDiagnosticId::Compose,
+                EnvironmentDiagnosticId::ContainerRuntime,
+                EnvironmentDiagnosticId::Freerdp,
+                EnvironmentDiagnosticId::SharedDirectory,
+                EnvironmentDiagnosticId::SharedMount,
+                EnvironmentDiagnosticId::Container,
+                EnvironmentDiagnosticId::GuestApi,
+                EnvironmentDiagnosticId::Rdp,
+                EnvironmentDiagnosticId::MarketplaceBrowser,
+            ],
+        );
+        assert_registry(
+            "environmentDiagnosticStatus",
+            [
+                EnvironmentDiagnosticStatus::Success,
+                EnvironmentDiagnosticStatus::Warning,
+                EnvironmentDiagnosticStatus::Failure,
+            ],
+        );
+        assert_registry(
+            "environmentDiagnosticAction",
+            [
+                EnvironmentDiagnosticAction::Redetect,
+                EnvironmentDiagnosticAction::StartWinboat,
+                EnvironmentDiagnosticAction::OpenWinboat,
+                EnvironmentDiagnosticAction::OpenSettings,
             ],
         );
         assert_registry(

@@ -39,6 +39,8 @@ pub fn run() {
             save_config,
             get_capabilities,
             get_environment_status,
+            get_environment_diagnostic_report,
+            export_environment_diagnostic_report,
             get_installed_versions,
             get_downloadable_versions_cache,
             fetch_downloadable_versions,

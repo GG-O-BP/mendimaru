@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   redetectConfig: vi.fn(),
   saveConfig: vi.fn(),
   getEnvironmentStatus: vi.fn(),
+  getEnvironmentDiagnosticReport: vi.fn(),
+  exportEnvironmentDiagnosticReport: vi.fn(),
   getInstalledVersions: vi.fn(),
   getDownloadableVersionsCache: vi.fn(),
   fetchDownloadableVersions: vi.fn(),
@@ -43,6 +45,7 @@ const mocks = vi.hoisted(() => ({
   onStudioDownloadProgress: vi.fn(),
   openDialog: vi.fn(),
   setWindowTitle: vi.fn(),
+  writeClipboard: vi.fn(),
 }));
 
 vi.mock("./api/tauri", () => ({
@@ -56,6 +59,8 @@ vi.mock("./api/tauri", () => ({
     redetectConfig: mocks.redetectConfig,
     saveConfig: mocks.saveConfig,
     getEnvironmentStatus: mocks.getEnvironmentStatus,
+    getEnvironmentDiagnosticReport: mocks.getEnvironmentDiagnosticReport,
+    exportEnvironmentDiagnosticReport: mocks.exportEnvironmentDiagnosticReport,
     getInstalledVersions: mocks.getInstalledVersions,
     getDownloadableVersionsCache: mocks.getDownloadableVersionsCache,
     fetchDownloadableVersions: mocks.fetchDownloadableVersions,
@@ -117,6 +122,17 @@ const status: EnvironmentStatus = {
   sharedMountMatches: true,
   containerStatus: "not-found",
   guestOnline: true,
+  diagnostics: [
+    {
+      id: "shared-directory",
+      status: "success",
+    },
+    {
+      id: "marketplace-browser",
+      status: "warning",
+      action: "redetect",
+    },
+  ],
 };
 
 const removableStudio: StudioVersion = {
@@ -189,6 +205,10 @@ beforeEach(() => {
     values.map(String),
   );
   mocks.getEnvironmentStatus.mockResolvedValue(status);
+  mocks.getEnvironmentDiagnosticReport.mockResolvedValue(
+    '{"schemaVersion":"1.0.0","checks":[]}',
+  );
+  mocks.exportEnvironmentDiagnosticReport.mockResolvedValue(true);
   mocks.getInstalledVersions.mockImplementation(async () => [...installed]);
   mocks.getDownloadableVersionsCache.mockResolvedValue(catalog);
   mocks.fetchDownloadableVersions.mockResolvedValue(catalog);
@@ -208,6 +228,11 @@ beforeEach(() => {
   mocks.onStudioDownloadProgress.mockResolvedValue(vi.fn());
   mocks.openDialog.mockResolvedValue(undefined);
   mocks.setWindowTitle.mockResolvedValue(undefined);
+  mocks.writeClipboard.mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: mocks.writeClipboard },
+  });
   mocks.redetectConfig.mockResolvedValue({ ...config });
   mocks.saveConfig.mockImplementation(async (nextConfig: AppConfig) => ({
     config: nextConfig,
@@ -334,5 +359,113 @@ describe("native Windows application E2E", () => {
       mocks.saveConfig.mock.calls[mocks.saveConfig.mock.calls.length - 1] ?? [];
     expect(savedConfig.windowsStudioPaths).toEqual([portablePath]);
     expect(applyMount).toBe(false);
+  });
+
+  it("renders independent diagnostics and copies, exports, and repairs safely", async () => {
+    await renderReadyApp();
+    fireEvent.click(screen.getByRole("button", { name: /nav-settings/ }));
+    await screen.findByText("diagnostics-title");
+
+    expect(screen.getByText("diagnostic-shared-directory-title")).toBeVisible();
+    expect(screen.getByText("diagnostic-status-success")).toBeVisible();
+    expect(screen.getByText("diagnostic-browser-title")).toBeVisible();
+    expect(screen.getByText("diagnostic-status-warning")).toBeVisible();
+    expect(screen.getByText("diagnostic-browser-recovery")).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "action-copy-diagnostic-report" }),
+    );
+    await waitFor(() => {
+      expect(mocks.getEnvironmentDiagnosticReport).toHaveBeenCalledOnce();
+      expect(mocks.writeClipboard).toHaveBeenCalledWith(
+        '{"schemaVersion":"1.0.0","checks":[]}',
+      );
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "action-export-diagnostic-report" }),
+    );
+    await waitFor(() =>
+      expect(mocks.exportEnvironmentDiagnosticReport).toHaveBeenCalledOnce(),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "diagnostic-action-redetect" }),
+    );
+    await waitFor(() => expect(mocks.redetectConfig).toHaveBeenCalledOnce());
+    expect(mocks.startWinBoatWindows).not.toHaveBeenCalled();
+  });
+});
+
+describe("Linux environment diagnostic E2E", () => {
+  it("keeps a partial failure actionable without treating the guest as ready", async () => {
+    const linuxConfig: AppConfig = {
+      ...config,
+      winboatExecutable: "/opt/winboat/winboat",
+      composeFile: "/home/dev/.winboat/docker-compose.yml",
+      containerName: "WinBoat",
+      apiUrl: "http://127.0.0.1:47280",
+      rdpHost: "127.0.0.1",
+      rdpPort: 47300,
+      sharedDirectory: "/home/dev/Mendix",
+      windowsSharedDirectory: String.raw`\\host.lan\Data`,
+      freerdpBinary: "xfreerdp3",
+    };
+    const partialStatus: EnvironmentStatus = {
+      ...status,
+      platform: {
+        ...status.platform,
+        kind: "linux-winboat",
+        requiresWinboat: true,
+      },
+      ready: false,
+      winboatAvailable: true,
+      winboatInitialized: true,
+      composeAvailable: true,
+      runtimeAvailable: true,
+      freerdpAvailable: true,
+      sharedDirectoryAvailable: true,
+      sharedMountMatches: false,
+      containerStatus: "exited",
+      guestOnline: false,
+      diagnostics: [
+        { id: "container-runtime", status: "success", observed: "29.7.2" },
+        {
+          id: "shared-mount",
+          status: "failure",
+          action: "open-settings",
+        },
+        {
+          id: "container",
+          status: "warning",
+          observed: "exited",
+          action: "start-winboat",
+        },
+        {
+          id: "guest-api",
+          status: "warning",
+          action: "start-winboat",
+        },
+      ],
+    };
+    mocks.getConfig.mockResolvedValue(linuxConfig);
+    mocks.getEnvironmentStatus.mockResolvedValue(partialStatus);
+    mocks.startWinBoatWindows.mockResolvedValue(undefined);
+
+    render(<App />);
+    await screen.findByText("route-linux");
+    expect(screen.getByText("connection-offline")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /nav-settings/ }));
+    await screen.findByText("diagnostics-title");
+
+    expect(screen.getByText("diagnostic-status-failure")).toBeVisible();
+    expect(screen.getAllByText("diagnostic-status-warning")).toHaveLength(2);
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "diagnostic-action-start" })[0],
+    );
+    await waitFor(() =>
+      expect(mocks.startWinBoatWindows).toHaveBeenCalledOnce(),
+    );
+    expect(mocks.saveConfig).not.toHaveBeenCalled();
   });
 });

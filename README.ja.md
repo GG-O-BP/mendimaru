@@ -20,6 +20,10 @@ Mendimaru は Mendix Studio Pro の各バージョンを検出・インストー
 
 ダッシュボード、VM リソース情報、高度なダウンロード URL、ビルド番号の手動入力は提供しません。
 
+### 環境診断
+
+設定画面では、WinBoat 実行ファイル、Compose 構造、コンテナーランタイム daemon、FreeRDP、共有ワークスペースとマウント、コンテナー状態、Guest API、loopback RDP ポート、Marketplace ブラウザーを個別に確認します。失敗した項目には、再検出、Windows の起動、WinBoat を開く、関連設定へ移動するなど、明示的で安全な次の操作のみを提示します。診断レポートは JSON としてコピーまたは書き出せます。許可された状態フィールドだけを含み、設定パス、資格情報、token、コマンド payload は除外します。
+
 ## Windows へのインストール
 
 GitHub Release のアセットから MSI または NSIS セットアップをダウンロードします。Windows ビルドでは WinBoat、Docker、Guest API、RDP、FreeRDP、パス変換は不要です。

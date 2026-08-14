@@ -109,6 +109,29 @@
     "not-found": true,
     "unknown": true
   },
+  "environmentDiagnosticId": {
+    "winboat": true,
+    "compose": true,
+    "container-runtime": true,
+    "freerdp": true,
+    "shared-directory": true,
+    "shared-mount": true,
+    "container": true,
+    "guest-api": true,
+    "rdp": true,
+    "marketplace-browser": true
+  },
+  "environmentDiagnosticStatus": {
+    "success": true,
+    "warning": true,
+    "failure": true
+  },
+  "environmentDiagnosticAction": {
+    "redetect": true,
+    "start-winboat": true,
+    "open-winboat": true,
+    "open-settings": true
+  },
   "downloadState": {
     "starting": true,
     "preparing": true,

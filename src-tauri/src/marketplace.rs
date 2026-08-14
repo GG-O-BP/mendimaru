@@ -64,6 +64,10 @@ pub async fn installer_url(version: &str) -> Result<String, String> {
 
 #[cfg(test)]
 use browser::{scrape_build_number, scrape_page};
+
+pub(crate) fn browser_executable() -> Option<String> {
+    browser::browser_executable()
+}
 #[cfg(test)]
 use parser::parse_datagrid_html;
 

@@ -94,7 +94,7 @@ fn browser_arguments() -> Vec<&'static str> {
     ]
 }
 
-fn chrome_executable() -> Option<String> {
+pub(super) fn chrome_executable() -> Option<String> {
     if let Ok(custom) = std::env::var("MENDIMARU_CHROME_PATH") {
         if Path::new(&custom).is_file() {
             return Some(custom);

@@ -6,8 +6,9 @@ use crate::contracts::{
     BackendId, BackendResult, CapabilityId, CapabilityManifest, CapabilitySnapshot,
 };
 use crate::models::{
-    AppConfig, ContainerStatus, EnvironmentStatus, HostPlatform, PlatformCapabilities,
-    StudioInstallProgress, StudioVersion,
+    AppConfig, ContainerStatus, EnvironmentDiagnostic, EnvironmentDiagnosticAction,
+    EnvironmentDiagnosticId, EnvironmentDiagnosticStatus, EnvironmentStatus, HostPlatform,
+    PlatformCapabilities, StudioInstallProgress, StudioVersion,
 };
 use regex::Regex;
 use std::path::Path;
@@ -81,6 +82,17 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
         shared_mount_matches: false,
         container_status: ContainerStatus::NotFound,
         guest_online: false,
+        diagnostics: vec![EnvironmentDiagnostic {
+            id: EnvironmentDiagnosticId::SharedDirectory,
+            status: if Path::new(&config.shared_directory).is_dir() {
+                EnvironmentDiagnosticStatus::Success
+            } else {
+                EnvironmentDiagnosticStatus::Failure
+            },
+            observed: None,
+            action: (!Path::new(&config.shared_directory).is_dir())
+                .then_some(EnvironmentDiagnosticAction::OpenSettings),
+        }],
     }
 }
 

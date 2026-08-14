@@ -20,6 +20,13 @@ pub fn compose_shared_directory(compose_file: &str) -> Option<String> {
     })
 }
 
+pub fn compose_file_is_valid(compose_file: &str) -> bool {
+    read_compose(Path::new(compose_file))
+        .ok()
+        .and_then(|compose| service_value(&compose).cloned())
+        .is_some_and(|service| service.is_mapping())
+}
+
 pub(super) fn read_compose(path: &Path) -> Result<Value, String> {
     let content = fs::read_to_string(path)
         .map_err(|error| crate::tr!("error-compose-read", error = error))?;
@@ -195,7 +202,8 @@ fn service_value_mut(compose: &mut Value) -> Option<&mut Value> {
 #[cfg(test)]
 mod tests {
     use super::{
-        host_port_for_guest, restore_file, shared_mount_source, snapshot_file, update_shared_mount,
+        compose_file_is_valid, host_port_for_guest, restore_file, shared_mount_source,
+        snapshot_file, update_shared_mount,
     };
     use serde_yaml::Value;
     use std::fs;
@@ -275,5 +283,20 @@ mod tests {
         restore_file(&snapshot).expect("restore compose");
 
         assert_eq!(fs::read_to_string(compose).expect("read compose"), original);
+    }
+
+    #[test]
+    fn distinguishes_valid_compose_from_yaml_without_a_service() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("docker-compose.yml");
+        fs::write(&compose, "services:\n  windows:\n    image: test\n")
+            .expect("write valid compose");
+        assert!(compose_file_is_valid(&compose.to_string_lossy()));
+
+        fs::write(&compose, "name: parsed-but-not-compose\n").expect("write invalid compose");
+        assert!(!compose_file_is_valid(&compose.to_string_lossy()));
+
+        fs::write(&compose, "services: [unterminated\n").expect("write malformed compose");
+        assert!(!compose_file_is_valid(&compose.to_string_lossy()));
     }
 }

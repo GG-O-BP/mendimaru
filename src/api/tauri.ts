@@ -24,6 +24,8 @@ const commands = {
   saveConfig: "save_config",
   getCapabilities: "get_capabilities",
   getEnvironmentStatus: "get_environment_status",
+  getEnvironmentDiagnosticReport: "get_environment_diagnostic_report",
+  exportEnvironmentDiagnosticReport: "export_environment_diagnostic_report",
   getInstalledVersions: "get_installed_versions",
   getDownloadableVersionsCache: "get_downloadable_versions_cache",
   fetchDownloadableVersions: "fetch_downloadable_versions",
@@ -59,6 +61,10 @@ export const tauriApi = {
     }),
   getEnvironmentStatus: () =>
     invoke<EnvironmentStatus>(commands.getEnvironmentStatus),
+  getEnvironmentDiagnosticReport: () =>
+    invoke<string>(commands.getEnvironmentDiagnosticReport),
+  exportEnvironmentDiagnosticReport: () =>
+    invoke<boolean>(commands.exportEnvironmentDiagnosticReport),
   getInstalledVersions: () =>
     invoke<StudioVersion[]>(commands.getInstalledVersions),
   getDownloadableVersionsCache: () =>

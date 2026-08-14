@@ -22,6 +22,7 @@ export function SettingsView({
         changed: environment.settingsChanged,
         mountMatches: Boolean(environment.status?.sharedMountMatches),
         applyNow: environment.applyMountNow,
+        diagnostics: environment.status?.diagnostics ?? [],
         isBusy,
         onChange: environment.setDraftConfig,
         onChoose: (field) => void environment.choosePath(field),
@@ -30,6 +31,11 @@ export function SettingsView({
         onApplyNow: environment.setApplyMountNow,
         onSave: environment.saveSettings,
         onRedetect: () => void environment.redetectSettings(),
+        onDiagnosticAction: (action, id) =>
+          void environment.runDiagnosticAction(action, id),
+        onCopyDiagnosticReport: () => void environment.copyDiagnosticReport(),
+        onExportDiagnosticReport: () =>
+          void environment.exportDiagnosticReport(),
       }}
     />
   );

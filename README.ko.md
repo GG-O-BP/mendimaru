@@ -20,6 +20,10 @@ Mendix Studio Pro 버전을 탐지·설치·실행·제거하는 Tauri GUI 앱�
 
 대시보드, VM 자원 정보, 고급 다운로드 URL, 수동 빌드 번호 입력은 제공하지 않습니다.
 
+### 환경 진단
+
+설정 화면은 WinBoat 실행 파일, Compose 구조, 컨테이너 런타임 daemon, FreeRDP, 공유 워크스페이스와 마운트, 컨테이너 상태, Guest API, loopback RDP 포트 및 Marketplace 브라우저를 독립적으로 검사합니다. 실패한 항목에는 재탐지, Windows 시작, WinBoat 열기 또는 관련 설정 이동처럼 명시적으로 안전한 다음 행동만 제공합니다. 진단 보고서는 JSON으로 복사하거나 내보낼 수 있으며, 허용된 상태 필드만 포함하고 설정 경로, 자격 증명, token 및 명령 payload는 제외합니다.
+
 ## Windows 설치
 
 GitHub Release 자산에서 MSI 또는 NSIS 설치 파일을 받습니다. Windows 빌드는 WinBoat, Docker, Guest API, RDP, FreeRDP와 경로 변환을 사용하지 않습니다.

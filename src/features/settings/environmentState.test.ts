@@ -26,6 +26,7 @@ function status(overrides: Partial<EnvironmentStatus> = {}): EnvironmentStatus {
     sharedMountMatches: true,
     containerStatus: "exited",
     guestOnline: false,
+    diagnostics: [],
     ...overrides,
   };
 }
