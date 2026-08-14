@@ -111,7 +111,7 @@ Installers are stored in `.mendimaru/installers` under the configured workspace.
 
 Likewise, removal is complete only after the official Windows uninstaller exits and `StudioPro.exe` for that version disappears. The installed-version list is then refreshed automatically.
 
-In Linux WinBoat mode, the Studio Pro launch button remains disabled until the Windows process has created a real window and FreeRDP is ready to display it. While a launch is being prepared, launch buttons for other versions and projects are also locked to prevent duplicate launches. The launch script is stored in the shared directory, and only a short invocation command is passed to RemoteApp so it stays within FreeRDP RAIL's command-length limit. Windows Script Host runs PowerShell in hidden mode. Installation and removal inherit the token of the already elevated WinBoat session, so neither a PowerShell console nor a separate UAC window is shown.
+In Linux WinBoat mode, the Studio Pro launch button remains disabled until the Windows process has created a real window and FreeRDP is ready to display it. While a launch is being prepared, launch buttons for other versions and projects are also locked to prevent duplicate launches. Windows hash-pins the shared operation script, copies it to a unique private path, and executes only that copy. Installation and removal inherit the token of the already elevated WinBoat session, so no separate UAC window is shown.
 
 ## Linux shared workspace
 
@@ -150,7 +150,9 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 Native Windows commands never interpolate paths into a command shell. Installers, installed Studio executables, and registered Mendix uninstallers must have a valid trusted Authenticode signature whose publisher is Mendix or Siemens; files are hashed before and after verification to detect replacement. Windows Installer removal is limited to a product-code `/x` operation and known non-interactive flags, while registered uninstallers must belong to the selected installation and use an allowlisted flag set. UAC cancellation and non-success process exit codes leave the operation failed rather than reporting a false install or removal.
 
-On Linux, Mendimaru does not store the Windows username or password in its app settings. When launching a RemoteApp, it reads credentials from the running WinBoat container and passes them to FreeRDP 3 through standard input, keeping the password out of process arguments and app logs.
+On Linux, Mendimaru does not store the Windows username or password in its app settings. When launching a RemoteApp, it reads credentials from the running WinBoat container and passes them to FreeRDP 3 through standard input, keeping the password out of process arguments and app logs. FreeRDP uses an app-scoped TOFU certificate pin, and privileged operations require loopback-only Guest API and RDP bindings. Shared operation results are authenticated with per-attempt HMAC keys and replay-protected sequence numbers.
+
+See [Security policy and WinBoat trust boundary](SECURITY.md) for the threat model, executable trust chain, container privileges, residual risks, and reporting guidance.
 
 ## License
 

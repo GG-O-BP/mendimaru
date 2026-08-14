@@ -44,6 +44,8 @@ icu_decimal = { version = "2.2", features = ["compiled_data"] }
 icu_locale = "2.2"
 writeable = "0.6"
 sha2 = "0.10"
+hmac = "0.12"
+getrandom = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"

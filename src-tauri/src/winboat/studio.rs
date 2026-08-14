@@ -5,10 +5,12 @@ use super::scripts::{install_script, launch_studio_script, uninstall_script};
 use crate::models::{AppConfig, StudioInstallPhase, StudioInstallProgress};
 use crate::platform::validate_version;
 use crate::projects::{linux_path_to_windows_share, scan_projects};
+use sha2::{Digest, Sha256};
 use std::fs;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const STUDIO_LAUNCH_TIMEOUT_SECONDS: u64 = 5 * 60;
 const INSTALL_TIMEOUT_SECONDS: u64 = 45 * 60;
@@ -32,14 +34,8 @@ pub async fn launch_studio(
         None
     };
     let label = format!("Studio Pro {}", selected.version);
-    let operation_directory = Path::new(&config.shared_directory).join(".mendimaru/operations");
-    fs::create_dir_all(&operation_directory)
-        .map_err(|error| crate::tr!("error-runtime-directory-create", error = error))?;
-    let operation_id = format!(
-        "launch-{}-{}",
-        safe_operation_name(version),
-        unix_timestamp_millis()
-    );
+    let operation_directory = secure_shared_directory(config, ".mendimaru/operations")?;
+    let operation_id = random_operation_id("launch", version)?;
     let report_path = operation_directory.join(format!("{operation_id}.json"));
     let windows_report_path = linux_path_to_windows_share(
         Path::new(&config.shared_directory),
@@ -50,13 +46,15 @@ pub async fn launch_studio(
         &selected.executable_path,
         project_argument.as_deref(),
         &windows_report_path,
+        &config.mendix_install_root,
     );
-    let script_path = write_command_script(config, &operation_id, &script)?;
+    let command = write_command_script(config, &operation_id, &script)?;
     let operation = crate::tr!("operation-studio-launch");
     let report = run_windows_operation(
         config,
         WindowsOperationRequest {
-            script_path: &script_path,
+            script_path: &command.path,
+            script_sha256: &command.sha256,
             label: &label,
             report_path: &report_path,
             timeout_seconds: STUDIO_LAUNCH_TIMEOUT_SECONDS,
@@ -76,21 +74,17 @@ pub async fn install_studio<F>(
     config: &AppConfig,
     version: &str,
     windows_installer_path: &str,
+    expected_sha256: &str,
     mut on_progress: F,
 ) -> Result<String, String>
 where
     F: FnMut(StudioInstallProgress) + Send,
 {
     validate_version(version)?;
+    validate_sha256(expected_sha256)?;
     ensure_guest_online(config).await?;
-    let operation_directory = Path::new(&config.shared_directory).join(".mendimaru/operations");
-    fs::create_dir_all(&operation_directory)
-        .map_err(|error| crate::tr!("error-install-state-directory-create", error = error))?;
-    let operation_id = format!(
-        "install-{}-{}",
-        safe_operation_name(version),
-        unix_timestamp_millis()
-    );
+    let operation_directory = secure_shared_directory(config, ".mendimaru/operations")?;
+    let operation_id = random_operation_id("install", version)?;
     let report_path = operation_directory.join(format!("{operation_id}.json"));
     let windows_report_path = linux_path_to_windows_share(
         Path::new(&config.shared_directory),
@@ -103,16 +97,19 @@ where
         &windows_report_path,
         &config.mendix_install_root,
         version,
+        expected_sha256,
+        &config.windows_shared_directory,
     );
     // Keep the exact script next to other commands so a failed installation can
     // be diagnosed without exposing the Windows password or FreeRDP arguments.
-    let script_path = write_command_script(config, &operation_id, &script)?;
+    let command = write_command_script(config, &operation_id, &script)?;
     let label = format!("Install Studio Pro {version}");
     let operation = crate::tr!("operation-studio-install");
     let report = run_windows_operation(
         config,
         WindowsOperationRequest {
-            script_path: &script_path,
+            script_path: &command.path,
+            script_sha256: &command.sha256,
             label: &label,
             report_path: &report_path,
             timeout_seconds: INSTALL_TIMEOUT_SECONDS,
@@ -146,14 +143,8 @@ where
 pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(), String> {
     validate_version(version)?;
     ensure_guest_online(config).await?;
-    let operation_directory = Path::new(&config.shared_directory).join(".mendimaru/operations");
-    fs::create_dir_all(&operation_directory)
-        .map_err(|error| crate::tr!("error-uninstall-state-directory-create", error = error))?;
-    let operation_id = format!(
-        "uninstall-{}-{}",
-        safe_operation_name(version),
-        unix_timestamp_millis()
-    );
+    let operation_directory = secure_shared_directory(config, ".mendimaru/operations")?;
+    let operation_id = random_operation_id("uninstall", version)?;
     let report_path = operation_directory.join(format!("{operation_id}.json"));
     let windows_report_path = linux_path_to_windows_share(
         Path::new(&config.shared_directory),
@@ -166,13 +157,14 @@ pub async fn launch_uninstaller(config: &AppConfig, version: &str) -> Result<(),
         version,
         &windows_report_path,
     );
-    let script_path = write_command_script(config, &operation_id, &script)?;
+    let command = write_command_script(config, &operation_id, &script)?;
     let label = format!("Uninstall Studio Pro {version}");
     let operation = crate::tr!("operation-studio-uninstall");
     run_windows_operation(
         config,
         WindowsOperationRequest {
-            script_path: &script_path,
+            script_path: &command.path,
+            script_sha256: &command.sha256,
             label: &label,
             report_path: &report_path,
             timeout_seconds: UNINSTALL_TIMEOUT_SECONDS,
@@ -230,23 +222,93 @@ fn paths_refer_to_same_location(left: &str, right: &str) -> bool {
     }
 }
 
-fn write_command_script(config: &AppConfig, name: &str, content: &str) -> Result<PathBuf, String> {
-    let command_directory = Path::new(&config.shared_directory).join(".mendimaru/commands");
-    fs::create_dir_all(&command_directory)
-        .map_err(|error| crate::tr!("error-command-directory-create", error = error))?;
-    let timestamp = unix_timestamp_millis();
-    let safe_name = safe_operation_name(name);
-    let path = command_directory.join(format!("{safe_name}-{timestamp}.ps1"));
-    fs::write(&path, content)
-        .map_err(|error| crate::tr!("error-command-script-save", error = error))?;
-    Ok(path)
+struct PreparedCommand {
+    path: PathBuf,
+    sha256: String,
 }
 
-fn unix_timestamp_millis() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
+fn write_command_script(
+    config: &AppConfig,
+    name: &str,
+    content: &str,
+) -> Result<PreparedCommand, String> {
+    let command_directory = secure_shared_directory(config, ".mendimaru/commands")?;
+    let safe_name = safe_operation_name(name);
+    let path = command_directory.join(format!("{safe_name}.ps1"));
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&path)
+        .map_err(|error| crate::tr!("error-command-script-save", error = error))?;
+    file.write_all(content.as_bytes())
+        .and_then(|_| file.sync_all())
+        .map_err(|error| crate::tr!("error-command-script-save", error = error))?;
+    let sha256 = format!("{:x}", Sha256::digest(content.as_bytes()));
+    Ok(PreparedCommand { path, sha256 })
+}
+
+fn secure_shared_directory(config: &AppConfig, relative: &str) -> Result<PathBuf, String> {
+    let shared = Path::new(&config.shared_directory);
+    let shared_metadata = fs::symlink_metadata(shared)
+        .map_err(|error| crate::tr!("error-secure-shared-directory", error = error))?;
+    if !shared_metadata.is_dir() || shared_metadata.file_type().is_symlink() {
+        return Err(crate::tr!(
+            "error-secure-shared-directory",
+            error = "the configured shared root is not a direct directory"
+        ));
+    }
+    let directory = shared.join(relative);
+    fs::create_dir_all(&directory)
+        .map_err(|error| crate::tr!("error-secure-shared-directory", error = error))?;
+    let canonical_shared = shared
+        .canonicalize()
+        .map_err(|error| crate::tr!("error-secure-shared-directory", error = error))?;
+    let canonical_directory = directory
+        .canonicalize()
+        .map_err(|error| crate::tr!("error-secure-shared-directory", error = error))?;
+    if !canonical_directory.starts_with(&canonical_shared) {
+        return Err(crate::tr!(
+            "error-secure-shared-directory",
+            error = "the application directory escapes the shared root"
+        ));
+    }
+    let mut current = shared.to_path_buf();
+    for component in Path::new(relative).components() {
+        current.push(component);
+        let metadata = fs::symlink_metadata(&current)
+            .map_err(|error| crate::tr!("error-secure-shared-directory", error = error))?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(crate::tr!(
+                "error-secure-shared-directory",
+                error = "a shared application directory is a symbolic link"
+            ));
+        }
+    }
+    Ok(directory)
+}
+
+fn random_operation_id(prefix: &str, version: &str) -> Result<String, String> {
+    let mut random = [0_u8; 16];
+    getrandom::fill(&mut random)
+        .map_err(|error| crate::tr!("error-operation-security-create", error = error))?;
+    let random: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+    Ok(format!(
+        "{}-{}-{random}",
+        safe_operation_name(prefix),
+        safe_operation_name(version)
+    ))
+}
+
+fn validate_sha256(value: &str) -> Result<(), String> {
+    if value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        Ok(())
+    } else {
+        Err(crate::tr!("error-installer-sha256-invalid"))
+    }
 }
 
 fn safe_operation_name(value: &str) -> String {

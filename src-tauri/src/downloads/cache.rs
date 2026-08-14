@@ -16,7 +16,7 @@ pub(super) struct InstallerCacheMetadata {
     source_url: String,
     pub(super) size: u64,
     remote_content_length: Option<u64>,
-    sha256: String,
+    pub(super) sha256: String,
     etag: Option<String>,
     last_modified: Option<String>,
 }

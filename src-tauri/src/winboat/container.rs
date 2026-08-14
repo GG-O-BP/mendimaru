@@ -3,6 +3,8 @@ use crate::config::{
 };
 use crate::models::{AppConfig, ContainerRuntime, ContainerStatus, EnvironmentStatus};
 use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::net::IpAddr;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::time::Duration;
@@ -128,6 +130,46 @@ pub(super) async fn ensure_guest_online(config: &AppConfig) -> Result<(), String
     ))
 }
 
+pub(super) fn ensure_private_operation_transport(config: &AppConfig) -> Result<(), String> {
+    if !is_loopback_host(&config.rdp_host) {
+        return Err(crate::tr!(
+            "error-winboat-transport-public",
+            endpoint = &config.rdp_host
+        ));
+    }
+    let api_url = reqwest::Url::parse(&resolved_api_url(config))
+        .map_err(|error| crate::tr!("error-winboat-transport-inspect", error = error))?;
+    if !api_url.host_str().is_some_and(is_loopback_host) {
+        return Err(crate::tr!(
+            "error-winboat-transport-public",
+            endpoint = api_url.as_str()
+        ));
+    }
+
+    let inspection = runtime_inspection(config)?;
+    for guest_port in ["3389/tcp", "7148/tcp"] {
+        let bindings = inspection
+            .network_settings
+            .ports
+            .get(guest_port)
+            .and_then(Option::as_ref)
+            .filter(|bindings| !bindings.is_empty())
+            .ok_or_else(|| {
+                crate::tr!("error-winboat-transport-binding-missing", port = guest_port)
+            })?;
+        if bindings
+            .iter()
+            .any(|binding| !is_loopback_host(&binding.host_ip))
+        {
+            return Err(crate::tr!(
+                "error-winboat-transport-public",
+                endpoint = format!("{} ({guest_port})", bindings[0].host_ip)
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub async fn guest_is_online(config: &AppConfig) -> bool {
     let Ok(client) = http_client(Duration::from_secs(2)) else {
         return false;
@@ -180,6 +222,21 @@ struct RuntimeContainerInspection {
     state: RuntimeContainerState,
     #[serde(default)]
     mounts: Vec<RuntimeContainerMount>,
+    #[serde(default)]
+    network_settings: RuntimeNetworkSettings,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct RuntimeNetworkSettings {
+    #[serde(default)]
+    ports: BTreeMap<String, Option<Vec<RuntimePortBinding>>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct RuntimePortBinding {
+    host_ip: String,
 }
 
 #[derive(Deserialize)]
@@ -206,6 +263,30 @@ fn inspect_container(config: &AppConfig) -> ContainerInspection {
         }
         _ => ContainerInspection::not_found(),
     }
+}
+
+fn runtime_inspection(config: &AppConfig) -> Result<RuntimeContainerInspection, String> {
+    let output = Command::new(config.container_runtime.as_str())
+        .arg("inspect")
+        .arg(&config.container_name)
+        .output()
+        .map_err(|error| crate::tr!("error-winboat-transport-inspect", error = error))?;
+    if !output.status.success() {
+        return Err(crate::tr!(
+            "error-winboat-transport-inspect",
+            error = output.status
+        ));
+    }
+    serde_json::from_slice::<Vec<RuntimeContainerInspection>>(&output.stdout)
+        .map_err(|error| crate::tr!("error-winboat-transport-inspect", error = error))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            crate::tr!(
+                "error-winboat-transport-inspect",
+                error = "the runtime returned no container"
+            )
+        })
 }
 
 fn parse_container_inspection(output: &[u8]) -> Option<ContainerInspection> {
@@ -251,9 +332,17 @@ fn paths_refer_to_same_location(left: &str, right: &str) -> bool {
     }
 }
 
+fn is_loopback_host(value: &str) -> bool {
+    value.eq_ignore_ascii_case("localhost")
+        || value
+            .trim_matches(['[', ']'])
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_container_inspection;
+    use super::{is_loopback_host, parse_container_inspection, RuntimeContainerInspection};
     use crate::models::ContainerStatus;
 
     #[test]
@@ -268,5 +357,20 @@ mod tests {
             inspection.shared_directory.as_deref(),
             Some("/home/dev/Mendix")
         );
+    }
+
+    #[test]
+    fn accepts_only_explicit_loopback_transport_bindings() {
+        assert!(is_loopback_host("127.0.0.1"));
+        assert!(is_loopback_host("::1"));
+        assert!(is_loopback_host("localhost"));
+        assert!(!is_loopback_host("0.0.0.0"));
+        assert!(!is_loopback_host("192.168.1.50"));
+
+        let inspection = serde_json::from_str::<Vec<RuntimeContainerInspection>>(
+            r#"[{"State":{"Status":"running"},"Mounts":[],"NetworkSettings":{"Ports":{"3389/tcp":[{"HostIp":"127.0.0.1","HostPort":"47300"}],"7148/tcp":[{"HostIp":"::1","HostPort":"47280"}]}}}]"#,
+        )
+        .expect("port bindings parse");
+        assert_eq!(inspection[0].network_settings.ports.len(), 2);
     }
 }

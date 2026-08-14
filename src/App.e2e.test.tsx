@@ -176,6 +176,7 @@ const localization: LocalizationBundle = {
 let installed: StudioVersion[];
 
 beforeEach(() => {
+  vi.clearAllMocks();
   installed = [removableStudio, portableStudio];
   mocks.getConfig.mockResolvedValue({ ...config });
   mocks.getLocalization.mockResolvedValue(localization);
@@ -270,7 +271,7 @@ describe("native Windows application E2E", () => {
   it("forces a fresh installer download only after explicit confirmation", async () => {
     await renderReadyApp();
 
-    fireEvent.click(screen.getByTitle("action-force-redownload"));
+    fireEvent.click(await screen.findByTitle("action-force-redownload"));
     const redownloadDialog = await screen.findByRole("dialog");
     expect(
       within(redownloadDialog).getByText(

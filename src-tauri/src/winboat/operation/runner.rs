@@ -1,7 +1,10 @@
 use super::reason::{localize_operation_state, localize_windows_reason};
 use super::report::{parse_install_report, WindowsOperationReport, WindowsOperationState};
+use crate::winboat::remote_app::RemoteAppProcess;
+use crate::winboat::security::{
+    authenticate_report, OperationSecurity, ReportSequenceTracker, MAX_REPORT_BYTES,
+};
 use std::path::Path;
-use std::process::Child;
 use std::time::Duration;
 
 const REMOTE_APP_START_GRACE_SECONDS: u64 = 20;
@@ -14,7 +17,8 @@ pub(super) struct WindowsOperationWaitError {
 
 pub(super) async fn wait_for_windows_operation<F>(
     report_path: &Path,
-    remote_app: &mut Child,
+    security: &OperationSecurity,
+    remote_app: &mut RemoteAppProcess,
     timeout_seconds: u64,
     operation: &str,
     on_report: &mut F,
@@ -30,32 +34,62 @@ where
     let mut last_report_timestamp = None;
     let mut last_report_changed_at = None;
     let mut last_report_had_percentage = false;
+    let mut report_sequence = ReportSequenceTracker::default();
 
     loop {
-        if let Ok(content) = tokio::fs::read_to_string(report_path).await {
-            if let Ok(report) = parse_install_report(&content) {
-                last_report_state = Some(report.state);
-                last_report_had_percentage = report.percentage.is_some();
-                if last_report_timestamp != report.timestamp {
-                    last_report_timestamp = report.timestamp.clone();
-                    last_report_changed_at = Some(tokio::time::Instant::now());
+        if remote_app.certificate_failed() {
+            return Err(WindowsOperationWaitError {
+                message: crate::tr!("error-freerdp-certificate-mismatch"),
+                retryable: false,
+            });
+        }
+        match tokio::fs::symlink_metadata(report_path).await {
+            Ok(metadata) => {
+                if !is_bounded_regular_report(&metadata) {
+                    return Err(report_authentication_error(
+                        operation,
+                        "the report path is not a bounded regular file",
+                    ));
                 }
-                let progress_signature = (
-                    report.state,
-                    report.percentage.map(|value| (value * 10.0).round() as i32),
-                    report.estimated,
-                );
-                if last_progress_signature.as_ref() != Some(&progress_signature) {
-                    on_report(&report);
-                    last_progress_signature = Some(progress_signature);
-                }
-                match report.state {
-                    WindowsOperationState::Succeeded => return Ok(report),
-                    WindowsOperationState::Failed => {
-                        return Err(failed_operation(&report, operation));
+                let content = tokio::fs::read(report_path)
+                    .await
+                    .map_err(|error| report_authentication_error(operation, &error.to_string()))?;
+                let authenticated = authenticate_report(&content, security)
+                    .map_err(|error| report_authentication_error(operation, &error.to_string()))?;
+                let is_new = report_sequence
+                    .accept(&authenticated)
+                    .map_err(|error| report_authentication_error(operation, &error.to_string()))?;
+                if is_new {
+                    let report = parse_install_report(&authenticated.payload).map_err(|error| {
+                        report_authentication_error(operation, &error.to_string())
+                    })?;
+                    last_report_state = Some(report.state);
+                    last_report_had_percentage = report.percentage.is_some();
+                    if last_report_timestamp.as_ref() != Some(&report.timestamp) {
+                        last_report_timestamp = Some(report.timestamp.clone());
+                        last_report_changed_at = Some(tokio::time::Instant::now());
                     }
-                    _ => {}
+                    let progress_signature = (
+                        report.state,
+                        report.percentage.map(|value| (value * 10.0).round() as i32),
+                        report.estimated,
+                    );
+                    if last_progress_signature.as_ref() != Some(&progress_signature) {
+                        on_report(&report);
+                        last_progress_signature = Some(progress_signature);
+                    }
+                    match report.state {
+                        WindowsOperationState::Succeeded => return Ok(report),
+                        WindowsOperationState::Failed => {
+                            return Err(failed_operation(&report, operation));
+                        }
+                        _ => {}
+                    }
                 }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(report_authentication_error(operation, &error.to_string()));
             }
         }
 
@@ -125,6 +159,21 @@ where
     }
 }
 
+fn is_bounded_regular_report(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_file() && metadata.len() <= MAX_REPORT_BYTES
+}
+
+fn report_authentication_error(operation: &str, reason: &str) -> WindowsOperationWaitError {
+    WindowsOperationWaitError {
+        message: crate::tr!(
+            "error-operation-report-authentication",
+            operation = operation,
+            reason = reason
+        ),
+        retryable: false,
+    }
+}
+
 fn failed_operation(report: &WindowsOperationReport, operation: &str) -> WindowsOperationWaitError {
     let raw_reason = report
         .error
@@ -154,5 +203,31 @@ fn failed_operation(report: &WindowsOperationReport, operation: &str) -> Windows
     WindowsOperationWaitError {
         message,
         retryable: false,
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::is_bounded_regular_report;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn refuses_symlinked_and_oversized_operation_reports() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let target = directory.path().join("target.json");
+        let link = directory.path().join("report.json");
+        std::fs::write(&target, b"{}").expect("write target");
+        symlink(&target, &link).expect("create report symlink");
+        assert!(!is_bounded_regular_report(
+            &std::fs::symlink_metadata(&link).expect("read symlink metadata")
+        ));
+
+        let oversized = directory.path().join("oversized.json");
+        let file = std::fs::File::create(&oversized).expect("create oversized report");
+        file.set_len(super::MAX_REPORT_BYTES + 1)
+            .expect("extend report");
+        assert!(!is_bounded_regular_report(
+            &std::fs::symlink_metadata(&oversized).expect("read oversized metadata")
+        ));
     }
 }

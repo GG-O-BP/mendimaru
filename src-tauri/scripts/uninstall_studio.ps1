@@ -5,6 +5,8 @@ $version = '__VERSION__'
 $resultPath = '__RESULT_PATH__'
 $process = $null
 
+__SECURITY_PREAMBLE__
+
 function Write-UninstallResult {
     param(
         [string]$State,
@@ -21,9 +23,7 @@ function Write-UninstallResult {
         error = $ErrorMessage
         timestamp = (Get-Date).ToString('o')
     }
-    $temporaryPath = "$resultPath.tmp"
-    $payload | ConvertTo-Json -Compress | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
-    Move-Item -LiteralPath $temporaryPath -Destination $resultPath -Force
+    Write-MendimaruReport $payload
 }
 
 function Find-StudioPro {
@@ -103,6 +103,7 @@ try {
 
     $studioPro = Find-StudioPro
     if ($null -ne $studioPro) {
+        $null = Assert-MendimaruTrustedExecutable -Path $studioPro -Root $installRoot
         Close-RunningStudioPro $studioPro
     }
 
@@ -111,28 +112,17 @@ try {
         Sort-Object Name -Descending |
         Select-Object -First 1
     if ($null -eq $folder) {
-        # Recover from an interrupted uninstall that removed its metadata but
-        # could not delete a running Studio Pro executable. Find-StudioPro only
-        # returns a matching child of the configured Mendix install root.
-        Write-UninstallResult 'running' 'Removing files left by a partial uninstall.' $null $null
-        if ($null -ne $studioPro) {
-            $versionFolder = Split-Path -Parent (Split-Path -Parent $studioPro)
-            Remove-Item -LiteralPath $versionFolder -Recurse -Force
-        }
-        $studioPro = Find-StudioPro
-        if ($null -ne $studioPro) {
-            throw "MENDIMARU_PARTIAL_CLEANUP_FAILED:$studioPro"
-        }
-        Write-UninstallResult 'succeeded' 'Studio Pro uninstall completed.' 0 $null
-        exit 0
+        throw "MENDIMARU_UNINSTALL_METADATA_MISSING:$version"
     }
 
     $uninstaller = Join-Path $folder.FullName 'uninst\unins000.exe'
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
         throw "MENDIMARU_UNINSTALLER_NOT_FOUND:$uninstaller"
     }
+    $null = Assert-MendimaruTrustedExecutable -Path $uninstaller -Root $dataRoot
 
     Write-UninstallResult 'running' 'Studio Pro uninstaller is running.' $null $null
+    $null = Assert-MendimaruTrustedExecutable -Path $uninstaller -Root $dataRoot
     $process = Start-Process -FilePath $uninstaller -ArgumentList @('/SILENT') -Wait -PassThru
     $exitCode = [int]$process.ExitCode
     if (@(0, 1641, 3010) -notcontains $exitCode) {

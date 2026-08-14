@@ -2,11 +2,12 @@ mod reason;
 mod report;
 mod runner;
 
-use super::remote_app::spawn_powershell_file;
+use super::container::ensure_private_operation_transport;
+use super::remote_app::{spawn_powershell_file, RemoteAppProcess};
+use super::security::OperationSecurity;
 use crate::models::AppConfig;
 use runner::wait_for_windows_operation;
 use std::path::Path;
-use std::process::Child;
 use std::time::Duration;
 
 #[cfg(test)]
@@ -20,6 +21,7 @@ const REMOTE_APP_RETRY_DELAY_SECONDS: u64 = 2;
 
 pub(super) struct WindowsOperationRequest<'a> {
     pub(super) script_path: &'a Path,
+    pub(super) script_sha256: &'a str,
     pub(super) label: &'a str,
     pub(super) report_path: &'a Path,
     pub(super) timeout_seconds: u64,
@@ -35,10 +37,16 @@ pub(super) async fn run_windows_operation<F>(
 where
     F: FnMut(&WindowsOperationReport) + Send,
 {
+    ensure_private_operation_transport(config)?;
     for attempt in 0..REMOTE_APP_START_ATTEMPTS {
-        let mut remote_app = spawn_powershell_file(config, request.script_path, request.label)?;
+        remove_stale_report(request.report_path).await?;
+        let security = OperationSecurity::generate(request.script_sha256)
+            .map_err(|error| crate::tr!("error-operation-security-create", error = error))?;
+        let mut remote_app =
+            spawn_powershell_file(config, request.script_path, request.label, &security)?;
         match wait_for_windows_operation(
             request.report_path,
+            &security,
             &mut remote_app,
             request.timeout_seconds,
             request.operation,
@@ -65,7 +73,22 @@ where
     unreachable!("the RemoteApp attempt loop always returns")
 }
 
-fn stop_remote_app(remote_app: &mut Child) {
+async fn remove_stale_report(report_path: &Path) -> Result<(), String> {
+    let mut temporary = report_path.as_os_str().to_os_string();
+    temporary.push(".tmp");
+    for path in [report_path.to_path_buf(), temporary.into()] {
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(crate::tr!("error-operation-report-remove", error = error));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn stop_remote_app(remote_app: &mut RemoteAppProcess) {
     match remote_app.try_wait() {
         Ok(Some(_)) => {}
         Ok(None) | Err(_) => {
