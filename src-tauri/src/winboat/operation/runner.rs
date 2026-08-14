@@ -13,6 +13,8 @@ const INSTALL_REPORT_STALE_SECONDS: u64 = 30;
 pub(super) struct WindowsOperationWaitError {
     pub(super) message: String,
     pub(super) retryable: bool,
+    pub(super) user_retryable: bool,
+    pub(super) exit_code: Option<i32>,
 }
 
 pub(super) async fn wait_for_windows_operation<F>(
@@ -41,6 +43,8 @@ where
             return Err(WindowsOperationWaitError {
                 message: crate::tr!("error-freerdp-certificate-mismatch"),
                 retryable: false,
+                user_retryable: false,
+                exit_code: None,
             });
         }
         match tokio::fs::symlink_metadata(report_path).await {
@@ -107,6 +111,8 @@ where
                             error = error
                         ),
                         retryable: false,
+                        user_retryable: false,
+                        exit_code: None,
                     });
                 }
             }
@@ -120,6 +126,8 @@ where
                     minutes = crate::i18n::format_number(timeout_seconds / 60)
                 ),
                 retryable: false,
+                user_retryable: false,
+                exit_code: None,
             });
         }
 
@@ -142,6 +150,8 @@ where
                             status = status
                         ),
                         retryable: false,
+                        user_retryable: false,
+                        exit_code: None,
                     }),
                     None => Err(WindowsOperationWaitError {
                         message: crate::tr!(
@@ -150,6 +160,8 @@ where
                             status = status
                         ),
                         retryable: true,
+                        user_retryable: true,
+                        exit_code: None,
                     }),
                 };
             }
@@ -171,6 +183,8 @@ fn report_authentication_error(operation: &str, reason: &str) -> WindowsOperatio
             reason = reason
         ),
         retryable: false,
+        user_retryable: false,
+        exit_code: None,
     }
 }
 
@@ -203,12 +217,15 @@ fn failed_operation(report: &WindowsOperationReport, operation: &str) -> Windows
     WindowsOperationWaitError {
         message,
         retryable: false,
+        user_retryable: true,
+        exit_code: report.exit_code,
     }
 }
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::is_bounded_regular_report;
+    use super::{failed_operation, is_bounded_regular_report};
+    use crate::winboat::operation::{WindowsOperationReport, WindowsOperationState};
     use std::os::unix::fs::symlink;
 
     #[test]
@@ -229,5 +246,24 @@ mod tests {
         assert!(!is_bounded_regular_report(
             &std::fs::symlink_metadata(&oversized).expect("read oversized metadata")
         ));
+    }
+
+    #[test]
+    fn preserves_an_authenticated_windows_exit_code_as_structured_failure_data() {
+        let report = WindowsOperationReport {
+            state: WindowsOperationState::Failed,
+            message: "installer failed".into(),
+            percentage: Some(75.0),
+            estimated: false,
+            timestamp: "2026-08-15T00:00:00Z".into(),
+            exit_code: Some(1603),
+            executable_path: None,
+            error: Some("InstallerExitCode".into()),
+        };
+
+        let error = failed_operation(&report, "installing Studio Pro");
+        assert_eq!(error.exit_code, Some(1603));
+        assert!(!error.retryable);
+        assert!(error.user_retryable);
     }
 }

@@ -24,7 +24,13 @@ pub(super) struct DownloadProgressUpdate<'a> {
     pub(super) message: String,
 }
 
-pub(super) fn emit_progress(app: &AppHandle, update: DownloadProgressUpdate<'_>) {
+pub(super) fn emit_progress<F>(
+    app: &AppHandle,
+    update: DownloadProgressUpdate<'_>,
+    on_progress: &mut F,
+) where
+    F: FnMut(&DownloadProgress),
+{
     let DownloadProgressUpdate {
         version,
         state,
@@ -34,25 +40,27 @@ pub(super) fn emit_progress(app: &AppHandle, update: DownloadProgressUpdate<'_>)
         estimated,
         message,
     } = update;
-    let _ = app.emit(
-        DOWNLOAD_EVENT,
-        DownloadProgress {
-            version: version.to_string(),
-            state,
-            downloaded_bytes,
-            total_bytes,
-            percentage,
-            estimated,
-            message,
-        },
-    );
+    let progress = DownloadProgress {
+        version: version.to_string(),
+        state,
+        downloaded_bytes,
+        total_bytes,
+        percentage,
+        estimated,
+        message,
+    };
+    on_progress(&progress);
+    let _ = app.emit(DOWNLOAD_EVENT, progress);
 }
 
-pub(super) fn emit_install_progress(
+pub(super) fn emit_install_progress<F>(
     app: &AppHandle,
     version: &str,
     progress: StudioInstallProgress,
-) {
+    on_progress: &mut F,
+) where
+    F: FnMut(&DownloadProgress),
+{
     let message = match progress.phase {
         StudioInstallPhase::Staging => crate::tr!("progress-staging"),
         StudioInstallPhase::Installing => crate::tr!("progress-installing"),
@@ -70,6 +78,7 @@ pub(super) fn emit_install_progress(
             estimated: progress.estimated,
             message,
         },
+        on_progress,
     );
 }
 

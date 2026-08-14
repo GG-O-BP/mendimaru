@@ -4,6 +4,7 @@ mod environment;
 mod errors;
 mod localization;
 mod marketplace;
+mod operation;
 mod projects;
 mod studio;
 
@@ -17,6 +18,9 @@ pub use environment::{
 pub use errors::{CommandError, CommandErrorCode};
 pub use localization::{LocaleOption, LocalizationBundle, TextDirection};
 pub use marketplace::{DownloadableVersion, StudioVersionCatalog};
+pub use operation::{
+    OperationError, OperationKind, OperationRecord, OperationStage, OperationState,
+};
 pub use projects::MendixProject;
 pub use studio::{StudioInstallPhase, StudioInstallProgress, StudioVersion, WinApp};
 
@@ -25,7 +29,7 @@ mod tests {
     use super::{
         CommandError, CommandErrorCode, ContainerRuntime, ContainerStatus, DownloadState,
         EnvironmentDiagnosticAction, EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
-        HostPlatform, TextDirection,
+        HostPlatform, OperationKind, OperationStage, OperationState, TextDirection,
     };
     use std::collections::BTreeSet;
 
@@ -140,6 +144,44 @@ mod tests {
                 DownloadState::Installed,
                 DownloadState::Failed,
                 DownloadState::Cancelled,
+            ],
+        );
+        assert_registry(
+            "operationKind",
+            [
+                OperationKind::Install,
+                OperationKind::Uninstall,
+                OperationKind::Launch,
+            ],
+        );
+        assert_registry(
+            "operationState",
+            [
+                OperationState::Running,
+                OperationState::Succeeded,
+                OperationState::Failed,
+                OperationState::Cancelled,
+                OperationState::Interrupted,
+            ],
+        );
+        assert_registry(
+            "operationStage",
+            [
+                OperationStage::Starting,
+                OperationStage::Preparing,
+                OperationStage::Checking,
+                OperationStage::Connecting,
+                OperationStage::Downloading,
+                OperationStage::Downloaded,
+                OperationStage::Ready,
+                OperationStage::Staging,
+                OperationStage::Installing,
+                OperationStage::Finalizing,
+                OperationStage::Verifying,
+                OperationStage::Launching,
+                OperationStage::Uninstalling,
+                OperationStage::Completed,
+                OperationStage::Interrupted,
             ],
         );
         assert_registry(

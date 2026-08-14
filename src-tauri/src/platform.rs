@@ -103,21 +103,27 @@ pub async fn installed_versions(config: &AppConfig) -> BackendResult<Vec<StudioV
 pub async fn launch_studio(
     config: &AppConfig,
     version: &str,
+    operation_id: &str,
     project_mpr_path: Option<&str>,
 ) -> BackendResult<()> {
     let selected = backend::active_backend(config, None)?;
-    backend::StudioBackend::start(selected.as_ref(), version, project_mpr_path).await
+    backend::StudioBackend::start(selected.as_ref(), version, operation_id, project_mpr_path).await
 }
 
-pub async fn uninstall_studio(config: &AppConfig, version: &str) -> BackendResult<()> {
+pub async fn uninstall_studio(
+    config: &AppConfig,
+    version: &str,
+    operation_id: &str,
+) -> BackendResult<()> {
     backend::active_backend(config, None)?
-        .uninstall(version)
+        .uninstall(version, operation_id)
         .await
 }
 
 pub async fn install_studio<F>(
     config: &AppConfig,
     version: &str,
+    operation_id: &str,
     installer_path: &Path,
     expected_sha256: &str,
     on_progress: F,
@@ -127,7 +133,13 @@ where
 {
     let mut on_progress = on_progress;
     backend::active_backend(config, None)?
-        .install(version, installer_path, expected_sha256, &mut on_progress)
+        .install(
+            version,
+            operation_id,
+            installer_path,
+            expected_sha256,
+            &mut on_progress,
+        )
         .await
 }
 
@@ -226,8 +238,12 @@ mod tests {
         let installed = tauri::async_runtime::block_on(super::installed_versions(&config))
             .expect("the adapter must detect installed versions");
         if installed.iter().any(|item| item.version == version) {
-            tauri::async_runtime::block_on(super::uninstall_studio(&config, &version))
-                .expect("the adapter must normalize a preinstalled E2E version");
+            tauri::async_runtime::block_on(super::uninstall_studio(
+                &config,
+                &version,
+                &format!("uninstall-{version}-preflight"),
+            ))
+            .expect("the adapter must normalize a preinstalled E2E version");
         }
 
         let installer_path = Path::new(&config.shared_directory)
@@ -253,6 +269,7 @@ mod tests {
         let executable = tauri::async_runtime::block_on(super::install_studio(
             &config,
             &version,
+            &format!("install-{version}-lifecycle"),
             &installer_path,
             &expected_sha256,
             |update| progress.push(update),
@@ -280,10 +297,19 @@ mod tests {
             item.version == version && item.executable_path.eq_ignore_ascii_case(&executable)
         }));
 
-        tauri::async_runtime::block_on(super::launch_studio(&config, &version, None))
-            .expect("the adapter must launch the exact Studio Pro version");
-        tauri::async_runtime::block_on(super::uninstall_studio(&config, &version))
-            .expect("the adapter must uninstall the exact Studio Pro version");
+        tauri::async_runtime::block_on(super::launch_studio(
+            &config,
+            &version,
+            &format!("launch-{version}-lifecycle"),
+            None,
+        ))
+        .expect("the adapter must launch the exact Studio Pro version");
+        tauri::async_runtime::block_on(super::uninstall_studio(
+            &config,
+            &version,
+            &format!("uninstall-{version}-lifecycle"),
+        ))
+        .expect("the adapter must uninstall the exact Studio Pro version");
         let installed = tauri::async_runtime::block_on(super::installed_versions(&config))
             .expect("the adapter must detect versions after uninstall");
         assert!(installed.iter().all(|item| item.version != version));

@@ -81,7 +81,9 @@ pub async fn download_and_launch(
     config: &AppConfig,
     manager: &DownloadManager,
     version: String,
+    operation_id: &str,
     force_redownload: bool,
+    mut on_progress: impl FnMut(&crate::models::DownloadProgress) + Send,
 ) -> Result<(), InstallError> {
     crate::platform::validate_version(&version)?;
     let _guard = manager.begin()?;
@@ -96,6 +98,7 @@ pub async fn download_and_launch(
             estimated: false,
             message: crate::tr!("progress-preparing"),
         },
+        &mut on_progress,
     );
     let download_url = marketplace::installer_url(&version).await?;
     emit_progress(
@@ -109,6 +112,7 @@ pub async fn download_and_launch(
             estimated: false,
             message: crate::tr!("progress-checking"),
         },
+        &mut on_progress,
     );
     let installer_directory = Path::new(&config.shared_directory).join(".mendimaru/installers");
     tokio::fs::create_dir_all(&installer_directory)
@@ -131,6 +135,7 @@ pub async fn download_and_launch(
                 estimated: false,
                 message: crate::tr!("progress-force-redownload"),
             },
+            &mut on_progress,
         );
         None
     } else {
@@ -149,6 +154,7 @@ pub async fn download_and_launch(
                         estimated: false,
                         message: crate::tr!("progress-cache-invalid", reason = error),
                     },
+                    &mut on_progress,
                 );
                 cache::discard(&installer_path)
                     .await
@@ -169,11 +175,20 @@ pub async fn download_and_launch(
                 estimated: false,
                 message: crate::tr!("progress-ready"),
             },
+            &mut on_progress,
         );
         sha256
     } else {
         manager.cancellable.store(true, Ordering::SeqCst);
-        let sha256 = download_file(app, manager, &version, &download_url, &installer_path).await?;
+        let sha256 = download_file(
+            app,
+            manager,
+            &version,
+            &download_url,
+            &installer_path,
+            &mut on_progress,
+        )
+        .await?;
         manager.cancellable.store(false, Ordering::SeqCst);
         sha256
     };
@@ -194,6 +209,7 @@ pub async fn download_and_launch(
             estimated: false,
             message: crate::tr!("progress-staging"),
         },
+        &mut on_progress,
     );
     #[cfg(target_os = "windows")]
     {
@@ -214,9 +230,10 @@ pub async fn download_and_launch(
     crate::platform::install_studio(
         config,
         &version,
+        operation_id,
         &installer_path,
         &installer_sha256,
-        |progress| emit_install_progress(app, &version, progress),
+        |progress| emit_install_progress(app, &version, progress, &mut on_progress),
     )
     .await?;
     emit_progress(
@@ -230,6 +247,7 @@ pub async fn download_and_launch(
             estimated: false,
             message: crate::tr!("progress-installed"),
         },
+        &mut on_progress,
     );
 
     Ok(())
@@ -239,13 +257,17 @@ pub fn cancel_download(manager: &DownloadManager) -> bool {
     manager.cancel()
 }
 
-async fn download_file(
+async fn download_file<F>(
     app: &AppHandle,
     manager: &DownloadManager,
     version: &str,
     url: &str,
     destination: &Path,
-) -> Result<String, InstallError> {
+    on_operation_progress: &mut F,
+) -> Result<String, InstallError>
+where
+    F: FnMut(&crate::models::DownloadProgress),
+{
     download_file_with_progress(
         manager,
         version,
@@ -263,6 +285,7 @@ async fn download_file(
                     estimated: false,
                     message,
                 },
+                on_operation_progress,
             );
         },
     )

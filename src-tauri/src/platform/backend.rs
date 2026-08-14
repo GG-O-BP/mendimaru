@@ -29,6 +29,7 @@ pub trait StudioBackend: BackendIdentity {
     fn install<'a>(
         &'a self,
         _version: &'a str,
+        _operation_id: &'a str,
         _installer_path: &'a Path,
         _expected_sha256: &'a str,
         _on_progress: ProgressCallback<'a>,
@@ -36,13 +37,14 @@ pub trait StudioBackend: BackendIdentity {
         unsupported(self.backend_id(), CapabilityId::StudioInstall)
     }
 
-    fn uninstall<'a>(&'a self, _version: &'a str) -> BackendFuture<'a, ()> {
+    fn uninstall<'a>(&'a self, _version: &'a str, _operation_id: &'a str) -> BackendFuture<'a, ()> {
         unsupported(self.backend_id(), CapabilityId::StudioUninstall)
     }
 
     fn start<'a>(
         &'a self,
         _version: &'a str,
+        _operation_id: &'a str,
         _project_mpr_path: Option<&'a str>,
     ) -> BackendFuture<'a, ()> {
         unsupported(self.backend_id(), CapabilityId::StudioStart)
@@ -319,6 +321,7 @@ impl StudioBackend for LinuxWinboatBackend<'_> {
     fn install<'a>(
         &'a self,
         version: &'a str,
+        operation_id: &'a str,
         installer_path: &'a Path,
         expected_sha256: &'a str,
         on_progress: ProgressCallback<'a>,
@@ -335,23 +338,24 @@ impl StudioBackend for LinuxWinboatBackend<'_> {
             crate::winboat::install_studio(
                 self.config,
                 version,
+                operation_id,
                 &windows_installer_path,
                 expected_sha256,
                 on_progress,
             )
             .await
             .map_err(|error| {
-                BackendError::operation(self.backend_id(), CapabilityId::StudioInstall, error)
+                winboat_operation_error(self.backend_id(), CapabilityId::StudioInstall, error)
             })
         })
     }
 
-    fn uninstall<'a>(&'a self, version: &'a str) -> BackendFuture<'a, ()> {
+    fn uninstall<'a>(&'a self, version: &'a str, operation_id: &'a str) -> BackendFuture<'a, ()> {
         Box::pin(async move {
-            crate::winboat::launch_uninstaller(self.config, version)
+            crate::winboat::launch_uninstaller(self.config, version, operation_id)
                 .await
                 .map_err(|error| {
-                    BackendError::operation(self.backend_id(), CapabilityId::StudioUninstall, error)
+                    winboat_operation_error(self.backend_id(), CapabilityId::StudioUninstall, error)
                 })
         })
     }
@@ -359,13 +363,14 @@ impl StudioBackend for LinuxWinboatBackend<'_> {
     fn start<'a>(
         &'a self,
         version: &'a str,
+        operation_id: &'a str,
         project_mpr_path: Option<&'a str>,
     ) -> BackendFuture<'a, ()> {
         Box::pin(async move {
-            crate::winboat::launch_studio(self.config, version, project_mpr_path)
+            crate::winboat::launch_studio(self.config, version, operation_id, project_mpr_path)
                 .await
                 .map_err(|error| {
-                    BackendError::operation(self.backend_id(), CapabilityId::StudioStart, error)
+                    winboat_operation_error(self.backend_id(), CapabilityId::StudioStart, error)
                 })
         })
     }
@@ -379,6 +384,20 @@ impl UiAutomationBackend for LinuxWinboatBackend<'_> {}
 impl BrowserBackend for LinuxWinboatBackend<'_> {}
 #[cfg(target_os = "linux")]
 impl PlatformBackend for LinuxWinboatBackend<'_> {}
+
+#[cfg(target_os = "linux")]
+fn winboat_operation_error(
+    backend: BackendId,
+    capability: CapabilityId,
+    error: crate::winboat::WindowsOperationFailure,
+) -> BackendError {
+    let mut backend_error = BackendError::operation(backend, capability, error.message);
+    backend_error.retryable = error.retryable;
+    backend_error.diagnostic_ref = error
+        .exit_code
+        .map(|code| format!("windows-exit-code:{code}"));
+    backend_error
+}
 
 #[cfg(target_os = "windows")]
 #[derive(Debug)]
@@ -406,6 +425,7 @@ impl StudioBackend for WindowsNativeBackend<'_> {
     fn install<'a>(
         &'a self,
         version: &'a str,
+        _operation_id: &'a str,
         installer_path: &'a Path,
         _expected_sha256: &'a str,
         on_progress: ProgressCallback<'a>,
@@ -414,17 +434,21 @@ impl StudioBackend for WindowsNativeBackend<'_> {
             super::windows_native::install_studio(self.config, version, installer_path, on_progress)
                 .await
                 .map_err(|error| {
-                    BackendError::operation(self.backend_id(), CapabilityId::StudioInstall, error)
+                    retryable_operation_error(self.backend_id(), CapabilityId::StudioInstall, error)
                 })
         })
     }
 
-    fn uninstall<'a>(&'a self, version: &'a str) -> BackendFuture<'a, ()> {
+    fn uninstall<'a>(&'a self, version: &'a str, _operation_id: &'a str) -> BackendFuture<'a, ()> {
         Box::pin(async move {
             super::windows_native::uninstall_studio(self.config, version)
                 .await
                 .map_err(|error| {
-                    BackendError::operation(self.backend_id(), CapabilityId::StudioUninstall, error)
+                    retryable_operation_error(
+                        self.backend_id(),
+                        CapabilityId::StudioUninstall,
+                        error,
+                    )
                 })
         })
     }
@@ -432,12 +456,13 @@ impl StudioBackend for WindowsNativeBackend<'_> {
     fn start<'a>(
         &'a self,
         version: &'a str,
+        _operation_id: &'a str,
         project_mpr_path: Option<&'a str>,
     ) -> BackendFuture<'a, ()> {
         Box::pin(async move {
             super::windows_native::launch_studio(self.config, version, project_mpr_path).map_err(
                 |error| {
-                    BackendError::operation(self.backend_id(), CapabilityId::StudioStart, error)
+                    retryable_operation_error(self.backend_id(), CapabilityId::StudioStart, error)
                 },
             )
         })
@@ -452,6 +477,17 @@ impl UiAutomationBackend for WindowsNativeBackend<'_> {}
 impl BrowserBackend for WindowsNativeBackend<'_> {}
 #[cfg(target_os = "windows")]
 impl PlatformBackend for WindowsNativeBackend<'_> {}
+
+#[cfg(target_os = "windows")]
+fn retryable_operation_error(
+    backend: BackendId,
+    capability: CapabilityId,
+    message: String,
+) -> BackendError {
+    let mut error = BackendError::operation(backend, capability, message);
+    error.retryable = true;
+    error
+}
 
 #[cfg(target_os = "macos")]
 #[derive(Debug)]

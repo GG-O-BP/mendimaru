@@ -20,6 +20,12 @@ Linux writes operation scripts into its application-owned directory under the sh
 
 Each attempt has a CSPRNG request ID, nonce, and 256-bit HMAC key. The key is sent inside the TLS-protected RDP operation and is never written to the shared workspace. Result files use an atomic, versioned envelope containing the request identity, monotonic sequence, base64 payload, and HMAC-SHA256. The host rejects malformed, oversized, stale, replayed, symlinked, or unauthenticated results.
 
+## Persistent operation history
+
+The operation center persists only an allowlisted host-side summary in the application's host-only configuration directory, outside the untrusted shared workspace: random operation ID, operation kind, target version, protected-project marker, state, stage, bounded progress, timestamps, stable error code, optional Windows exit code, and retryability. It does not store project paths, command payloads, download URLs, credentials, HMAC keys, or raw backend errors. The history file is bounded, schema-checked, rejected if it or an application-owned ancestor is a symbolic link, written with private permissions on Unix, and replaced through a synced temporary file.
+
+An HMAC report cannot be re-authenticated after its process-local key is gone. On restart, Mendimaru therefore changes stale running host records to interrupted. A one-time migration may correlate an older regular, bounded Windows report by its constrained filename, but it never reads that report payload or treats it as evidence of success. Clearing history removes terminal summary records only and deliberately preserves operation reports, scripts, installers, and active records.
+
 ## RDP and network exposure
 
 FreeRDP receives the Windows password through standard input rather than argv. Mendimaru uses an application-scoped FreeRDP TOFU certificate store under the user's configuration directory. The first connection pins the WinBoat RDP certificate; a later certificate mismatch fails before a privileged operation starts. Protect the first connection and the Linux user configuration directory. If the VM is intentionally rebuilt and its certificate changes, inspect the cause before removing the Mendimaru-specific pin.

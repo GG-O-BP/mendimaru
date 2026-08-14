@@ -6,6 +6,7 @@
 @import "./features/studio/studio.css";
 @import "./features/studio/installation-progress.css";
 @import "./features/projects/projects.css";
+@import "./features/operations/operations.css";
 @import "./features/settings/settings.css";
 @import "./styles/feedback.css";
 @import "./styles/responsive.css";
