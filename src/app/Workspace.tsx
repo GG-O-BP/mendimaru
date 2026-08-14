@@ -122,7 +122,8 @@ export function Workspace({
   const winBoatControl = {
     ...environmentControl,
     onAction:
-      environmentControl.kind === "settings"
+      environmentControl.kind === "settings" ||
+      environmentControl.kind === "native"
         ? () => setActiveView("settings")
         : environmentControl.onAction,
   };

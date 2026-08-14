@@ -33,7 +33,7 @@ const commands = {
   uninstallStudioPro: "uninstall_studio_pro",
   installStudioPro: "install_studio_pro",
   cancelStudioDownload: "cancel_studio_download",
-  openLinuxFolder: "open_linux_folder",
+  openFolder: "open_folder",
 } as const;
 
 export const tauriApi = {
@@ -77,8 +77,7 @@ export const tauriApi = {
   installStudioPro: (version: string) =>
     invoke<void>(commands.installStudioPro, { version }),
   cancelStudioDownload: () => invoke<boolean>(commands.cancelStudioDownload),
-  openLinuxFolder: (path: string) =>
-    invoke<void>(commands.openLinuxFolder, { path }),
+  openFolder: (path: string) => invoke<void>(commands.openFolder, { path }),
   onStudioDownloadProgress: (
     handler: (progress: DownloadProgress) => void,
   ): Promise<UnlistenFn> =>

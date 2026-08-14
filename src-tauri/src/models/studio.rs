@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct WinApp {
@@ -23,4 +24,31 @@ pub struct StudioVersion {
     pub executable_path: String,
     pub install_root: String,
     pub source: String,
+    pub removable: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StudioInstallProgress {
+    pub phase: StudioInstallPhase,
+    pub percentage: Option<f64>,
+    pub estimated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StudioInstallPhase {
+    Staging,
+    Installing,
+    Finalizing,
+    Verifying,
+}
+
+impl StudioInstallPhase {
+    pub const fn download_state(self) -> crate::models::DownloadState {
+        match self {
+            Self::Staging => crate::models::DownloadState::Staging,
+            Self::Installing => crate::models::DownloadState::Installing,
+            Self::Finalizing => crate::models::DownloadState::Finalizing,
+            Self::Verifying => crate::models::DownloadState::Verifying,
+        }
+    }
 }

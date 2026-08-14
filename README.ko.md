@@ -10,15 +10,30 @@
 
 <h1 align="center">Mendimaru</h1>
 
-WinBoat를 통해 Linux에서 Mendix Studio Pro를 설치하고, 버전을 선택해 실행하며, 공유 워크스페이스의 프로젝트를 여는 Tauri GUI 앱입니다.
+Mendix Studio Pro 버전을 탐지·설치·실행·제거하는 Tauri GUI 앱입니다. Windows에서는 네이티브로 실행하고 Linux에서는 WinBoat를 사용합니다.
 
 ## 화면 구성
 
-- **Studio Pro**: WinBoat Windows에 설치된 버전 실행·제거, Mendix Marketplace의 실제 설치 가능 버전 조회·설치
-- **프로젝트**: 설정한 Linux 공유 디렉터리 안의 `.mpr` 프로젝트 탐지·실행
-- **설정**: WinBoat 실행 파일, Compose 파일, Docker/Podman, Linux 공유 디렉터리 지정
+- **Studio Pro**: 현재 Windows 환경의 Studio Pro 버전 탐지·실행·설치·안전한 제거
+- **프로젝트**: 설정한 워크스페이스 안의 `.mpr` 프로젝트 탐지·실행
+- **설정**: Windows 네이티브 워크스페이스와 포터블 Studio 경로 또는 Linux WinBoat 환경 지정
 
 대시보드, VM 자원 정보, 고급 다운로드 URL, 수동 빌드 번호, 강제 재다운로드 옵션은 제공하지 않습니다.
+
+## Windows 설치
+
+GitHub Release 자산에서 MSI 또는 NSIS 설치 파일을 받습니다. Windows 빌드는 WinBoat, Docker, Guest API, RDP, FreeRDP와 경로 변환을 사용하지 않습니다.
+
+네이티브 Windows 모드에서는 다음을 수행합니다.
+
+- 32/64비트 제거 레지스트리, Mendix 표준 폴더, Version Selector 정보와 설정한 사용자/포터블 경로에서 Studio Pro 탐지
+- `StudioPro.exe`를 직접 실행하고 선택한 `.mpr` 경로를 프로세스 인자로 전달
+- 프로젝트와 설치 파일에 Windows 네이티브 경로만 사용
+- UAC 요청 전에 다운로드 파일의 SHA-256 안정성과 Mendix/Siemens의 신뢰된 Authenticode 서명 검증
+- 관리자 권한 설치 프로그램 또는 공식 등록 제거 프로그램의 실제 종료 코드와 설치 결과 확인
+- 해당 `StudioPro.exe`가 실행 중이면 제거 거부, 공식 제거 정보가 없는 포터블 버전의 제거 버튼 비활성화
+
+기존 설정은 자동 마이그레이션되며 새 `windowsStudioPaths` 목록은 기본적으로 비어 있으므로 Linux 설정도 그대로 유효합니다.
 
 ## Arch Linux 설치
 
@@ -75,26 +90,27 @@ Mendimaru는 마법사가 완료될 때까지 상태를 확인한 뒤 다음 작
 - Studio Pro 10 이하는 버전 상세 페이지에서 `Build <number>`를 자동 추출해 `Mendix-<version>.<build>-Setup.exe`를 사용합니다.
 - 사용자는 목록에서 버전을 고르기만 하면 되며 URL이나 빌드 번호를 입력하지 않습니다.
 
-Chrome 탐지 순서는 `MENDIMARU_CHROME_PATH`, `google-chrome-stable`, `google-chrome`, `chromium`, `chromium-browser`입니다.
+Windows에서는 시스템 및 사용자 표준 경로의 Microsoft Edge와 Chrome을 탐지합니다. Linux에서는 `MENDIMARU_CHROME_PATH`, `google-chrome-stable`, `google-chrome`, `chromium`, `chromium-browser` 순서로 찾습니다.
 
 ## Windows 경로
 
-참조 앱과 동일한 경로를 사용합니다.
+레지스트리와 Version Selector 정보 외에 다음 기본 위치도 탐지합니다.
 
 | 용도 | Windows 경로 |
 | --- | --- |
 | Studio Pro 설치 루트 | `C:\Program Files\Mendix` |
 | Studio Pro 실행 파일 | `C:\Program Files\Mendix\<version>\modeler\studiopro.exe` |
 | Studio Pro 제거 정보 | `C:\ProgramData\Mendix` |
-| 기본 공유 경로 | `\\host.lan\Data` |
+| 네이티브 기본 워크스페이스 | 존재하면 `%USERPROFILE%\Mendix`, 아니면 `%USERPROFILE%` |
+| Linux WinBoat 공유 경로 | `\\host.lan\Data` |
 
-설치 파일은 Linux 공유 디렉터리의 `.mendimaru/installers`에 저장합니다. Windows에서는 공유 경로의 보안 경고가 숨은 상태로 설치를 막지 않도록 파일을 로컬 임시 디렉터리로 복사하고 차단을 해제한 뒤 실행합니다. WinBoat RemoteApp에는 따옴표 영향을 받지 않는 UTF-16LE 인코딩 PowerShell 명령으로 전달하며, 설치 프로세스 종료 코드가 성공이고 해당 버전의 `StudioPro.exe`가 생성된 뒤에만 완료로 처리합니다.
+설치 파일은 설정한 워크스페이스의 `.mendimaru/installers`에 저장합니다. 네이티브 모드에서는 서명을 검증한 뒤 명령 셸 없이 Windows 권한 상승 API로 실행합니다. Linux 모드에서는 따옴표 영향을 받지 않는 UTF-16LE 인코딩 PowerShell 명령을 WinBoat RemoteApp에 전달합니다. 설치 프로세스가 성공하고 해당 버전의 `StudioPro.exe`가 탐지된 뒤에만 완료로 처리합니다.
 
 제거할 때도 Windows 제거 프로세스가 끝나고 해당 버전의 `StudioPro.exe`가 사라진 것을 확인한 뒤 설치된 버전 목록을 자동으로 갱신합니다.
 
-Studio Pro 실행 버튼은 Windows 프로세스의 실제 창이 생성되고 FreeRDP가 표시할 준비를 마칠 때까지 비활성화됩니다. 실행 준비 중에는 다른 버전과 프로젝트의 실행 버튼도 잠겨 중복 실행을 방지합니다. 실행 스크립트는 공유 폴더에 저장하고 짧은 호출 명령만 RemoteApp으로 전달해 FreeRDP RAIL의 명령 길이 제한을 넘지 않습니다. Windows Script Host가 PowerShell을 숨김 모드로 실행하며, 설치·제거는 이미 관리자 권한인 WinBoat 세션의 토큰을 상속하므로 PowerShell 콘솔이나 별도의 UAC 창을 표시하지 않습니다.
+Linux WinBoat 모드에서는 Studio Pro 실행 버튼이 Windows 프로세스의 실제 창이 생성되고 FreeRDP가 표시할 준비를 마칠 때까지 비활성화됩니다. 실행 준비 중에는 다른 버전과 프로젝트의 실행 버튼도 잠겨 중복 실행을 방지합니다. 실행 스크립트는 공유 폴더에 저장하고 짧은 호출 명령만 RemoteApp으로 전달해 FreeRDP RAIL의 명령 길이 제한을 넘지 않습니다. Windows Script Host가 PowerShell을 숨김 모드로 실행하며, 설치·제거는 이미 관리자 권한인 WinBoat 세션의 토큰을 상속하므로 PowerShell 콘솔이나 별도의 UAC 창을 표시하지 않습니다.
 
-## 공유 워크스페이스
+## Linux 공유 워크스페이스
 
 Linux 공유 디렉터리는 WinBoat Compose의 `<host path>:/shared` 마운트와 연결됩니다. 프로젝트 목록은 이 디렉터리만 탐색하며 `.git`, `node_modules`, `deployment`, `.mendix-cache`, `.mendimaru` 같은 생성·캐시 디렉터리는 제외합니다.
 
@@ -102,7 +118,7 @@ Linux 공유 디렉터리는 WinBoat Compose의 `<host path>:/shared` 마운트�
 
 ## 개발
 
-필수 환경은 Node.js, Rust, Tauri의 Linux 시스템 의존성, WinBoat, Docker 또는 Podman, FreeRDP 3, Google Chrome 또는 Chromium입니다.
+필수 환경은 Node.js 22.22.2 이상, Rust와 호스트 플랫폼용 Tauri 시스템 의존성입니다. Linux 통합에는 WinBoat, Docker 또는 Podman, FreeRDP 3, Chrome/Chromium이 추가로 필요하며 Windows 목록 조회에는 Edge 또는 Chrome을 사용합니다.
 
 ```bash
 npm install
@@ -116,6 +132,8 @@ npm run check
 npm run tauri build
 ```
 
+`npm run test:e2e`는 OS 경계를 모킹한 Windows 네이티브 앱 전체 흐름을 실행합니다. 전체 Rust 테스트는 레지스트리 파싱, 경로 격리, 파일 무결성, Windows 인자 인코딩, UAC/종료 코드 실패와 설치부터 제거까지의 fixture 수명주기를 검증합니다. CI는 Windows와 Linux 모두에서 테스트하고 Windows MSI/NSIS 번들을 스모크 빌드합니다.
+
 Rust와 TypeScript가 공유하는 직렬화 enum 값은 `src/shared/contracts/enumValues.json`에서 관리합니다. TypeScript는 여기서 유니언 타입을 만들고, Rust 테스트는 계약 불일치를 차단합니다.
 
 실제 Marketplace 연동 테스트는 기본 테스트에서 제외되며 다음처럼 실행할 수 있습니다.
@@ -127,7 +145,9 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 ## 보안
 
-Windows 사용자명과 암호는 앱 설정에 저장하지 않습니다. RemoteApp 실행 시 실행 중인 WinBoat 컨테이너에서 자격 증명을 읽어 FreeRDP 3의 표준 입력으로 전달하므로 프로세스 인자나 앱 로그에 암호가 노출되지 않습니다.
+Windows 네이티브 명령은 경로를 명령 셸에 삽입하지 않습니다. 설치 파일, 설치된 Studio 실행 파일과 등록된 Mendix 제거 프로그램은 Mendix 또는 Siemens가 발행한 유효한 신뢰 Authenticode 서명이 있어야 하며 검증 전후 해시로 파일 교체도 탐지합니다. Windows Installer 제거는 제품 코드에 대한 `/x` 작업과 알려진 비대화형 플래그로 제한하고, 등록 제거 프로그램은 선택한 설치본에 속하면서 허용 목록의 플래그만 사용해야 합니다. UAC 취소나 실패 종료 코드는 성공으로 처리하지 않습니다.
+
+Linux에서는 Windows 사용자명과 암호를 앱 설정에 저장하지 않습니다. RemoteApp 실행 시 실행 중인 WinBoat 컨테이너에서 자격 증명을 읽어 FreeRDP 3의 표준 입력으로 전달합니다.
 
 ## 라이선스
 

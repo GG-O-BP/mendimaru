@@ -1,5 +1,4 @@
-use crate::models::{DownloadProgress, DownloadState};
-use crate::winboat::{StudioInstallPhase, StudioInstallProgress};
+use crate::models::{DownloadProgress, DownloadState, StudioInstallPhase, StudioInstallProgress};
 use tauri::{AppHandle, Emitter};
 
 pub(super) const DOWNLOAD_EVENT: &str = "studio-download-progress";
@@ -105,7 +104,7 @@ mod tests {
         DOWNLOAD_PROGRESS_START, FINALIZING_PROGRESS, INSTALL_PROGRESS_END, STAGING_PROGRESS_END,
         STAGING_PROGRESS_START, VERIFY_PROGRESS_END,
     };
-    use crate::winboat::{StudioInstallPhase, StudioInstallProgress};
+    use crate::models::{StudioInstallPhase, StudioInstallProgress};
 
     #[test]
     fn download_percentage_is_mapped_to_the_overall_install_range() {

@@ -2,8 +2,6 @@ use crate::marketplace;
 mod progress;
 
 use crate::models::{AppConfig, DownloadState};
-use crate::projects::linux_path_to_windows_share;
-use crate::winboat::{install_studio, validate_version};
 use futures_util::StreamExt;
 use progress::{
     emit_install_progress, emit_progress, overall_download_percentage, DownloadProgressUpdate,
@@ -73,7 +71,7 @@ pub async fn download_and_launch(
     manager: &DownloadManager,
     version: String,
 ) -> Result<(), InstallError> {
-    validate_version(&version)?;
+    crate::platform::validate_version(&version)?;
     let _guard = manager.begin()?;
     emit_progress(
         app,
@@ -136,11 +134,6 @@ pub async fn download_and_launch(
             "error-download-cancelled"
         )));
     }
-    let windows_installer_path = linux_path_to_windows_share(
-        Path::new(&config.shared_directory),
-        &installer_path,
-        &config.windows_shared_directory,
-    )?;
     emit_progress(
         app,
         DownloadProgressUpdate {
@@ -153,7 +146,23 @@ pub async fn download_and_launch(
             message: crate::tr!("progress-staging"),
         },
     );
-    install_studio(config, &version, &windows_installer_path, |progress| {
+    #[cfg(target_os = "windows")]
+    {
+        let verification_path = installer_path.clone();
+        let verification = tokio::task::spawn_blocking(move || {
+            crate::platform::verify_native_installer(&verification_path)
+        })
+        .await
+        .map_err(|error| crate::tr!("error-native-process-join", error = error))?;
+        if let Err(error) = verification {
+            // This directory is an application-owned cache. Only discard a
+            // payload that failed trust/integrity verification; UAC cancellation
+            // and installer failures retain the already verified download.
+            let _ = tokio::fs::remove_file(&installer_path).await;
+            return Err(error.into());
+        }
+    }
+    crate::platform::install_studio(config, &version, &installer_path, |progress| {
         emit_install_progress(app, &version, progress)
     })
     .await?;
@@ -200,7 +209,7 @@ async fn download_file(
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(60 * 60))
-        .user_agent("Mozilla/5.0 (X11; Linux x86_64) mendimaru/0.1")
+        .user_agent(download_user_agent())
         .build()
         .map_err(|error| crate::tr!("error-download-client-create", error = error))?;
     let response = client
@@ -261,9 +270,7 @@ async fn download_file(
         .await
         .map_err(|error| crate::tr!("error-installer-flush", error = error))?;
     drop(file);
-    tokio::fs::rename(&partial, destination)
-        .await
-        .map_err(|error| crate::tr!("error-installer-finalize", error = error))?;
+    finalize_download(&partial, destination).await?;
     emit_progress(
         app,
         DownloadProgressUpdate {
@@ -292,4 +299,73 @@ fn safe_version_filename(version: &str) -> String {
             character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
         })
         .collect()
+}
+
+async fn finalize_download(partial: &Path, destination: &Path) -> Result<(), InstallError> {
+    if tokio::fs::metadata(destination).await.is_ok() {
+        tokio::fs::remove_file(destination)
+            .await
+            .map_err(|error| crate::tr!("error-installer-finalize", error = error))?;
+    }
+    tokio::fs::rename(partial, destination)
+        .await
+        .map_err(|error| crate::tr!("error-installer-finalize", error = error))?;
+    Ok(())
+}
+
+fn download_user_agent() -> String {
+    let platform = if cfg!(target_os = "windows") {
+        match std::env::consts::ARCH {
+            "aarch64" => "Windows NT 10.0; ARM64",
+            _ => "Windows NT 10.0; Win64; x64",
+        }
+    } else {
+        "X11; Linux"
+    };
+    format!(
+        "Mozilla/5.0 ({platform}; {architecture}) mendimaru/{}",
+        env!("CARGO_PKG_VERSION"),
+        architecture = std::env::consts::ARCH,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{download_user_agent, finalize_download, safe_version_filename};
+    use std::fs;
+
+    #[test]
+    fn installer_cache_filename_rejects_path_characters() {
+        assert_eq!(safe_version_filename(r"11.12.2/..\\evil"), "11.12.2..evil");
+    }
+
+    #[test]
+    fn user_agent_matches_the_host_platform() {
+        let agent = download_user_agent();
+        assert!(agent.contains(std::env::consts::ARCH));
+        if cfg!(target_os = "windows") {
+            assert!(agent.contains("Windows NT 10.0"));
+        } else {
+            assert!(agent.contains("X11; Linux"));
+        }
+    }
+
+    #[tokio::test]
+    async fn completed_download_replaces_a_stale_cache_file_on_windows() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let destination = temporary.path().join("Mendix-11.12.2-Setup.exe");
+        let partial = temporary.path().join("Mendix-11.12.2-Setup.exe.download");
+        fs::write(&destination, b"stale").expect("stale cache");
+        fs::write(&partial, b"complete download").expect("partial download");
+
+        finalize_download(&partial, &destination)
+            .await
+            .expect("finalize download");
+
+        assert_eq!(
+            fs::read(&destination).expect("final cache"),
+            b"complete download"
+        );
+        assert!(!partial.exists());
+    }
 }

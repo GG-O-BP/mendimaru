@@ -5,11 +5,12 @@ use tauri::AppHandle;
 #[tauri::command]
 pub(crate) async fn get_environment_status(app: AppHandle) -> CommandResult<EnvironmentStatus> {
     let config = load_command_config(&app)?;
-    Ok(crate::winboat::environment_status(&config).await)
+    Ok(crate::platform::environment_status(&config).await)
 }
 
 #[tauri::command]
 pub(crate) async fn start_winboat_windows(app: AppHandle) -> CommandResult<()> {
+    require_winboat()?;
     let config = load_command_config(&app)?;
     crate::winboat::start_container(&config).await?;
     Ok(())
@@ -17,12 +18,14 @@ pub(crate) async fn start_winboat_windows(app: AppHandle) -> CommandResult<()> {
 
 #[tauri::command]
 pub(crate) fn open_winboat(app: AppHandle) -> CommandResult<()> {
+    require_winboat()?;
     let config = load_command_config(&app)?;
     Ok(crate::winboat::open_winboat(&config)?)
 }
 
 #[tauri::command]
 pub(crate) fn begin_winboat_setup(app: AppHandle) -> CommandResult<()> {
+    require_winboat()?;
     let mut config = load_command_config(&app)?;
     let was_pending = config.winboat_setup_pending;
     config.winboat_setup_pending = true;
@@ -37,6 +40,7 @@ pub(crate) fn begin_winboat_setup(app: AppHandle) -> CommandResult<()> {
 
 #[tauri::command]
 pub(crate) async fn complete_winboat_setup(app: AppHandle) -> CommandResult<SettingsSaveResult> {
+    require_winboat()?;
     let preferred = load_command_config(&app)?;
     if !preferred.winboat_setup_pending {
         return Err(crate::tr!("error-winboat-setup-not-pending").into());
@@ -55,4 +59,12 @@ pub(crate) async fn complete_winboat_setup(app: AppHandle) -> CommandResult<Sett
     detected.startup_timeout_seconds = preferred.startup_timeout_seconds;
 
     Ok(crate::settings::save_settings(&app, detected, true).await?)
+}
+
+fn require_winboat() -> CommandResult<()> {
+    if crate::platform::capabilities().requires_winboat {
+        Ok(())
+    } else {
+        Err(crate::tr!("error-winboat-not-required").into())
+    }
 }

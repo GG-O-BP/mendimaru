@@ -249,6 +249,6 @@ function ProjectTools({
 }
 
 function compactPath(path: string) {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.length > 3 ? `…/${parts.slice(-3).join("/")}` : path;
 }

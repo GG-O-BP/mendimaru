@@ -1,11 +1,14 @@
 mod commands;
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 mod config;
 mod downloads;
 mod i18n;
 mod marketplace;
 mod models;
+mod platform;
 mod projects;
 mod settings;
+#[cfg_attr(target_os = "windows", allow(dead_code, unused_imports))]
 mod winboat;
 
 use commands::*;
@@ -45,7 +48,7 @@ pub fn run() {
             uninstall_studio_pro,
             install_studio_pro,
             cancel_studio_download,
-            open_linux_folder,
+            open_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running mendimaru");

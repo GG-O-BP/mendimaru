@@ -6,7 +6,7 @@ use tauri::{AppHandle, State};
 #[tauri::command]
 pub(crate) async fn get_installed_versions(app: AppHandle) -> CommandResult<Vec<StudioVersion>> {
     let config = load_command_config(&app)?;
-    Ok(crate::winboat::installed_versions(&config).await?)
+    Ok(crate::platform::installed_versions(&config).await?)
 }
 
 #[tauri::command]
@@ -32,13 +32,13 @@ pub(crate) async fn launch_studio_pro(
     project_mpr_path: Option<String>,
 ) -> CommandResult<()> {
     let config = load_command_config(&app)?;
-    Ok(crate::winboat::launch_studio(&config, &version, project_mpr_path.as_deref()).await?)
+    Ok(crate::platform::launch_studio(&config, &version, project_mpr_path.as_deref()).await?)
 }
 
 #[tauri::command]
 pub(crate) async fn uninstall_studio_pro(app: AppHandle, version: String) -> CommandResult<()> {
     let config = load_command_config(&app)?;
-    Ok(crate::winboat::launch_uninstaller(&config, &version).await?)
+    Ok(crate::platform::uninstall_studio(&config, &version).await?)
 }
 
 #[tauri::command]

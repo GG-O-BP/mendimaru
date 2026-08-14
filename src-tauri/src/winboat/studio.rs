@@ -2,9 +2,9 @@ use super::client::installed_versions;
 use super::container::ensure_guest_online;
 use super::operation::{run_windows_operation, WindowsOperationRequest, WindowsOperationState};
 use super::scripts::{install_script, launch_studio_script, uninstall_script};
-use crate::models::{AppConfig, DownloadState};
+use crate::models::{AppConfig, StudioInstallPhase, StudioInstallProgress};
+use crate::platform::validate_version;
 use crate::projects::{linux_path_to_windows_share, scan_projects};
-use regex::Regex;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -13,32 +13,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const STUDIO_LAUNCH_TIMEOUT_SECONDS: u64 = 5 * 60;
 const INSTALL_TIMEOUT_SECONDS: u64 = 45 * 60;
 const UNINSTALL_TIMEOUT_SECONDS: u64 = 15 * 60;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct StudioInstallProgress {
-    pub phase: StudioInstallPhase,
-    pub percentage: Option<f64>,
-    pub estimated: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StudioInstallPhase {
-    Staging,
-    Installing,
-    Finalizing,
-    Verifying,
-}
-
-impl StudioInstallPhase {
-    pub const fn download_state(self) -> DownloadState {
-        match self {
-            Self::Staging => DownloadState::Staging,
-            Self::Installing => DownloadState::Installing,
-            Self::Finalizing => DownloadState::Finalizing,
-            Self::Verifying => DownloadState::Verifying,
-        }
-    }
-}
 
 pub async fn launch_studio(
     config: &AppConfig,
@@ -224,16 +198,6 @@ pub fn open_linux_folder(path: &str) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| crate::tr!("error-file-manager-open", error = error))
-}
-
-pub fn validate_version(version: &str) -> Result<(), String> {
-    let pattern = Regex::new(r"^\d+\.\d+\.\d+(?:\.\d+)?(?:-(?:beta|rc)\d*)?$")
-        .map_err(|error| error.to_string())?;
-    if pattern.is_match(version) {
-        Ok(())
-    } else {
-        Err(crate::tr!("error-version-format"))
-    }
 }
 
 fn validate_project_argument(

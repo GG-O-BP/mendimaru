@@ -121,6 +121,14 @@ mod tests {
             compare_versions_desc("10.24.22", "11.0.0"),
             Ordering::Greater
         );
+        assert_eq!(
+            compare_versions_desc("11.6.0", "11.6.0-rc.2"),
+            Ordering::Less
+        );
+        assert_eq!(
+            compare_versions_desc("11.6.0-rc.2", "11.6.0-beta.3"),
+            Ordering::Less
+        );
     }
 
     #[tokio::test]

@@ -1,4 +1,4 @@
-name: Release and publish AUR package
+name: Release Windows installers and publish AUR package
 
 on:
   push:
@@ -204,3 +204,53 @@ jobs:
             ${{ runner.temp }}/aur/mendimaru/PKGBUILD
             ${{ runner.temp }}/aur/mendimaru/.SRCINFO
           if-no-files-found: error
+
+  publish-windows:
+    name: Build and publish Windows installers
+    needs: release
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build MSI and NSIS installers
+        run: npm run tauri -- build --bundles msi,nsis
+
+      - name: Upload installers to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $installers = @(
+            Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Filter "*.msi" -File
+            Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -File
+          )
+          if ($installers.Count -lt 2) {
+            throw "Expected both MSI and NSIS release installers."
+          }
+          foreach ($installer in $installers) {
+            gh release upload $env:RELEASE_TAG $installer.FullName `
+              --repo $env:GITHUB_REPOSITORY --clobber

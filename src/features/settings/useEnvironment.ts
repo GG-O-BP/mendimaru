@@ -30,6 +30,8 @@ export function useEnvironment(dependencies: EnvironmentDependencies) {
     settingsChanged: settings.settingsChanged,
     refreshStatus: environmentStatus.refreshStatus,
     choosePath: settings.choosePath,
+    addStudioPath: settings.addStudioPath,
+    removeStudioPath: settings.removeStudioPath,
     saveSettings: settings.saveSettings,
     redetectSettings: settings.redetectSettings,
     updateLanguagePreference: settings.updateLanguagePreference,

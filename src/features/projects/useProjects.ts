@@ -38,7 +38,7 @@ export function useProjects(
 
   const openFolder = useCallback(
     (path: string) =>
-      runAction(`folder-${path}`, () => tauriApi.openLinuxFolder(path)),
+      runAction(`folder-${path}`, () => tauriApi.openFolder(path)),
     [runAction],
   );
 

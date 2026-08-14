@@ -29,6 +29,8 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
         winboat_initialized && container_status.is_running() && guest_is_online(config).await;
 
     EnvironmentStatus {
+        platform: crate::platform::capabilities(),
+        ready: guest_online,
         winboat_available,
         winboat_initialized,
         setup_pending: config.winboat_setup_pending,

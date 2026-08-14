@@ -10,15 +10,30 @@
 
 <h1 align="center">Mendimaru</h1>
 
-Mendimaru is a Tauri GUI app for installing Mendix Studio Pro on Linux through WinBoat, launching a selected version, and opening projects from a shared workspace.
+Mendimaru is a Tauri GUI app for discovering, installing, launching, and removing Mendix Studio Pro versions. It runs natively on Windows and uses WinBoat when running on Linux.
 
 ## Interface
 
-- **Studio Pro**: Launch or remove versions installed in WinBoat's Windows environment, and browse and install versions that are actually available from the Mendix Marketplace
-- **Projects**: Find and launch `.mpr` projects in the configured Linux shared directory
-- **Settings**: Configure the WinBoat executable, Compose file, Docker or Podman, and the Linux shared directory
+- **Studio Pro**: Discover, launch, install, and safely remove Studio Pro versions in the active Windows environment
+- **Projects**: Find and launch `.mpr` projects in the configured workspace
+- **Settings**: Configure a native Windows workspace and optional portable Studio paths, or the WinBoat environment on Linux
 
 Mendimaru does not provide a dashboard, VM resource information, advanced download URLs, manual build-number entry, or a force-redownload option.
+
+## Windows installation
+
+Download either the MSI or NSIS setup executable from the GitHub release assets. The Windows build does not require WinBoat, Docker, a Guest API, RDP, FreeRDP, or path conversion.
+
+On native Windows, Mendimaru:
+
+- detects Studio Pro from 32-bit and 64-bit uninstall registry views, standard Mendix folders, Version Selector evidence, and configured custom or portable paths;
+- opens `StudioPro.exe` directly and passes a selected `.mpr` path as a process argument;
+- keeps project and installer paths as native Windows paths;
+- validates the downloaded installer's SHA-256 stability and trusted Authenticode signature from Mendix or Siemens before requesting UAC elevation;
+- waits for the elevated installer or official registered uninstaller and accepts the documented success/reboot exit codes;
+- refuses removal while that exact Studio Pro executable is running and disables removal when official uninstall metadata is unavailable.
+
+Windows settings are migrated from older configuration files automatically. The optional `windowsStudioPaths` list is empty by default, so existing Linux settings remain valid.
 
 ## Arch Linux installation
 
@@ -76,26 +91,27 @@ Mendimaru uses Chromium to read the data grid on the [Mendix Marketplace Studio 
 - For Studio Pro 10 and earlier, Mendimaru extracts `Build <number>` from the version details page and uses `Mendix-<version>.<build>-Setup.exe`.
 - You only need to select a version from the list; there is no need to enter a URL or build number.
 
-Chrome is detected in this order: `MENDIMARU_CHROME_PATH`, `google-chrome-stable`, `google-chrome`, `chromium`, and `chromium-browser`.
+On Windows, Microsoft Edge and Chrome are detected in their standard per-machine and per-user locations. On Linux, browser detection checks `MENDIMARU_CHROME_PATH`, `google-chrome-stable`, `google-chrome`, `chromium`, and `chromium-browser`.
 
 ## Windows paths
 
-Mendimaru uses the same paths as the reference app.
+Native discovery uses these default locations in addition to registry and Version Selector evidence.
 
 | Purpose | Windows path |
 | --- | --- |
 | Studio Pro installation root | `C:\Program Files\Mendix` |
 | Studio Pro executable | `C:\Program Files\Mendix\<version>\modeler\studiopro.exe` |
 | Studio Pro uninstall information | `C:\ProgramData\Mendix` |
-| Default shared path | `\\host.lan\Data` |
+| Native default workspace | `%USERPROFILE%\Mendix` when present, otherwise `%USERPROFILE%` |
+| Linux WinBoat shared path | `\\host.lan\Data` |
 
-Installers are stored in `.mendimaru/installers` under the Linux shared directory. On Windows, each installer is copied to a local temporary directory and unblocked before launch so that a hidden security warning for the shared path cannot stall installation. Commands are sent to WinBoat RemoteApp as UTF-16LE-encoded PowerShell, avoiding quoting issues. Installation is considered complete only after the installer exits successfully and `StudioPro.exe` for that version has been created.
+Installers are stored in `.mendimaru/installers` under the configured workspace. In native mode, the installer is signature-checked and launched through the Windows elevation API without a command shell. In Linux mode, commands are sent to WinBoat RemoteApp as UTF-16LE-encoded PowerShell, avoiding quoting issues. Installation is complete only after the installer exits successfully and `StudioPro.exe` for that version is detected.
 
-Likewise, removal is considered complete only after the Windows uninstaller has exited and `StudioPro.exe` for that version has disappeared. The installed-version list is then refreshed automatically.
+Likewise, removal is complete only after the official Windows uninstaller exits and `StudioPro.exe` for that version disappears. The installed-version list is then refreshed automatically.
 
-The Studio Pro launch button remains disabled until the Windows process has created a real window and FreeRDP is ready to display it. While a launch is being prepared, launch buttons for other versions and projects are also locked to prevent duplicate launches. The launch script is stored in the shared directory, and only a short invocation command is passed to RemoteApp so it stays within FreeRDP RAIL's command-length limit. Windows Script Host runs PowerShell in hidden mode. Installation and removal inherit the token of the already elevated WinBoat session, so neither a PowerShell console nor a separate UAC window is shown.
+In Linux WinBoat mode, the Studio Pro launch button remains disabled until the Windows process has created a real window and FreeRDP is ready to display it. While a launch is being prepared, launch buttons for other versions and projects are also locked to prevent duplicate launches. The launch script is stored in the shared directory, and only a short invocation command is passed to RemoteApp so it stays within FreeRDP RAIL's command-length limit. Windows Script Host runs PowerShell in hidden mode. Installation and removal inherit the token of the already elevated WinBoat session, so neither a PowerShell console nor a separate UAC window is shown.
 
-## Shared workspace
+## Linux shared workspace
 
 The Linux shared directory is connected to the `<host path>:/shared` mount in the WinBoat Compose file. The project list scans only this directory and excludes generated and cache directories such as `.git`, `node_modules`, `deployment`, `.mendix-cache`, and `.mendimaru`.
 
@@ -103,7 +119,7 @@ When the shared directory changes, Mendimaru backs up the existing Compose file 
 
 ## Development
 
-Development requires Node.js, Rust, the Tauri system dependencies for Linux, WinBoat, Docker or Podman, FreeRDP 3, and Google Chrome or Chromium.
+Development requires Node.js 22.22.2 or later, Rust, and the Tauri system dependencies for the host platform. Linux integration additionally requires WinBoat, Docker or Podman, FreeRDP 3, and Chrome or Chromium. Native Windows catalog discovery uses Edge or Chrome.
 
 ```bash
 npm install
@@ -117,6 +133,8 @@ npm run check
 npm run tauri build
 ```
 
+`npm run test:e2e` runs the native Windows application-flow suite with mocked OS boundaries. The full Rust suite covers registry parsing, path containment, installer integrity, Windows argument quoting, UAC/exit-code failures, and a fixture-backed install-to-uninstall lifecycle. CI runs the frontend and Rust suites on both Windows and Linux and smoke-builds MSI and NSIS installers on Windows.
+
 Serialized enum values shared by Rust and TypeScript are registered in `src/shared/contracts/enumValues.json`. TypeScript derives its union types from this registry, and a Rust test rejects contract drift.
 
 Live Marketplace integration tests are excluded from the default test run. Run them with:
@@ -128,7 +146,9 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 ## Security
 
-Mendimaru does not store the Windows username or password in its app settings. When launching a RemoteApp, it reads the credentials from the running WinBoat container and passes them to FreeRDP 3 through standard input, keeping the password out of process arguments and app logs.
+Native Windows commands never interpolate paths into a command shell. Installers, installed Studio executables, and registered Mendix uninstallers must have a valid trusted Authenticode signature whose publisher is Mendix or Siemens; files are hashed before and after verification to detect replacement. Windows Installer removal is limited to a product-code `/x` operation and known non-interactive flags, while registered uninstallers must belong to the selected installation and use an allowlisted flag set. UAC cancellation and non-success process exit codes leave the operation failed rather than reporting a false install or removal.
+
+On Linux, Mendimaru does not store the Windows username or password in its app settings. When launching a RemoteApp, it reads credentials from the running WinBoat container and passes them to FreeRDP 3 through standard input, keeping the password out of process arguments and app logs.
 
 ## License
 

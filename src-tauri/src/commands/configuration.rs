@@ -18,6 +18,14 @@ pub(crate) fn redetect_config(app: AppHandle) -> CommandResult<AppConfig> {
     detected.winboat_setup_pending = current
         .as_ref()
         .is_some_and(|config| config.winboat_setup_pending);
+    if crate::platform::is_windows_native() {
+        if let Some(current) = current.as_ref() {
+            if std::path::Path::new(&current.shared_directory).is_dir() {
+                detected.shared_directory = current.shared_directory.clone();
+            }
+            detected.windows_studio_paths = current.windows_studio_paths.clone();
+        }
+    }
     crate::config::persist_config(&app, &detected)?;
     Ok(detected)
 }
