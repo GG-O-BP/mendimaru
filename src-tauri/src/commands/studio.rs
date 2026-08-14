@@ -46,9 +46,10 @@ pub(crate) async fn install_studio_pro(
     app: AppHandle,
     manager: State<'_, DownloadManager>,
     version: String,
+    force_redownload: bool,
 ) -> CommandResult<()> {
     let config = load_command_config(&app)?;
-    crate::downloads::download_and_launch(&app, &config, &manager, version)
+    crate::downloads::download_and_launch(&app, &config, &manager, version, force_redownload)
         .await
         .map_err(|error| match error {
             InstallError::Cancelled(message) => {

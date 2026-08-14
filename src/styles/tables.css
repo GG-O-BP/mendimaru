@@ -148,6 +148,20 @@
   text-align: end;
 }
 
+.manifest-action {
+  white-space: nowrap;
+}
+
+.manifest-action .button,
+.manifest-action .icon-button {
+  margin-inline-start: 5px;
+  vertical-align: middle;
+}
+
+.manifest-action .icon-button {
+  display: inline-grid;
+}
+
 .project-actions {
   white-space: nowrap;
 }

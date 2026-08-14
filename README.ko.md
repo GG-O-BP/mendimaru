@@ -18,7 +18,7 @@ Mendix Studio Pro 버전을 탐지·설치·실행·제거하는 Tauri GUI 앱�
 - **프로젝트**: 설정한 워크스페이스 안의 `.mpr` 프로젝트 탐지·실행
 - **설정**: Windows 네이티브 워크스페이스와 포터블 Studio 경로 또는 Linux WinBoat 환경 지정
 
-대시보드, VM 자원 정보, 고급 다운로드 URL, 수동 빌드 번호, 강제 재다운로드 옵션은 제공하지 않습니다.
+대시보드, VM 자원 정보, 고급 다운로드 URL, 수동 빌드 번호 입력은 제공하지 않습니다.
 
 ## Windows 설치
 
@@ -89,6 +89,8 @@ Mendimaru는 마법사가 완료될 때까지 상태를 확인한 뒤 다음 작
 - Studio Pro 11 이상은 `Mendix-<version>-Setup.exe` 공식 아티팩트를 사용합니다.
 - Studio Pro 10 이하는 버전 상세 페이지에서 `Build <number>`를 자동 추출해 `Mendix-<version>.<build>-Setup.exe`를 사용합니다.
 - 사용자는 목록에서 버전을 고르기만 하면 되며 URL이나 빌드 번호를 입력하지 않습니다.
+- 다운로드를 완료한 설치 파일은 기록된 출처, 예상 크기, Windows PE 구조와 SHA-256이 모두 일치할 때만 재사용합니다. 기존 버전의 메타데이터 없는 캐시나 변경된 캐시는 제거하고 다시 다운로드합니다.
+- 설치되지 않은 각 카탈로그 버전에는 기존 캐시를 재사용하지 않고 설치 실패를 복구할 수 있는 강제 재다운로드 동작이 있습니다.
 
 Windows에서는 시스템 및 사용자 표준 경로의 Microsoft Edge와 Chrome을 탐지합니다. Linux에서는 `MENDIMARU_CHROME_PATH`, `google-chrome-stable`, `google-chrome`, `chromium`, `chromium-browser` 순서로 찾습니다.
 

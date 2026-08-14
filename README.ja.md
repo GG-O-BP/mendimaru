@@ -18,7 +18,7 @@ Mendimaru は Mendix Studio Pro の各バージョンを検出・インストー
 - **プロジェクト**: 設定したワークスペース内の `.mpr` プロジェクトを検出・起動
 - **設定**: Windows ネイティブワークスペースとポータブル Studio のパス、または Linux の WinBoat 環境を設定
 
-ダッシュボード、VM リソース情報、高度なダウンロード URL、ビルド番号の手動入力、強制再ダウンロードのオプションは提供しません。
+ダッシュボード、VM リソース情報、高度なダウンロード URL、ビルド番号の手動入力は提供しません。
 
 ## Windows へのインストール
 
@@ -90,6 +90,8 @@ Mendimaru はウィザードが完了するまで状態を監視し、その後�
 - Studio Pro 11 以降では公式の `Mendix-<version>-Setup.exe` アーティファクトを使用します。
 - Studio Pro 10 以前では、バージョン詳細ページから `Build <number>` を自動的に抽出し、`Mendix-<version>.<build>-Setup.exe` を使用します。
 - 一覧からバージョンを選ぶだけでよく、URL やビルド番号を入力する必要はありません。
+- ダウンロード済みインストーラーは、記録された配布元、想定サイズ、Windows PE 構造、SHA-256 がすべて一致する場合にのみ再利用します。メタデータのない旧キャッシュや変更されたキャッシュは削除して再ダウンロードします。
+- 未インストールの各カタログバージョンには、既存キャッシュを再利用せずインストール失敗から復旧するための強制再ダウンロード操作があります。
 
 Windows ではシステムおよびユーザーの標準場所にある Microsoft Edge と Chrome を検出します。Linux では `MENDIMARU_CHROME_PATH`、`google-chrome-stable`、`google-chrome`、`chromium`、`chromium-browser` の順に検出します。
 

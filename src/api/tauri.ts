@@ -74,8 +74,8 @@ export const tauriApi = {
     }),
   uninstallStudioPro: (version: string) =>
     invoke<void>(commands.uninstallStudioPro, { version }),
-  installStudioPro: (version: string) =>
-    invoke<void>(commands.installStudioPro, { version }),
+  installStudioPro: (version: string, forceRedownload = false) =>
+    invoke<void>(commands.installStudioPro, { version, forceRedownload }),
   cancelStudioDownload: () => invoke<boolean>(commands.cancelStudioDownload),
   openFolder: (path: string) => invoke<void>(commands.openFolder, { path }),
   onStudioDownloadProgress: (

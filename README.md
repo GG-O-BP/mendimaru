@@ -18,7 +18,7 @@ Mendimaru is a Tauri GUI app for discovering, installing, launching, and removin
 - **Projects**: Find and launch `.mpr` projects in the configured workspace
 - **Settings**: Configure a native Windows workspace and optional portable Studio paths, or the WinBoat environment on Linux
 
-Mendimaru does not provide a dashboard, VM resource information, advanced download URLs, manual build-number entry, or a force-redownload option.
+Mendimaru does not provide a dashboard, VM resource information, advanced download URLs, or manual build-number entry.
 
 ## Windows installation
 
@@ -90,6 +90,8 @@ Mendimaru uses Chromium to read the data grid on the [Mendix Marketplace Studio 
 - Studio Pro 11 and later use the official `Mendix-<version>-Setup.exe` artifact.
 - For Studio Pro 10 and earlier, Mendimaru extracts `Build <number>` from the version details page and uses `Mendix-<version>.<build>-Setup.exe`.
 - You only need to select a version from the list; there is no need to enter a URL or build number.
+- A completed installer is reused only after its recorded source, expected size, Windows PE structure, and SHA-256 all validate. Invalid legacy or modified caches are removed and downloaded again.
+- Each uninstalled catalog version provides a force-redownload action for recovering from an installer failure without reusing the existing cache.
 
 On Windows, Microsoft Edge and Chrome are detected in their standard per-machine and per-user locations. On Linux, browser detection checks `MENDIMARU_CHROME_PATH`, `google-chrome-stable`, `google-chrome`, `chromium`, and `chromium-browser`.
 

@@ -1,4 +1,4 @@
-import { CheckCircle2, Download, LoaderCircle } from "lucide-react";
+import { CheckCircle2, Download, LoaderCircle, RefreshCw } from "lucide-react";
 import type { LocalizationBundle } from "../../domain/types";
 import type { Translate } from "../../i18n";
 import { useLocalizedDates } from "../../shared/hooks/useLocalizedValues";
@@ -125,6 +125,18 @@ function VersionRow({
               ? t("action-installed")
               : t("action-install")}
         </button>
+        {!alreadyInstalled && (
+          <button
+            type="button"
+            className="icon-button compact"
+            title={t("action-force-redownload")}
+            aria-label={t("action-force-redownload")}
+            disabled={!online || installationBusy}
+            onClick={() => onInstall(version, true)}
+          >
+            <RefreshCw size={15} />
+          </button>
+        )}
       </td>
     </tr>
   );
