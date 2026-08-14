@@ -10,7 +10,7 @@ use std::process::Command;
 pub use compose::{compose_file_is_valid, compose_shared_directory};
 pub(crate) use compose::{restore_file, snapshot_file, update_shared_mount, FileSnapshot};
 pub use store::{load_config, persist_config};
-pub(crate) use store::{restore_config, snapshot_config, ConfigSnapshot};
+pub(crate) use store::{load_config_from, restore_config, snapshot_config, ConfigSnapshot};
 pub(crate) use validation::normalize_and_validate;
 
 const DEFAULT_API_PORT: u16 = 47280;
@@ -228,7 +228,7 @@ pub fn expand_home(value: &str) -> String {
     value.to_string()
 }
 
-pub(super) fn home_directory() -> Result<PathBuf, String> {
+pub(crate) fn home_directory() -> Result<PathBuf, String> {
     preferred_home_directory(
         env::var_os("HOME"),
         env::var_os("USERPROFILE"),

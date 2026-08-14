@@ -1,7 +1,6 @@
 use crate::models::{DownloadProgress, DownloadState, StudioInstallPhase, StudioInstallProgress};
-use tauri::{AppHandle, Emitter};
 
-pub(super) const DOWNLOAD_EVENT: &str = "studio-download-progress";
+pub(crate) const DOWNLOAD_EVENT: &str = "studio-download-progress";
 pub(super) const PREPARING_PROGRESS: f64 = 3.0;
 pub(super) const CHECKING_PROGRESS: f64 = 7.0;
 pub(super) const DOWNLOAD_PROGRESS_START: f64 = 10.0;
@@ -24,11 +23,8 @@ pub(super) struct DownloadProgressUpdate<'a> {
     pub(super) message: String,
 }
 
-pub(super) fn emit_progress<F>(
-    app: &AppHandle,
-    update: DownloadProgressUpdate<'_>,
-    on_progress: &mut F,
-) where
+pub(super) fn emit_progress<F>(update: DownloadProgressUpdate<'_>, on_progress: &mut F)
+where
     F: FnMut(&DownloadProgress),
 {
     let DownloadProgressUpdate {
@@ -50,11 +46,9 @@ pub(super) fn emit_progress<F>(
         message,
     };
     on_progress(&progress);
-    let _ = app.emit(DOWNLOAD_EVENT, progress);
 }
 
 pub(super) fn emit_install_progress<F>(
-    app: &AppHandle,
     version: &str,
     progress: StudioInstallProgress,
     on_progress: &mut F,
@@ -68,7 +62,6 @@ pub(super) fn emit_install_progress<F>(
         StudioInstallPhase::Verifying => crate::tr!("progress-verifying"),
     };
     emit_progress(
-        app,
         DownloadProgressUpdate {
             version,
             state: progress.phase.download_state(),

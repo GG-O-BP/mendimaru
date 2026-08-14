@@ -146,6 +146,10 @@ mendimaru capabilities --json
 
 The response separates the host, Studio, and optional Runtime platforms and reports every Studio, Runtime, UI automation, and browser action as supported or unsupported. An explicit `--backend` must match the current host; Mendimaru never silently falls back to another backend. See [Platform backend and capability contract](docs/backend-contract.md) and the machine-readable [JSON Schemas](schemas/).
 
+### Headless CLI
+
+The installed `mendimaru` executable can inspect or ensure the environment, list/install/remove/start exact Studio Pro versions, query/stop Studio sessions, resolve projects by opaque ID, and query/retry persistent operations without initializing Tauri or opening a dialog. Results are JSON on stdout, errors are JSON on stderr, and `--ndjson` adds structured progress events. `--timeout-seconds` and `Ctrl+C` cancel at the shared operation boundary; interrupted work can be re-queried by operation ID. See the [headless CLI contract](docs/headless-cli.md) for the full command surface, exit codes, schemas, and safety rules.
+
 ## Development
 
 Development requires Node.js 22.22.2 or later, Rust, and the Tauri system dependencies for the host platform. Linux integration additionally requires WinBoat, Docker or Podman, FreeRDP 3, and Chrome or Chromium. Native Windows catalog discovery uses Edge or Chrome.

@@ -145,6 +145,10 @@ mendimaru capabilities --json
 
 응답은 host, Studio와 선택적 Runtime platform을 구분하고 Studio, Runtime, UI 자동화 및 browser의 모든 동작을 지원/미지원으로 명시합니다. `--backend`를 지정하면 현재 host와 정확히 일치해야 하며 다른 backend로 자동 fallback하지 않습니다. 자세한 내용은 [Platform backend와 capability 계약](docs/backend-contract.md) 및 기계 판독용 [JSON Schema](schemas/)를 참고하세요.
 
+### Headless CLI
+
+설치된 `mendimaru` 실행 파일은 Tauri나 대화상자를 시작하지 않고 환경 확인/준비, 정확한 Studio Pro 버전 목록·설치·제거·실행, Studio 세션 조회·종료, opaque 프로젝트 ID 조회, 영속 작업 조회·재시도를 수행합니다. 결과 JSON은 stdout, 오류 JSON은 stderr로 분리되며 `--ndjson`은 구조화된 진행 이벤트를 추가합니다. `--timeout-seconds`와 `Ctrl+C`는 공유 작업 경계에서 취소하고, 중단된 작업은 operation ID로 다시 조회할 수 있습니다. 전체 명령, 종료 코드, 스키마와 안전 규칙은 [Headless CLI 계약](docs/headless-cli.md)을 참고하세요.
+
 ## 개발
 
 필수 환경은 Node.js 22.22.2 이상, Rust와 호스트 플랫폼용 Tauri 시스템 의존성입니다. Linux 통합에는 WinBoat, Docker 또는 Podman, FreeRDP 3, Chrome/Chromium이 추가로 필요하며 Windows 목록 조회에는 Edge 또는 Chrome을 사용합니다.

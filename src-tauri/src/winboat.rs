@@ -13,6 +13,9 @@ pub use container::{
 };
 pub(crate) use operation::WindowsOperationFailure;
 pub(crate) use sessions::stop as stop_studio_session;
+pub(crate) use sessions::{
+    disconnect_all_clients, disconnect_registered_client, registered_client_sessions,
+};
 pub(crate) use sessions::{list as studio_sessions, reconnect as reconnect_studio_session};
 pub use studio::{install_studio, launch_studio, launch_uninstaller, open_linux_folder};
 

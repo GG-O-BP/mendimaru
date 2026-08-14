@@ -1,32 +1,159 @@
+use crate::app_paths::AppPaths;
 use crate::contracts::{
-    BackendError, BackendErrorCode, BackendId, CapabilitySnapshot, CONTRACT_SCHEMA_VERSION,
+    BackendError, BackendErrorCode, BackendId, CapabilityId, CapabilitySnapshot, PlatformId,
+    SessionDescriptor, CONTRACT_SCHEMA_VERSION,
 };
+use crate::downloads::DownloadManager;
+use crate::models::{CommandError, CommandErrorCode, DownloadProgress};
+#[cfg(target_os = "linux")]
+use serde::Deserialize;
 use serde::Serialize;
+use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::io::Write;
 use std::str::FromStr;
+use std::time::Duration;
 
 const EXIT_OK: i32 = 0;
 const EXIT_OPERATION_FAILED: i32 = 1;
 const EXIT_INVALID_REQUEST: i32 = 2;
 const EXIT_BACKEND_UNAVAILABLE: i32 = 3;
+const DEFAULT_TIMEOUT_SECONDS: u64 = 300;
+const MAX_TIMEOUT_SECONDS: u64 = 3_600;
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SuccessEnvelope<T> {
-    schema_version: &'static str,
-    command: &'static str,
-    ok: bool,
-    data: T,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputFormat {
+    Json,
+    Ndjson,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum CliCommand {
+    Capabilities,
+    EnvironmentStatus,
+    EnvironmentEnsure,
+    StudioList,
+    StudioInstall {
+        version: String,
+        force_redownload: bool,
+    },
+    StudioUninstall {
+        version: String,
+    },
+    StudioStart {
+        version: String,
+        project_id: Option<String>,
+    },
+    StudioStatus {
+        session_id: Option<String>,
+    },
+    StudioStop {
+        session_id: String,
+    },
+    ProjectList,
+    ProjectVersion {
+        project_id: String,
+    },
+    OperationList,
+    OperationStatus {
+        operation_id: String,
+    },
+    OperationRetry {
+        operation_id: String,
+    },
+}
+
+impl CliCommand {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Capabilities => "capabilities",
+            Self::EnvironmentStatus => "env.status",
+            Self::EnvironmentEnsure => "env.ensure",
+            Self::StudioList => "studio.list",
+            Self::StudioInstall { .. } => "studio.install",
+            Self::StudioUninstall { .. } => "studio.uninstall",
+            Self::StudioStart { .. } => "studio.start",
+            Self::StudioStatus { .. } => "studio.status",
+            Self::StudioStop { .. } => "studio.stop",
+            Self::ProjectList => "project.list",
+            Self::ProjectVersion { .. } => "project.version",
+            Self::OperationList => "operation.list",
+            Self::OperationStatus { .. } => "operation.status",
+            Self::OperationRetry { .. } => "operation.retry",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ParsedCli {
+    command: CliCommand,
+    backend: Option<BackendId>,
+    format: OutputFormat,
+    timeout: Duration,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ErrorEnvelope {
+struct SuccessEnvelope<'a> {
     schema_version: &'static str,
-    command: &'static str,
+    command: &'a str,
     ok: bool,
-    error: BackendError,
+    platform: PlatformId,
+    backend: BackendId,
+    session_id: &'a str,
+    capability_snapshot: &'a CapabilitySnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    studio_session_id: Option<&'a str>,
+    data: &'a Value,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ErrorEnvelope<'a> {
+    schema_version: &'static str,
+    command: &'a str,
+    ok: bool,
+    platform: PlatformId,
+    backend: BackendId,
+    session_id: &'a str,
+    capability_snapshot: &'a CapabilitySnapshot,
+    error: &'a BackendError,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProgressEnvelope<'a> {
+    schema_version: &'static str,
+    command: &'a str,
+    event: &'static str,
+    session_id: &'a str,
+    progress: &'a DownloadProgress,
+}
+
+#[derive(Debug)]
+struct CommandOutput {
+    data: Value,
+    operation_id: Option<String>,
+    studio_session_id: Option<String>,
+    progress: Vec<DownloadProgress>,
+}
+
+impl CommandOutput {
+    fn data(data: impl Serialize) -> Result<Self, CommandError> {
+        Ok(Self {
+            data: serde_json::to_value(data).map_err(|_| {
+                CommandError::new(
+                    CommandErrorCode::OperationFailed,
+                    "the command result could not be serialized".to_string(),
+                )
+            })?,
+            operation_id: None,
+            studio_session_id: None,
+            progress: Vec::new(),
+        })
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -36,10 +163,41 @@ struct CliExecution {
     stderr: String,
 }
 
+struct ExecutionContext {
+    snapshot: CapabilitySnapshot,
+    session: SessionDescriptor,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionKeeperResponse {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    studio_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<BackendError>,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionKeeperIpcResponse {
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session: Option<crate::contracts::StudioSessionStatus>,
+}
+
 /// Runs a recognized headless command before Tauri is initialized. Returning
 /// `None` means that the process should continue as the desktop application.
 pub fn dispatch_from_env() -> Option<i32> {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+    #[cfg(target_os = "linux")]
+    if arguments.first().and_then(|value| value.to_str()) == Some("__session-keeper") {
+        return Some(session_keeper_dispatch(&arguments[1..]));
+    }
     let execution = execute(&arguments)?;
     if !execution.stdout.is_empty() {
         let _ = std::io::stdout().write_all(execution.stdout.as_bytes());
@@ -51,101 +209,1083 @@ pub fn dispatch_from_env() -> Option<i32> {
 }
 
 fn execute(arguments: &[OsString]) -> Option<CliExecution> {
-    if arguments.first().and_then(|value| value.to_str()) != Some("capabilities") {
+    if !is_headless_command(arguments.first()) {
         return None;
     }
-
-    let requested = match parse_capability_arguments(&arguments[1..]) {
-        Ok(requested) => requested,
-        Err(error) => return Some(error_execution(error)),
+    let parsed = match parse(arguments) {
+        Ok(parsed) => parsed,
+        Err(error) => return Some(bootstrap_error_execution(arguments, error)),
     };
-    Some(match crate::platform::capability_snapshot(requested) {
-        Ok(snapshot) => success_execution(snapshot),
-        Err(error) => error_execution(error),
+    let command_name = parsed.command.name();
+    if crate::i18n::initialize("en-US").is_err() {
+        return Some(bootstrap_error_execution(
+            arguments,
+            BackendError::operation(
+                expected_backend(),
+                CapabilityId::StudioDetect,
+                "localization initialization failed",
+            ),
+        ));
+    }
+
+    let context = match execution_context(parsed.backend) {
+        Ok(context) => context,
+        Err(error) => return Some(context_error_execution(command_name, parsed.format, error)),
+    };
+    let future = run_command(&parsed.command, parsed.timeout, &context.snapshot);
+    let result = tauri::async_runtime::block_on(async {
+        tokio::pin!(future);
+        tokio::select! {
+            result = &mut future => result,
+            _ = tokio::time::sleep(parsed.timeout) => Err(CommandError::new(
+                CommandErrorCode::OperationFailed,
+                "the command reached its timeout and was cancelled".to_string(),
+            )),
+            signal = tokio::signal::ctrl_c() => {
+                let message = if signal.is_ok() {
+                    "the command was cancelled"
+                } else {
+                    "the cancellation signal handler failed"
+                };
+                Err(CommandError::new(CommandErrorCode::OperationFailed, message.to_string()))
+            }
+        }
+    });
+    Some(match result {
+        Ok(output) => success_execution(command_name, parsed.format, &context, output),
+        Err(error) => error_execution(
+            command_name,
+            parsed.format,
+            &context,
+            command_error_to_backend(error, context.snapshot.manifest.backend),
+        ),
     })
 }
 
-fn parse_capability_arguments(arguments: &[OsString]) -> Result<Option<BackendId>, BackendError> {
-    let mut requested = None;
+async fn run_command(
+    command: &CliCommand,
+    timeout: Duration,
+    capability_snapshot: &CapabilitySnapshot,
+) -> Result<CommandOutput, CommandError> {
+    if matches!(command, CliCommand::Capabilities) {
+        return CommandOutput::data(capability_snapshot);
+    }
+    let paths = AppPaths::discover_for_cli().map_err(|_| {
+        CommandError::new(
+            CommandErrorCode::ConfigLoadFailed,
+            "the application directories could not be resolved".to_string(),
+        )
+    })?;
+    let config = crate::application::load_config(&paths)?;
+    match command {
+        CliCommand::Capabilities => unreachable!("handled without configuration"),
+        CliCommand::EnvironmentStatus => {
+            CommandOutput::data(crate::application::environment_status(&config).await)
+        }
+        CliCommand::EnvironmentEnsure => {
+            CommandOutput::data(crate::application::ensure_environment(&config, timeout).await?)
+        }
+        CliCommand::StudioList => {
+            CommandOutput::data(crate::application::installed_versions(&config).await?)
+        }
+        CliCommand::StudioInstall {
+            version,
+            force_redownload,
+        } => {
+            let manager = DownloadManager::default();
+            let mut progress = Vec::new();
+            let operation_id = crate::application::install(
+                &paths,
+                &config,
+                &manager,
+                version.clone(),
+                *force_redownload,
+                None,
+                |update| progress.push(update.clone()),
+            )
+            .await?;
+            Ok(CommandOutput {
+                data: json!({ "completed": true }),
+                operation_id: Some(operation_id),
+                studio_session_id: None,
+                progress,
+            })
+        }
+        CliCommand::StudioUninstall { version } => {
+            let operation_id =
+                crate::application::uninstall(&paths, &config, version.clone(), None).await?;
+            Ok(CommandOutput {
+                data: json!({ "completed": true }),
+                operation_id: Some(operation_id),
+                studio_session_id: None,
+                progress: Vec::new(),
+            })
+        }
+        CliCommand::StudioStart {
+            version,
+            project_id,
+        } => {
+            #[cfg(target_os = "linux")]
+            let (operation_id, studio_session_id) =
+                start_with_session_keeper(version, project_id.as_deref()).await?;
+            #[cfg(not(target_os = "linux"))]
+            let operation_id = if let Some(project_id) = project_id {
+                crate::application::launch_project(&paths, &config, version.clone(), project_id)
+                    .await?
+            } else {
+                crate::application::launch(&paths, &config, version.clone(), None, None).await?
+            };
+            #[cfg(not(target_os = "linux"))]
+            let studio_session_id = None;
+            Ok(CommandOutput {
+                data: json!({ "completed": true }),
+                operation_id: Some(operation_id),
+                studio_session_id,
+                progress: Vec::new(),
+            })
+        }
+        CliCommand::StudioStatus { session_id } => {
+            #[cfg(target_os = "linux")]
+            if let Some(session_id) = session_id {
+                if let Some(session) = keeper_session(&paths, session_id).await? {
+                    let mut output = CommandOutput::data(&session)?;
+                    output.studio_session_id = Some(session.session_id);
+                    return Ok(output);
+                }
+            } else {
+                let sessions = keeper_sessions(&paths).await?;
+                if !sessions.is_empty() {
+                    return CommandOutput::data(sessions);
+                }
+            }
+            if let Some(session_id) = session_id {
+                let session = crate::application::studio_session(&config, session_id).await?;
+                let mut output = CommandOutput::data(&session)?;
+                output.studio_session_id = Some(session.session_id);
+                Ok(output)
+            } else {
+                CommandOutput::data(crate::application::studio_sessions(&config).await?)
+            }
+        }
+        CliCommand::StudioStop { session_id } => {
+            #[cfg(target_os = "linux")]
+            let stopped_by_keeper = request_keeper_stop(&paths, session_id).await?;
+            #[cfg(not(target_os = "linux"))]
+            let stopped_by_keeper = false;
+            if !stopped_by_keeper {
+                crate::application::stop_session(&paths, &config, session_id).await?;
+            }
+            Ok(CommandOutput {
+                data: json!({ "completed": true }),
+                operation_id: None,
+                studio_session_id: Some(session_id.clone()),
+                progress: Vec::new(),
+            })
+        }
+        CliCommand::ProjectList => CommandOutput::data(crate::application::projects(&config)?),
+        CliCommand::ProjectVersion { project_id } => {
+            let project = crate::application::project(&config, project_id)?;
+            CommandOutput::data(json!({
+                "projectId": project.project_id,
+                "requiredVersion": project.required_version,
+            }))
+        }
+        CliCommand::OperationList => {
+            CommandOutput::data(crate::application::operations(&paths, &config)?)
+        }
+        CliCommand::OperationStatus { operation_id } => {
+            let operation = crate::application::operation(&paths, &config, operation_id)?;
+            let mut output = CommandOutput::data(&operation)?;
+            output.operation_id = Some(operation.id);
+            Ok(output)
+        }
+        CliCommand::OperationRetry { operation_id } => {
+            let manager = DownloadManager::default();
+            let mut progress = Vec::new();
+            let new_operation_id =
+                crate::application::retry(&paths, &config, &manager, operation_id, |update| {
+                    progress.push(update.clone())
+                })
+                .await?;
+            Ok(CommandOutput {
+                data: json!({ "completed": true, "retryOf": operation_id }),
+                operation_id: Some(new_operation_id),
+                studio_session_id: None,
+                progress,
+            })
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn start_with_session_keeper(
+    version: &str,
+    project_id: Option<&str>,
+) -> Result<(String, Option<String>), CommandError> {
+    use std::os::unix::process::CommandExt;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let executable = std::env::current_exe().map_err(|_| {
+        CommandError::new(
+            CommandErrorCode::OperationFailed,
+            "the session keeper executable could not be resolved".to_string(),
+        )
+    })?;
+    let mut command = tokio::process::Command::new(executable);
+    command
+        .arg("__session-keeper")
+        .arg("--version")
+        .arg(version)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(false);
+    if let Some(project_id) = project_id {
+        command.arg("--project-id").arg(project_id);
+    }
+    // The keeper owns the RemoteApp connection after this CLI invocation
+    // exits. setsid prevents a terminal hangup from coupling it back to the
+    // caller's process group; only the verified Studio session controls its
+    // lifetime after the handshake.
+    unsafe {
+        command.as_std_mut().pre_exec(|| {
+            if libc::setsid() == -1 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        });
+    }
+    let mut child = command.spawn().map_err(|_| {
+        CommandError::new(
+            CommandErrorCode::OperationFailed,
+            "the session keeper could not be started".to_string(),
+        )
+    })?;
+    let mut stdin = child.stdin.take().ok_or_else(|| {
+        CommandError::new(
+            CommandErrorCode::OperationFailed,
+            "the session keeper acknowledgement is unavailable".to_string(),
+        )
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        CommandError::new(
+            CommandErrorCode::OperationFailed,
+            "the session keeper handshake is unavailable".to_string(),
+        )
+    })?;
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+    let count = reader.read_line(&mut line).await.map_err(|_| {
+        CommandError::new(
+            CommandErrorCode::OperationFailed,
+            "the session keeper handshake failed".to_string(),
+        )
+    })?;
+    if count == 0 {
+        return Err(CommandError::new(
+            CommandErrorCode::OperationFailed,
+            "the session keeper exited before launch completed".to_string(),
+        ));
+    }
+    let response = serde_json::from_str::<SessionKeeperResponse>(&line).map_err(|_| {
+        CommandError::new(
+            CommandErrorCode::OperationFailed,
+            "the session keeper returned an invalid handshake".to_string(),
+        )
+    })?;
+    if response.ok {
+        let operation_id = response.operation_id.ok_or_else(|| {
+            CommandError::new(
+                CommandErrorCode::OperationFailed,
+                "the session keeper omitted the operation ID".to_string(),
+            )
+        })?;
+        stdin.write_all(b"accept\n").await.map_err(|_| {
+            CommandError::new(
+                CommandErrorCode::OperationFailed,
+                "the session keeper acknowledgement failed".to_string(),
+            )
+        })?;
+        stdin.flush().await.map_err(|_| {
+            CommandError::new(
+                CommandErrorCode::OperationFailed,
+                "the session keeper acknowledgement failed".to_string(),
+            )
+        })?;
+        Ok((operation_id, response.studio_session_id))
+    } else {
+        Err(response
+            .error
+            .unwrap_or_else(|| {
+                BackendError::operation(
+                    BackendId::LinuxWinboat,
+                    CapabilityId::StudioStart,
+                    "the session keeper launch failed",
+                )
+            })
+            .into())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn session_keeper_dispatch(arguments: &[OsString]) -> i32 {
+    use std::io::{BufRead, Read};
+
+    let mut response = session_keeper_response(arguments);
+    let completed_operation_id = if response.ok {
+        response.operation_id.clone()
+    } else {
+        None
+    };
+    let prepared = if response.ok {
+        response
+            .studio_session_id
+            .as_deref()
+            .ok_or_else(|| "the launched Studio session ID is unavailable".to_string())
+            .and_then(prepare_session_keeper)
+    } else {
+        Err("the Studio session keeper launch failed".to_string())
+    };
+    if let Err(message) = &prepared {
+        if response.ok {
+            response = keeper_error(BackendError::operation(
+                BackendId::LinuxWinboat,
+                CapabilityId::StudioStart,
+                message,
+            ));
+        }
+    }
+    let successful = response.ok;
+    let serialized = serde_json::to_vec(&response).unwrap_or_else(|_| {
+        br#"{"ok":false,"error":{"schemaVersion":"1.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
+    });
+    let written = std::io::stdout()
+        .write_all(&serialized)
+        .and_then(|()| std::io::stdout().write_all(b"\n"))
+        .and_then(|()| std::io::stdout().flush())
+        .is_ok();
+    let mut acknowledgement = String::new();
+    let accepted = successful
+        && written
+        && std::io::stdin()
+            .lock()
+            .take(16)
+            .read_line(&mut acknowledgement)
+            .is_ok_and(|count| count > 0)
+        && acknowledgement.trim_end() == "accept";
+    if accepted {
+        let (listener, socket_guard, session_id) =
+            prepared.expect("a successful keeper response has a prepared listener");
+        tauri::async_runtime::block_on(serve_session_keeper(listener, socket_guard, &session_id));
+        EXIT_OK
+    } else {
+        if let (Some(operation_id), Ok(paths)) =
+            (completed_operation_id, AppPaths::discover_for_cli())
+        {
+            let _ = crate::operations::interrupt_completed_launch_with_paths(&paths, &operation_id);
+        }
+        crate::winboat::disconnect_all_clients();
+        EXIT_OPERATION_FAILED
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn session_keeper_response(arguments: &[OsString]) -> SessionKeeperResponse {
+    if crate::i18n::initialize("en-US").is_err() {
+        return keeper_error(BackendError::operation(
+            BackendId::LinuxWinboat,
+            CapabilityId::StudioStart,
+            "localization initialization failed",
+        ));
+    }
+    let values = match arguments
+        .iter()
+        .map(|value| value.to_str().map(str::to_string))
+        .collect::<Option<Vec<_>>>()
+    {
+        Some(values) => values,
+        None => return keeper_error(BackendError::invalid_request("invalid keeper arguments")),
+    };
+    let (options, _) = match parse_options(&values, &["--version", "--project-id"], &[]) {
+        Ok(parsed) => parsed,
+        Err(error) => return keeper_error(sanitize_backend_error(error)),
+    };
+    let Some(version) = options.get("--version").cloned() else {
+        return keeper_error(BackendError::invalid_request(
+            "the keeper version is missing",
+        ));
+    };
+    let paths = match AppPaths::discover_for_cli() {
+        Ok(paths) => paths,
+        Err(_) => {
+            return keeper_error(BackendError::operation(
+                BackendId::LinuxWinboat,
+                CapabilityId::StudioStart,
+                "the application directories could not be resolved",
+            ))
+        }
+    };
+    let config = match crate::application::load_config(&paths) {
+        Ok(config) => config,
+        Err(error) => {
+            return keeper_error(command_error_to_backend(error, BackendId::LinuxWinboat))
+        }
+    };
+    let result = tauri::async_runtime::block_on(async {
+        if let Some(project_id) = options.get("--project-id") {
+            crate::application::launch_project(&paths, &config, version, project_id).await
+        } else {
+            crate::application::launch(&paths, &config, version, None, None).await
+        }
+    });
+    match result {
+        Ok(operation_id) => {
+            let sessions = crate::winboat::registered_client_sessions();
+            if sessions.len() != 1 {
+                return keeper_error(BackendError::operation(
+                    BackendId::LinuxWinboat,
+                    CapabilityId::StudioStart,
+                    "the launched Studio session could not be registered",
+                ));
+            }
+            SessionKeeperResponse {
+                ok: true,
+                operation_id: Some(operation_id),
+                studio_session_id: Some(sessions[0].session_id.clone()),
+                error: None,
+            }
+        }
+        Err(error) => keeper_error(command_error_to_backend(error, BackendId::LinuxWinboat)),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn keeper_error(error: BackendError) -> SessionKeeperResponse {
+    SessionKeeperResponse {
+        ok: false,
+        operation_id: None,
+        studio_session_id: None,
+        error: Some(sanitize_backend_error(error)),
+    }
+}
+
+#[cfg(target_os = "linux")]
+struct SessionSocketGuard {
+    path: std::path::PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for SessionSocketGuard {
+    fn drop(&mut self) {
+        let Ok(metadata) = std::fs::symlink_metadata(&self.path) else {
+            return;
+        };
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+        if metadata.file_type().is_socket() && metadata.uid() == unsafe { libc::geteuid() } {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_session_keeper(
+    session_id: &str,
+) -> Result<(std::os::unix::net::UnixListener, SessionSocketGuard, String), String> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+
+    let paths = AppPaths::discover_for_cli()
+        .map_err(|_| "the session keeper directory could not be resolved".to_string())?;
+    let directory = ensure_session_socket_directory(&paths)?;
+    let socket_path = directory.join(session_socket_name(session_id));
+    if let Ok(metadata) = std::fs::symlink_metadata(&socket_path) {
+        if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() } {
+            return Err("the session keeper socket is not trusted".to_string());
+        }
+        if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
+            return Err("the Studio session already has a live keeper".to_string());
+        }
+        std::fs::remove_file(&socket_path)
+            .map_err(|_| "a stale session keeper socket could not be removed".to_string())?;
+    }
+    let listener = std::os::unix::net::UnixListener::bind(&socket_path)
+        .map_err(|_| "the session keeper socket could not be created".to_string())?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|_| "the session keeper socket could not be configured".to_string())?;
+    std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|_| "the session keeper socket permissions could not be secured".to_string())?;
+    Ok((
+        listener,
+        SessionSocketGuard { path: socket_path },
+        session_id.to_string(),
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_session_socket_directory(paths: &AppPaths) -> Result<std::path::PathBuf, String> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    paths
+        .ensure_cache_directory()
+        .map_err(|_| "the application cache directory is unavailable".to_string())?;
+    let directory = paths.cache_directory().join("cli-sessions");
+    std::fs::create_dir_all(&directory)
+        .map_err(|_| "the session keeper directory could not be created".to_string())?;
+    let metadata = std::fs::symlink_metadata(&directory)
+        .map_err(|_| "the session keeper directory could not be inspected".to_string())?;
+    if !metadata.is_dir()
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != unsafe { libc::geteuid() }
+    {
+        return Err("the session keeper directory is not trusted".to_string());
+    }
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
+        .map_err(|_| "the session keeper directory permissions could not be secured".to_string())?;
+    Ok(directory)
+}
+
+#[cfg(target_os = "linux")]
+fn session_socket_name(session_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(session_id.as_bytes());
+    let suffix = digest[..16]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("s-{suffix}.sock")
+}
+
+#[cfg(target_os = "linux")]
+async fn serve_session_keeper(
+    listener: std::os::unix::net::UnixListener,
+    _socket_guard: SessionSocketGuard,
+    session_id: &str,
+) {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+    let Ok(listener) = tokio::net::UnixListener::from_std(listener) else {
+        crate::winboat::disconnect_all_clients();
+        return;
+    };
+    loop {
+        tokio::select! {
+            accepted = listener.accept() => {
+                let Ok((stream, _)) = accepted else {
+                    crate::winboat::disconnect_all_clients();
+                    return;
+                };
+                let (read_half, mut write_half) = stream.into_split();
+                let mut reader = BufReader::new(read_half).take(32);
+                let mut request = String::new();
+                let read = tokio::time::timeout(
+                    Duration::from_secs(2),
+                    reader.read_line(&mut request),
+                ).await;
+                let mut should_stop = false;
+                let response = if matches!(read, Ok(Ok(count)) if count > 0)
+                    && request.trim_end() == "status"
+                {
+                    SessionKeeperIpcResponse {
+                        ok: true,
+                        session: crate::winboat::registered_client_sessions()
+                            .into_iter()
+                            .find(|session| session.session_id == session_id),
+                    }
+                } else if matches!(read, Ok(Ok(count)) if count > 0)
+                    && request.trim_end() == "stop"
+                {
+                    should_stop = crate::winboat::disconnect_registered_client(session_id);
+                    SessionKeeperIpcResponse {
+                        ok: should_stop,
+                        session: None,
+                    }
+                } else {
+                    SessionKeeperIpcResponse {
+                        ok: false,
+                        session: None,
+                    }
+                };
+                if let Ok(mut payload) = serde_json::to_vec(&response) {
+                    payload.push(b'\n');
+                    let _ = tokio::time::timeout(
+                        Duration::from_secs(2),
+                        write_half.write_all(&payload),
+                    ).await;
+                }
+                if should_stop {
+                    return;
+                }
+            }
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                if !crate::winboat::registered_client_sessions()
+                    .iter()
+                    .any(|session| session.session_id == session_id)
+                {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn keeper_sessions(
+    paths: &AppPaths,
+) -> Result<Vec<crate::contracts::StudioSessionStatus>, CommandError> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+    let directory = ensure_session_socket_directory(paths).map_err(keeper_command_error)?;
+    let entries = std::fs::read_dir(directory).map_err(|_| {
+        keeper_command_error("the session keeper directory could not be read".to_string())
+    })?;
+    let mut sessions = Vec::new();
+    for entry in entries.take(64) {
+        let Ok(entry) = entry else { continue };
+        let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() } {
+            continue;
+        }
+        if let Some(response) = request_session_keeper(&entry.path(), "status").await? {
+            if response.ok {
+                if let Some(session) = response.session {
+                    if !sessions
+                        .iter()
+                        .any(|existing: &crate::contracts::StudioSessionStatus| {
+                            existing.session_id == session.session_id
+                        })
+                    {
+                        sessions.push(session);
+                    }
+                }
+            }
+        }
+    }
+    sessions.sort_by_key(|session| std::cmp::Reverse(session.started_at));
+    Ok(sessions)
+}
+
+#[cfg(target_os = "linux")]
+async fn keeper_session(
+    paths: &AppPaths,
+    session_id: &str,
+) -> Result<Option<crate::contracts::StudioSessionStatus>, CommandError> {
+    let directory = ensure_session_socket_directory(paths).map_err(keeper_command_error)?;
+    let socket_path = directory.join(session_socket_name(session_id));
+    let response = request_session_keeper(&socket_path, "status").await?;
+    let Some(response) = response else {
+        return Ok(None);
+    };
+    let session = response
+        .session
+        .filter(|session| session.session_id == session_id);
+    if response.ok && session.is_some() {
+        Ok(session)
+    } else {
+        Err(keeper_command_error(
+            "the session keeper returned an invalid status".to_string(),
+        ))
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn request_keeper_stop(paths: &AppPaths, session_id: &str) -> Result<bool, CommandError> {
+    let directory = ensure_session_socket_directory(paths).map_err(keeper_command_error)?;
+    let socket_path = directory.join(session_socket_name(session_id));
+    let Some(response) = request_session_keeper(&socket_path, "stop").await? else {
+        return Ok(false);
+    };
+    if response.ok && response.session.is_none() {
+        Ok(true)
+    } else {
+        Err(keeper_command_error(
+            "the session keeper could not stop the selected session".to_string(),
+        ))
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn request_session_keeper(
+    socket_path: &std::path::Path,
+    request: &str,
+) -> Result<Option<SessionKeeperIpcResponse>, CommandError> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+    let metadata = match std::fs::symlink_metadata(socket_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => {
+            return Err(keeper_command_error(
+                "the session keeper socket could not be inspected".to_string(),
+            ))
+        }
+    };
+    if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() } {
+        return Err(keeper_command_error(
+            "the session keeper socket is not trusted".to_string(),
+        ));
+    }
+    let stream = match tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio::net::UnixStream::connect(socket_path),
+    )
+    .await
+    {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(error))
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+            ) =>
+        {
+            return Ok(None)
+        }
+        _ => {
+            return Err(keeper_command_error(
+                "the session keeper could not be reached".to_string(),
+            ))
+        }
+    };
+    let (read_half, mut write_half) = stream.into_split();
+    let payload = format!("{request}\n");
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        write_half.write_all(payload.as_bytes()),
+    )
+    .await
+    .map_err(|_| keeper_command_error("the session keeper request timed out".to_string()))?
+    .map_err(|_| keeper_command_error("the session keeper request failed".to_string()))?;
+    let mut reader = BufReader::new(read_half).take(32 * 1024);
+    let mut response = String::new();
+    let count = tokio::time::timeout(Duration::from_secs(2), reader.read_line(&mut response))
+        .await
+        .map_err(|_| keeper_command_error("the session keeper response timed out".to_string()))?
+        .map_err(|_| keeper_command_error("the session keeper response failed".to_string()))?;
+    if count == 0 {
+        return Err(keeper_command_error(
+            "the session keeper response was empty".to_string(),
+        ));
+    }
+    serde_json::from_str(&response)
+        .map(Some)
+        .map_err(|_| keeper_command_error("the session keeper response was invalid".to_string()))
+}
+
+#[cfg(target_os = "linux")]
+fn keeper_command_error(message: String) -> CommandError {
+    CommandError::new(CommandErrorCode::OperationFailed, message)
+}
+
+fn parse(arguments: &[OsString]) -> Result<ParsedCli, BackendError> {
+    let values = arguments
+        .iter()
+        .map(|value| {
+            value
+                .to_str()
+                .map(str::to_string)
+                .ok_or_else(|| BackendError::invalid_request("CLI arguments must be valid UTF-8"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut format = OutputFormat::Json;
+    let mut format_seen = false;
+    let mut backend = None;
+    let mut timeout_seconds = DEFAULT_TIMEOUT_SECONDS;
+    let mut timeout_seen = false;
+    let mut command_values = Vec::new();
     let mut index = 0;
-    while index < arguments.len() {
-        let value = arguments[index]
-            .to_str()
-            .ok_or_else(|| BackendError::invalid_request("CLI arguments must be valid UTF-8"))?;
-        match value {
-            "--json" => {}
+    while index < values.len() {
+        match values[index].as_str() {
+            "--json" | "--ndjson" => {
+                if format_seen {
+                    return Err(BackendError::invalid_request(
+                        "only one output format may be selected",
+                    ));
+                }
+                format_seen = true;
+                format = if values[index] == "--ndjson" {
+                    OutputFormat::Ndjson
+                } else {
+                    OutputFormat::Json
+                };
+            }
             "--backend" => {
-                if requested.is_some() {
+                if backend.is_some() {
                     return Err(BackendError::invalid_request(
                         "--backend may only be provided once",
                     ));
                 }
                 index += 1;
-                let backend = arguments
-                    .get(index)
-                    .and_then(|argument| argument.to_str())
-                    .ok_or_else(|| {
-                        BackendError::invalid_request("--backend requires a backend ID")
-                    })?;
-                requested = Some(BackendId::from_str(backend).map_err(|_| {
-                    BackendError::invalid_request(format!(
-                        "unknown backend {backend}; expected linux-winboat, windows-native, or mac-native"
-                    ))
-                })?);
+                let value = values.get(index).ok_or_else(|| {
+                    BackendError::invalid_request("--backend requires a backend ID")
+                })?;
+                backend = Some(parse_backend(value)?);
             }
-            _ if value.starts_with("--backend=") => {
-                if requested.is_some() {
+            value if value.starts_with("--backend=") => {
+                if backend.is_some() {
                     return Err(BackendError::invalid_request(
                         "--backend may only be provided once",
                     ));
                 }
-                let backend = value.trim_start_matches("--backend=");
-                requested = Some(BackendId::from_str(backend).map_err(|_| {
-                    BackendError::invalid_request(format!(
-                        "unknown backend {backend}; expected linux-winboat, windows-native, or mac-native"
-                    ))
-                })?);
+                backend = Some(parse_backend(value.trim_start_matches("--backend="))?);
             }
-            _ => {
-                return Err(BackendError::invalid_request(format!(
-                    "unknown capabilities argument: {value}"
-                )));
+            "--timeout-seconds" => {
+                if timeout_seen {
+                    return Err(BackendError::invalid_request(
+                        "--timeout-seconds may only be provided once",
+                    ));
+                }
+                timeout_seen = true;
+                index += 1;
+                let value = values.get(index).ok_or_else(|| {
+                    BackendError::invalid_request("--timeout-seconds requires an integer")
+                })?;
+                timeout_seconds = parse_timeout(value)?;
             }
+            value if value.starts_with("--timeout-seconds=") => {
+                if timeout_seen {
+                    return Err(BackendError::invalid_request(
+                        "--timeout-seconds may only be provided once",
+                    ));
+                }
+                timeout_seen = true;
+                timeout_seconds = parse_timeout(value.trim_start_matches("--timeout-seconds="))?;
+            }
+            _ => command_values.push(values[index].clone()),
         }
         index += 1;
     }
-    Ok(requested)
+    let command = parse_command(&command_values)?;
+    Ok(ParsedCli {
+        command,
+        backend,
+        format,
+        timeout: Duration::from_secs(timeout_seconds),
+    })
 }
 
-fn success_execution(snapshot: CapabilitySnapshot) -> CliExecution {
+fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
+    match values.first().map(String::as_str) {
+        Some("capabilities") if values.len() == 1 => Ok(CliCommand::Capabilities),
+        Some("env") => match values.get(1).map(String::as_str) {
+            Some("status") if values.len() == 2 => Ok(CliCommand::EnvironmentStatus),
+            Some("ensure") if values.len() == 2 => Ok(CliCommand::EnvironmentEnsure),
+            _ => Err(BackendError::invalid_request(
+                "expected env status or env ensure",
+            )),
+        },
+        Some("studio") => parse_studio_command(&values[1..]),
+        Some("project") => match values.get(1).map(String::as_str) {
+            Some("list") if values.len() == 2 => Ok(CliCommand::ProjectList),
+            Some("version") => Ok(CliCommand::ProjectVersion {
+                project_id: required_option(&values[2..], "--project-id")?,
+            }),
+            _ => Err(BackendError::invalid_request(
+                "expected project list or project version",
+            )),
+        },
+        Some("operation") => match values.get(1).map(String::as_str) {
+            Some("list") if values.len() == 2 => Ok(CliCommand::OperationList),
+            Some("status") => Ok(CliCommand::OperationStatus {
+                operation_id: required_option(&values[2..], "--operation-id")?,
+            }),
+            Some("retry") => Ok(CliCommand::OperationRetry {
+                operation_id: required_option(&values[2..], "--operation-id")?,
+            }),
+            _ => Err(BackendError::invalid_request(
+                "expected operation list, operation status, or operation retry",
+            )),
+        },
+        Some("capabilities") => Err(BackendError::invalid_request(
+            "capabilities does not accept positional arguments",
+        )),
+        _ => Err(BackendError::invalid_request("unknown headless command")),
+    }
+}
+
+fn parse_studio_command(values: &[String]) -> Result<CliCommand, BackendError> {
+    match values.first().map(String::as_str) {
+        Some("list") if values.len() == 1 => Ok(CliCommand::StudioList),
+        Some("install") => {
+            let (options, flags) =
+                parse_options(&values[1..], &["--version"], &["--force-redownload"])?;
+            Ok(CliCommand::StudioInstall {
+                version: required_map_option(&options, "--version")?,
+                force_redownload: flags.contains("--force-redownload"),
+            })
+        }
+        Some("uninstall") => Ok(CliCommand::StudioUninstall {
+            version: required_option(&values[1..], "--version")?,
+        }),
+        Some("start") => {
+            let (options, _) = parse_options(&values[1..], &["--version", "--project-id"], &[])?;
+            Ok(CliCommand::StudioStart {
+                version: required_map_option(&options, "--version")?,
+                project_id: options.get("--project-id").cloned(),
+            })
+        }
+        Some("status") => {
+            let (options, _) = parse_options(&values[1..], &["--session-id"], &[])?;
+            Ok(CliCommand::StudioStatus {
+                session_id: options.get("--session-id").cloned(),
+            })
+        }
+        Some("stop") => Ok(CliCommand::StudioStop {
+            session_id: required_option(&values[1..], "--session-id")?,
+        }),
+        _ => Err(BackendError::invalid_request(
+            "expected studio list, install, uninstall, start, status, or stop",
+        )),
+    }
+}
+
+fn required_option(values: &[String], name: &str) -> Result<String, BackendError> {
+    let (options, _) = parse_options(values, &[name], &[])?;
+    required_map_option(&options, name)
+}
+
+fn required_map_option(
+    options: &std::collections::BTreeMap<String, String>,
+    name: &str,
+) -> Result<String, BackendError> {
+    options
+        .get(name)
+        .cloned()
+        .ok_or_else(|| BackendError::invalid_request(format!("{name} is required")))
+}
+
+fn parse_options(
+    values: &[String],
+    option_names: &[&str],
+    flag_names: &[&str],
+) -> Result<
+    (
+        std::collections::BTreeMap<String, String>,
+        std::collections::BTreeSet<String>,
+    ),
+    BackendError,
+> {
+    let mut options = std::collections::BTreeMap::new();
+    let mut flags = std::collections::BTreeSet::new();
+    let mut index = 0;
+    while index < values.len() {
+        let value = &values[index];
+        if flag_names.contains(&value.as_str()) {
+            if !flags.insert(value.clone()) {
+                return Err(BackendError::invalid_request("an option was duplicated"));
+            }
+        } else if option_names.contains(&value.as_str()) {
+            index += 1;
+            let option_value = values
+                .get(index)
+                .filter(|candidate| !candidate.starts_with("--"))
+                .ok_or_else(|| BackendError::invalid_request("an option value is missing"))?;
+            if options
+                .insert(value.clone(), option_value.clone())
+                .is_some()
+            {
+                return Err(BackendError::invalid_request("an option was duplicated"));
+            }
+        } else if let Some((name, option_value)) = value.split_once('=') {
+            if !option_names.contains(&name) || option_value.is_empty() {
+                return Err(BackendError::invalid_request("an option is invalid"));
+            }
+            if options
+                .insert(name.to_string(), option_value.to_string())
+                .is_some()
+            {
+                return Err(BackendError::invalid_request("an option was duplicated"));
+            }
+        } else {
+            return Err(BackendError::invalid_request(
+                "an unknown option was provided",
+            ));
+        }
+        index += 1;
+    }
+    Ok((options, flags))
+}
+
+fn parse_backend(value: &str) -> Result<BackendId, BackendError> {
+    BackendId::from_str(value).map_err(|_| {
+        BackendError::invalid_request(
+            "unknown backend; expected linux-winboat, windows-native, or mac-native",
+        )
+    })
+}
+
+fn parse_timeout(value: &str) -> Result<u64, BackendError> {
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|seconds| (1..=MAX_TIMEOUT_SECONDS).contains(seconds))
+        .ok_or_else(|| {
+            BackendError::invalid_request("timeout must be an integer from 1 through 3600")
+        })
+}
+
+fn execution_context(requested: Option<BackendId>) -> Result<ExecutionContext, BackendError> {
+    let snapshot = crate::platform::capability_snapshot(requested)?;
+    let session = SessionDescriptor::create(snapshot.clone())?;
+    Ok(ExecutionContext { snapshot, session })
+}
+
+fn success_execution(
+    command: &str,
+    format: OutputFormat,
+    context: &ExecutionContext,
+    output: CommandOutput,
+) -> CliExecution {
     let envelope = SuccessEnvelope {
         schema_version: CONTRACT_SCHEMA_VERSION,
-        command: "capabilities",
+        command,
         ok: true,
-        data: snapshot,
+        platform: context.snapshot.manifest.host_platform,
+        backend: context.snapshot.manifest.backend,
+        session_id: &context.session.session_id,
+        capability_snapshot: &context.snapshot,
+        operation_id: output.operation_id.as_deref(),
+        studio_session_id: output.studio_session_id.as_deref(),
+        data: &output.data,
     };
+    let mut stdout = String::new();
+    if format == OutputFormat::Ndjson {
+        for progress in &output.progress {
+            stdout.push_str(&json_line(&ProgressEnvelope {
+                schema_version: CONTRACT_SCHEMA_VERSION,
+                command,
+                event: "progress",
+                session_id: &context.session.session_id,
+                progress,
+            }));
+        }
+    }
+    stdout.push_str(&json_line(&envelope));
     CliExecution {
         exit_code: EXIT_OK,
-        stdout: json_line(&envelope),
+        stdout,
         stderr: String::new(),
     }
 }
 
-fn error_execution(error: BackendError) -> CliExecution {
-    let exit_code = match error.code {
-        BackendErrorCode::InvalidRequest => EXIT_INVALID_REQUEST,
-        BackendErrorCode::BackendMismatch | BackendErrorCode::UnsupportedCapability => {
-            EXIT_BACKEND_UNAVAILABLE
-        }
-        BackendErrorCode::PreconditionFailed | BackendErrorCode::OperationFailed => {
-            EXIT_OPERATION_FAILED
-        }
-    };
+fn error_execution(
+    command: &str,
+    _format: OutputFormat,
+    context: &ExecutionContext,
+    error: BackendError,
+) -> CliExecution {
+    let exit_code = exit_code(&error);
     let envelope = ErrorEnvelope {
         schema_version: CONTRACT_SCHEMA_VERSION,
-        command: "capabilities",
+        command,
         ok: false,
-        error,
+        platform: context.snapshot.manifest.host_platform,
+        backend: context.snapshot.manifest.backend,
+        session_id: &context.session.session_id,
+        capability_snapshot: &context.snapshot,
+        error: &error,
     };
     CliExecution {
         exit_code,
@@ -154,19 +1294,145 @@ fn error_execution(error: BackendError) -> CliExecution {
     }
 }
 
+fn context_error_execution(
+    command: &str,
+    format: OutputFormat,
+    error: BackendError,
+) -> CliExecution {
+    match execution_context(None) {
+        Ok(context) => error_execution(command, format, &context, sanitize_backend_error(error)),
+        Err(_) => bare_error_execution(command, sanitize_backend_error(error)),
+    }
+}
+
+fn bootstrap_error_execution(arguments: &[OsString], error: BackendError) -> CliExecution {
+    let command = bootstrap_command_name(arguments);
+    context_error_execution(command, OutputFormat::Json, error)
+}
+
+fn bare_error_execution(command: &str, error: BackendError) -> CliExecution {
+    let exit_code = exit_code(&error);
+    let value = json!({
+        "schemaVersion": CONTRACT_SCHEMA_VERSION,
+        "command": command,
+        "ok": false,
+        "platform": PlatformId::current(),
+        "backend": expected_backend(),
+        "sessionId": "session_unavailable",
+        "capabilitySnapshot": null,
+        "error": error,
+    });
+    CliExecution {
+        exit_code,
+        stdout: String::new(),
+        stderr: json_line(&value),
+    }
+}
+
+fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendError {
+    if let Some(details) = error.details {
+        return sanitize_backend_error(*details);
+    }
+    let code = match error.code {
+        CommandErrorCode::UnsupportedCapability => BackendErrorCode::UnsupportedCapability,
+        CommandErrorCode::BackendMismatch => BackendErrorCode::BackendMismatch,
+        CommandErrorCode::InvalidRequest => BackendErrorCode::InvalidRequest,
+        CommandErrorCode::PreconditionFailed => BackendErrorCode::PreconditionFailed,
+        CommandErrorCode::ConfigLoadFailed
+        | CommandErrorCode::DownloadCancelled
+        | CommandErrorCode::InstallFailed
+        | CommandErrorCode::OperationFailed => BackendErrorCode::OperationFailed,
+    };
+    BackendError {
+        schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
+        code,
+        message: safe_error_message(code).to_string(),
+        backend: Some(backend),
+        capability: None,
+        reason: None,
+        retryable: matches!(
+            error.code,
+            CommandErrorCode::DownloadCancelled
+                | CommandErrorCode::InstallFailed
+                | CommandErrorCode::OperationFailed
+        ),
+        diagnostic_ref: None,
+    }
+}
+
+fn sanitize_backend_error(error: BackendError) -> BackendError {
+    BackendError {
+        schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
+        code: error.code,
+        message: safe_error_message(error.code).to_string(),
+        backend: error.backend,
+        capability: error.capability,
+        reason: None,
+        retryable: error.retryable,
+        diagnostic_ref: None,
+    }
+}
+
+fn safe_error_message(code: BackendErrorCode) -> &'static str {
+    match code {
+        BackendErrorCode::UnsupportedCapability => {
+            "the selected backend does not support this command"
+        }
+        BackendErrorCode::BackendMismatch => "the selected backend does not match this host",
+        BackendErrorCode::InvalidRequest => "the command request is invalid",
+        BackendErrorCode::PreconditionFailed => "a required precondition was not satisfied",
+        BackendErrorCode::OperationFailed => "the command could not be completed",
+    }
+}
+
+fn exit_code(error: &BackendError) -> i32 {
+    match error.code {
+        BackendErrorCode::InvalidRequest => EXIT_INVALID_REQUEST,
+        BackendErrorCode::BackendMismatch | BackendErrorCode::UnsupportedCapability => {
+            EXIT_BACKEND_UNAVAILABLE
+        }
+        BackendErrorCode::PreconditionFailed | BackendErrorCode::OperationFailed => {
+            EXIT_OPERATION_FAILED
+        }
+    }
+}
+
 fn json_line<T: Serialize>(value: &T) -> String {
-    let json = serde_json::to_string(value).unwrap_or_else(|error| {
+    let json = serde_json::to_string(value).unwrap_or_else(|_| {
         format!(
-            "{{\"schemaVersion\":\"{CONTRACT_SCHEMA_VERSION}\",\"command\":\"capabilities\",\"ok\":false,\"error\":{{\"code\":\"operation_failed\",\"message\":\"JSON serialization failed: {error}\"}}}}"
+            "{{\"schemaVersion\":\"{CONTRACT_SCHEMA_VERSION}\",\"command\":\"unknown\",\"ok\":false}}"
         )
     });
     format!("{json}\n")
 }
 
+fn is_headless_command(argument: Option<&OsString>) -> bool {
+    matches!(
+        argument.and_then(|value| value.to_str()),
+        Some("capabilities" | "env" | "studio" | "project" | "operation")
+    )
+}
+
+fn bootstrap_command_name(arguments: &[OsString]) -> &'static str {
+    match arguments.first().and_then(|value| value.to_str()) {
+        Some("capabilities") => "capabilities",
+        Some("env") => "env",
+        Some("studio") => "studio",
+        Some("project") => "project",
+        Some("operation") => "operation",
+        _ => "unknown",
+    }
+}
+
+fn expected_backend() -> BackendId {
+    crate::platform::backend::expected_backend(PlatformId::current())
+        .unwrap_or(BackendId::MacNative)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contracts::{CapabilityId, PlatformId};
+    use crate::contracts::CapabilityId;
 
     fn args(values: &[&str]) -> Vec<OsString> {
         values.iter().map(OsString::from).collect()
@@ -179,20 +1445,24 @@ mod tests {
     }
 
     #[test]
-    fn capabilities_returns_one_json_line_without_tauri_initialization() {
+    fn capabilities_returns_one_complete_json_envelope_without_tauri_initialization() {
         let execution =
-            execute(&args(&["capabilities", "--json"])).expect("capabilities is a CLI command");
+            execute(&args(&["capabilities", "--json"])).expect("recognized CLI command");
         assert_eq!(execution.exit_code, EXIT_OK);
         assert!(execution.stderr.is_empty());
         assert_eq!(execution.stdout.lines().count(), 1);
-        let json: serde_json::Value =
-            serde_json::from_str(&execution.stdout).expect("stdout is JSON");
+        let json: Value = serde_json::from_str(&execution.stdout).expect("stdout JSON");
         assert_eq!(json["schemaVersion"], CONTRACT_SCHEMA_VERSION);
+        assert_eq!(json["command"], "capabilities");
         assert_eq!(json["ok"], true);
         assert_eq!(
-            json["data"]["manifest"]["hostPlatform"],
-            serde_json::to_value(PlatformId::current()).expect("platform serializes")
+            json["platform"],
+            serde_json::to_value(PlatformId::current()).unwrap()
         );
+        assert_eq!(json["data"], json["capabilitySnapshot"]);
+        assert!(json["sessionId"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("session_")));
         assert_eq!(
             json["data"]["manifest"]["capabilities"]
                 .as_array()
@@ -200,47 +1470,232 @@ mod tests {
                 .len(),
             CapabilityId::ALL.len()
         );
-        assert!(json["data"]["snapshotId"]
-            .as_str()
-            .is_some_and(|id| id.starts_with("cap_")));
     }
 
     #[test]
-    fn a_mismatched_explicit_backend_is_json_error_on_stderr() {
+    fn mismatched_backend_is_a_structured_stderr_error_without_fallback() {
         let mismatched = match PlatformId::current() {
             PlatformId::Linux => "windows-native",
             PlatformId::Windows => "mac-native",
-            PlatformId::Macos => "linux-winboat",
-            PlatformId::Unsupported => "linux-winboat",
+            PlatformId::Macos | PlatformId::Unsupported => "linux-winboat",
         };
         let execution = execute(&args(&["capabilities", "--json", "--backend", mismatched]))
-            .expect("capabilities is a CLI command");
+            .expect("recognized CLI command");
         assert_eq!(execution.exit_code, EXIT_BACKEND_UNAVAILABLE);
         assert!(execution.stdout.is_empty());
-        let json: serde_json::Value =
-            serde_json::from_str(&execution.stderr).expect("stderr is JSON");
+        let json: Value = serde_json::from_str(&execution.stderr).expect("stderr JSON");
         assert_eq!(json["ok"], false);
         assert_eq!(json["error"]["code"], "backend_mismatch");
-        assert_eq!(json["error"]["backend"], mismatched);
+        assert_ne!(json["backend"], mismatched);
+        assert!(json["capabilitySnapshot"].is_object());
     }
 
     #[test]
-    fn invalid_or_duplicate_backend_arguments_fail_without_guessing() {
-        for arguments in [
-            args(&["capabilities", "--backend", "future-backend"]),
+    fn parser_accepts_the_complete_command_surface_and_rejects_ambiguity() {
+        let valid = [
+            args(&["env", "status", "--json"]),
+            args(&["env", "ensure", "--timeout-seconds", "30"]),
+            args(&["studio", "list"]),
+            args(&["studio", "install", "--version", "11.12.2", "--ndjson"]),
+            args(&["studio", "uninstall", "--version=11.12.2"]),
             args(&[
-                "capabilities",
-                "--backend=linux-winboat",
-                "--backend=windows-native",
+                "studio",
+                "start",
+                "--version",
+                "11.12.2",
+                "--project-id",
+                &format!("project_{}", "a".repeat(64)),
             ]),
-            args(&["capabilities", "--unknown"]),
-        ] {
-            let execution = execute(&arguments).expect("capabilities is a CLI command");
-            assert_eq!(execution.exit_code, EXIT_INVALID_REQUEST);
-            assert!(execution.stdout.is_empty());
-            let json: serde_json::Value =
-                serde_json::from_str(&execution.stderr).expect("stderr is JSON");
-            assert_eq!(json["error"]["code"], "invalid_request");
+            args(&["studio", "status"]),
+            args(&[
+                "studio",
+                "stop",
+                "--session-id",
+                "studio-1-700000000000000000",
+            ]),
+            args(&["project", "list"]),
+            args(&[
+                "project",
+                "version",
+                "--project-id",
+                &format!("project_{}", "b".repeat(64)),
+            ]),
+            args(&["operation", "list"]),
+            args(&["operation", "status", "--operation-id", "install-11.12.2-a"]),
+            args(&["operation", "retry", "--operation-id", "install-11.12.2-a"]),
+        ];
+        for arguments in valid {
+            parse(&arguments).expect("valid CLI shape");
         }
+
+        for arguments in [
+            args(&[
+                "studio",
+                "install",
+                "--version",
+                "11.12.2",
+                "--version",
+                "11.13.0",
+            ]),
+            args(&["studio", "start", "--project-path", "/secret/app.mpr"]),
+            args(&["project", "version"]),
+            args(&["env", "ensure", "--json", "--ndjson"]),
+            args(&["operation", "cancel", "--operation-id", "x"]),
+            args(&["studio", "list", "--timeout-seconds", "0"]),
+        ] {
+            let error = parse(&arguments).expect_err("invalid CLI shape");
+            assert_eq!(error.code, BackendErrorCode::InvalidRequest);
+        }
+    }
+
+    #[test]
+    fn parse_errors_never_echo_unknown_arguments_or_secret_values() {
+        let secret = "super-secret-password";
+        let execution = execute(&args(&["studio", "list", "--password", secret]))
+            .expect("recognized CLI command");
+        assert_eq!(execution.exit_code, EXIT_INVALID_REQUEST);
+        assert!(execution.stdout.is_empty());
+        assert!(!execution.stderr.contains(secret));
+        assert!(!execution.stderr.contains("--password"));
+        let json: Value = serde_json::from_str(&execution.stderr).expect("stderr JSON");
+        assert_eq!(json["error"]["code"], "invalid_request");
+    }
+
+    #[test]
+    fn the_same_cli_fixture_has_the_same_shape_for_every_fake_platform_manifest() {
+        use std::collections::BTreeSet;
+
+        let mut expected_keys = None;
+        for backend in BackendId::ALL {
+            let snapshot = CapabilitySnapshot::capture(crate::platform::backend::manifest_for(
+                backend,
+                "fixture-architecture",
+            ))
+            .expect("fake capability snapshot");
+            let session = SessionDescriptor::create(snapshot.clone()).expect("fake session");
+            let context = ExecutionContext { snapshot, session };
+            let execution = success_execution(
+                "env.status",
+                OutputFormat::Json,
+                &context,
+                CommandOutput::data(json!({
+                    "ready": false,
+                    "containerStatus": "not-found",
+                    "checks": [],
+                }))
+                .expect("fixture output"),
+            );
+            let document: Value = serde_json::from_str(&execution.stdout).expect("CLI JSON");
+            let keys = document
+                .as_object()
+                .expect("response object")
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            if let Some(expected) = &expected_keys {
+                assert_eq!(&keys, expected);
+            } else {
+                expected_keys = Some(keys);
+            }
+            assert_eq!(document["backend"], backend.as_str());
+            assert_eq!(
+                document["platform"],
+                serde_json::to_value(context.snapshot.manifest.host_platform)
+                    .expect("platform serializes")
+            );
+            assert_eq!(document["command"], "env.status");
+            assert_eq!(document["data"]["ready"], false);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn session_keeper_socket_contract_is_private_bounded_and_symlink_safe() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let paths = AppPaths::for_tests(
+            temporary.path().join("config"),
+            temporary.path().join("cache"),
+        );
+        let directory = ensure_session_socket_directory(&paths).expect("keeper directory");
+        let mode = std::fs::symlink_metadata(&directory)
+            .expect("keeper metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700);
+
+        let name = session_socket_name("studio-4242-638908128000000000");
+        assert!(name.starts_with("s-"));
+        assert!(name.ends_with(".sock"));
+        assert_eq!(name.len(), 39);
+        assert!(!name.contains("4242"));
+
+        let other = tempfile::tempdir().expect("other temporary directory");
+        let unsafe_paths =
+            AppPaths::for_tests(other.path().join("config"), other.path().join("cache"));
+        unsafe_paths
+            .ensure_cache_directory()
+            .expect("unsafe cache directory");
+        let target = other.path().join("target");
+        std::fs::create_dir(&target).expect("target directory");
+        symlink(&target, unsafe_paths.cache_directory().join("cli-sessions"))
+            .expect("directory symlink");
+        assert!(ensure_session_socket_directory(&unsafe_paths).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn session_keeper_ipc_accepts_only_bounded_json_from_a_private_socket() {
+        use std::io::{BufRead, Write};
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let socket_path = temporary.path().join("keeper.sock");
+        let listener =
+            std::os::unix::net::UnixListener::bind(&socket_path).expect("fixture listener");
+        std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
+            .expect("fixture permissions");
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("fixture connection");
+            let mut request = String::new();
+            std::io::BufReader::new(stream.try_clone().expect("fixture reader"))
+                .read_line(&mut request)
+                .expect("fixture request");
+            assert_eq!(request, "status\n");
+            let response = json!({
+                "ok": true,
+                "session": {
+                    "schemaVersion": CONTRACT_SCHEMA_VERSION,
+                    "sessionId": "studio-4242-638908128000000000",
+                    "version": "11.12.2",
+                    "state": "running",
+                    "processId": 4242,
+                    "startedAt": "2026-08-15T00:00:00Z",
+                    "projectName": "Orders",
+                    "connection": "connected",
+                    "reconnectable": false,
+                    "reconnectUnavailable": "already-connected"
+                }
+            });
+            let mut stream = stream;
+            writeln!(stream, "{response}").expect("fixture response");
+        });
+        let response =
+            tauri::async_runtime::block_on(request_session_keeper(&socket_path, "status"))
+                .expect("keeper request")
+                .expect("keeper response");
+        assert!(response.ok);
+        assert_eq!(
+            response.session.expect("session").session_id,
+            "studio-4242-638908128000000000"
+        );
+        server.join().expect("fixture server");
+
+        let untrusted = temporary.path().join("regular-file.sock");
+        std::fs::write(&untrusted, b"not a socket").expect("untrusted fixture");
+        let result = tauri::async_runtime::block_on(request_session_keeper(&untrusted, "status"));
+        assert!(result.is_err());
     }
 }

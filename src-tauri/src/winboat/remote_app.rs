@@ -4,17 +4,18 @@ use crate::models::AppConfig;
 use crate::projects::linux_path_to_windows_share;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use sha2::{Digest, Sha256};
-use std::io::{Read, Write};
+use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 pub(super) const FREERDP_CERTIFICATE_POLICY: &str = "/cert:tofu";
 const MAX_DIAGNOSTIC_BYTES: usize = 64 * 1024;
 
 pub(super) struct RemoteAppProcess {
     child: Child,
-    diagnostics: Arc<Mutex<Vec<u8>>>,
+    diagnostics: Mutex<File>,
 }
 
 impl RemoteAppProcess {
@@ -31,11 +32,14 @@ impl RemoteAppProcess {
     }
 
     pub(super) fn certificate_failed(&self) -> bool {
-        let diagnostics = self
-            .diagnostics
-            .lock()
-            .map(|bytes| String::from_utf8_lossy(&bytes).to_ascii_lowercase())
-            .unwrap_or_default();
+        let diagnostics = self.diagnostics.lock().ok().and_then(|file| {
+            let length = file.metadata().ok()?.len().min(MAX_DIAGNOSTIC_BYTES as u64) as usize;
+            let mut bytes = vec![0_u8; length];
+            let count = read_diagnostics_at(&file, &mut bytes).ok()?;
+            bytes.truncate(count);
+            Some(String::from_utf8_lossy(&bytes).to_ascii_lowercase())
+        });
+        let diagnostics = diagnostics.unwrap_or_default();
         diagnostics.contains("certificate")
             && [
                 "mismatch",
@@ -155,12 +159,25 @@ fn spawn_remote_app(
 
     // FreeRDP 3 can parse one argument per line from stdin. This keeps the
     // Windows password out of the process list and out of application logs.
+    // An anonymous private file keeps FreeRDP's output descriptors valid after
+    // a one-shot CLI parent exits. A pipe would lose its reader at process exit
+    // and can terminate FreeRDP with SIGPIPE, which in turn closes the Windows
+    // RemoteApp session. The file has no persistent pathname and is never
+    // exposed through CLI output or operation history.
+    let diagnostics =
+        tempfile::tempfile().map_err(|error| crate::tr!("error-remoteapp-run", error = error))?;
+    let diagnostic_stdout = diagnostics
+        .try_clone()
+        .map_err(|error| crate::tr!("error-remoteapp-run", error = error))?;
+    let diagnostic_stderr = diagnostics
+        .try_clone()
+        .map_err(|error| crate::tr!("error-remoteapp-run", error = error))?;
     let mut child = Command::new(&config.freerdp_binary)
         .arg("/args-from:stdin")
         .env("XDG_CONFIG_HOME", &trust_store)
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(Stdio::from(diagnostic_stdout))
+        .stderr(Stdio::from(diagnostic_stderr))
         .spawn()
         .map_err(|error| crate::tr!("error-remoteapp-run", error = error))?;
     let payload = format!("{}\n", arguments.join("\n"));
@@ -170,32 +187,30 @@ fn spawn_remote_app(
         .ok_or_else(|| crate::tr!("error-freerdp-input-open"))?
         .write_all(payload.as_bytes())
         .map_err(|error| crate::tr!("error-freerdp-credentials-send", error = error))?;
-    let diagnostics = Arc::new(Mutex::new(Vec::new()));
-    if let Some(stdout) = child.stdout.take() {
-        collect_diagnostics(stdout, Arc::clone(&diagnostics));
-    }
-    if let Some(stderr) = child.stderr.take() {
-        collect_diagnostics(stderr, Arc::clone(&diagnostics));
-    }
-    Ok(RemoteAppProcess { child, diagnostics })
+    Ok(RemoteAppProcess {
+        child,
+        diagnostics: Mutex::new(diagnostics),
+    })
 }
 
-fn collect_diagnostics<R>(mut reader: R, diagnostics: Arc<Mutex<Vec<u8>>>)
-where
-    R: Read + Send + 'static,
-{
-    std::thread::spawn(move || {
-        let mut buffer = [0_u8; 4096];
-        while let Ok(count) = reader.read(&mut buffer) {
-            if count == 0 {
-                break;
-            }
-            if let Ok(mut collected) = diagnostics.lock() {
-                let remaining = MAX_DIAGNOSTIC_BYTES.saturating_sub(collected.len());
-                collected.extend_from_slice(&buffer[..count.min(remaining)]);
-            }
-        }
-    });
+#[cfg(unix)]
+fn read_diagnostics_at(file: &File, bytes: &mut [u8]) -> std::io::Result<usize> {
+    use std::os::unix::fs::FileExt;
+    file.read_at(bytes, 0)
+}
+
+#[cfg(windows)]
+fn read_diagnostics_at(file: &File, bytes: &mut [u8]) -> std::io::Result<usize> {
+    use std::os::windows::fs::FileExt;
+    file.seek_read(bytes, 0)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn read_diagnostics_at(file: &File, bytes: &mut [u8]) -> std::io::Result<usize> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = file.try_clone()?;
+    file.seek(SeekFrom::Start(0))?;
+    file.read(bytes)
 }
 
 fn certificate_policy(config: &AppConfig, trust_store: &Path) -> Result<String, String> {
@@ -270,7 +285,8 @@ fn css_slug(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::fingerprint_policy_from_pem;
+    use super::{fingerprint_policy_from_pem, read_diagnostics_at};
+    use std::io::Write;
 
     #[test]
     fn converts_the_app_pin_to_an_exact_sha256_fingerprint_policy() {
@@ -282,5 +298,20 @@ mod tests {
             policy,
             "/cert:fingerprint:sha256:8edde51f9bc00d3fff19237df43bc1c6d058839aa1469b3fbd0c5479c929825d"
         );
+    }
+
+    #[test]
+    fn diagnostic_reads_do_not_move_the_child_writer_offset() {
+        let diagnostics = tempfile::tempfile().expect("anonymous diagnostics");
+        let mut writer = diagnostics.try_clone().expect("diagnostic writer");
+        writer.write_all(b"certificate ").expect("first diagnostic");
+        let mut first = vec![0_u8; 64];
+        let count = read_diagnostics_at(&diagnostics, &mut first).expect("read diagnostics");
+        assert_eq!(&first[..count], b"certificate ");
+
+        writer.write_all(b"mismatch").expect("second diagnostic");
+        let mut complete = vec![0_u8; 64];
+        let count = read_diagnostics_at(&diagnostics, &mut complete).expect("reread diagnostics");
+        assert_eq!(&complete[..count], b"certificate mismatch");
     }
 }
