@@ -3,9 +3,9 @@ use serde_json::Value;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn fixture_config(workspace: &std::path::Path) -> AppConfig {
     AppConfig {
@@ -51,7 +51,45 @@ fn run_with_environment(
     for (name, value) in environment {
         command.env(name, value);
     }
-    command.output().expect("run the real mendimaru binary")
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().expect("run the real mendimaru binary");
+    let mut stdout = child.stdout.take().expect("capture CLI stdout");
+    let mut stderr = child.stderr.take().expect("capture CLI stderr");
+    let stdout_reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).expect("read CLI stdout");
+        bytes
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes).expect("read CLI stderr");
+        bytes
+    });
+    let deadline = Instant::now() + Duration::from_secs(40);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("observe CLI process") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            let command_name = arguments
+                .iter()
+                .take(2)
+                .copied()
+                .collect::<Vec<_>>()
+                .join(" ");
+            panic!("CLI command {command_name:?} exceeded the 40-second E2E boundary");
+        }
+        thread::sleep(Duration::from_millis(100));
+    };
+    Output {
+        status,
+        stdout: stdout_reader.join().expect("join CLI stdout reader"),
+        stderr: stderr_reader.join().expect("join CLI stderr reader"),
+    }
 }
 
 fn stdout_json(output: &Output) -> Value {
