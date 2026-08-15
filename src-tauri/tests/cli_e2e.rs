@@ -40,6 +40,13 @@ fn run_with_environment(
     arguments: &[&str],
     environment: &[(&str, &std::ffi::OsStr)],
 ) -> Output {
+    let command_name = arguments
+        .iter()
+        .take(2)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ");
+    eprintln!("E2E CLI started: {command_name}");
     let mut command = Command::new(env!("CARGO_BIN_EXE_mendimaru"));
     command
         .args(arguments)
@@ -75,21 +82,17 @@ fn run_with_environment(
             let _ = child.wait();
             let _ = stdout_reader.join();
             let _ = stderr_reader.join();
-            let command_name = arguments
-                .iter()
-                .take(2)
-                .copied()
-                .collect::<Vec<_>>()
-                .join(" ");
             panic!("CLI command {command_name:?} exceeded the 40-second E2E boundary");
         }
         thread::sleep(Duration::from_millis(100));
     };
-    Output {
+    let output = Output {
         status,
         stdout: stdout_reader.join().expect("join CLI stdout reader"),
         stderr: stderr_reader.join().expect("join CLI stderr reader"),
-    }
+    };
+    eprintln!("E2E CLI completed: {command_name}");
+    output
 }
 
 fn stdout_json(output: &Output) -> Value {
