@@ -5,7 +5,7 @@ use std::fmt;
 /// Contract versions follow semantic versioning. Changes accepted by the
 /// current closed schemas may increment the minor version; serialized fields,
 /// enum variants, capability IDs, or semantics require a major version.
-pub const CONTRACT_SCHEMA_VERSION: &str = "2.0.0";
+pub const CONTRACT_SCHEMA_VERSION: &str = "3.0.0";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
@@ -665,6 +665,8 @@ pub struct RuntimeStatus {
     pub session_id: String,
     pub backend: BackendId,
     pub mode: RuntimeMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_version: Option<String>,
     pub state: RuntimeState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process_id: Option<u32>,
@@ -762,15 +764,74 @@ pub struct BrowserTestRequest {
     pub session_id: String,
     pub base_url: String,
     pub suite_path: String,
+    pub runtime_context: BrowserRuntimeContext,
+    pub policy: BrowserTestPolicy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserRuntimeContext {
+    pub host_platform: PlatformId,
+    pub studio_platform: PlatformId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_platform: Option<PlatformId>,
+    pub backend: BackendId,
+    pub runtime_mode: RuntimeMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub studio_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserTestPolicy {
+    pub navigation_timeout_milliseconds: u64,
+    pub action_timeout_milliseconds: u64,
+    pub assertion_timeout_milliseconds: u64,
+    pub fail_on_console_error: bool,
+    pub fail_on_network_failure: bool,
+    pub record_video: bool,
+    pub record_har: bool,
+    pub max_artifact_bytes: u64,
+    pub retention_runs: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserTestOutcome {
+    Passed,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserTestCaseSummary {
+    pub name: String,
+    pub outcome: BrowserTestOutcome,
+    pub completed_steps: u32,
+    pub total_steps: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserTestSummary {
+    pub schema_version: String,
     pub session_id: String,
+    pub outcome: BrowserTestOutcome,
     pub passed: u32,
     pub failed: u32,
     pub skipped: u32,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: DateTime<Utc>,
+    pub browser_name: String,
+    pub browser_version: String,
+    pub playwright_version: String,
+    pub tests: Vec<BrowserTestCaseSummary>,
+    pub artifacts: Vec<ArtifactDescriptor>,
 }
 
 #[cfg(test)]
@@ -868,6 +929,14 @@ mod tests {
                 ArtifactKind::UiTree,
                 ArtifactKind::DomSnapshot,
                 ArtifactKind::Diagnostic,
+            ],
+        );
+        assert_registry(
+            "browserTestOutcome",
+            [
+                BrowserTestOutcome::Passed,
+                BrowserTestOutcome::Failed,
+                BrowserTestOutcome::Skipped,
             ],
         );
         assert_registry(
@@ -1019,6 +1088,17 @@ mod tests {
                 "{name} schema version drifted"
             );
         }
+        let browser: serde_json::Value =
+            serde_json::from_str(include_str!("../../schemas/browser.schema.json"))
+                .expect("browser schema must be valid JSON");
+        assert_eq!(
+            browser["$defs"]["summary"]["properties"]["schemaVersion"]["const"],
+            CONTRACT_SCHEMA_VERSION
+        );
+        let suite: serde_json::Value =
+            serde_json::from_str(include_str!("../../schemas/browser-suite.schema.json"))
+                .expect("browser suite schema must be valid JSON");
+        assert_eq!(suite["properties"]["schemaVersion"]["const"], "1.0.0");
     }
 
     impl BackendErrorCode {

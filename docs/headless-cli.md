@@ -27,6 +27,10 @@ mendimaru runtime wait --session-id RUNTIME_SESSION_ID
 mendimaru runtime url --session-id RUNTIME_SESSION_ID
 mendimaru runtime stop --session-id RUNTIME_SESSION_ID
 mendimaru runtime logs --session-id RUNTIME_SESSION_ID [--cursor CURSOR]
+mendimaru browser doctor
+mendimaru browser install chromium
+mendimaru browser test (--base-url URL | --runtime-session-id RUNTIME_SESSION_ID) --suite-path SUITE_JSON
+mendimaru browser artifacts --session-id BROWSER_SESSION_ID
 mendimaru operation list
 mendimaru operation status --operation-id OPERATION_ID
 mendimaru operation retry --operation-id OPERATION_ID
@@ -52,8 +56,11 @@ dialog or confirmation window.
 ## Result and error streams
 
 A successful command writes exactly one JSON result to stdout (after any
-NDJSON progress events) and leaves stderr empty. A failed command leaves stdout
-empty and writes exactly one JSON error to stderr. The result envelope includes
+NDJSON progress events) and leaves stderr empty. An invocation or backend
+failure leaves stdout empty and writes exactly one JSON error to stderr. An
+executed `browser test` with failed assertions or diagnostic policy violations
+is the deliberate exception: it writes its complete result to stdout and exits
+`1`, so failure artifacts remain agent-readable. The result envelope includes
 the schema version, normalized command name, host platform, selected backend,
 invocation session ID, and immutable capability snapshot. Mutation successes
 also include their persistent operation ID; Studio session commands include the
@@ -65,7 +72,9 @@ status, build artifacts, and bounded log batches validate against
 [`portable-runtime.md`](portable-runtime.md) for exact-version, readiness,
 cache, licensing, and secret-handling rules, and
 [`winboat-run-locally.md`](winboat-run-locally.md) for Linux host/Windows guest
-port forwarding and recovery.
+port forwarding and recovery. Browser installation, suites, policy controls,
+artifacts, and secret handling are documented in
+[`browser-testing.md`](browser-testing.md).
 
 Exit codes are stable:
 

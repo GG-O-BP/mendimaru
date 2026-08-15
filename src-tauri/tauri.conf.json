@@ -29,6 +29,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "../scripts/browser-runner.mjs": "browser/browser-runner.mjs",
+      "../node_modules/@playwright/test/": "browser/node_modules/@playwright/test/",
+      "../node_modules/fflate/": "browser/node_modules/fflate/",
+      "../node_modules/playwright/": "browser/node_modules/playwright/",
+      "../node_modules/playwright-core/": "browser/node_modules/playwright-core/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

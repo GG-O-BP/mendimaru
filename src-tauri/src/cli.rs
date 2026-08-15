@@ -1,7 +1,7 @@
 use crate::app_paths::AppPaths;
 use crate::contracts::{
-    BackendError, BackendErrorCode, BackendId, CapabilityId, CapabilitySnapshot, PlatformId,
-    RuntimeMode, SessionDescriptor, CONTRACT_SCHEMA_VERSION,
+    BackendError, BackendErrorCode, BackendId, BrowserTestPolicy, CapabilityId, CapabilitySnapshot,
+    PlatformId, RuntimeMode, SessionDescriptor, CONTRACT_SCHEMA_VERSION,
 };
 use crate::downloads::DownloadManager;
 use crate::models::{CommandError, CommandErrorCode, DownloadProgress};
@@ -20,6 +20,11 @@ const EXIT_INVALID_REQUEST: i32 = 2;
 const EXIT_BACKEND_UNAVAILABLE: i32 = 3;
 const DEFAULT_TIMEOUT_SECONDS: u64 = 300;
 const MAX_TIMEOUT_SECONDS: u64 = 3_600;
+const DEFAULT_BROWSER_NAVIGATION_TIMEOUT_MS: u64 = 30_000;
+const DEFAULT_BROWSER_ACTION_TIMEOUT_MS: u64 = 10_000;
+const DEFAULT_BROWSER_ASSERTION_TIMEOUT_MS: u64 = 5_000;
+const DEFAULT_BROWSER_ARTIFACT_MIB: u64 = 128;
+const DEFAULT_BROWSER_RETENTION_RUNS: u32 = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputFormat {
@@ -77,6 +82,17 @@ enum CliCommand {
         session_id: String,
         cursor: Option<String>,
     },
+    BrowserDoctor,
+    BrowserInstallChromium,
+    BrowserTest {
+        base_url: Option<String>,
+        runtime_session_id: Option<String>,
+        suite_path: String,
+        policy: BrowserTestPolicy,
+    },
+    BrowserArtifacts {
+        session_id: String,
+    },
     ProjectList,
     ProjectVersion {
         project_id: String,
@@ -109,6 +125,10 @@ impl CliCommand {
             Self::RuntimeUrl { .. } => "runtime.url",
             Self::RuntimeStop { .. } => "runtime.stop",
             Self::RuntimeLogs { .. } => "runtime.logs",
+            Self::BrowserDoctor => "browser.doctor",
+            Self::BrowserInstallChromium => "browser.install",
+            Self::BrowserTest { .. } => "browser.test",
+            Self::BrowserArtifacts { .. } => "browser.artifacts",
             Self::ProjectList => "project.list",
             Self::ProjectVersion { .. } => "project.version",
             Self::OperationList => "operation.list",
@@ -313,6 +333,69 @@ async fn run_command(
     if matches!(command, CliCommand::Capabilities) {
         return CommandOutput::data(capability_snapshot);
     }
+    let browser_capability = match command {
+        CliCommand::BrowserDoctor
+        | CliCommand::BrowserInstallChromium
+        | CliCommand::BrowserTest { .. } => Some(CapabilityId::BrowserTest),
+        CliCommand::BrowserArtifacts { .. } => Some(CapabilityId::BrowserArtifacts),
+        _ => None,
+    };
+    if let Some(capability_id) = browser_capability {
+        let capability = capability_snapshot
+            .manifest
+            .capability(capability_id)
+            .ok_or_else(|| {
+                CommandError::from(BackendError::unsupported(
+                    capability_snapshot.manifest.backend,
+                    capability_id,
+                ))
+            })?;
+        if !capability_snapshot.manifest.supports(capability_id) {
+            return Err(CommandError::from(BackendError::unsupported_with_reason(
+                capability_snapshot.manifest.backend,
+                capability_id,
+                capability.limitation.clone().unwrap_or_else(|| {
+                    crate::contracts::CapabilityLimitation::not_implemented(capability_id)
+                }),
+            )));
+        }
+    }
+    match command {
+        CliCommand::BrowserDoctor => {
+            return CommandOutput::data(
+                crate::application::browser_doctor(capability_snapshot.manifest.backend).await?,
+            );
+        }
+        CliCommand::BrowserInstallChromium => {
+            return CommandOutput::data(
+                crate::application::browser_install_chromium(capability_snapshot.manifest.backend)
+                    .await?,
+            );
+        }
+        CliCommand::BrowserTest {
+            base_url: Some(base_url),
+            runtime_session_id: None,
+            suite_path,
+            policy,
+        } => {
+            return CommandOutput::data(
+                crate::application::browser_test_url(
+                    capability_snapshot.manifest.backend,
+                    base_url,
+                    suite_path,
+                    policy.clone(),
+                )
+                .await?,
+            );
+        }
+        CliCommand::BrowserArtifacts { session_id } => {
+            return CommandOutput::data(crate::application::browser_artifacts(
+                capability_snapshot.manifest.backend,
+                session_id,
+            )?);
+        }
+        _ => {}
+    }
     let paths = AppPaths::discover_for_cli().map_err(|_| {
         CommandError::new(
             CommandErrorCode::ConfigLoadFailed,
@@ -322,6 +405,9 @@ async fn run_command(
     let config = crate::application::load_config(&paths)?;
     match command {
         CliCommand::Capabilities => unreachable!("handled without configuration"),
+        CliCommand::BrowserDoctor | CliCommand::BrowserInstallChromium => {
+            unreachable!("handled without configuration")
+        }
         CliCommand::EnvironmentStatus => {
             CommandOutput::data(crate::application::environment_status(&config).await)
         }
@@ -494,6 +580,24 @@ async fn run_command(
             output.runtime_session_id = Some(session_id.clone());
             Ok(output)
         }
+        CliCommand::BrowserTest {
+            base_url: None,
+            runtime_session_id: Some(runtime_session_id),
+            suite_path,
+            policy,
+        } => CommandOutput::data(
+            crate::application::browser_test_runtime(
+                &config,
+                runtime_session_id,
+                suite_path,
+                policy.clone(),
+            )
+            .await?,
+        ),
+        CliCommand::BrowserTest { .. } => {
+            unreachable!("browser test target invariant was validated")
+        }
+        CliCommand::BrowserArtifacts { .. } => unreachable!("handled without configuration"),
         CliCommand::ProjectList => CommandOutput::data(crate::application::projects(&config)?),
         CliCommand::ProjectVersion { project_id } => {
             let project = crate::application::project(&config, project_id)?;
@@ -671,7 +775,7 @@ fn session_keeper_dispatch(arguments: &[OsString]) -> i32 {
     }
     let successful = response.ok;
     let serialized = serde_json::to_vec(&response).unwrap_or_else(|_| {
-        br#"{"ok":false,"error":{"schemaVersion":"2.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
+        br#"{"ok":false,"error":{"schemaVersion":"3.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
     });
     let written = std::io::stdout()
         .write_all(&serialized)
@@ -1191,6 +1295,7 @@ fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
         },
         Some("studio") => parse_studio_command(&values[1..]),
         Some("runtime") => parse_runtime_command(&values[1..]),
+        Some("browser") => parse_browser_command(&values[1..]),
         Some("project") => match values.get(1).map(String::as_str) {
             Some("list") if values.len() == 2 => Ok(CliCommand::ProjectList),
             Some("version") => Ok(CliCommand::ProjectVersion {
@@ -1216,6 +1321,88 @@ fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
             "capabilities does not accept positional arguments",
         )),
         _ => Err(BackendError::invalid_request("unknown headless command")),
+    }
+}
+
+fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> {
+    match values.first().map(String::as_str) {
+        Some("doctor") if values.len() == 1 => Ok(CliCommand::BrowserDoctor),
+        Some("install")
+            if values.get(1).map(String::as_str) == Some("chromium") && values.len() == 2 =>
+        {
+            Ok(CliCommand::BrowserInstallChromium)
+        }
+        Some("artifacts") => Ok(CliCommand::BrowserArtifacts {
+            session_id: required_option(&values[1..], "--session-id")?,
+        }),
+        Some("test") => {
+            let (options, flags) = parse_options(
+                &values[1..],
+                &[
+                    "--base-url",
+                    "--runtime-session-id",
+                    "--suite-path",
+                    "--navigation-timeout-ms",
+                    "--action-timeout-ms",
+                    "--assertion-timeout-ms",
+                    "--max-artifact-mib",
+                    "--retention-runs",
+                ],
+                &[
+                    "--fail-on-console-error",
+                    "--fail-on-network-failure",
+                    "--record-video",
+                    "--record-har",
+                ],
+            )?;
+            let base_url = options.get("--base-url").cloned();
+            let runtime_session_id = options.get("--runtime-session-id").cloned();
+            if base_url.is_some() == runtime_session_id.is_some() {
+                return Err(BackendError::invalid_request(
+                    "exactly one of --base-url or --runtime-session-id is required",
+                ));
+            }
+            let policy = BrowserTestPolicy {
+                navigation_timeout_milliseconds: options
+                    .get("--navigation-timeout-ms")
+                    .map(|value| parse_browser_timeout(value))
+                    .transpose()?
+                    .unwrap_or(DEFAULT_BROWSER_NAVIGATION_TIMEOUT_MS),
+                action_timeout_milliseconds: options
+                    .get("--action-timeout-ms")
+                    .map(|value| parse_browser_timeout(value))
+                    .transpose()?
+                    .unwrap_or(DEFAULT_BROWSER_ACTION_TIMEOUT_MS),
+                assertion_timeout_milliseconds: options
+                    .get("--assertion-timeout-ms")
+                    .map(|value| parse_browser_timeout(value))
+                    .transpose()?
+                    .unwrap_or(DEFAULT_BROWSER_ASSERTION_TIMEOUT_MS),
+                fail_on_console_error: flags.contains("--fail-on-console-error"),
+                fail_on_network_failure: flags.contains("--fail-on-network-failure"),
+                record_video: flags.contains("--record-video"),
+                record_har: flags.contains("--record-har"),
+                max_artifact_bytes: options
+                    .get("--max-artifact-mib")
+                    .map(|value| parse_artifact_mebibytes(value))
+                    .transpose()?
+                    .unwrap_or(DEFAULT_BROWSER_ARTIFACT_MIB * 1024 * 1024),
+                retention_runs: options
+                    .get("--retention-runs")
+                    .map(|value| parse_retention_runs(value))
+                    .transpose()?
+                    .unwrap_or(DEFAULT_BROWSER_RETENTION_RUNS),
+            };
+            Ok(CliCommand::BrowserTest {
+                base_url,
+                runtime_session_id,
+                suite_path: required_map_option(&options, "--suite-path")?,
+                policy,
+            })
+        }
+        _ => Err(BackendError::invalid_request(
+            "expected browser doctor, install chromium, test, or artifacts",
+        )),
     }
 }
 
@@ -1427,6 +1614,43 @@ fn parse_timeout(value: &str) -> Result<u64, BackendError> {
         })
 }
 
+fn parse_browser_timeout(value: &str) -> Result<u64, BackendError> {
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|milliseconds| (100..=300_000).contains(milliseconds))
+        .ok_or_else(|| {
+            BackendError::invalid_request(
+                "browser timeout must be an integer from 100 through 300000 milliseconds",
+            )
+        })
+}
+
+fn parse_artifact_mebibytes(value: &str) -> Result<u64, BackendError> {
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|mebibytes| (1..=512).contains(mebibytes))
+        .and_then(|mebibytes| mebibytes.checked_mul(1024 * 1024))
+        .ok_or_else(|| {
+            BackendError::invalid_request(
+                "browser artifact limit must be an integer from 1 through 512 MiB",
+            )
+        })
+}
+
+fn parse_retention_runs(value: &str) -> Result<u32, BackendError> {
+    value
+        .parse::<u32>()
+        .ok()
+        .filter(|runs| (1..=100).contains(runs))
+        .ok_or_else(|| {
+            BackendError::invalid_request(
+                "browser retention must be an integer from 1 through 100 runs",
+            )
+        })
+}
+
 fn parse_runtime_mode(value: &str) -> Result<RuntimeMode, BackendError> {
     match value {
         "portable" => Ok(RuntimeMode::Portable),
@@ -1486,8 +1710,15 @@ fn success_execution(
         }
     }
     stdout.push_str(&json_line(&envelope));
+    let exit_code = if command == "browser.test"
+        && output.data.get("outcome").and_then(Value::as_str) == Some("failed")
+    {
+        EXIT_OPERATION_FAILED
+    } else {
+        EXIT_OK
+    };
     CliExecution {
-        exit_code: EXIT_OK,
+        exit_code,
         stdout,
         stderr: String::new(),
     }
@@ -1703,7 +1934,7 @@ fn json_line<T: Serialize>(value: &T) -> String {
 fn is_headless_command(argument: Option<&OsString>) -> bool {
     matches!(
         argument.and_then(|value| value.to_str()),
-        Some("capabilities" | "env" | "studio" | "runtime" | "project" | "operation")
+        Some("capabilities" | "env" | "studio" | "runtime" | "browser" | "project" | "operation")
     )
 }
 
@@ -1713,6 +1944,7 @@ fn bootstrap_command_name(arguments: &[OsString]) -> &'static str {
         Some("env") => "env",
         Some("studio") => "studio",
         Some("runtime") => "runtime",
+        Some("browser") => "browser",
         Some("project") => "project",
         Some("operation") => "operation",
         _ => "unknown",
@@ -1818,6 +2050,29 @@ mod tests {
             args(&["operation", "list"]),
             args(&["operation", "status", "--operation-id", "install-11.12.2-a"]),
             args(&["operation", "retry", "--operation-id", "install-11.12.2-a"]),
+            args(&["browser", "doctor"]),
+            args(&["browser", "install", "chromium"]),
+            args(&[
+                "browser",
+                "test",
+                "--base-url",
+                "http://127.0.0.1:8080",
+                "--suite-path",
+                "tests/browser/smoke.browser.json",
+                "--fail-on-console-error",
+                "--fail-on-network-failure",
+                "--record-har",
+                "--max-artifact-mib",
+                "64",
+                "--retention-runs",
+                "5",
+            ]),
+            args(&[
+                "browser",
+                "artifacts",
+                "--session-id",
+                &format!("session_{}", "c".repeat(32)),
+            ]),
         ];
         for arguments in valid {
             parse(&arguments).expect("valid CLI shape");
@@ -1837,6 +2092,24 @@ mod tests {
             args(&["env", "ensure", "--json", "--ndjson"]),
             args(&["operation", "cancel", "--operation-id", "x"]),
             args(&["studio", "list", "--timeout-seconds", "0"]),
+            args(&[
+                "browser",
+                "test",
+                "--base-url",
+                "http://127.0.0.1:8080",
+                "--runtime-session-id",
+                &format!("runtime_{}", "d".repeat(32)),
+                "--suite-path",
+                "suite.json",
+            ]),
+            args(&[
+                "browser",
+                "test",
+                "--suite-path",
+                "suite.json",
+                "--navigation-timeout-ms",
+                "99",
+            ]),
         ] {
             let error = parse(&arguments).expect_err("invalid CLI shape");
             assert_eq!(error.code, BackendErrorCode::InvalidRequest);

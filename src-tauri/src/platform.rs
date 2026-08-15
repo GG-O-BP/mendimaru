@@ -3,9 +3,9 @@ pub mod backend;
 mod windows_native;
 
 use crate::contracts::{
-    BackendId, BackendResult, CapabilityId, CapabilityManifest, CapabilitySnapshot,
-    RuntimeBuildRequest, RuntimeBuildResult, RuntimeLogBatch, RuntimeStartRequest, RuntimeStatus,
-    StudioSessionStatus,
+    ArtifactDescriptor, BackendId, BackendResult, BrowserTestRequest, BrowserTestSummary,
+    CapabilityId, CapabilityManifest, CapabilitySnapshot, RuntimeBuildRequest, RuntimeBuildResult,
+    RuntimeLogBatch, RuntimeStartRequest, RuntimeStatus, StudioSessionStatus,
 };
 use crate::models::{
     AppConfig, ContainerStatus, EnvironmentDiagnostic, EnvironmentDiagnosticAction,
@@ -172,6 +172,22 @@ pub async fn runtime_logs(
 ) -> BackendResult<RuntimeLogBatch> {
     backend::active_backend(config, None)?
         .logs(session_id, cursor)
+        .await
+}
+
+pub async fn run_browser_test(
+    config: &AppConfig,
+    request: &BrowserTestRequest,
+) -> BackendResult<BrowserTestSummary> {
+    backend::active_backend(config, None)?.test(request).await
+}
+
+pub async fn browser_artifacts(
+    config: &AppConfig,
+    session_id: &str,
+) -> BackendResult<Vec<ArtifactDescriptor>> {
+    backend::active_backend(config, None)?
+        .artifacts(session_id)
         .await
 }
 

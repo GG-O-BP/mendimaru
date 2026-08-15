@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "command", "event", "sessionId", "progress"],
   "properties": {
-    "schemaVersion": { "const": "2.0.0" },
+    "schemaVersion": { "const": "3.0.0" },
     "command": { "enum": ["studio.install", "operation.retry"] },
     "event": { "const": "progress" },
     "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },

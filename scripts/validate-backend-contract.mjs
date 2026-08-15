@@ -11,6 +11,8 @@ const schemaFiles = [
   "schemas/cli-response.schema.json",
   "schemas/cli-event.schema.json",
   "schemas/runtime.schema.json",
+  "schemas/browser-suite.schema.json",
+  "schemas/browser.schema.json",
 ];
 const schemas = schemaFiles.map((path) =>
   JSON.parse(fs.readFileSync(path, "utf8")),
@@ -44,7 +46,7 @@ const sessionId = `session_${"ab".repeat(16)}`;
 validate(
   schemas[2].$id,
   {
-    schemaVersion: "2.0.0",
+    schemaVersion: "3.0.0",
     sessionId,
     createdAt: snapshot.capturedAt,
     state: "created",
@@ -55,7 +57,7 @@ validate(
 validate(
   schemas[3].$id,
   {
-    schemaVersion: "2.0.0",
+    schemaVersion: "3.0.0",
     artifactId: `artifact_${"cd".repeat(16)}`,
     sessionId,
     backend: manifest.backend,
@@ -67,7 +69,7 @@ validate(
 validate(
   schemas[1].$id,
   {
-    schemaVersion: "2.0.0",
+    schemaVersion: "3.0.0",
     code: "unsupported_capability",
     message: "runtime.url is not implemented by this backend",
     backend: manifest.backend,
@@ -85,7 +87,7 @@ const parseErrorEnvelope = {
   command: "studio",
   ok: false,
   error: {
-    schemaVersion: "2.0.0",
+    schemaVersion: "3.0.0",
     code: "invalid_request",
     message: "the command request is invalid",
     backend: manifest.backend,
@@ -97,7 +99,7 @@ validate(schemas[4].$id, parseErrorEnvelope, "CLI parse-error envelope");
 validate(
   schemas[4].$id,
   {
-    schemaVersion: "2.0.0",
+    schemaVersion: "3.0.0",
     command: "unknown",
     ok: false,
     platform: manifest.hostPlatform,
@@ -105,7 +107,7 @@ validate(
     sessionId: "session_unavailable",
     capabilitySnapshot: null,
     error: {
-      schemaVersion: "2.0.0",
+      schemaVersion: "3.0.0",
       code: "operation_failed",
       message: "the command could not be completed",
       backend: manifest.backend,
@@ -128,7 +130,7 @@ validate(
 validate(
   schemas[5].$id,
   {
-    schemaVersion: "2.0.0",
+    schemaVersion: "3.0.0",
     command: "studio.install",
     event: "progress",
     sessionId,
@@ -147,7 +149,7 @@ validate(
 const runtimeSessionId = `runtime_${"12".repeat(16)}`;
 const runtimeBuildSessionId = `session_${"56".repeat(16)}`;
 const runtimeLogArtifact = {
-  schemaVersion: "2.0.0",
+  schemaVersion: "3.0.0",
   artifactId: `artifact_${"34".repeat(16)}`,
   sessionId: runtimeSessionId,
   backend: manifest.backend,
@@ -157,7 +159,7 @@ const runtimeLogArtifact = {
   location: `mendimaru-cache://artifact_${"34".repeat(16)}`,
 };
 const buildArtifact = (suffix, kind, mediaType) => ({
-  schemaVersion: "2.0.0",
+  schemaVersion: "3.0.0",
   artifactId: `artifact_${suffix.repeat(16)}`,
   sessionId: runtimeBuildSessionId,
   backend: manifest.backend,
@@ -193,10 +195,11 @@ validate(
 validate(
   schemas[6].$id,
   {
-    schemaVersion: "2.0.0",
+    schemaVersion: "3.0.0",
     sessionId: runtimeSessionId,
     backend: manifest.backend,
     mode: "portable",
+    runtimeVersion: "11.12.2",
     state: "ready",
     httpReady: true,
     processId: 4242,
@@ -209,7 +212,7 @@ validate(
 validate(
   schemas[6].$id,
   {
-    schemaVersion: "2.0.0",
+    schemaVersion: "3.0.0",
     sessionId: runtimeSessionId,
     backend: "linux-winboat",
     mode: "studio-run-locally",
@@ -233,6 +236,159 @@ validate(
     truncated: false,
   },
   "Portable Runtime log batch",
+);
+
+const browserSessionId = `session_${"90".repeat(16)}`;
+const browserArtifact = {
+  schemaVersion: "3.0.0",
+  artifactId: `artifact_${"91".repeat(16)}`,
+  sessionId: browserSessionId,
+  backend: manifest.backend,
+  kind: "browser-report",
+  createdAt: snapshot.capturedAt,
+  mediaType: "text/html; charset=utf-8",
+  location: `mendimaru-cache://artifact_${"91".repeat(16)}`,
+  sha256: "92".repeat(32),
+  sizeBytes: 1024,
+};
+validate(
+  `${schemas[8].$id}#/$defs/doctor`,
+  {
+    schemaVersion: "3.0.0",
+    runnerVersion: "1.0.0",
+    ready: true,
+    nodeVersion: "22.22.2",
+    minimumNodeVersion: "22.22.2",
+    nodeSupported: true,
+    playwrightVersion: "1.62.1",
+    chromium: {
+      installed: true,
+      launchable: true,
+      version: "151.0.7922.34",
+    },
+    downloadPolicy: "explicit-only",
+  },
+  "browser doctor",
+);
+validate(
+  schemas[7].$id,
+  {
+    schemaVersion: "1.0.0",
+    name: "Mendix fixture smoke",
+    beforeEach: [
+      { action: "goto", path: "/" },
+      {
+        action: "fill",
+        locator: { by: "label", value: "Password" },
+        valueFromEnv: "MENDIMARU_TEST_PASSWORD",
+      },
+    ],
+    tests: [
+      {
+        name: "widget interaction",
+        steps: [
+          {
+            action: "click",
+            locator: { by: "mendixName", value: "SaveButton" },
+          },
+          {
+            action: "expectText",
+            locator: { by: "role", role: "status", name: "Result" },
+            value: "Saved",
+          },
+        ],
+      },
+    ],
+  },
+  "browser suite",
+);
+reject(
+  schemas[7].$id,
+  {
+    schemaVersion: "1.0.0",
+    name: "Ambiguous credential source",
+    tests: [
+      {
+        name: "invalid fill",
+        steps: [
+          {
+            action: "fill",
+            locator: { by: "label", value: "Password" },
+            value: "must-not-be-accepted",
+            valueFromEnv: "MENDIMARU_TEST_PASSWORD",
+            sensitive: true,
+          },
+        ],
+      },
+    ],
+  },
+  "browser suite with two value sources",
+);
+validate(
+  `${schemas[8].$id}#/$defs/summary`,
+  {
+    schemaVersion: "3.0.0",
+    sessionId: browserSessionId,
+    outcome: "passed",
+    passed: 1,
+    failed: 0,
+    skipped: 0,
+    startedAt: snapshot.capturedAt,
+    finishedAt: snapshot.capturedAt,
+    browserName: "chromium",
+    browserVersion: "151.0.7922.34",
+    playwrightVersion: "1.62.1",
+    tests: [
+      {
+        name: "widget interaction",
+        outcome: "passed",
+        completedSteps: 2,
+        totalSteps: 2,
+      },
+    ],
+    artifacts: [browserArtifact],
+  },
+  "browser summary",
+);
+validate(
+  `${schemas[8].$id}#/$defs/manifest`,
+  {
+    schemaVersion: "3.0.0",
+    sessionId: browserSessionId,
+    createdAt: snapshot.capturedAt,
+    hostPlatform: "linux",
+    studioPlatform: "windows",
+    runtimePlatform: "windows",
+    backend: "linux-winboat",
+    runtimeMode: "studio-run-locally",
+    studioVersion: "11.12.2",
+    runtimeVersion: "11.12.2",
+    browser: { name: "chromium", version: "151.0.7922.34" },
+    playwrightVersion: "1.62.1",
+    runnerVersion: "1.0.0",
+    suite: { name: "Mendix fixture smoke", tests: 1 },
+    policy: {
+      navigationTimeoutMilliseconds: 30000,
+      actionTimeoutMilliseconds: 10000,
+      assertionTimeoutMilliseconds: 5000,
+      failOnConsoleError: true,
+      failOnNetworkFailure: true,
+      recordVideo: false,
+      recordHar: false,
+      maxArtifactBytes: 134217728,
+      retentionRuns: 20,
+    },
+    artifacts: [
+      {
+        file: "report.html",
+        kind: "browser-report",
+        mediaType: "text/html; charset=utf-8",
+        sha256: "92".repeat(32),
+        sizeBytes: 1024,
+      },
+    ],
+  },
+  "browser artifact manifest",
 );
 
 const expectedIds = new Set([
@@ -313,6 +469,17 @@ if (portableHost) {
   assert(!("runtimeMode" in manifest), "unsupported host has runtimeMode");
   assert(!("runtimeModes" in manifest), "unsupported host has runtimeModes");
 }
+const browserCapabilities = manifest.capabilities.filter(({ id }) =>
+  id.startsWith("browser."),
+);
+assert(
+  browserCapabilities.every(({ status }) =>
+    manifest.backend === "linux-winboat"
+      ? status === "supported"
+      : status === "unsupported",
+  ),
+  "Browser capability status does not match the Linux milestone",
+);
 for (const leaked of [
   "apiUrl",
   "rdpHost",
@@ -344,6 +511,14 @@ function validate(id, value, label) {
     throw new Error(
       `${label} failed schema validation:\n${ajv.errorsText(validator.errors, { separator: "\n" })}`,
     );
+  }
+}
+
+function reject(id, value, label) {
+  const validator = ajv.getSchema(id);
+  assert(validator, `schema was not registered: ${id}`);
+  if (validator(value)) {
+    throw new Error(`${label} unexpectedly passed schema validation`);
   }
 }
 

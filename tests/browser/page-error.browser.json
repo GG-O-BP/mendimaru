@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "Mendix page error fixture",
+  "beforeEach": [
+    { "action": "goto", "path": "/" },
+    {
+      "action": "fill",
+      "locator": { "by": "label", "value": "Username" },
+      "value": "fixture-user"
+    },
+    {
+      "action": "fill",
+      "locator": { "by": "label", "value": "Password" },
+      "valueFromEnv": "MENDIMARU_TEST_PASSWORD"
+    },
+    {
+      "action": "click",
+      "locator": { "by": "role", "role": "button", "name": "Sign in" }
+    }
+  ],
+  "tests": [
+    {
+      "name": "uncaught page errors always fail",
+      "steps": [
+        {
+          "action": "click",
+          "locator": { "by": "testId", "value": "page-error" }
+        },
+        {
+          "action": "expectText",
+          "locator": { "by": "role", "role": "status", "name": "Result" },
+          "value": "Page error observed"
+        }
+      ]
+    }
+  ]
+}

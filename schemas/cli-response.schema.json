@@ -14,7 +14,7 @@
     "capabilitySnapshot"
   ],
   "properties": {
-    "schemaVersion": { "const": "2.0.0" },
+    "schemaVersion": { "const": "3.0.0" },
     "command": {
       "enum": [
         "capabilities",
@@ -36,6 +36,11 @@
         "runtime.url",
         "runtime.stop",
         "runtime.logs",
+        "browser",
+        "browser.doctor",
+        "browser.install",
+        "browser.test",
+        "browser.artifacts",
         "project",
         "project.list",
         "project.version",

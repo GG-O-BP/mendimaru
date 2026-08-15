@@ -1,8 +1,9 @@
 use crate::app_paths::AppPaths;
 use crate::contracts::{
-    BackendError, BackendErrorCode, CapabilityId, CapabilityLimitation, RuntimeBuildRequest,
-    RuntimeBuildResult, RuntimeLogBatch, RuntimeMode, RuntimeStartRequest, RuntimeStatus,
-    StudioSessionStatus,
+    ArtifactDescriptor, BackendError, BackendErrorCode, BackendId, BrowserRuntimeContext,
+    BrowserTestPolicy, BrowserTestRequest, BrowserTestSummary, CapabilityId, CapabilityLimitation,
+    RuntimeBuildRequest, RuntimeBuildResult, RuntimeLogBatch, RuntimeMode, RuntimeStartRequest,
+    RuntimeStatus, StudioSessionStatus,
 };
 use crate::downloads::{DownloadManager, InstallError};
 use crate::models::{
@@ -328,6 +329,125 @@ pub(crate) async fn runtime_logs(
     crate::platform::runtime_logs(config, session_id, cursor)
         .await
         .map_err(CommandError::from)
+}
+
+pub(crate) async fn browser_doctor(
+    backend: BackendId,
+) -> ApplicationResult<crate::browser::BrowserDoctor> {
+    crate::browser::doctor(backend)
+        .await
+        .map_err(CommandError::from)
+}
+
+pub(crate) async fn browser_install_chromium(
+    backend: BackendId,
+) -> ApplicationResult<crate::browser::BrowserDoctor> {
+    crate::browser::install_chromium(backend)
+        .await
+        .map_err(CommandError::from)
+}
+
+pub(crate) async fn browser_test_url(
+    backend: BackendId,
+    base_url: &str,
+    suite_path: &str,
+    policy: BrowserTestPolicy,
+) -> ApplicationResult<BrowserTestSummary> {
+    let manifest =
+        crate::platform::capability_manifest(Some(backend)).map_err(CommandError::from)?;
+    let request = BrowserTestRequest {
+        session_id: crate::contracts::secure_identifier("session")?,
+        base_url: normalize_browser_url(base_url)?,
+        suite_path: suite_path.to_string(),
+        runtime_context: BrowserRuntimeContext {
+            host_platform: manifest.host_platform,
+            studio_platform: manifest.studio_platform,
+            runtime_platform: None,
+            backend: manifest.backend,
+            runtime_mode: RuntimeMode::ExternalUrl,
+            studio_version: None,
+            runtime_version: None,
+        },
+        policy,
+    };
+    crate::browser::test(&request, backend)
+        .await
+        .map_err(CommandError::from)
+}
+
+pub(crate) async fn browser_test_runtime(
+    config: &AppConfig,
+    runtime_session_id: &str,
+    suite_path: &str,
+    policy: BrowserTestPolicy,
+) -> ApplicationResult<BrowserTestSummary> {
+    let manifest = crate::platform::capability_manifest(None).map_err(CommandError::from)?;
+    let status = runtime_status(config, runtime_session_id).await?;
+    if !status.http_ready {
+        return Err(precondition_error(
+            CapabilityId::BrowserTest,
+            "the Runtime session is not HTTP-ready",
+            true,
+        ));
+    }
+    let base_url = runtime_url(config, runtime_session_id).await?;
+    let runtime_platform = match status.mode {
+        RuntimeMode::Portable => Some(manifest.host_platform),
+        RuntimeMode::StudioRunLocally => Some(manifest.studio_platform),
+        RuntimeMode::ExternalUrl => None,
+    };
+    let studio_version = if let Some(session_id) = status.studio_session_id.as_deref() {
+        studio_session(config, session_id)
+            .await
+            .ok()
+            .map(|session| session.version)
+    } else {
+        None
+    };
+    let runtime_version = status.runtime_version.clone().or_else(|| {
+        (status.mode == RuntimeMode::StudioRunLocally)
+            .then(|| studio_version.clone())
+            .flatten()
+    });
+    let request = BrowserTestRequest {
+        session_id: crate::contracts::secure_identifier("session")?,
+        base_url,
+        suite_path: suite_path.to_string(),
+        runtime_context: BrowserRuntimeContext {
+            host_platform: manifest.host_platform,
+            studio_platform: manifest.studio_platform,
+            runtime_platform,
+            backend: manifest.backend,
+            runtime_mode: status.mode,
+            studio_version,
+            runtime_version,
+        },
+        policy,
+    };
+    crate::platform::run_browser_test(config, &request)
+        .await
+        .map_err(CommandError::from)
+}
+
+pub(crate) fn browser_artifacts(
+    backend: BackendId,
+    session_id: &str,
+) -> ApplicationResult<Vec<ArtifactDescriptor>> {
+    crate::browser::artifacts(session_id, backend).map_err(CommandError::from)
+}
+
+fn normalize_browser_url(value: &str) -> ApplicationResult<String> {
+    let url = reqwest::Url::parse(value)
+        .map_err(|_| invalid_request("the browser base URL is invalid"))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(invalid_request("the browser base URL is unsafe"));
+    }
+    Ok(url.to_string())
 }
 
 pub(crate) async fn launch(

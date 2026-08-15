@@ -150,6 +150,8 @@ mendimaru capabilities --json
 
 インストール済みの `mendimaru` 実行ファイルは、Tauri やダイアログを起動せずに、環境の確認・準備、Studio Pro の正確なバージョンの一覧・インストール・削除・起動、Studio セッションの照会・停止、opaque project ID の解決、永続 operation の照会・再試行を実行できます。結果 JSON は stdout、エラー JSON は stderr に分離され、`--ndjson` は構造化された進捗イベントを追加します。`--timeout-seconds` と `Ctrl+C` は共有 operation 境界でキャンセルし、中断された処理は operation ID で再照会できます。全コマンド、終了コード、schema、安全規則は [Headless CLI contract](docs/headless-cli.md) を参照してください。
 
+Linux の `browser test` は、明示 URL、Portable Runtime session、または WinBoat Run Locally session に対して、同じ宣言型 Playwright/Chromium suite を実行します。browser の download は明示操作に限定され、失敗時には mask 済み HTML、DOM/accessibility、screenshot、trace、console、network 証跡を上限付き retention policy で保存します。詳細は [browser testing guide](docs/browser-testing.md) を参照してください。
+
 ## 開発
 
 開発には Node.js 22.22.2 以降、Rust、ホスト向け Tauri システム依存パッケージが必要です。Linux 統合には WinBoat、Docker または Podman、FreeRDP 3、Chrome／Chromium が追加で必要で、Windows の一覧取得には Edge または Chrome を使用します。
@@ -163,6 +165,7 @@ npm run tauri dev
 
 ```bash
 npm run check
+npm run test:browser
 npm run tauri build
 ```
 

@@ -1,5 +1,6 @@
 mod app_paths;
 mod application;
+mod browser;
 pub mod cli;
 mod commands;
 #[cfg_attr(target_os = "windows", allow(dead_code))]

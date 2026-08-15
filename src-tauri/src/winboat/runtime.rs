@@ -885,6 +885,7 @@ fn status_from_record(record: &SessionRecord) -> RuntimeStatus {
         session_id: record.session_id.clone(),
         backend: record.backend,
         mode: record.mode,
+        runtime_version: None,
         state: record.state,
         process_id: record.studio_process_id,
         started_at: Some(record.started_at),

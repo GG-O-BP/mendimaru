@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "Mendix storage-state authentication fixture",
+  "storageStateEnv": "MENDIMARU_TEST_STORAGE_STATE",
+  "tests": [
+    {
+      "name": "authenticated storage enters the representative page",
+      "steps": [
+        { "action": "goto", "path": "/storage-auth" },
+        {
+          "action": "expectVisible",
+          "locator": {
+            "by": "role",
+            "role": "heading",
+            "name": "Storage authenticated"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -4,7 +4,7 @@
   "title": "Mendimaru Runtime contracts",
   "type": "object",
   "properties": {
-    "schemaVersion": { "const": "2.0.0" }
+    "schemaVersion": { "const": "3.0.0" }
   },
   "oneOf": [
     { "$ref": "#/$defs/buildResult" },
@@ -57,7 +57,7 @@
         "httpReady"
       ],
       "properties": {
-        "schemaVersion": { "const": "2.0.0" },
+        "schemaVersion": { "const": "3.0.0" },
         "sessionId": {
           "type": "string",
           "pattern": "^runtime_[0-9a-f]{32}$"
@@ -68,6 +68,7 @@
         "mode": {
           "enum": ["portable", "studio-run-locally", "external-url"]
         },
+        "runtimeVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
         "state": {
           "enum": ["starting", "running", "ready", "stopped", "failed"]
         },

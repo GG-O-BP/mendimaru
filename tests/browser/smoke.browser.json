@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "Mendix fixture smoke",
+  "beforeEach": [
+    { "action": "goto", "path": "/" },
+    {
+      "action": "fill",
+      "locator": { "by": "label", "value": "Username" },
+      "valueFromEnv": "MENDIMARU_TEST_USERNAME",
+      "sensitive": false
+    },
+    {
+      "action": "fill",
+      "locator": { "by": "label", "value": "Password" },
+      "valueFromEnv": "MENDIMARU_TEST_PASSWORD"
+    },
+    {
+      "action": "click",
+      "locator": { "by": "role", "role": "button", "name": "Sign in" }
+    },
+    {
+      "action": "expectVisible",
+      "locator": { "by": "role", "role": "heading", "name": "Task board" }
+    }
+  ],
+  "maskLocators": [{ "by": "testId", "value": "private-output" }],
+  "tests": [
+    {
+      "name": "login and update a Mendix widget",
+      "steps": [
+        {
+          "action": "fill",
+          "locator": { "by": "mendixName", "value": "TaskInput" },
+          "value": "Review order"
+        },
+        {
+          "action": "click",
+          "locator": { "by": "mendixName", "value": "AddTask" }
+        },
+        {
+          "action": "expectText",
+          "locator": { "by": "role", "role": "status", "name": "Result" },
+          "value": "Saved: Review order"
+        },
+        {
+          "action": "check",
+          "locator": { "by": "label", "value": "Done" }
+        },
+        {
+          "action": "expectValue",
+          "locator": { "by": "mendixName", "value": "TaskInput" },
+          "value": "Review order"
+        }
+      ]
+    }
+  ]
+}

@@ -262,6 +262,16 @@ fn capability_for(backend: BackendId, id: CapabilityId, architecture: &str) -> C
         return Capability::supported(id, required_permissions(backend, id));
     }
 
+    if backend == BackendId::LinuxWinboat
+        && matches!(architecture, "x86_64" | "aarch64")
+        && matches!(
+            id,
+            CapabilityId::BrowserTest | CapabilityId::BrowserArtifacts
+        )
+    {
+        return Capability::supported(id, required_permissions(backend, id));
+    }
+
     let mut limitation = CapabilityLimitation::not_implemented(id);
     if backend == BackendId::WindowsNative
         && !architecture_supported
@@ -360,6 +370,13 @@ fn required_permissions(backend: BackendId, id: CapabilityId) -> &'static [&'sta
             | CapabilityId::RuntimeStop
             | CapabilityId::RuntimeLogs,
         ) => &["loopback-bind", "java-runtime", "private-cache"],
+        (BackendId::LinuxWinboat, CapabilityId::BrowserTest) => &[
+            "network-access",
+            "node-runtime",
+            "private-cache",
+            "playwright-chromium",
+        ],
+        (BackendId::LinuxWinboat, CapabilityId::BrowserArtifacts) => &["private-cache"],
         (BackendId::MacNative, CapabilityId::StudioInstall)
         | (BackendId::MacNative, CapabilityId::StudioUninstall) => {
             &["macos-administrator-approval"]
@@ -599,7 +616,18 @@ impl RuntimeBackend for LinuxWinboatBackend<'_> {
 #[cfg(target_os = "linux")]
 impl UiAutomationBackend for LinuxWinboatBackend<'_> {}
 #[cfg(target_os = "linux")]
-impl BrowserBackend for LinuxWinboatBackend<'_> {}
+impl BrowserBackend for LinuxWinboatBackend<'_> {
+    fn test<'a>(
+        &'a self,
+        request: &'a BrowserTestRequest,
+    ) -> BackendFuture<'a, BrowserTestSummary> {
+        Box::pin(crate::browser::test(request, self.backend_id()))
+    }
+
+    fn artifacts<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, Vec<ArtifactDescriptor>> {
+        Box::pin(async move { crate::browser::artifacts(session_id, self.backend_id()) })
+    }
+}
 #[cfg(target_os = "linux")]
 impl PlatformBackend for LinuxWinboatBackend<'_> {}
 
@@ -951,7 +979,7 @@ mod tests {
     }
 
     #[test]
-    fn production_capabilities_match_the_implemented_studio_and_runtime_surface() {
+    fn production_capabilities_match_the_implemented_surface() {
         for backend in [BackendId::LinuxWinboat, BackendId::WindowsNative] {
             let manifest = manifest_for(backend, "x86_64");
             for capability in CapabilityId::ALL {
@@ -970,7 +998,11 @@ mod tests {
                         | CapabilityId::RuntimeUrl
                         | CapabilityId::RuntimeStop
                         | CapabilityId::RuntimeLogs
-                );
+                ) || (backend == BackendId::LinuxWinboat
+                    && matches!(
+                        capability,
+                        CapabilityId::BrowserTest | CapabilityId::BrowserArtifacts
+                    ));
                 assert_eq!(manifest.supports(capability), expected);
             }
             if backend == BackendId::LinuxWinboat {
