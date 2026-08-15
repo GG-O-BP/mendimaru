@@ -171,6 +171,8 @@ npm run tauri build
 
 Linux에서 `npm run test:e2e`는 고정 버전의 `tauri-driver`와 `WebKitWebDriver`를 통해 debug 실행 파일을 Vite 개발 URL에 연결합니다. 격리된 WinBoat/API/프로젝트 fixture로 실제 WebView, Tauri IPC, 온라인 앱 상태, 유휴 렌더링과 주요 화면 전환을 검증합니다. 드라이버 브리지는 `cargo install tauri-driver --version 2.0.6 --locked`로 설치하고 호스트에는 `WebKitWebDriver`도 있어야 합니다. `npm run test:app-flow`는 OS 경계를 모킹한 빠른 React 앱 흐름 테스트이고, `npm run test:browser`는 Mendimaru 데스크톱 셸이 아니라 Mendix Runtime 페이지를 테스트합니다. CI는 세 계층을 모두 통과시킨 뒤 Windows/Linux 테스트와 Windows MSI/NSIS 스모크 빌드를 수행합니다.
 
+실행 중인 실제 WinBoat에 대한 비파괴 RemoteApp 검증은 `npm run test:winboat-e2e`로 실행합니다. 이 테스트는 세션 조회와 만료된 세션 거부를 확인하며, 격리된 Xvfb 화면에서 백그라운드 PowerShell 창이 하나라도 노출되면 실패합니다. 호스트에는 `xvfb-run`, `xfwm4`, `wmctrl`이 필요합니다.
+
 전체 Rust 테스트는 레지스트리 파싱, 경로 격리, 파일 무결성, Windows 인자 인코딩, UAC/종료 코드 실패와 설치부터 제거까지의 fixture 수명주기를 검증합니다.
 
 Rust와 TypeScript가 공유하는 직렬화 enum 값은 `src/shared/contracts/enumValues.json`에서 관리합니다. TypeScript는 여기서 유니언 타입을 만들고, Rust 테스트는 계약 불일치를 차단합니다.

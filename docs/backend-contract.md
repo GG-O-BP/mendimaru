@@ -214,13 +214,15 @@ cargo test --manifest-path src-tauri/Cargo.toml \
 The test normalizes that exact version to absent, installs it through the common
 adapter, verifies all progress phases and exact-version detection, launches a
 real Studio window, uninstalls it officially, and verifies it is absent again.
-The non-destructive live session suite can run against an existing WinBoat VM:
+The non-destructive live session suite can run against an existing, online
+WinBoat VM:
 
 ```bash
-cargo test --manifest-path src-tauri/Cargo.toml \
-  winboat::sessions::tests::live_e2e_lists_sessions_and_rejects_an_ended_identity \
-  -- --ignored --exact --nocapture --test-threads=1
+npm run test:winboat-e2e
 ```
 
 It queries current-user sessions through the authenticated RemoteApp transport
 and verifies that reconnect and close both reject a stale PID/start-time pair.
+It also runs FreeRDP under Xvfb and an isolated window manager, failing if any
+background operation exposes a RAIL/PowerShell window. The host must provide
+`xvfb-run`, `xfwm4`, and `wmctrl`.

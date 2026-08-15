@@ -1,4 +1,4 @@
-use super::security;
+use super::{process::hidden_command, security};
 use crate::contracts::{
     StudioConnectionState, StudioProcessState, StudioReconnectUnavailable, StudioSessionStatus,
     CONTRACT_SCHEMA_VERSION,
@@ -8,7 +8,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 const WINDOWS_EPOCH_TICKS: i64 = 621_355_968_000_000_000;
 const TICKS_PER_SECOND: i64 = 10_000_000;
@@ -257,7 +257,7 @@ fn run_script(studios: &[StudioVersion], mode: SessionMode) -> Result<Vec<u8>, S
         SessionMode::Reconnect(identity) => ("reconnect", Some(identity)),
         SessionMode::Stop(identity) => ("stop", Some(identity)),
     };
-    let output = Command::new("powershell.exe")
+    let output = hidden_command("powershell.exe")
         .args([
             "-NoLogo",
             "-NoProfile",

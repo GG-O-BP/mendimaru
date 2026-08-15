@@ -1,8 +1,9 @@
+use super::process::hidden_command;
 use crate::models::{AppConfig, StudioVersion};
 use regex::Regex;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use winreg::enums::{
     HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
 };
@@ -424,7 +425,7 @@ fn version_from_path(path: &Path) -> Option<String> {
 }
 
 fn product_version(executable: &Path) -> Option<String> {
-    let output = Command::new("powershell.exe")
+    let output = hidden_command("powershell.exe")
         .args([
             "-NoLogo",
             "-NoProfile",

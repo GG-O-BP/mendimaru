@@ -27,7 +27,8 @@ use client::parse_studio_versions;
 use operation::{localize_windows_reason, parse_install_report};
 #[cfg(test)]
 use remote_app::{
-    encode_powershell_script, powershell_encoded_arguments, FREERDP_CERTIFICATE_POLICY,
+    encode_powershell_script, headless_powershell_arguments, powershell_encoded_arguments,
+    FREERDP_CERTIFICATE_POLICY, HEADLESS_CONSOLE_HOST, POWERSHELL_EXECUTABLE,
 };
 #[cfg(test)]
 use scripts::{install_script, launch_studio_script, uninstall_script};
@@ -40,11 +41,12 @@ use security::{secure_powershell_launcher, OperationSecurity};
 mod tests {
     use super::operation::{run_windows_operation, WindowsOperationRequest};
     use super::{
-        encode_powershell_script, install_script, install_studio, installed_versions,
-        launch_studio, launch_studio_script, launch_uninstaller, localize_windows_reason,
-        parse_install_report, parse_studio_versions, powershell_encoded_arguments,
-        reparse_probe_script, secure_powershell_launcher, security_probe_script, uninstall_script,
-        OperationSecurity, FREERDP_CERTIFICATE_POLICY,
+        encode_powershell_script, headless_powershell_arguments, install_script, install_studio,
+        installed_versions, launch_studio, launch_studio_script, launch_uninstaller,
+        localize_windows_reason, parse_install_report, parse_studio_versions,
+        powershell_encoded_arguments, reparse_probe_script, secure_powershell_launcher,
+        security_probe_script, uninstall_script, OperationSecurity, FREERDP_CERTIFICATE_POLICY,
+        HEADLESS_CONSOLE_HOST, POWERSHELL_EXECUTABLE,
     };
     use crate::{
         config,
@@ -375,23 +377,30 @@ mod tests {
             &security,
         );
         let encoded = encode_powershell_script(&launcher);
-        let arguments = powershell_encoded_arguments(&encoded);
+        let arguments = headless_powershell_arguments(&encoded);
 
         // TS_RAIL_ORDER_EXEC allows at most 16,000 bytes for Arguments.
         assert!(arguments.encode_utf16().count() * 2 < 16_000);
+        assert!(arguments.starts_with("--headless "));
+        assert!(arguments.contains(POWERSHELL_EXECUTABLE));
         assert!(arguments.contains("-EncodedCommand"));
         assert!(!arguments.contains("MainWindowHandle"));
         assert!(arguments.contains("ExecutionPolicy RemoteSigned"));
     }
 
     #[test]
-    fn windows_script_host_runs_private_copy_hidden_without_bypass() {
-        let arguments = powershell_encoded_arguments("QQA=");
+    fn windows_script_host_uses_headless_conhost_without_bypass() {
+        let powershell_arguments = powershell_encoded_arguments("QQA=");
+        let arguments = headless_powershell_arguments("QQA=");
+        assert_eq!(HEADLESS_CONSOLE_HOST, r"C:\Windows\System32\conhost.exe");
+        assert!(arguments.starts_with("--headless "));
+        assert!(arguments.contains(POWERSHELL_EXECUTABLE));
         assert!(arguments.contains("-WindowStyle Hidden"));
         assert!(arguments.contains("-EncodedCommand QQA="));
         assert!(arguments.contains("-ExecutionPolicy RemoteSigned"));
         assert!(!arguments.contains("Bypass"));
         assert!(!arguments.contains("WindowStyle Normal"));
+        assert!(arguments.ends_with(&powershell_arguments));
         assert_eq!(FREERDP_CERTIFICATE_POLICY, "/cert:tofu");
         assert_ne!(FREERDP_CERTIFICATE_POLICY, "/cert:ignore");
     }

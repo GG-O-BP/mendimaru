@@ -11,6 +11,9 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Mutex;
 
 pub(super) const FREERDP_CERTIFICATE_POLICY: &str = "/cert:tofu";
+pub(super) const HEADLESS_CONSOLE_HOST: &str = r"C:\Windows\System32\conhost.exe";
+pub(super) const POWERSHELL_EXECUTABLE: &str =
+    r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
 const MAX_DIAGNOSTIC_BYTES: usize = 64 * 1024;
 
 pub(super) struct RemoteAppProcess {
@@ -94,21 +97,23 @@ pub(super) fn spawn_powershell_file(
     )?;
     let launcher = secure_powershell_launcher(&windows_script_path, security);
     let encoded = encode_powershell_script(&launcher);
-    let arguments = powershell_encoded_arguments(&encoded);
+    let arguments = headless_powershell_arguments(&encoded);
     if arguments.encode_utf16().count() * 2 >= 16_000 {
         return Err(crate::tr!("error-remoteapp-command-too-long"));
     }
-    spawn_remote_app(
-        config,
-        r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
-        Some(&arguments),
-        label,
-    )
+    spawn_remote_app(config, HEADLESS_CONSOLE_HOST, Some(&arguments), label)
 }
 
 pub(super) fn powershell_encoded_arguments(encoded_command: &str) -> String {
     format!(
         "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy RemoteSigned -EncodedCommand {encoded_command}"
+    )
+}
+
+pub(super) fn headless_powershell_arguments(encoded_command: &str) -> String {
+    format!(
+        "--headless {POWERSHELL_EXECUTABLE} {}",
+        powershell_encoded_arguments(encoded_command)
     )
 }
 

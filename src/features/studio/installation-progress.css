@@ -59,6 +59,20 @@
   transition: width 450ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.progress-track > span.active::after {
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.55),
+    transparent
+  );
+  content: "";
+  animation: progress-shimmer 1.35s ease-in-out infinite;
+}
+
 .progress-boundaries {
   position: absolute;
   z-index: 2;
@@ -118,6 +132,10 @@
   box-shadow: 0 0 0 3px rgba(255, 193, 49, 0.16);
 }
 
+.download-bar[aria-busy="true"] .progress-stages span.current i {
+  animation: progress-stage-pulse 1.4s ease-in-out infinite;
+}
+
 .download-bar.failed .progress-track span,
 .download-bar.cancelled .progress-track span {
   background: #e38376;
@@ -143,6 +161,27 @@
   background: transparent;
   border: 0;
   cursor: pointer;
+}
+
+@keyframes progress-shimmer {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(260%);
+  }
+}
+
+@keyframes progress-stage-pulse {
+  0%,
+  100% {
+    opacity: 0.62;
+    transform: scale(0.84);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .inline-error {

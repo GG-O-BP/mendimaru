@@ -81,6 +81,33 @@
   border-color: var(--cyan-dark);
 }
 
+.route-track i {
+  position: absolute;
+  z-index: 1;
+  top: -2px;
+  inset-inline-start: 5px;
+  width: 6px;
+  height: 6px;
+  background: var(--surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--cyan);
+  animation: route-arrival 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes route-arrival {
+  from {
+    opacity: 0;
+    transform: translateX(0) scale(0.72);
+  }
+  30% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: translateX(clamp(18px, 4vw, 58px)) scale(1);
+  }
+}
+
 .route-status > strong {
   display: inline-flex;
   min-height: 28px;

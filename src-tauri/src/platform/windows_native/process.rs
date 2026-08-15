@@ -1,10 +1,13 @@
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_CANCELLED};
 use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
-use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
+use windows_sys::Win32::System::Threading::{
+    GetExitCodeProcess, WaitForSingleObject, CREATE_NO_WINDOW, INFINITE,
+};
 use windows_sys::Win32::UI::Shell::{
     ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS,
     SHELLEXECUTEINFOW,
@@ -25,6 +28,12 @@ pub(super) fn system_executable(name: &str) -> Result<PathBuf, String> {
         ));
     }
     Ok(executable)
+}
+
+pub(super) fn hidden_command(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
 }
 
 pub(super) fn run_elevated(executable: &Path, arguments: &[String]) -> Result<u32, String> {
@@ -102,7 +111,7 @@ $running = @(Get-CimInstance Win32_Process -Filter "Name = 'studiopro.exe'" -Err
 })
 [Console]::Out.Write(($running.Count -gt 0).ToString())
 "#;
-    let output = Command::new("powershell.exe")
+    let output = hidden_command("powershell.exe")
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -164,7 +173,7 @@ pub(super) fn quote_windows_argument(argument: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{quote_windows_argument, run_elevated, system_executable};
+    use super::{hidden_command, quote_windows_argument, run_elevated, system_executable};
 
     #[test]
     fn quotes_windows_arguments_without_shell_interpretation() {
@@ -185,6 +194,26 @@ mod tests {
         let temporary = tempfile::tempdir().expect("temp dir");
         let missing = temporary.path().join("missing-installer.exe");
         assert!(run_elevated(&missing, &[]).is_err());
+    }
+
+    #[test]
+    fn hidden_command_does_not_allocate_a_powershell_console() {
+        const SCRIPT: &str = r#"
+Add-Type -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();' -Name ConsoleWindow -Namespace MendimaruTest
+[Console]::Out.Write(([MendimaruTest.ConsoleWindow]::GetConsoleWindow() -eq [IntPtr]::Zero).ToString())
+"#;
+        let output = hidden_command("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                SCRIPT,
+            ])
+            .output()
+            .expect("run hidden PowerShell probe");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "True");
     }
 
     #[test]

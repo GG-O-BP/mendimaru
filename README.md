@@ -176,6 +176,8 @@ npm run tauri build
 
 On Linux, `npm run test:e2e` launches the debug executable against the Vite development URL through pinned `tauri-driver` and `WebKitWebDriver`. It uses isolated WinBoat/API/project fixtures and verifies the real WebView, Tauri IPC, online application state, idle rendering, and primary navigation. Install the driver bridge with `cargo install tauri-driver --version 2.0.6 --locked`; the host must also provide `WebKitWebDriver`. `npm run test:app-flow` retains the faster React application-flow suite with mocked OS boundaries, while `npm run test:browser` tests Mendix Runtime pages rather than the Mendimaru desktop shell. CI gates all three layers, runs the frontend and Rust suites on Windows and Linux, and smoke-builds MSI and NSIS installers on Windows.
 
+Run `npm run test:winboat-e2e` for the non-destructive RemoteApp gate against an online WinBoat VM. It verifies session queries and stale-session rejection on an isolated Xvfb display, failing if any background PowerShell window becomes visible. The host must provide `xvfb-run`, `xfwm4`, and `wmctrl`.
+
 The full Rust suite covers registry parsing, path containment, installer integrity, Windows argument quoting, UAC/exit-code failures, and a fixture-backed install-to-uninstall lifecycle.
 
 Serialized enum values shared by Rust and TypeScript are registered in `src/shared/contracts/enumValues.json`. TypeScript derives its union types from this registry, and a Rust test rejects contract drift.

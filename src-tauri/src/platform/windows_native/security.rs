@@ -1,10 +1,11 @@
+use super::process::hidden_command;
 use base64::Engine;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,7 +78,7 @@ $json = $report | ConvertTo-Json -Compress
 $bytes = [Text.Encoding]::UTF8.GetBytes($json)
 [Console]::Out.Write([Convert]::ToBase64String($bytes))
 "#;
-    let output = Command::new("powershell.exe")
+    let output = hidden_command("powershell.exe")
         .args([
             "-NoLogo",
             "-NoProfile",

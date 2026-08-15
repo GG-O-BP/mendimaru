@@ -148,6 +148,57 @@ try {
     "the fixture-backed native commands did not populate the online Studio view",
   );
 
+  const routeMotion = await execute(`
+    const marker = document.querySelector(".route-track i");
+    if (!marker) return null;
+    const style = getComputedStyle(marker);
+    return {
+      animationName: style.animationName,
+      iterationCount: style.animationIterationCount,
+    };
+  `);
+  assert.deepEqual(
+    routeMotion,
+    { animationName: "route-arrival", iterationCount: "1" },
+    "the online route must animate once instead of repainting forever",
+  );
+
+  const activeMotion = await execute(`
+    const probe = document.createElement("div");
+    probe.setAttribute("aria-hidden", "true");
+    probe.innerHTML = \`
+      <span class="spin"></span>
+      <div class="download-bar" aria-busy="true">
+        <div class="progress-track"><span class="active"></span></div>
+        <div class="progress-stages"><span class="current"><i></i></span></div>
+      </div>
+    \`;
+    document.body.append(probe);
+    const result = {
+      spinner: getComputedStyle(probe.querySelector(".spin")).animationName,
+      shimmer: getComputedStyle(
+        probe.querySelector(".progress-track > span"),
+        "::after",
+      ).animationName,
+      stagePulse: getComputedStyle(
+        probe.querySelector(".progress-stages i"),
+      ).animationName,
+    };
+    probe.remove();
+    return result;
+  `);
+  assert.deepEqual(
+    activeMotion,
+    {
+      spinner: "spin",
+      shimmer: "progress-shimmer",
+      stagePulse: "progress-stage-pulse",
+    },
+    "busy and installation states must retain visible motion",
+  );
+
+  await delay(1_100);
+
   const idleMotion = await execute(`
     const infiniteAnimations = document.getAnimations()
       .filter((animation) => animation.effect?.getTiming().iterations === Infinity)
@@ -157,12 +208,19 @@ try {
       }));
     return {
       infiniteAnimations,
+      runningAnimations: document.getAnimations()
+        .filter((animation) => animation.playState === "running")
+        .map((animation) => animation.id || animation.constructor.name),
       routeMarkerPresent: Boolean(document.querySelector(".route-track i")),
     };
   `);
   assert.deepEqual(
     idleMotion,
-    { infiniteAnimations: [], routeMarkerPresent: false },
+    {
+      infiniteAnimations: [],
+      runningAnimations: [],
+      routeMarkerPresent: true,
+    },
     "the idle native window must not continuously repaint for decorative motion",
   );
 

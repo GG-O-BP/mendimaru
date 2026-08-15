@@ -214,3 +214,13 @@
 .recovery-screen code + .button {
   margin-top: 0;
 }
+
+.spin {
+  animation: spin 850ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
