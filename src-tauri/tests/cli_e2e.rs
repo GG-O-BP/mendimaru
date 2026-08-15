@@ -572,7 +572,10 @@ setInterval(() => {}, 1000);
 #[test]
 fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
     let temporary = tempfile::tempdir().expect("temporary directory");
-    let fixture = portable_fixture(temporary.path(), "success", READY_RUNTIME);
+    // Preserve this fixture while unwinding so a still-running Windows Runtime
+    // cannot hide the original assertion behind TempDir cleanup.
+    let fixture_root = temporary.keep();
+    let fixture = portable_fixture(&fixture_root, "success", READY_RUNTIME);
     let project_id = fixture_project_id(&fixture);
 
     let first_build = stdout_json(&run_portable(
@@ -630,6 +633,7 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
         String::from_utf8_lossy(&started_output.stderr),
         fixture_runtime_logs(&fixture),
     );
+    eprintln!("E2E lifecycle validating runtime start response");
     let started = stdout_json(&started_output);
     assert_complete_envelope(&started, "runtime.start");
     assert_eq!(started["data"]["build"]["cacheHit"], true);
@@ -644,7 +648,9 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
         .as_str()
         .expect("runtime URL");
     assert!(url.starts_with("http://127.0.0.1:"));
+    eprintln!("E2E lifecycle probing runtime HTTP endpoint");
     assert_http_ok(url);
+    eprintln!("E2E lifecycle observed runtime HTTP readiness");
 
     for (verb, expected_command) in [
         ("status", "runtime.status"),
@@ -728,6 +734,8 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
         std::net::TcpStream::connect(url.strip_prefix("http://").expect("runtime authority"))
             .is_err()
     );
+    drop(fixture);
+    fs::remove_dir_all(&fixture_root).expect("remove stopped Runtime fixture");
 }
 
 #[test]
