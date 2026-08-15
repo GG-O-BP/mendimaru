@@ -919,11 +919,24 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
         written: 0,
         saturated: false,
     }));
-    let mut command =
-        runtime_command(&deployment, &override_path, &temp_directory, &payload).map_err(|_| ())?;
+    let mut command = match runtime_command(&deployment, &override_path, &temp_directory, &payload)
+    {
+        Ok(command) => command,
+        Err(_) => {
+            append_internal_log(&log, "runtime command validation failed").await;
+            fail_and_respond(
+                &layout,
+                &mut record,
+                BackendErrorCode::RuntimeInitializationFailed,
+            )
+            .await;
+            return Err(());
+        }
+    };
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(_) => {
+            append_internal_log(&log, "runtime process spawn failed").await;
             fail_and_respond(
                 &layout,
                 &mut record,
@@ -936,6 +949,7 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
     let runtime_pid = match child.id() {
         Some(pid) => pid,
         None => {
+            append_internal_log(&log, "runtime process identity was unavailable").await;
             fail_and_respond(
                 &layout,
                 &mut record,
@@ -949,6 +963,7 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
         Ok(containment) => containment,
         Err(_) => {
             let _ = child.start_kill();
+            append_internal_log(&log, "runtime containment initialization failed").await;
             fail_and_respond(
                 &layout,
                 &mut record,
@@ -962,6 +977,7 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
         Ok(identity) => identity,
         Err(_) => {
             let _ = child.start_kill();
+            append_internal_log(&log, "runtime process identity validation failed").await;
             fail_and_respond(
                 &layout,
                 &mut record,
@@ -1032,8 +1048,8 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
             )),
         })
         .await;
-        join_log_tasks(stdout_task, stderr_task).await;
         drop(containment);
+        join_log_tasks(stdout_task, stderr_task).await;
         return Err(());
     }
     record.state = RuntimeState::Ready;
@@ -1064,8 +1080,8 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
         record.state = RuntimeState::Stopped;
         record.failure_code = None;
         let _ = write_session(&layout, &record);
-        join_log_tasks(stdout_task, stderr_task).await;
         drop(containment);
+        join_log_tasks(stdout_task, stderr_task).await;
         return Err(());
     }
     let mut stdout = tokio::io::stdout();
@@ -1082,8 +1098,8 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
         &runtime_identity,
     )
     .await;
-    join_log_tasks(stdout_task, stderr_task).await;
     drop(containment);
+    join_log_tasks(stdout_task, stderr_task).await;
     Ok(())
 }
 
@@ -1248,10 +1264,32 @@ async fn join_log_tasks(
     stderr: Option<tokio::task::JoinHandle<()>>,
 ) {
     if let Some(task) = stdout {
-        let _ = task.await;
+        join_log_task(task).await;
     }
     if let Some(task) = stderr {
+        join_log_task(task).await;
+    }
+}
+
+async fn join_log_task(mut task: tokio::task::JoinHandle<()>) {
+    if tokio::time::timeout(Duration::from_secs(2), &mut task)
+        .await
+        .is_err()
+    {
+        task.abort();
         let _ = task.await;
+    }
+}
+
+async fn append_internal_log(sink: &Arc<Mutex<LogSink>>, message: &str) {
+    let entry = format!("{} supervisor {message}\n", Utc::now().to_rfc3339());
+    let mut sink = sink.lock().await;
+    if sink.saturated || sink.written.saturating_add(entry.len() as u64) > MAX_LOG_BYTES {
+        return;
+    }
+    if sink.file.write_all(entry.as_bytes()).await.is_ok() {
+        sink.written += entry.len() as u64;
+        let _ = sink.file.flush().await;
     }
 }
 

@@ -1,4 +1,4 @@
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,12 +113,16 @@ pub(super) fn terminate_runtime_group(expected: &ProcessIdentity, _force: bool) 
     if !matches(expected) {
         return;
     }
-    let _ = Command::new("taskkill")
-        .args(["/PID", &expected.pid.to_string(), "/T", "/F"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    unsafe {
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, TerminateProcess, PROCESS_TERMINATE,
+        };
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, expected.pid);
+        if !handle.is_null() {
+            TerminateProcess(handle, 1);
+            windows_sys::Win32::Foundation::CloseHandle(handle);
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
