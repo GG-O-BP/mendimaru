@@ -15,6 +15,38 @@ pub(super) fn matches(expected: &ProcessIdentity) -> bool {
     identity(expected.pid).is_ok_and(|observed| observed.start_token == expected.start_token)
 }
 
+#[cfg(windows)]
+pub(super) fn prevent_standard_handle_inheritance() -> Result<(), String> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{
+        SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
+    };
+
+    let handles = [
+        std::io::stdin().as_raw_handle(),
+        std::io::stdout().as_raw_handle(),
+        std::io::stderr().as_raw_handle(),
+    ];
+    for raw in handles {
+        let handle = raw as HANDLE;
+        if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+            continue;
+        }
+        if unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) } == 0 {
+            return Err(format!(
+                "could not protect the caller's standard handles: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub(super) fn prevent_standard_handle_inheritance() -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg(unix)]
 pub(super) fn configure_detached_supervisor(command: &mut tokio::process::Command) {
     use std::os::unix::process::CommandExt;

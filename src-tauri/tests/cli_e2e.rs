@@ -4,6 +4,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -62,15 +63,17 @@ fn run_with_environment(
     let mut child = command.spawn().expect("run the real mendimaru binary");
     let mut stdout = child.stdout.take().expect("capture CLI stdout");
     let mut stderr = child.stderr.take().expect("capture CLI stderr");
-    let stdout_reader = thread::spawn(move || {
+    let (stdout_sender, stdout_receiver) = mpsc::channel();
+    let (stderr_sender, stderr_receiver) = mpsc::channel();
+    thread::spawn(move || {
         let mut bytes = Vec::new();
-        stdout.read_to_end(&mut bytes).expect("read CLI stdout");
-        bytes
+        let result = stdout.read_to_end(&mut bytes).map(|_| bytes);
+        let _ = stdout_sender.send(result);
     });
-    let stderr_reader = thread::spawn(move || {
+    thread::spawn(move || {
         let mut bytes = Vec::new();
-        stderr.read_to_end(&mut bytes).expect("read CLI stderr");
-        bytes
+        let result = stderr.read_to_end(&mut bytes).map(|_| bytes);
+        let _ = stderr_sender.send(result);
     });
     let deadline = Instant::now() + Duration::from_secs(40);
     let status = loop {
@@ -79,17 +82,20 @@ fn run_with_environment(
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
-            let _ = child.wait();
-            drop(stdout_reader);
-            drop(stderr_reader);
             panic!("CLI command {command_name:?} exceeded the 40-second E2E boundary");
         }
         thread::sleep(Duration::from_millis(100));
     };
     let output = Output {
         status,
-        stdout: stdout_reader.join().expect("join CLI stdout reader"),
-        stderr: stderr_reader.join().expect("join CLI stderr reader"),
+        stdout: stdout_receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("CLI stdout reached EOF")
+            .expect("read CLI stdout"),
+        stderr: stderr_receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("CLI stderr reached EOF")
+            .expect("read CLI stderr"),
     };
     eprintln!("E2E CLI completed: {command_name}");
     output

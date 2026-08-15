@@ -465,6 +465,15 @@ pub(super) async fn start(
             true,
         )
     })?;
+    process::prevent_standard_handle_inheritance().map_err(|_| {
+        runtime_error(
+            backend,
+            CapabilityId::RuntimeStart,
+            BackendErrorCode::RuntimeInitializationFailed,
+            Some(record.log_artifact.artifact_id.clone()),
+            true,
+        )
+    })?;
     let mut command = tokio::process::Command::new(executable);
     command
         .arg("__runtime-supervisor")
