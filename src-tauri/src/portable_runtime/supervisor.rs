@@ -1281,6 +1281,7 @@ async fn http_ready(url: &str, admin_port: u16) -> bool {
     let client = match reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(1))
         .timeout(Duration::from_secs(2))
+        .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .build()
     {

@@ -430,12 +430,8 @@ async fn run_command(
             crate::application::runtime_build(&config, project_id, *clean).await?,
         ),
         CliCommand::RuntimeStart { project_id, clean } => {
-            let readiness_timeout = timeout
-                .checked_sub(Duration::from_secs(1))
-                .unwrap_or(timeout);
             let (build, status) =
-                crate::application::runtime_start(&config, project_id, *clean, readiness_timeout)
-                    .await?;
+                crate::application::runtime_start(&config, project_id, *clean, timeout).await?;
             let runtime_session_id = status.session_id.clone();
             Ok(CommandOutput {
                 data: json!({ "build": build, "runtime": status }),

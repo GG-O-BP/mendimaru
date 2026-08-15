@@ -14,7 +14,7 @@ use crate::operations::{OperationTracker, SessionActionGuard};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub(crate) type ApplicationResult<T> = Result<T, CommandError>;
 
@@ -224,9 +224,20 @@ pub(crate) async fn runtime_start(
     config: &AppConfig,
     project_id: &str,
     clean: bool,
-    readiness_timeout: Duration,
+    operation_timeout: Duration,
 ) -> ApplicationResult<(RuntimeBuildResult, RuntimeStatus)> {
+    let started = Instant::now();
     let build = runtime_build(config, project_id, clean).await?;
+    let readiness_timeout = operation_timeout
+        .checked_sub(started.elapsed())
+        .and_then(|remaining| remaining.checked_sub(Duration::from_secs(1)))
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| {
+            CommandError::new(
+                CommandErrorCode::OperationFailed,
+                "the Runtime build exhausted the operation timeout".to_string(),
+            )
+        })?;
     let request = RuntimeStartRequest {
         session_id: build.session_id.clone(),
         mode: RuntimeMode::Portable,

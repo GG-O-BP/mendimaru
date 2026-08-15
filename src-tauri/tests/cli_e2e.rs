@@ -422,6 +422,22 @@ fn run_portable(
     run_with_environment(&fixture.config_directory, arguments, &environment)
 }
 
+fn fixture_runtime_logs(fixture: &PortableFixture) -> String {
+    let sessions = fixture
+        .config_directory
+        .join("isolated-cache")
+        .join("portable-runtime")
+        .join("sessions");
+    let Ok(entries) = fs::read_dir(sessions) else {
+        return "no Runtime session directory".to_string();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| fs::read_to_string(entry.path().join("runtime.log")).ok())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn fixture_project_id(fixture: &PortableFixture) -> String {
     let listed = stdout_json(&run_portable(fixture, &["project", "list", "--json"], None));
     listed["data"][0]["projectId"]
@@ -554,7 +570,7 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
         secret.as_bytes(),
     );
     let environment = format!(r#"{{"E2E_SECRET":"{secret}"}}"#);
-    let started = stdout_json(&run_portable(
+    let started_output = run_portable(
         &fixture,
         &[
             "runtime",
@@ -566,7 +582,14 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
             "30",
         ],
         Some(&environment),
-    ));
+    );
+    assert!(
+        started_output.status.success(),
+        "command failed: {}\nRuntime logs:\n{}",
+        String::from_utf8_lossy(&started_output.stderr),
+        fixture_runtime_logs(&fixture),
+    );
+    let started = stdout_json(&started_output);
     assert_complete_envelope(&started, "runtime.start");
     assert_eq!(started["data"]["build"]["cacheHit"], true);
     assert_eq!(started["data"]["runtime"]["schemaVersion"], "1.0.0");
@@ -660,13 +683,18 @@ fn real_binary_distinguishes_portable_consistency_build_and_readiness_failures()
             &project_id,
             "--json",
             "--timeout-seconds",
-            "3",
+            "8",
         ],
         None,
     );
     let error = stderr_json(&failed);
     assert_complete_envelope(&error, "runtime.start");
-    assert_eq!(error["error"]["code"], "runtime_readiness_timeout");
+    assert_eq!(
+        error["error"]["code"],
+        "runtime_readiness_timeout",
+        "Runtime logs:\n{}",
+        fixture_runtime_logs(&fixture),
+    );
     assert!(error["error"]["diagnosticRef"]
         .as_str()
         .is_some_and(|value| value.starts_with("artifact_")));
@@ -730,7 +758,7 @@ fn real_binary_timeout_terminates_mxbuild_and_its_descendants() {
             &project_id,
             "--json",
             "--timeout-seconds",
-            "1",
+            "5",
         ],
         None,
     );
