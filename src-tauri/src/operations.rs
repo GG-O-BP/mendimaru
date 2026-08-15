@@ -865,6 +865,14 @@ fn failure_classification(error: &CommandError) -> (&'static str, bool) {
         CommandErrorCode::RuntimeReadinessTimeout => ("runtime_readiness_timeout", true),
         CommandErrorCode::RuntimeSessionNotFound => ("runtime_session_not_found", false),
         CommandErrorCode::RuntimeExited => ("runtime_exited", false),
+        CommandErrorCode::RuntimeGuestOffline => ("runtime_guest_offline", true),
+        CommandErrorCode::RuntimePortConflict => ("runtime_port_conflict", true),
+        CommandErrorCode::RuntimePortForwardingInvalid => ("runtime_port_forwarding_invalid", true),
+        CommandErrorCode::RuntimeFirewallBlocked => ("runtime_firewall_blocked", true),
+        CommandErrorCode::RuntimeNotListening => ("runtime_not_listening", true),
+        CommandErrorCode::RuntimeComposeRecoveryFailed => {
+            ("runtime_compose_recovery_failed", false)
+        }
     }
 }
 

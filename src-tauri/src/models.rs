@@ -211,6 +211,12 @@ mod tests {
                 CommandErrorCode::RuntimeReadinessTimeout,
                 CommandErrorCode::RuntimeSessionNotFound,
                 CommandErrorCode::RuntimeExited,
+                CommandErrorCode::RuntimeGuestOffline,
+                CommandErrorCode::RuntimePortConflict,
+                CommandErrorCode::RuntimePortForwardingInvalid,
+                CommandErrorCode::RuntimeFirewallBlocked,
+                CommandErrorCode::RuntimeNotListening,
+                CommandErrorCode::RuntimeComposeRecoveryFailed,
             ],
         );
         assert_registry("textDirection", [TextDirection::Ltr, TextDirection::Rtl]);

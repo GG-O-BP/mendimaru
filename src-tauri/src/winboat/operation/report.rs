@@ -5,7 +5,7 @@ use serde::Deserialize;
 pub(in crate::winboat) struct WindowsOperationReport {
     pub(in crate::winboat) state: WindowsOperationState,
     #[serde(default)]
-    pub(super) message: String,
+    pub(in crate::winboat) message: String,
     #[serde(default)]
     pub(in crate::winboat) percentage: Option<f64>,
     #[serde(default)]

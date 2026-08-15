@@ -2,6 +2,8 @@ mod client;
 mod container;
 mod operation;
 mod remote_app;
+#[cfg(target_os = "linux")]
+pub(crate) mod runtime;
 mod scripts;
 mod security;
 mod sessions;

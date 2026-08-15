@@ -9,6 +9,16 @@ pub(crate) struct FileSnapshot {
     content: Option<Vec<u8>>,
 }
 
+const LOOPBACK_IPV4: &str = "127.0.0.1";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimePortMapping {
+    pub(crate) host_ip: String,
+    pub(crate) host_port: Option<u16>,
+    pub(crate) guest_port: u16,
+    pub(crate) protocol: String,
+}
+
 pub fn compose_shared_directory(compose_file: &str) -> Option<String> {
     let compose = read_compose(Path::new(compose_file)).ok()?;
     let volumes = service_value(&compose)?.get("volumes")?.as_sequence()?;
@@ -72,18 +82,200 @@ pub(super) fn apply_compose_detection(config: &mut AppConfig, compose: &Value) {
 
 fn host_port_for_guest(ports: &[Value], guest_port: u16) -> Option<u16> {
     ports.iter().find_map(|port| {
-        let raw = port.as_str()?;
-        let parts: Vec<&str> = raw.split(':').collect();
-        if parts.len() < 2 {
-            return None;
-        }
-        let guest = parts.last()?.split('/').next()?.parse::<u16>().ok()?;
-        if guest != guest_port {
-            return None;
-        }
-        let host = parts.get(parts.len().saturating_sub(2))?;
-        host.split('-').next()?.parse::<u16>().ok()
+        let mapping = parse_port_mapping(port)?;
+        (mapping.guest_port == guest_port).then_some(mapping.host_port)?
     })
+}
+
+pub(crate) fn runtime_port_mapping(
+    compose_path: &Path,
+    guest_port: u16,
+) -> Result<Option<RuntimePortMapping>, String> {
+    let compose = read_compose(compose_path)?;
+    let ports = service_value(&compose)
+        .and_then(|service| service.get("ports"))
+        .and_then(Value::as_sequence);
+    let Some(ports) = ports else {
+        return Ok(None);
+    };
+    let mappings = ports
+        .iter()
+        .filter_map(parse_port_mapping)
+        .filter(|mapping| mapping.guest_port == guest_port)
+        .collect::<Vec<_>>();
+    match mappings.as_slice() {
+        [] => Ok(None),
+        [mapping] => Ok(Some(mapping.clone())),
+        _ => Err(format!(
+            "the Compose service contains multiple mappings for guest port {guest_port}"
+        )),
+    }
+}
+
+pub(crate) fn ensure_runtime_port_mapping(
+    compose_path: &Path,
+    guest_port: u16,
+) -> Result<bool, String> {
+    if !(1024..=u16::MAX).contains(&guest_port) {
+        return Err("the Mendix Runtime guest port must be from 1024 through 65535".to_string());
+    }
+    let mut compose = read_compose(compose_path)?;
+    let service = service_value_mut(&mut compose)
+        .ok_or_else(|| crate::tr!("error-compose-windows-service-missing"))?;
+    let mapping = service
+        .as_mapping_mut()
+        .ok_or_else(|| crate::tr!("error-compose-windows-service-invalid"))?;
+    if mapping
+        .get(Value::String("network_mode".to_string()))
+        .and_then(Value::as_str)
+        .is_some_and(|mode| mode.eq_ignore_ascii_case("host"))
+    {
+        return Err("the WinBoat service uses host networking and cannot be isolated".to_string());
+    }
+
+    let volumes = mapping
+        .get(Value::String("volumes".to_string()))
+        .and_then(Value::as_sequence)
+        .ok_or_else(|| "the WinBoat service has no protected /storage volume".to_string())?;
+    let storage_before = storage_mounts(volumes);
+    if storage_before.is_empty() {
+        return Err("the WinBoat service has no protected /storage volume".to_string());
+    }
+
+    let ports_key = Value::String("ports".to_string());
+    if !mapping.contains_key(&ports_key) {
+        mapping.insert(ports_key.clone(), Value::Sequence(Vec::new()));
+    }
+    let ports = mapping
+        .get_mut(&ports_key)
+        .and_then(Value::as_sequence_mut)
+        .ok_or_else(|| "the WinBoat Compose ports value is invalid".to_string())?;
+    let expected = RuntimePortMapping {
+        host_ip: LOOPBACK_IPV4.to_string(),
+        host_port: None,
+        guest_port,
+        protocol: "tcp".to_string(),
+    };
+    let current = ports
+        .iter()
+        .filter_map(parse_port_mapping)
+        .filter(|entry| entry.guest_port == guest_port)
+        .collect::<Vec<_>>();
+    if current.as_slice() == [expected.clone()] {
+        return Ok(false);
+    }
+    ports.retain(|entry| {
+        parse_port_mapping(entry).is_none_or(|mapping| mapping.guest_port != guest_port)
+    });
+    ports.push(Value::String(format!("{LOOPBACK_IPV4}::{guest_port}/tcp")));
+
+    let storage_after = mapping
+        .get(Value::String("volumes".to_string()))
+        .and_then(Value::as_sequence)
+        .map(|volumes| storage_mounts(volumes))
+        .unwrap_or_default();
+    if storage_after != storage_before {
+        return Err(
+            "the WinBoat /storage volume changed while adding Runtime forwarding".to_string(),
+        );
+    }
+    write_compose(compose_path, &compose)?;
+    Ok(true)
+}
+
+fn parse_port_mapping(value: &Value) -> Option<RuntimePortMapping> {
+    if let Some(guest_port) = yaml_u16(value) {
+        return Some(RuntimePortMapping {
+            host_ip: String::new(),
+            host_port: None,
+            guest_port,
+            protocol: "tcp".to_string(),
+        });
+    }
+    if let Some(raw) = value.as_str() {
+        return parse_short_port_mapping(raw);
+    }
+    let mapping = value.as_mapping()?;
+    let guest_port = yaml_u16(mapping.get(Value::String("target".to_string()))?)?;
+    let host_port = mapping
+        .get(Value::String("published".to_string()))
+        .and_then(yaml_u16);
+    let host_ip = mapping
+        .get(Value::String("host_ip".to_string()))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let protocol = mapping
+        .get(Value::String("protocol".to_string()))
+        .and_then(Value::as_str)
+        .unwrap_or("tcp")
+        .to_ascii_lowercase();
+    Some(RuntimePortMapping {
+        host_ip,
+        host_port,
+        guest_port,
+        protocol,
+    })
+}
+
+fn parse_short_port_mapping(raw: &str) -> Option<RuntimePortMapping> {
+    let (raw, protocol) = raw
+        .rsplit_once('/')
+        .map(|(mapping, protocol)| (mapping, protocol.to_ascii_lowercase()))
+        .unwrap_or((raw, "tcp".to_string()));
+    let parts = raw.split(':').collect::<Vec<_>>();
+    let guest_port = parts.last()?.parse::<u16>().ok()?;
+    let (host_ip, host_port) = match parts.as_slice() {
+        [_guest] => (String::new(), None),
+        [published, _guest] => (String::new(), published.parse::<u16>().ok()),
+        [host_ip @ .., published, _guest] => (
+            host_ip.join(":"),
+            (!published.is_empty())
+                .then(|| published.split('-').next()?.parse::<u16>().ok())
+                .flatten(),
+        ),
+        _ => return None,
+    };
+    Some(RuntimePortMapping {
+        host_ip,
+        host_port,
+        guest_port,
+        protocol,
+    })
+}
+
+fn yaml_u16(value: &Value) -> Option<u16> {
+    value
+        .as_u64()
+        .and_then(|value| u16::try_from(value).ok())
+        .or_else(|| value.as_str()?.parse::<u16>().ok())
+}
+
+fn storage_mounts(volumes: &[Value]) -> Vec<Value> {
+    volumes
+        .iter()
+        .filter(|volume| {
+            volume
+                .as_str()
+                .is_some_and(|raw| volume_target(raw) == Some("/storage"))
+                || volume
+                    .as_mapping()
+                    .and_then(|mapping| mapping.get(Value::String("target".to_string())))
+                    .and_then(Value::as_str)
+                    == Some("/storage")
+        })
+        .cloned()
+        .collect()
+}
+
+fn volume_target(volume: &str) -> Option<&str> {
+    let mut parts = volume.rsplit(':');
+    let last = parts.next()?;
+    if last.starts_with('/') {
+        Some(last)
+    } else {
+        parts.next().filter(|target| target.starts_with('/'))
+    }
 }
 
 fn expand_compose_source(source: &str) -> String {
@@ -202,8 +394,8 @@ fn service_value_mut(compose: &mut Value) -> Option<&mut Value> {
 #[cfg(test)]
 mod tests {
     use super::{
-        compose_file_is_valid, host_port_for_guest, restore_file, shared_mount_source,
-        snapshot_file, update_shared_mount,
+        compose_file_is_valid, ensure_runtime_port_mapping, host_port_for_guest, restore_file,
+        runtime_port_mapping, shared_mount_source, snapshot_file, update_shared_mount,
     };
     use serde_yaml::Value;
     use std::fs;
@@ -239,6 +431,53 @@ mod tests {
         assert_eq!(host_port_for_guest(&ports, 7148), Some(47280));
         assert_eq!(host_port_for_guest(&ports, 3389), Some(47300));
         assert_eq!(host_port_for_guest(&ports, 8006), None);
+    }
+
+    #[test]
+    fn adds_only_a_dynamic_loopback_runtime_mapping_and_preserves_storage() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("docker-compose.yml");
+        fs::write(
+            &compose,
+            "services:\n  windows:\n    image: test\n    volumes:\n      - winboat-data:/storage\n      - /workspace:/shared\n    ports:\n      - 127.0.0.1:47280:7148\n      - 0.0.0.0:8080:8080\nvolumes:\n  winboat-data: {}\n",
+        )
+        .expect("write compose");
+
+        assert!(ensure_runtime_port_mapping(&compose, 8080).expect("add mapping"));
+        let updated = fs::read_to_string(&compose).expect("read compose");
+        assert!(updated.contains("winboat-data:/storage"));
+        assert!(updated.contains("127.0.0.1::8080/tcp"));
+        assert!(!updated.contains("0.0.0.0:8080:8080"));
+        assert!(!ensure_runtime_port_mapping(&compose, 8080).expect("mapping is stable"));
+        let mapping = runtime_port_mapping(&compose, 8080)
+            .expect("inspect mapping")
+            .expect("mapping exists");
+        assert_eq!(mapping.host_ip, "127.0.0.1");
+        assert_eq!(mapping.host_port, None);
+        assert_eq!(mapping.guest_port, 8080);
+    }
+
+    #[test]
+    fn refuses_host_networking_or_a_compose_without_protected_storage() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("docker-compose.yml");
+        fs::write(
+            &compose,
+            "services:\n  windows:\n    image: test\n    network_mode: host\n    volumes:\n      - data:/storage\n",
+        )
+        .expect("write compose");
+        assert!(ensure_runtime_port_mapping(&compose, 8080)
+            .expect_err("host networking rejected")
+            .contains("host networking"));
+
+        fs::write(
+            &compose,
+            "services:\n  windows:\n    image: test\n    volumes:\n      - /workspace:/shared\n",
+        )
+        .expect("write compose");
+        assert!(ensure_runtime_port_mapping(&compose, 8080)
+            .expect_err("missing storage rejected")
+            .contains("/storage"));
     }
 
     #[test]

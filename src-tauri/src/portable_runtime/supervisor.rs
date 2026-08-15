@@ -1715,11 +1715,17 @@ fn status_from_record(record: &SessionRecord) -> RuntimeStatus {
     RuntimeStatus {
         schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
         session_id: record.session_id.clone(),
+        backend: record.backend,
         mode: RuntimeMode::Portable,
         state: record.state,
         process_id: record.runtime_pid,
         started_at: record.started_at,
         url: (record.state == RuntimeState::Ready).then(|| record.url.clone()),
+        host_port: None,
+        guest_port: None,
+        studio_session_id: None,
+        studio_state: None,
+        http_ready: record.state == RuntimeState::Ready,
         failure_code: record.failure_code,
         log_artifact: Some(record.log_artifact.clone()),
     }

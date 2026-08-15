@@ -222,27 +222,66 @@ pub(crate) async fn runtime_build(
 
 pub(crate) async fn runtime_start(
     config: &AppConfig,
-    project_id: &str,
+    project_id: Option<&str>,
     clean: bool,
+    mode: RuntimeMode,
+    studio_session_id: Option<&str>,
+    guest_port: Option<u16>,
     operation_timeout: Duration,
-) -> ApplicationResult<(RuntimeBuildResult, RuntimeStatus)> {
+) -> ApplicationResult<(Option<RuntimeBuildResult>, RuntimeStatus)> {
     const SUPERVISOR_RESPONSE_MARGIN: Duration = Duration::from_secs(5);
     let started = Instant::now();
-    let build = runtime_build(config, project_id, clean).await?;
+    let (build, session_id, package_artifact_id) = match mode {
+        RuntimeMode::Portable => {
+            let project_id = project_id.ok_or_else(|| {
+                invalid_request("--project-id is required for portable Runtime mode")
+            })?;
+            if studio_session_id.is_some() || guest_port.is_some() {
+                return Err(invalid_request(
+                    "Studio session and guest port options require studio-run-locally mode",
+                ));
+            }
+            let build = runtime_build(config, project_id, clean).await?;
+            let session_id = build.session_id.clone();
+            let artifact_id = build.package_artifact.artifact_id.clone();
+            (Some(build), session_id, Some(artifact_id))
+        }
+        RuntimeMode::StudioRunLocally => {
+            if project_id.is_some() || clean {
+                return Err(invalid_request(
+                    "project build options are not accepted in studio-run-locally mode",
+                ));
+            }
+            (None, crate::contracts::secure_identifier("session")?, None)
+        }
+        RuntimeMode::ExternalUrl => {
+            return Err(invalid_request(
+                "external-url Runtime sessions cannot be started by this command",
+            ));
+        }
+    };
     let readiness_timeout = operation_timeout
         .checked_sub(started.elapsed())
-        .and_then(|remaining| remaining.checked_sub(SUPERVISOR_RESPONSE_MARGIN))
+        .and_then(|remaining| {
+            if mode == RuntimeMode::Portable {
+                remaining.checked_sub(SUPERVISOR_RESPONSE_MARGIN)
+            } else {
+                Some(remaining)
+            }
+        })
         .filter(|remaining| !remaining.is_zero())
         .ok_or_else(|| {
             CommandError::new(
                 CommandErrorCode::OperationFailed,
-                "the Runtime build exhausted the operation timeout".to_string(),
+                "the Runtime preparation exhausted the operation timeout".to_string(),
             )
         })?;
     let request = RuntimeStartRequest {
-        session_id: build.session_id.clone(),
-        mode: RuntimeMode::Portable,
-        package_artifact_id: Some(build.package_artifact.artifact_id.clone()),
+        session_id,
+        mode,
+        package_artifact_id,
+        studio_session_id: studio_session_id.map(ToString::to_string),
+        guest_port,
         readiness_timeout_seconds: readiness_timeout.as_secs().clamp(1, 3_600),
     };
     let status = crate::platform::start_runtime(config, &request)

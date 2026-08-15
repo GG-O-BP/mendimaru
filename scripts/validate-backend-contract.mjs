@@ -44,7 +44,7 @@ const sessionId = `session_${"ab".repeat(16)}`;
 validate(
   schemas[2].$id,
   {
-    schemaVersion: "1.0.0",
+    schemaVersion: "2.0.0",
     sessionId,
     createdAt: snapshot.capturedAt,
     state: "created",
@@ -55,7 +55,7 @@ validate(
 validate(
   schemas[3].$id,
   {
-    schemaVersion: "1.0.0",
+    schemaVersion: "2.0.0",
     artifactId: `artifact_${"cd".repeat(16)}`,
     sessionId,
     backend: manifest.backend,
@@ -67,7 +67,7 @@ validate(
 validate(
   schemas[1].$id,
   {
-    schemaVersion: "1.0.0",
+    schemaVersion: "2.0.0",
     code: "unsupported_capability",
     message: "runtime.url is not implemented by this backend",
     backend: manifest.backend,
@@ -85,7 +85,7 @@ const parseErrorEnvelope = {
   command: "studio",
   ok: false,
   error: {
-    schemaVersion: "1.0.0",
+    schemaVersion: "2.0.0",
     code: "invalid_request",
     message: "the command request is invalid",
     backend: manifest.backend,
@@ -97,7 +97,7 @@ validate(schemas[4].$id, parseErrorEnvelope, "CLI parse-error envelope");
 validate(
   schemas[4].$id,
   {
-    schemaVersion: "1.0.0",
+    schemaVersion: "2.0.0",
     command: "unknown",
     ok: false,
     platform: manifest.hostPlatform,
@@ -105,7 +105,7 @@ validate(
     sessionId: "session_unavailable",
     capabilitySnapshot: null,
     error: {
-      schemaVersion: "1.0.0",
+      schemaVersion: "2.0.0",
       code: "operation_failed",
       message: "the command could not be completed",
       backend: manifest.backend,
@@ -128,7 +128,7 @@ validate(
 validate(
   schemas[5].$id,
   {
-    schemaVersion: "1.0.0",
+    schemaVersion: "2.0.0",
     command: "studio.install",
     event: "progress",
     sessionId,
@@ -147,7 +147,7 @@ validate(
 const runtimeSessionId = `runtime_${"12".repeat(16)}`;
 const runtimeBuildSessionId = `session_${"56".repeat(16)}`;
 const runtimeLogArtifact = {
-  schemaVersion: "1.0.0",
+  schemaVersion: "2.0.0",
   artifactId: `artifact_${"34".repeat(16)}`,
   sessionId: runtimeSessionId,
   backend: manifest.backend,
@@ -157,7 +157,7 @@ const runtimeLogArtifact = {
   location: `mendimaru-cache://artifact_${"34".repeat(16)}`,
 };
 const buildArtifact = (suffix, kind, mediaType) => ({
-  schemaVersion: "1.0.0",
+  schemaVersion: "2.0.0",
   artifactId: `artifact_${suffix.repeat(16)}`,
   sessionId: runtimeBuildSessionId,
   backend: manifest.backend,
@@ -193,16 +193,37 @@ validate(
 validate(
   schemas[6].$id,
   {
-    schemaVersion: "1.0.0",
+    schemaVersion: "2.0.0",
     sessionId: runtimeSessionId,
+    backend: manifest.backend,
     mode: "portable",
     state: "ready",
+    httpReady: true,
     processId: 4242,
     startedAt: snapshot.capturedAt,
     url: "http://127.0.0.1:49152",
     logArtifact: runtimeLogArtifact,
   },
   "Portable Runtime ready status",
+);
+validate(
+  schemas[6].$id,
+  {
+    schemaVersion: "2.0.0",
+    sessionId: runtimeSessionId,
+    backend: "linux-winboat",
+    mode: "studio-run-locally",
+    state: "ready",
+    httpReady: true,
+    startedAt: snapshot.capturedAt,
+    url: "http://127.0.0.1:49153",
+    hostPort: 49153,
+    guestPort: 8080,
+    studioSessionId: "studio-4242-638908128000000000",
+    studioState: "running",
+    logArtifact: { ...runtimeLogArtifact, backend: "linux-winboat" },
+  },
+  "WinBoat Studio Run Locally ready status",
 );
 validate(
   schemas[6].$id,
@@ -270,13 +291,27 @@ if (portableHost) {
     manifest.runtimePlatform === manifest.hostPlatform,
     "Portable Runtime platform differs from the host",
   );
-  assert(manifest.runtimeMode === "portable", "Runtime mode is not portable");
+  assert(
+    Array.isArray(manifest.runtimeModes) &&
+      manifest.runtimeModes.includes("portable"),
+    "Portable Runtime mode is not advertised",
+  );
+  if (manifest.backend === "linux-winboat") {
+    assert(
+      manifest.runtimeModes.includes("studio-run-locally"),
+      "Linux WinBoat Run Locally mode is not advertised",
+    );
+    assert(!("runtimeMode" in manifest), "multi-mode manifest is ambiguous");
+  } else {
+    assert(manifest.runtimeMode === "portable", "Runtime mode is not portable");
+  }
 } else {
   assert(
     !("runtimePlatform" in manifest),
     "unsupported host has runtimePlatform",
   );
   assert(!("runtimeMode" in manifest), "unsupported host has runtimeMode");
+  assert(!("runtimeModes" in manifest), "unsupported host has runtimeModes");
 }
 for (const leaked of [
   "apiUrl",

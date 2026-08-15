@@ -116,6 +116,64 @@ pub(super) fn powershell_literal(value: &str) -> String {
     value.replace('\'', "''")
 }
 
+pub(super) fn runtime_port_probe_script(guest_port: u16, windows_report_path: &str) -> String {
+    format!(
+        r#"$ErrorActionPreference = 'Stop'
+$guestPort = [int]{guest_port}
+$resultPath = '{result_path}'
+
+{preamble}
+
+try {{
+    $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $guestPort -ErrorAction SilentlyContinue)
+    $blockingRules = @(
+        Get-NetFirewallRule -Enabled True -Direction Inbound -Action Block -ErrorAction SilentlyContinue |
+            Get-NetFirewallPortFilter -ErrorAction SilentlyContinue |
+            Where-Object {{
+                $_.Protocol -eq 'TCP' -and
+                ($_.LocalPort -eq 'Any' -or $_.LocalPort -eq $guestPort.ToString())
+            }}
+    )
+    if ($listeners.Count -eq 0) {{
+        $diagnostic = 'MENDIMARU_RUNTIME_NOT_LISTENING'
+    }} elseif ($blockingRules.Count -gt 0) {{
+        $diagnostic = 'MENDIMARU_RUNTIME_FIREWALL_BLOCKED'
+    }} else {{
+        $diagnostic = 'MENDIMARU_RUNTIME_LISTENING'
+    }}
+    $payload = [ordered]@{{
+        state = 'succeeded'
+        message = $diagnostic
+        percentage = $null
+        estimated = $false
+        timestamp = (Get-Date).ToString('o')
+        exitCode = 0
+        executablePath = $null
+        error = $null
+    }}
+    Write-MendimaruReport $payload
+    exit 0
+}} catch {{
+    $payload = [ordered]@{{
+        state = 'failed'
+        message = 'Runtime port diagnosis failed.'
+        percentage = $null
+        estimated = $false
+        timestamp = (Get-Date).ToString('o')
+        exitCode = 1
+        executablePath = $null
+        error = $_.Exception.Message
+    }}
+    Write-MendimaruReport $payload
+    exit 1
+}}
+"#,
+        guest_port = guest_port,
+        result_path = powershell_literal(windows_report_path),
+        preamble = OPERATION_SECURITY_PREAMBLE,
+    )
+}
+
 #[cfg(test)]
 pub(super) fn security_probe_script(
     target: &str,
@@ -228,8 +286,8 @@ if ($null -eq $failure) {{ exit 0 }} else {{ exit 1 }}
 #[cfg(test)]
 mod tests {
     use super::{
-        install_script, launch_studio_script, studio_sessions_script, uninstall_script,
-        StudioSessionScriptMode,
+        install_script, launch_studio_script, runtime_port_probe_script, studio_sessions_script,
+        uninstall_script, StudioSessionScriptMode,
     };
     use crate::models::StudioVersion;
 
@@ -331,6 +389,18 @@ mod tests {
         assert!(script.contains("Assert-MendimaruTrustedExecutable"));
         assert!(script.contains("CloseMainWindow()"));
         assert!(!script.contains("Stop-Process"));
+        assert!(!script.contains("__"));
+    }
+
+    #[test]
+    fn runtime_probe_uses_a_numeric_port_and_authenticated_closed_report() {
+        let script = runtime_port_probe_script(8080, r"\\host.lan\Data\probe.json");
+        assert!(script.contains("$guestPort = [int]8080"));
+        assert!(script.contains("Get-NetTCPConnection"));
+        assert!(script.contains("Get-NetFirewallRule"));
+        assert!(script.contains("MENDIMARU_RUNTIME_NOT_LISTENING"));
+        assert!(script.contains("MENDIMARU_RUNTIME_FIREWALL_BLOCKED"));
+        assert!(script.contains("Write-MendimaruReport"));
         assert!(!script.contains("__"));
     }
 }

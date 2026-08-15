@@ -43,14 +43,15 @@ headless surface and stream contract are documented in
 
 Do not infer one identity from another:
 
-| Backend          | `hostPlatform` | `studioPlatform` | `runtimePlatform` | `runtimeMode` |
-| ---------------- | -------------- | ---------------- | ----------------- | ------------- |
-| `linux-winboat`  | `linux`        | `windows`        | `linux`           | `portable`    |
-| `windows-native` | `windows`      | `windows`        | `windows`         | `portable`    |
-| `mac-native`     | `macos`        | `macos`          | absent            | absent        |
+| Backend          | `hostPlatform` | `studioPlatform` | `runtimePlatform` | `runtimeModes`                   |
+| ---------------- | -------------- | ---------------- | ----------------- | -------------------------------- |
+| `linux-winboat`  | `linux`        | `windows`        | `linux`           | `portable`, `studio-run-locally` |
+| `windows-native` | `windows`      | `windows`        | `windows`         | `portable`                       |
+| `mac-native`     | `macos`        | `macos`          | absent            | absent                           |
 
-`runtimePlatform` and `runtimeMode` are optional and independent. They are
-present only where a Runtime adapter selects a concrete supported mode. A common
+`runtimePlatform`, singular `runtimeMode`, and `runtimeModes` are optional and
+independent. The singular field is emitted only when exactly one mode is
+supported; `runtimeModes` is the authoritative advertised set. A common
 request, session, error, or artifact must not require RDP, UNC, Compose,
 Windows registry, app-bundle, or TCC fields.
 
@@ -93,11 +94,14 @@ currently available.
 
 The current Linux+WinBoat and Windows native adapters support Studio `detect`,
 `install`, `uninstall`, `start`, `status`, and `stop`, plus Portable Runtime
-`build`, `start`, `wait`, `url`, `stop`, and `logs`. Session identity binds an
+`build`, `start`, `wait`, `url`, `stop`, and `logs`. Linux also supports the
+WinBoat `studio-run-locally` Runtime adapter with transactional loopback port
+forwarding. Session identity binds an
 exact process ID to its process start time; adapters also verify the current
 Windows user and the executable path of the detected installation before a
 session can be shown or closed. Runtime versions are exact-policy gated and the
-manifest records `portable` mode independently of the Windows Studio backend.
+manifest records all supported Runtime modes independently of the Windows
+Studio backend.
 UI automation and browser execution remain explicitly unsupported. `mac-native`
 is registered but reports all operations as unsupported until issue #11
 supplies the native implementation.
@@ -119,7 +123,7 @@ connection state, and a machine-readable reconnect availability reason. No
 project path or Windows command line crosses the adapter boundary. Before this
 surface was implemented, both production adapters reported `studio.status` and
 `studio.stop` as unsupported and emitted no successful status payload, so its
-initial supported shape remains within the current `1.0.0` contract.
+initial supported shape was introduced in `1.0.0` and is unchanged in `2.0.0`.
 
 `ArtifactDescriptor` links every artifact to a session and backend. Local
 location, media type, digest, size, and backend diagnostic reference are
@@ -127,11 +131,13 @@ optional. This keeps platform paths out of the portable required shape while
 allowing an adapter to provide a verified local artifact.
 
 `RuntimeStatus` is the shared successful lifecycle payload on Linux and
-Windows. It exposes only the opaque Runtime session ID, `portable` mode, state,
-optional process ID/start time/ready URL/failure code, and log artifact. The
-initial supported shape is version `1.0.0`; deployment paths, admin ports,
-credentials, and host launcher details remain private. The exact orchestration
-and policy are documented in [`portable-runtime.md`](portable-runtime.md).
+Windows. Version `2.0.0` adds the backend identity and an explicit `httpReady`
+gate. WinBoat sessions may also expose optional host/guest ports, linked Studio
+identity, and Studio state; these are not required for native or Portable
+adapters. Deployment paths, admin ports, credentials, Compose paths, and host
+launcher details remain private. See
+[`portable-runtime.md`](portable-runtime.md) and
+[`winboat-run-locally.md`](winboat-run-locally.md).
 
 ## Adding an adapter
 
@@ -151,7 +157,9 @@ and policy are documented in [`portable-runtime.md`](portable-runtime.md).
 
 ## Compatibility and versioning
 
-The current schema version is `1.0.0` and follows semantic versioning:
+The current schema version is `2.0.0` and follows semantic versioning. Version
+2 adds multi-mode capability discovery, explicit Runtime backend/readiness,
+WinBoat Run Locally status fields, and its distinct failure codes:
 
 - Patch: documentation or validation corrections that do not change accepted
   data or meaning.

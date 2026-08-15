@@ -38,6 +38,7 @@ export interface CapabilityManifest {
   studioPlatform: PlatformId;
   runtimePlatform?: PlatformId;
   runtimeMode?: RuntimeMode;
+  runtimeModes?: RuntimeMode[];
   architecture: string;
   capabilities: Capability[];
 }

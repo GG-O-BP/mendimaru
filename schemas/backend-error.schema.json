@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "code", "message", "retryable"],
   "properties": {
-    "schemaVersion": { "const": "1.0.0" },
+    "schemaVersion": { "const": "2.0.0" },
     "code": {
       "enum": [
         "unsupported_capability",
@@ -21,7 +21,13 @@
         "runtime_initialization_failed",
         "runtime_readiness_timeout",
         "runtime_session_not_found",
-        "runtime_exited"
+        "runtime_exited",
+        "runtime_guest_offline",
+        "runtime_port_conflict",
+        "runtime_port_forwarding_invalid",
+        "runtime_firewall_blocked",
+        "runtime_not_listening",
+        "runtime_compose_recovery_failed"
       ]
     },
     "message": { "type": "string", "minLength": 1 },
@@ -51,7 +57,13 @@
             "runtime_initialization_failed",
             "runtime_readiness_timeout",
             "runtime_session_not_found",
-            "runtime_exited"
+            "runtime_exited",
+            "runtime_guest_offline",
+            "runtime_port_conflict",
+            "runtime_port_forwarding_invalid",
+            "runtime_firewall_blocked",
+            "runtime_not_listening",
+            "runtime_compose_recovery_failed"
           ]
         },
         "message": { "type": "string", "minLength": 1 },
