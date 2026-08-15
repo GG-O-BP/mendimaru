@@ -758,7 +758,7 @@ fn real_binary_timeout_terminates_mxbuild_and_its_descendants() {
             &project_id,
             "--json",
             "--timeout-seconds",
-            "5",
+            "15",
         ],
         None,
     );

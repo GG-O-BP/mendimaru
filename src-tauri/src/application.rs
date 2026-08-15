@@ -226,11 +226,12 @@ pub(crate) async fn runtime_start(
     clean: bool,
     operation_timeout: Duration,
 ) -> ApplicationResult<(RuntimeBuildResult, RuntimeStatus)> {
+    const SUPERVISOR_RESPONSE_MARGIN: Duration = Duration::from_secs(5);
     let started = Instant::now();
     let build = runtime_build(config, project_id, clean).await?;
     let readiness_timeout = operation_timeout
         .checked_sub(started.elapsed())
-        .and_then(|remaining| remaining.checked_sub(Duration::from_secs(1)))
+        .and_then(|remaining| remaining.checked_sub(SUPERVISOR_RESPONSE_MARGIN))
         .filter(|remaining| !remaining.is_zero())
         .ok_or_else(|| {
             CommandError::new(

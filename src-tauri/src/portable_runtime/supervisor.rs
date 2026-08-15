@@ -1003,6 +1003,7 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
         .stderr
         .take()
         .map(|stream| tokio::spawn(capture_log(stream, "stderr", log.clone(), redactor.clone())));
+    append_internal_log(&log, "runtime process started").await;
 
     let mut acknowledgement = String::new();
     let acknowledgement_future = stdin.read_line(&mut acknowledgement);
@@ -1018,13 +1019,23 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
                 break Some(BackendErrorCode::RuntimeInitializationFailed);
             }
             _ = tokio::time::sleep(Duration::from_millis(250)) => {
-                if child.try_wait().ok().flatten().is_some() {
+                if let Some(status) = child.try_wait().ok().flatten() {
+                    let exit = status.code().map_or_else(
+                        || "without an exit code".to_string(),
+                        |code| format!("with exit code {code}"),
+                    );
+                    append_internal_log(
+                        &log,
+                        &format!("runtime process exited before readiness {exit}"),
+                    ).await;
                     break Some(BackendErrorCode::RuntimeInitializationFailed);
                 }
                 if http_ready(&record.url, record.admin_port).await {
+                    append_internal_log(&log, "runtime readiness confirmed").await;
                     break None;
                 }
                 if tokio::time::Instant::now() >= deadline {
+                    append_internal_log(&log, "runtime readiness deadline expired").await;
                     break Some(BackendErrorCode::RuntimeReadinessTimeout);
                 }
             }
@@ -1036,6 +1047,8 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
         record.state = RuntimeState::Failed;
         record.failure_code = Some(code);
         let _ = write_session(&layout, &record);
+        drop(containment);
+        join_log_tasks(stdout_task, stderr_task).await;
         let _ = write_supervisor_response(&SupervisorResponse {
             ok: false,
             status: None,
@@ -1048,8 +1061,6 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
             )),
         })
         .await;
-        drop(containment);
-        join_log_tasks(stdout_task, stderr_task).await;
         return Err(());
     }
     record.state = RuntimeState::Ready;
