@@ -20,7 +20,8 @@ mendimaru studio stop --session-id STUDIO_SESSION_ID
 mendimaru project list
 mendimaru project version --project-id PROJECT_ID
 mendimaru runtime build --project-id PROJECT_ID [--clean]
-mendimaru runtime start --project-id PROJECT_ID [--clean]
+mendimaru runtime start --project-id PROJECT_ID [--clean] [--mode portable]
+mendimaru runtime start --mode studio-run-locally [--guest-port PORT] [--studio-session-id STUDIO_SESSION_ID]
 mendimaru runtime status --session-id RUNTIME_SESSION_ID
 mendimaru runtime wait --session-id RUNTIME_SESSION_ID
 mendimaru runtime url --session-id RUNTIME_SESSION_ID
@@ -62,7 +63,9 @@ Runtime lifecycle results include an independent `runtimeSessionId`. Runtime
 status, build artifacts, and bounded log batches validate against
 [`runtime.schema.json`](../schemas/runtime.schema.json); see
 [`portable-runtime.md`](portable-runtime.md) for exact-version, readiness,
-cache, licensing, and secret-handling rules.
+cache, licensing, and secret-handling rules, and
+[`winboat-run-locally.md`](winboat-run-locally.md) for Linux host/Windows guest
+port forwarding and recovery.
 
 Exit codes are stable:
 
@@ -92,11 +95,18 @@ ambiguous, or mismatched version fails before an operation record is created or
 the platform backend is contacted. There is no nearest-version fallback,
 implicit upgrade, or mutation of the `.mpr` file.
 
-`runtime build` and `runtime start` always derive their exact version from the
-opaque project ID. `--clean` rebuilds only that project's cached portable
+Portable `runtime build` and `runtime start` derive their exact version from
+the opaque project ID. `--clean` rebuilds only that project's cached portable
 package. Runtime configuration and credentials have no CLI flags; callers may
 provide the bounded `MENDIMARU_RUNTIME_ENV_JSON` process environment described
-in the Portable Runtime guide. A Runtime URL is withheld until HTTP readiness.
+in the Portable Runtime guide.
+
+On Linux, `--mode studio-run-locally` selects the WinBoat adapter and does not
+build a package or accept a project ID. It records the Windows guest port
+(default `8080`) separately from the dynamic Linux host port. The optional
+Studio session ID must be an opaque process/start-time identity. A Runtime URL
+is withheld in both modes until HTTP readiness. WinBoat-specific fields remain
+optional in the common schema and native adapters never inspect Compose.
 
 On Linux, a detached per-session keeper owns the verified FreeRDP process after
 `studio start` returns. `studio status` and `studio stop` communicate with that

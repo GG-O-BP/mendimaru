@@ -60,7 +60,13 @@
     "runtime_initialization_failed": true,
     "runtime_readiness_timeout": true,
     "runtime_session_not_found": true,
-    "runtime_exited": true
+    "runtime_exited": true,
+    "runtime_guest_offline": true,
+    "runtime_port_conflict": true,
+    "runtime_port_forwarding_invalid": true,
+    "runtime_firewall_blocked": true,
+    "runtime_not_listening": true,
+    "runtime_compose_recovery_failed": true
   },
   "sessionState": {
     "created": true,
@@ -215,7 +221,13 @@
     "runtime_initialization_failed": true,
     "runtime_readiness_timeout": true,
     "runtime_session_not_found": true,
-    "runtime_exited": true
+    "runtime_exited": true,
+    "runtime_guest_offline": true,
+    "runtime_port_conflict": true,
+    "runtime_port_forwarding_invalid": true,
+    "runtime_firewall_blocked": true,
+    "runtime_not_listening": true,
+    "runtime_compose_recovery_failed": true
   },
   "textDirection": {
     "ltr": true,

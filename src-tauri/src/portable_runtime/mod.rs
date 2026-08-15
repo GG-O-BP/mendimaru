@@ -510,7 +510,8 @@ fn cached_build(
 ) -> Result<BuildRecord, String> {
     ensure_direct_directory(directory)?;
     let record: BuildRecord = store::read_json(&directory.join("build.json"))?;
-    if !record.success
+    if record.schema_version != CONTRACT_SCHEMA_VERSION
+        || !record.success
         || record.project_key != project_key
         || record.build_key != build_key
         || record.project_digest != project_digest
@@ -534,7 +535,11 @@ fn cached_build(
     ensure_direct_directory(&directory.join("deployment-template"))?;
     let artifact: ArtifactRecord =
         store::read_json(&layout.artifact_record(&package.artifact_id)?)?;
-    if artifact.role != ArtifactRole::Package
+    if artifact.schema_version != CONTRACT_SCHEMA_VERSION
+        || artifact.descriptor.schema_version != CONTRACT_SCHEMA_VERSION
+        || record.consistency_artifact.schema_version != CONTRACT_SCHEMA_VERSION
+        || record.build_log_artifact.schema_version != CONTRACT_SCHEMA_VERSION
+        || artifact.role != ArtifactRole::Package
         || artifact.project_key != project_key
         || artifact.build_key != build_key
     {
@@ -1020,6 +1025,20 @@ fn safe_runtime_error_message(code: BackendErrorCode) -> &'static str {
         }
         BackendErrorCode::RuntimeSessionNotFound => "the Portable Runtime session was not found",
         BackendErrorCode::RuntimeExited => "the Portable Runtime process exited unexpectedly",
+        BackendErrorCode::RuntimeGuestOffline => "the WinBoat guest is offline",
+        BackendErrorCode::RuntimePortConflict => "the WinBoat Runtime host port conflicts",
+        BackendErrorCode::RuntimePortForwardingInvalid => {
+            "the WinBoat Runtime port forwarding is invalid"
+        }
+        BackendErrorCode::RuntimeFirewallBlocked => {
+            "the Windows firewall blocks the WinBoat Runtime port"
+        }
+        BackendErrorCode::RuntimeNotListening => {
+            "the Mendix Runtime is not listening inside the WinBoat guest"
+        }
+        BackendErrorCode::RuntimeComposeRecoveryFailed => {
+            "the original WinBoat Compose configuration could not be recovered"
+        }
         BackendErrorCode::UnsupportedCapability => {
             "the selected backend does not support this runtime operation"
         }

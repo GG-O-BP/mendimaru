@@ -5,7 +5,7 @@ use std::fmt;
 /// Contract versions follow semantic versioning. Changes accepted by the
 /// current closed schemas may increment the minor version; serialized fields,
 /// enum variants, capability IDs, or semantics require a major version.
-pub const CONTRACT_SCHEMA_VERSION: &str = "1.0.0";
+pub const CONTRACT_SCHEMA_VERSION: &str = "2.0.0";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
@@ -204,6 +204,12 @@ pub enum BackendErrorCode {
     RuntimeReadinessTimeout,
     RuntimeSessionNotFound,
     RuntimeExited,
+    RuntimeGuestOffline,
+    RuntimePortConflict,
+    RuntimePortForwardingInvalid,
+    RuntimeFirewallBlocked,
+    RuntimeNotListening,
+    RuntimeComposeRecoveryFailed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -289,6 +295,8 @@ pub struct CapabilityManifest {
     pub runtime_platform: Option<PlatformId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_mode: Option<RuntimeMode>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_modes: Vec<RuntimeMode>,
     pub architecture: String,
     pub capabilities: Vec<Capability>,
 }
@@ -633,6 +641,10 @@ pub struct RuntimeStartRequest {
     pub mode: RuntimeMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub package_artifact_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub studio_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guest_port: Option<u16>,
     pub readiness_timeout_seconds: u64,
 }
 
@@ -651,6 +663,7 @@ pub enum RuntimeState {
 pub struct RuntimeStatus {
     pub schema_version: String,
     pub session_id: String,
+    pub backend: BackendId,
     pub mode: RuntimeMode,
     pub state: RuntimeState,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -659,6 +672,15 @@ pub struct RuntimeStatus {
     pub started_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guest_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub studio_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub studio_state: Option<StudioProcessState>,
+    pub http_ready: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure_code: Option<BackendErrorCode>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -810,6 +832,12 @@ mod tests {
                 BackendErrorCode::RuntimeReadinessTimeout,
                 BackendErrorCode::RuntimeSessionNotFound,
                 BackendErrorCode::RuntimeExited,
+                BackendErrorCode::RuntimeGuestOffline,
+                BackendErrorCode::RuntimePortConflict,
+                BackendErrorCode::RuntimePortForwardingInvalid,
+                BackendErrorCode::RuntimeFirewallBlocked,
+                BackendErrorCode::RuntimeNotListening,
+                BackendErrorCode::RuntimeComposeRecoveryFailed,
             ],
         );
         assert_registry(
@@ -898,6 +926,7 @@ mod tests {
             studio_platform: PlatformId::Windows,
             runtime_platform: None,
             runtime_mode: None,
+            runtime_modes: Vec::new(),
             architecture: "x86_64".to_string(),
             capabilities: CapabilityId::ALL
                 .into_iter()

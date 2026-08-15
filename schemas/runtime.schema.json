@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/GG-O-BP/mendimaru/schemas/runtime.schema.json",
-  "title": "Mendimaru Portable Runtime contracts",
+  "title": "Mendimaru Runtime contracts",
   "type": "object",
   "properties": {
-    "schemaVersion": { "const": "1.0.0" }
+    "schemaVersion": { "const": "2.0.0" }
   },
   "oneOf": [
     { "$ref": "#/$defs/buildResult" },
@@ -48,14 +48,26 @@
     "status": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schemaVersion", "sessionId", "mode", "state"],
+      "required": [
+        "schemaVersion",
+        "sessionId",
+        "backend",
+        "mode",
+        "state",
+        "httpReady"
+      ],
       "properties": {
-        "schemaVersion": { "const": "1.0.0" },
+        "schemaVersion": { "const": "2.0.0" },
         "sessionId": {
           "type": "string",
           "pattern": "^runtime_[0-9a-f]{32}$"
         },
-        "mode": { "const": "portable" },
+        "backend": {
+          "enum": ["linux-winboat", "windows-native", "mac-native"]
+        },
+        "mode": {
+          "enum": ["portable", "studio-run-locally", "external-url"]
+        },
         "state": {
           "enum": ["starting", "running", "ready", "stopped", "failed"]
         },
@@ -65,6 +77,16 @@
           "type": "string",
           "pattern": "^http://127\\.0\\.0\\.1:[1-9][0-9]{0,4}$"
         },
+        "hostPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "guestPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "studioSessionId": {
+          "type": "string",
+          "pattern": "^studio-[1-9][0-9]*-[1-9][0-9]*$"
+        },
+        "studioState": {
+          "enum": ["starting", "running", "stopped", "unknown"]
+        },
+        "httpReady": { "type": "boolean" },
         "failureCode": { "$ref": "#/$defs/errorCode" },
         "logArtifact": { "$ref": "#/$defs/artifact" }
       },
@@ -77,12 +99,35 @@
           },
           "then": {
             "type": "object",
-            "properties": { "url": true },
-            "required": ["url"]
+            "properties": {
+              "url": true,
+              "httpReady": { "const": true }
+            },
+            "required": ["url", "httpReady"]
           },
           "else": {
             "type": "object",
-            "properties": { "url": false }
+            "properties": {
+              "url": false,
+              "httpReady": { "const": false }
+            }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": { "mode": { "const": "studio-run-locally" } },
+            "required": ["mode"]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "backend": { "const": "linux-winboat" },
+              "hostPort": true,
+              "guestPort": true,
+              "studioState": true
+            },
+            "required": ["hostPort", "guestPort", "studioState"]
           }
         },
         {

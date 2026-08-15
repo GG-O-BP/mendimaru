@@ -13,7 +13,7 @@
     "createdAt"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.0.0" },
+    "schemaVersion": { "const": "2.0.0" },
     "artifactId": { "type": "string", "pattern": "^artifact_[0-9a-f]{32}$" },
     "sessionId": {
       "type": "string",

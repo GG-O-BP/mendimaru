@@ -1,7 +1,7 @@
 use crate::app_paths::AppPaths;
 use crate::contracts::{
     BackendError, BackendErrorCode, BackendId, CapabilityId, CapabilitySnapshot, PlatformId,
-    SessionDescriptor, CONTRACT_SCHEMA_VERSION,
+    RuntimeMode, SessionDescriptor, CONTRACT_SCHEMA_VERSION,
 };
 use crate::downloads::DownloadManager;
 use crate::models::{CommandError, CommandErrorCode, DownloadProgress};
@@ -55,8 +55,11 @@ enum CliCommand {
         clean: bool,
     },
     RuntimeStart {
-        project_id: String,
+        project_id: Option<String>,
         clean: bool,
+        mode: RuntimeMode,
+        studio_session_id: Option<String>,
+        guest_port: Option<u16>,
     },
     RuntimeStatus {
         session_id: String,
@@ -429,12 +432,31 @@ async fn run_command(
         CliCommand::RuntimeBuild { project_id, clean } => CommandOutput::data(
             crate::application::runtime_build(&config, project_id, *clean).await?,
         ),
-        CliCommand::RuntimeStart { project_id, clean } => {
-            let (build, status) =
-                crate::application::runtime_start(&config, project_id, *clean, timeout).await?;
+        CliCommand::RuntimeStart {
+            project_id,
+            clean,
+            mode,
+            studio_session_id,
+            guest_port,
+        } => {
+            let (build, status) = crate::application::runtime_start(
+                &config,
+                project_id.as_deref(),
+                *clean,
+                *mode,
+                studio_session_id.as_deref(),
+                *guest_port,
+                timeout,
+            )
+            .await?;
             let runtime_session_id = status.session_id.clone();
+            let data = if let Some(build) = build {
+                json!({ "build": build, "runtime": status })
+            } else {
+                json!({ "runtime": status })
+            };
             Ok(CommandOutput {
-                data: json!({ "build": build, "runtime": status }),
+                data,
                 operation_id: None,
                 studio_session_id: None,
                 runtime_session_id: Some(runtime_session_id),
@@ -649,7 +671,7 @@ fn session_keeper_dispatch(arguments: &[OsString]) -> i32 {
     }
     let successful = response.ok;
     let serialized = serde_json::to_vec(&response).unwrap_or_else(|_| {
-        br#"{"ok":false,"error":{"schemaVersion":"1.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
+        br#"{"ok":false,"error":{"schemaVersion":"2.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
     });
     let written = std::io::stdout()
         .write_all(&serialized)
@@ -1199,15 +1221,65 @@ fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
 
 fn parse_runtime_command(values: &[String]) -> Result<CliCommand, BackendError> {
     match values.first().map(String::as_str) {
-        Some("build") | Some("start") => {
+        Some("build") => {
             let (options, flags) = parse_options(&values[1..], &["--project-id"], &["--clean"])?;
             let project_id = required_map_option(&options, "--project-id")?;
             let clean = flags.contains("--clean");
-            if values.first().is_some_and(|value| value == "build") {
-                Ok(CliCommand::RuntimeBuild { project_id, clean })
-            } else {
-                Ok(CliCommand::RuntimeStart { project_id, clean })
+            Ok(CliCommand::RuntimeBuild { project_id, clean })
+        }
+        Some("start") => {
+            let (options, flags) = parse_options(
+                &values[1..],
+                &[
+                    "--project-id",
+                    "--mode",
+                    "--studio-session-id",
+                    "--guest-port",
+                ],
+                &["--clean"],
+            )?;
+            let mode = options
+                .get("--mode")
+                .map(|value| parse_runtime_mode(value))
+                .transpose()?
+                .unwrap_or(RuntimeMode::Portable);
+            let guest_port = options
+                .get("--guest-port")
+                .map(|value| parse_guest_port(value))
+                .transpose()?;
+            let project_id = options.get("--project-id").cloned();
+            let studio_session_id = options.get("--studio-session-id").cloned();
+            let clean = flags.contains("--clean");
+            match mode {
+                RuntimeMode::Portable if project_id.is_none() => {
+                    return Err(BackendError::invalid_request(
+                        "--project-id is required for portable Runtime mode",
+                    ));
+                }
+                RuntimeMode::Portable if studio_session_id.is_some() || guest_port.is_some() => {
+                    return Err(BackendError::invalid_request(
+                        "--studio-session-id and --guest-port require studio-run-locally mode",
+                    ));
+                }
+                RuntimeMode::StudioRunLocally if project_id.is_some() || clean => {
+                    return Err(BackendError::invalid_request(
+                        "--project-id and --clean are not accepted in studio-run-locally mode",
+                    ));
+                }
+                RuntimeMode::ExternalUrl => {
+                    return Err(BackendError::invalid_request(
+                        "external-url Runtime sessions cannot be started",
+                    ));
+                }
+                _ => {}
             }
+            Ok(CliCommand::RuntimeStart {
+                project_id,
+                clean,
+                mode,
+                studio_session_id,
+                guest_port,
+            })
         }
         Some("status") => Ok(CliCommand::RuntimeStatus {
             session_id: required_option(&values[1..], "--session-id")?,
@@ -1355,6 +1427,27 @@ fn parse_timeout(value: &str) -> Result<u64, BackendError> {
         })
 }
 
+fn parse_runtime_mode(value: &str) -> Result<RuntimeMode, BackendError> {
+    match value {
+        "portable" => Ok(RuntimeMode::Portable),
+        "studio-run-locally" => Ok(RuntimeMode::StudioRunLocally),
+        "external-url" => Ok(RuntimeMode::ExternalUrl),
+        _ => Err(BackendError::invalid_request(
+            "unknown Runtime mode; expected portable or studio-run-locally",
+        )),
+    }
+}
+
+fn parse_guest_port(value: &str) -> Result<u16, BackendError> {
+    value
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port >= 1024)
+        .ok_or_else(|| {
+            BackendError::invalid_request("guest port must be an integer from 1024 through 65535")
+        })
+}
+
 fn execution_context(requested: Option<BackendId>) -> Result<ExecutionContext, BackendError> {
     let snapshot = crate::platform::capability_snapshot(requested)?;
     let session = SessionDescriptor::create(snapshot.clone())?;
@@ -1478,6 +1571,16 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
         CommandErrorCode::RuntimeReadinessTimeout => BackendErrorCode::RuntimeReadinessTimeout,
         CommandErrorCode::RuntimeSessionNotFound => BackendErrorCode::RuntimeSessionNotFound,
         CommandErrorCode::RuntimeExited => BackendErrorCode::RuntimeExited,
+        CommandErrorCode::RuntimeGuestOffline => BackendErrorCode::RuntimeGuestOffline,
+        CommandErrorCode::RuntimePortConflict => BackendErrorCode::RuntimePortConflict,
+        CommandErrorCode::RuntimePortForwardingInvalid => {
+            BackendErrorCode::RuntimePortForwardingInvalid
+        }
+        CommandErrorCode::RuntimeFirewallBlocked => BackendErrorCode::RuntimeFirewallBlocked,
+        CommandErrorCode::RuntimeNotListening => BackendErrorCode::RuntimeNotListening,
+        CommandErrorCode::RuntimeComposeRecoveryFailed => {
+            BackendErrorCode::RuntimeComposeRecoveryFailed
+        }
         CommandErrorCode::ConfigLoadFailed
         | CommandErrorCode::DownloadCancelled
         | CommandErrorCode::InstallFailed
@@ -1541,6 +1644,20 @@ fn safe_error_message(code: BackendErrorCode) -> &'static str {
         }
         BackendErrorCode::RuntimeSessionNotFound => "the Portable Runtime session was not found",
         BackendErrorCode::RuntimeExited => "the Portable Runtime exited unexpectedly",
+        BackendErrorCode::RuntimeGuestOffline => "the WinBoat guest is offline",
+        BackendErrorCode::RuntimePortConflict => "the WinBoat Runtime host port conflicts",
+        BackendErrorCode::RuntimePortForwardingInvalid => {
+            "the WinBoat Runtime port forwarding is invalid"
+        }
+        BackendErrorCode::RuntimeFirewallBlocked => {
+            "the Windows firewall blocks the WinBoat Runtime port"
+        }
+        BackendErrorCode::RuntimeNotListening => {
+            "the Mendix Runtime is not listening inside the WinBoat guest"
+        }
+        BackendErrorCode::RuntimeComposeRecoveryFailed => {
+            "the original WinBoat Compose configuration could not be recovered"
+        }
     }
 }
 
@@ -1558,7 +1675,13 @@ fn exit_code(error: &BackendError) -> i32 {
         | BackendErrorCode::RuntimeInitializationFailed
         | BackendErrorCode::RuntimeReadinessTimeout
         | BackendErrorCode::RuntimeSessionNotFound
-        | BackendErrorCode::RuntimeExited => EXIT_OPERATION_FAILED,
+        | BackendErrorCode::RuntimeExited
+        | BackendErrorCode::RuntimeGuestOffline
+        | BackendErrorCode::RuntimePortConflict
+        | BackendErrorCode::RuntimePortForwardingInvalid
+        | BackendErrorCode::RuntimeFirewallBlocked
+        | BackendErrorCode::RuntimeNotListening
+        | BackendErrorCode::RuntimeComposeRecoveryFailed => EXIT_OPERATION_FAILED,
     }
 }
 

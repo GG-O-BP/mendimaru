@@ -643,7 +643,7 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
     let started = stdout_json(&started_output);
     assert_complete_envelope(&started, "runtime.start");
     assert_eq!(started["data"]["build"]["cacheHit"], true);
-    assert_eq!(started["data"]["runtime"]["schemaVersion"], "1.0.0");
+    assert_eq!(started["data"]["runtime"]["schemaVersion"], "2.0.0");
     assert_eq!(started["data"]["runtime"]["mode"], "portable");
     assert_eq!(started["data"]["runtime"]["state"], "ready");
     let session_id = started["runtimeSessionId"]
@@ -868,8 +868,634 @@ fn real_binary_timeout_terminates_mxbuild_and_its_descendants() {
     }
 }
 
+#[cfg(unix)]
+struct FixtureHttpServer {
+    address: std::net::SocketAddr,
+    stopping: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(unix)]
+impl FixtureHttpServer {
+    fn start() -> Self {
+        use std::sync::atomic::Ordering;
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind HTTP fixture");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking HTTP fixture");
+        let address = listener.local_addr().expect("HTTP fixture address");
+        let stopping = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_stopping = stopping.clone();
+        let worker = thread::spawn(move || {
+            while !worker_stopping.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                        let mut request = [0_u8; 4096];
+                        let _ = stream.read(&mut request);
+                        let _ = stream.write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nready",
+                        );
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        Self {
+            address,
+            stopping,
+            worker: Some(worker),
+        }
+    }
+
+    fn port(&self) -> u16 {
+        self.address.port()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for FixtureHttpServer {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+
+        self.stopping.store(true, Ordering::Relaxed);
+        let _ = std::net::TcpStream::connect(self.address);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+#[cfg(unix)]
+struct WinboatRuntimeFixture {
+    _temporary: tempfile::TempDir,
+    _guest_server: FixtureHttpServer,
+    _runtime_server: FixtureHttpServer,
+    config_directory: PathBuf,
+    compose_path: PathBuf,
+    original_compose: String,
+    fake_bin: PathBuf,
+    fake_state: PathBuf,
+    compose_log: PathBuf,
+    runtime_port: u16,
+    guest_api_port: u16,
+}
+
+#[cfg(unix)]
+impl WinboatRuntimeFixture {
+    fn new() -> Self {
+        let temporary = tempfile::tempdir().expect("WinBoat Runtime fixture");
+        let root = temporary.path();
+        let config_directory = root.join("config");
+        let workspace = root.join("workspace");
+        let fake_bin = root.join("bin");
+        let fake_state = root.join("fake-docker");
+        fs::create_dir_all(&config_directory).expect("config directory");
+        fs::create_dir_all(&workspace).expect("workspace directory");
+        fs::create_dir_all(&fake_bin).expect("fake binary directory");
+        fs::create_dir_all(&fake_state).expect("fake Docker state");
+
+        let guest_server = FixtureHttpServer::start();
+        let runtime_server = FixtureHttpServer::start();
+        let guest_api_port = guest_server.port();
+        let runtime_port = runtime_server.port();
+        let compose_path = root.join("docker-compose.yml");
+        let original_compose = format!(
+            "services:\n  windows:\n    image: winboat-fixture\n    container_name: MendimaruE2EWinBoat\n    volumes:\n      - winboat-storage:/storage\n      - {}:/shared\n    ports:\n      - 127.0.0.1:47280:7148\n      - 127.0.0.1:47300:3389\nvolumes:\n  winboat-storage: {{}}\n",
+            workspace.to_string_lossy()
+        );
+        fs::write(&compose_path, &original_compose).expect("Compose fixture");
+
+        let mut config = fixture_config(&workspace);
+        config.compose_file = compose_path.to_string_lossy().into_owned();
+        config.container_name = "MendimaruE2EWinBoat".into();
+        config.api_url = format!("http://127.0.0.1:{guest_api_port}");
+        config.startup_timeout_seconds = 3;
+        fs::write(
+            config_directory.join("config.json"),
+            serde_json::to_vec_pretty(&config).expect("serialize WinBoat fixture config"),
+        )
+        .expect("WinBoat fixture config");
+
+        fs::write(fake_state.join("api-port"), guest_api_port.to_string()).expect("fake API port");
+        fs::write(fake_state.join("runtime-port"), runtime_port.to_string())
+            .expect("fake Runtime port");
+        write_fake_docker_inspection(
+            &fake_state.join("inspect.json"),
+            guest_api_port,
+            runtime_port,
+            "127.0.0.1",
+            "winboat-storage",
+        );
+        fs::copy(
+            fake_state.join("inspect.json"),
+            fake_state.join("inspect.good.json"),
+        )
+        .expect("copy good inspection");
+        write_fake_docker_inspection(
+            &fake_state.join("inspect.bad-storage.json"),
+            guest_api_port,
+            runtime_port,
+            "127.0.0.1",
+            "unexpected-storage",
+        );
+
+        let compose_log = fake_state.join("compose.log");
+        let docker_script = r#"#!/bin/sh
+set -eu
+state=__STATE__
+compose_log=__COMPOSE_LOG__
+command=${1:-}
+if [ "$command" = "port" ]; then
+  private_port=${3:-}
+  case "$private_port" in
+    7148/tcp) port=$(cat "$state/api-port") ;;
+    3389/tcp) port=47300 ;;
+    8080/tcp) port=$(cat "$state/runtime-port") ;;
+    *) exit 1 ;;
+  esac
+  printf '127.0.0.1:%s\n' "$port"
+  exit 0
+fi
+if [ "$command" = "inspect" ]; then
+  if [ "${2:-}" = "--format" ]; then
+    printf 'USERNAME=fixture\nPASSWORD=fixture\n'
+  else
+    cat "$state/inspect.json"
+  fi
+  exit 0
+fi
+if [ "$command" = "compose" ]; then
+  compose_file=
+  previous=
+  for argument in "$@"; do
+    if [ "$previous" = "-f" ]; then compose_file=$argument; fi
+    previous=$argument
+  done
+  printf 'compose-up\n' >> "$compose_log"
+  if [ -f "$state/fail-once" ]; then
+    rm -f "$state/fail-once"
+    printf 'Bind for 127.0.0.1 failed: port is already allocated\n' >&2
+    exit 1
+  fi
+  if [ -f "$state/mutate-storage" ]; then
+    if grep -q '127.0.0.1::8080/tcp' "$compose_file"; then
+      cp "$state/inspect.bad-storage.json" "$state/inspect.json"
+    else
+      cp "$state/inspect.good.json" "$state/inspect.json"
+    fi
+  fi
+  exit 0
+fi
+if [ "$command" = "info" ]; then
+  printf '29.0.0\n'
+  exit 0
+fi
+exit 1
+"#
+        .replace("__STATE__", &shell_literal(&fake_state))
+        .replace("__COMPOSE_LOG__", &shell_literal(&compose_log));
+        let docker = fake_bin.join("docker");
+        fs::write(&docker, docker_script).expect("fake Docker executable");
+        make_executable(&docker);
+
+        Self {
+            _temporary: temporary,
+            _guest_server: guest_server,
+            _runtime_server: runtime_server,
+            config_directory,
+            compose_path,
+            original_compose,
+            fake_bin,
+            fake_state,
+            compose_log,
+            runtime_port,
+            guest_api_port,
+        }
+    }
+
+    fn run(&self, arguments: &[&str]) -> Output {
+        let current_path = std::env::var_os("PATH").unwrap_or_default();
+        let paths =
+            std::iter::once(self.fake_bin.clone()).chain(std::env::split_paths(&current_path));
+        let path = std::env::join_paths(paths).expect("fake Docker PATH");
+        run_with_environment(
+            &self.config_directory,
+            arguments,
+            &[("PATH", path.as_os_str())],
+        )
+    }
+
+    fn set_runtime_binding(&self, port: u16, host_ip: &str, storage: &str) {
+        fs::write(self.fake_state.join("runtime-port"), port.to_string())
+            .expect("replace fake Runtime port");
+        write_fake_docker_inspection(
+            &self.fake_state.join("inspect.json"),
+            self.guest_api_port,
+            port,
+            host_ip,
+            storage,
+        );
+    }
+}
+
+#[cfg(unix)]
+fn shell_literal(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\"'\"'"))
+}
+
+#[cfg(unix)]
+fn write_fake_docker_inspection(
+    path: &Path,
+    api_port: u16,
+    runtime_port: u16,
+    runtime_host_ip: &str,
+    storage_source: &str,
+) {
+    let inspection = serde_json::json!([{
+        "State": { "Status": "running" },
+        "Mounts": [
+            { "Source": storage_source, "Destination": "/storage" },
+            { "Source": "/fixture/workspace", "Destination": "/shared" }
+        ],
+        "NetworkSettings": {
+            "Ports": {
+                "3389/tcp": [{ "HostIp": "127.0.0.1", "HostPort": "47300" }],
+                "7148/tcp": [{ "HostIp": "127.0.0.1", "HostPort": api_port.to_string() }],
+                "8080/tcp": [{ "HostIp": runtime_host_ip, "HostPort": runtime_port.to_string() }]
+            }
+        }
+    }]);
+    fs::write(
+        path,
+        serde_json::to_vec(&inspection).expect("serialize fake Docker inspection"),
+    )
+    .expect("write fake Docker inspection");
+}
+
+#[cfg(unix)]
+#[test]
+fn real_binary_runs_winboat_runtime_through_loopback_and_restores_compose() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = WinboatRuntimeFixture::new();
+    let started = stdout_json(&fixture.run(&[
+        "runtime",
+        "start",
+        "--mode",
+        "studio-run-locally",
+        "--guest-port",
+        "8080",
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]));
+    assert_complete_envelope(&started, "runtime.start");
+    assert!(started["data"].get("build").is_none());
+    assert_eq!(started["data"]["runtime"]["backend"], "linux-winboat");
+    assert_eq!(started["data"]["runtime"]["mode"], "studio-run-locally");
+    assert_eq!(started["data"]["runtime"]["state"], "ready");
+    assert_eq!(started["data"]["runtime"]["httpReady"], true);
+    assert_eq!(started["data"]["runtime"]["hostPort"], fixture.runtime_port);
+    assert_eq!(started["data"]["runtime"]["guestPort"], 8080);
+    assert_eq!(started["data"]["runtime"]["studioState"], "running");
+    assert_eq!(
+        started["capabilitySnapshot"]["manifest"]["runtimeModes"],
+        serde_json::json!(["portable", "studio-run-locally"])
+    );
+    let session_id = started["runtimeSessionId"]
+        .as_str()
+        .expect("WinBoat Runtime session");
+    let first_url = started["data"]["runtime"]["url"]
+        .as_str()
+        .expect("WinBoat Runtime URL");
+    assert_http_ok(first_url);
+    let serialized = serde_json::to_string(&started).expect("serialize start response");
+    assert!(!serialized.contains(fixture.compose_path.to_string_lossy().as_ref()));
+    assert!(!serialized.contains("winboat-storage"));
+
+    let updated_compose = fs::read_to_string(&fixture.compose_path).expect("updated Compose");
+    assert!(updated_compose.contains("127.0.0.1::8080/tcp"));
+    assert!(updated_compose.contains("winboat-storage:/storage"));
+    assert!(!updated_compose.contains("0.0.0.0"));
+
+    let replacement_runtime = FixtureHttpServer::start();
+    fixture.set_runtime_binding(replacement_runtime.port(), "127.0.0.1", "winboat-storage");
+    let status = stdout_json(&fixture.run(&[
+        "runtime",
+        "status",
+        "--session-id",
+        session_id,
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]));
+    assert_eq!(status["data"]["state"], "ready");
+    assert_eq!(status["data"]["hostPort"], replacement_runtime.port());
+    let replacement_url = status["data"]["url"]
+        .as_str()
+        .expect("re-detected Runtime URL");
+    assert_http_ok(replacement_url);
+
+    for (verb, command) in [("wait", "runtime.wait"), ("url", "runtime.url")] {
+        let observed = stdout_json(&fixture.run(&[
+            "runtime",
+            verb,
+            "--session-id",
+            session_id,
+            "--json",
+            "--timeout-seconds",
+            "15",
+        ]));
+        assert_complete_envelope(&observed, command);
+        if verb == "url" {
+            assert_eq!(observed["data"]["url"], replacement_url);
+        } else {
+            assert_eq!(observed["data"]["httpReady"], true);
+        }
+    }
+
+    let logs =
+        stdout_json(&fixture.run(&["runtime", "logs", "--session-id", session_id, "--json"]));
+    assert!(logs["data"]["entries"]
+        .as_array()
+        .expect("Runtime log entries")
+        .iter()
+        .any(|entry| entry
+            .as_str()
+            .is_some_and(|line| line.contains("guest restart changed"))));
+    assert!(!serde_json::to_string(&logs)
+        .expect("serialize logs")
+        .contains(fixture.compose_path.to_string_lossy().as_ref()));
+
+    let session_directory = fixture
+        .config_directory
+        .join("isolated-cache/winboat-runtime/sessions")
+        .join(session_id);
+    assert_eq!(
+        fs::metadata(&session_directory)
+            .expect("private session directory")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(
+        fs::metadata(session_directory.join("compose.original.yml"))
+            .expect("private Compose backup")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+
+    let stopped = stdout_json(&fixture.run(&[
+        "runtime",
+        "stop",
+        "--session-id",
+        session_id,
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]));
+    assert_eq!(stopped["data"]["completed"], true);
+    assert_eq!(
+        fs::read_to_string(&fixture.compose_path).expect("restored Compose"),
+        fixture.original_compose
+    );
+    let stopped_status =
+        stdout_json(&fixture.run(&["runtime", "status", "--session-id", session_id, "--json"]));
+    assert_eq!(stopped_status["data"]["state"], "stopped");
+    assert_eq!(stopped_status["data"]["httpReady"], false);
+    assert!(stopped_status["data"].get("url").is_none());
+    assert_eq!(
+        fs::read_to_string(&fixture.compose_log)
+            .expect("Compose invocation log")
+            .lines()
+            .count(),
+        2
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn real_binary_recovers_compose_and_distinguishes_winboat_runtime_failures() {
+    let conflict = WinboatRuntimeFixture::new();
+    fs::write(conflict.fake_state.join("fail-once"), b"1").expect("port conflict marker");
+    let failed = conflict.run(&[
+        "runtime",
+        "start",
+        "--mode",
+        "studio-run-locally",
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]);
+    assert_eq!(
+        stderr_json(&failed)["error"]["code"],
+        "runtime_port_conflict"
+    );
+    assert_eq!(
+        fs::read_to_string(&conflict.compose_path).expect("conflict rollback"),
+        conflict.original_compose
+    );
+
+    let public = WinboatRuntimeFixture::new();
+    public.set_runtime_binding(public.runtime_port, "0.0.0.0", "winboat-storage");
+    let failed = public.run(&[
+        "runtime",
+        "start",
+        "--mode",
+        "studio-run-locally",
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]);
+    assert_eq!(
+        stderr_json(&failed)["error"]["code"],
+        "runtime_port_forwarding_invalid"
+    );
+    assert_eq!(
+        fs::read_to_string(&public.compose_path).expect("public binding rollback"),
+        public.original_compose
+    );
+
+    let storage = WinboatRuntimeFixture::new();
+    fs::write(storage.fake_state.join("mutate-storage"), b"1").expect("storage mutation marker");
+    let failed = storage.run(&[
+        "runtime",
+        "start",
+        "--mode",
+        "studio-run-locally",
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]);
+    assert_eq!(
+        stderr_json(&failed)["error"]["code"],
+        "runtime_port_forwarding_invalid"
+    );
+    assert_eq!(
+        fs::read_to_string(&storage.compose_path).expect("storage rollback"),
+        storage.original_compose
+    );
+    let restored_inspection: Value = serde_json::from_slice(
+        &fs::read(storage.fake_state.join("inspect.json")).expect("restored inspection"),
+    )
+    .expect("inspection JSON");
+    assert_eq!(
+        restored_inspection[0]["Mounts"][0]["Source"],
+        "winboat-storage"
+    );
+
+    let offline = WinboatRuntimeFixture::new();
+    fs::write(offline.fake_state.join("api-port"), b"1").expect("offline API port");
+    let failed = offline.run(&[
+        "runtime",
+        "start",
+        "--mode",
+        "studio-run-locally",
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]);
+    assert_eq!(
+        stderr_json(&failed)["error"]["code"],
+        "runtime_guest_offline"
+    );
+    assert_eq!(
+        fs::read_to_string(&offline.compose_path).expect("offline Compose"),
+        offline.original_compose
+    );
+    assert!(!offline.compose_log.exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn real_binary_never_reports_winboat_ready_before_http_responds() {
+    let fixture = WinboatRuntimeFixture::new();
+    let unavailable_listener =
+        std::net::TcpListener::bind(("127.0.0.1", 0)).expect("reserve unavailable fixture port");
+    let unavailable_port = unavailable_listener
+        .local_addr()
+        .expect("unavailable fixture address")
+        .port();
+    drop(unavailable_listener);
+    fixture.set_runtime_binding(unavailable_port, "127.0.0.1", "winboat-storage");
+
+    let started = stdout_json(&fixture.run(&[
+        "runtime",
+        "start",
+        "--mode",
+        "studio-run-locally",
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]));
+    assert_eq!(started["data"]["runtime"]["state"], "starting");
+    assert_eq!(started["data"]["runtime"]["httpReady"], false);
+    assert!(started["data"]["runtime"].get("url").is_none());
+    let session_id = started["runtimeSessionId"]
+        .as_str()
+        .expect("starting WinBoat Runtime session");
+
+    fixture.set_runtime_binding(fixture.runtime_port, "127.0.0.1", "winboat-storage");
+    let ready = stdout_json(&fixture.run(&[
+        "runtime",
+        "wait",
+        "--session-id",
+        session_id,
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]));
+    assert_eq!(ready["data"]["state"], "ready");
+    assert_eq!(ready["data"]["httpReady"], true);
+    assert_http_ok(ready["data"]["url"].as_str().expect("ready URL"));
+
+    let stopped = fixture.run(&[
+        "runtime",
+        "stop",
+        "--session-id",
+        session_id,
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]);
+    assert!(stopped.status.success(), "stop delayed Runtime fixture");
+}
+
+#[cfg(unix)]
+#[test]
+fn real_binary_refuses_to_overwrite_a_concurrent_compose_edit_on_stop() {
+    let fixture = WinboatRuntimeFixture::new();
+    let started = stdout_json(&fixture.run(&[
+        "runtime",
+        "start",
+        "--mode",
+        "studio-run-locally",
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]));
+    let session_id = started["runtimeSessionId"]
+        .as_str()
+        .expect("WinBoat Runtime session");
+    let mut compose = fs::read_to_string(&fixture.compose_path).expect("managed Compose");
+    compose.push_str("# concurrent-user-edit\n");
+    fs::write(&fixture.compose_path, &compose).expect("concurrent Compose edit");
+
+    let stopped = fixture.run(&[
+        "runtime",
+        "stop",
+        "--session-id",
+        session_id,
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]);
+    assert_eq!(
+        stderr_json(&stopped)["error"]["code"],
+        "runtime_compose_recovery_failed"
+    );
+    assert!(fs::read_to_string(&fixture.compose_path)
+        .expect("preserved concurrent Compose edit")
+        .contains("# concurrent-user-edit"));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_native_rejects_winboat_runtime_mode_without_reading_compose() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let config_directory = temporary.path().join("config");
+    let workspace = temporary.path().join("workspace");
+    fs::create_dir_all(&config_directory).expect("config directory");
+    fs::create_dir_all(&workspace).expect("workspace directory");
+    let compose = temporary.path().join("must-not-be-read.yml");
+    let marker = b"native adapter boundary";
+    fs::write(&compose, marker).expect("Compose boundary marker");
+    let mut config = fixture_config(&workspace);
+    config.compose_file = compose.to_string_lossy().into_owned();
+    fs::write(
+        config_directory.join("config.json"),
+        serde_json::to_vec_pretty(&config).expect("serialize config"),
+    )
+    .expect("config fixture");
+
+    let rejected = run(
+        &config_directory,
+        &["runtime", "start", "--mode", "studio-run-locally", "--json"],
+    );
+    assert_eq!(stderr_json(&rejected)["error"]["code"], "invalid_request");
+    assert_eq!(fs::read(&compose).expect("Compose boundary marker"), marker);
+}
+
 fn assert_complete_envelope(document: &Value, command: &str) {
-    assert_eq!(document["schemaVersion"], "1.0.0");
+    assert_eq!(document["schemaVersion"], "2.0.0");
     assert_eq!(document["command"], command);
     assert!(document["ok"].is_boolean());
     assert!(document["platform"].is_string());

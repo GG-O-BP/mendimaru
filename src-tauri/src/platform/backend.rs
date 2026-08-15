@@ -203,13 +203,26 @@ pub fn manifest_for(backend: BackendId, architecture: &str) -> CapabilityManifes
         .collect();
     let portable_runtime = matches!(backend, BackendId::LinuxWinboat | BackendId::WindowsNative)
         && architecture == "x86_64";
+    let runtime_modes = if portable_runtime {
+        match backend {
+            BackendId::LinuxWinboat => vec![
+                crate::contracts::RuntimeMode::Portable,
+                crate::contracts::RuntimeMode::StudioRunLocally,
+            ],
+            BackendId::WindowsNative => vec![crate::contracts::RuntimeMode::Portable],
+            BackendId::MacNative => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
     CapabilityManifest {
         schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
         backend,
         host_platform,
         studio_platform,
         runtime_platform: portable_runtime.then_some(host_platform),
-        runtime_mode: portable_runtime.then_some(crate::contracts::RuntimeMode::Portable),
+        runtime_mode: (runtime_modes.len() == 1).then(|| runtime_modes[0]),
+        runtime_modes,
         architecture: architecture.to_string(),
         capabilities,
     }
@@ -323,7 +336,23 @@ fn required_permissions(backend: BackendId, id: CapabilityId) -> &'static [&'sta
             &["network-access", "java-runtime", "private-cache"]
         }
         (
-            BackendId::LinuxWinboat | BackendId::WindowsNative,
+            BackendId::LinuxWinboat,
+            CapabilityId::RuntimeStart
+            | CapabilityId::RuntimeStatus
+            | CapabilityId::RuntimeWait
+            | CapabilityId::RuntimeUrl
+            | CapabilityId::RuntimeStop
+            | CapabilityId::RuntimeLogs,
+        ) => &[
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate",
+        ],
+        (
+            BackendId::WindowsNative,
             CapabilityId::RuntimeStart
             | CapabilityId::RuntimeStatus
             | CapabilityId::RuntimeWait
@@ -501,26 +530,54 @@ impl RuntimeBackend for LinuxWinboatBackend<'_> {
     }
 
     fn start<'a>(&'a self, request: &'a RuntimeStartRequest) -> BackendFuture<'a, RuntimeStatus> {
-        Box::pin(crate::portable_runtime::start(request, self.backend_id()))
+        match request.mode {
+            crate::contracts::RuntimeMode::Portable => {
+                Box::pin(crate::portable_runtime::start(request, self.backend_id()))
+            }
+            crate::contracts::RuntimeMode::StudioRunLocally => {
+                Box::pin(crate::winboat::runtime::start(self.config, request))
+            }
+            crate::contracts::RuntimeMode::ExternalUrl => Box::pin(async move {
+                Err(BackendError::invalid_request(
+                    "external-url Runtime sessions cannot be started by linux-winboat",
+                ))
+            }),
+        }
     }
 
     fn status<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, RuntimeStatus> {
-        Box::pin(crate::portable_runtime::status(
-            session_id,
-            self.backend_id(),
-        ))
+        if crate::winboat::runtime::session_exists(session_id) {
+            Box::pin(crate::winboat::runtime::status(self.config, session_id))
+        } else {
+            Box::pin(crate::portable_runtime::status(
+                session_id,
+                self.backend_id(),
+            ))
+        }
     }
 
     fn wait<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, RuntimeStatus> {
-        Box::pin(crate::portable_runtime::wait(session_id, self.backend_id()))
+        if crate::winboat::runtime::session_exists(session_id) {
+            Box::pin(crate::winboat::runtime::wait(self.config, session_id))
+        } else {
+            Box::pin(crate::portable_runtime::wait(session_id, self.backend_id()))
+        }
     }
 
     fn url<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, String> {
-        Box::pin(crate::portable_runtime::url(session_id, self.backend_id()))
+        if crate::winboat::runtime::session_exists(session_id) {
+            Box::pin(crate::winboat::runtime::url(self.config, session_id))
+        } else {
+            Box::pin(crate::portable_runtime::url(session_id, self.backend_id()))
+        }
     }
 
     fn stop<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, ()> {
-        Box::pin(crate::portable_runtime::stop(session_id, self.backend_id()))
+        if crate::winboat::runtime::session_exists(session_id) {
+            Box::pin(crate::winboat::runtime::stop(self.config, session_id))
+        } else {
+            Box::pin(crate::portable_runtime::stop(session_id, self.backend_id()))
+        }
     }
 
     fn logs<'a>(
@@ -528,11 +585,15 @@ impl RuntimeBackend for LinuxWinboatBackend<'_> {
         session_id: &'a str,
         cursor: Option<&'a str>,
     ) -> BackendFuture<'a, RuntimeLogBatch> {
-        Box::pin(crate::portable_runtime::logs(
-            session_id,
-            cursor,
-            self.backend_id(),
-        ))
+        if crate::winboat::runtime::session_exists(session_id) {
+            Box::pin(async move { crate::winboat::runtime::logs(session_id, cursor) })
+        } else {
+            Box::pin(crate::portable_runtime::logs(
+                session_id,
+                cursor,
+                self.backend_id(),
+            ))
+        }
     }
 }
 #[cfg(target_os = "linux")]
@@ -912,10 +973,25 @@ mod tests {
                 );
                 assert_eq!(manifest.supports(capability), expected);
             }
-            assert_eq!(
-                manifest.runtime_mode,
-                Some(crate::contracts::RuntimeMode::Portable)
-            );
+            if backend == BackendId::LinuxWinboat {
+                assert_eq!(manifest.runtime_mode, None);
+                assert_eq!(
+                    manifest.runtime_modes,
+                    vec![
+                        crate::contracts::RuntimeMode::Portable,
+                        crate::contracts::RuntimeMode::StudioRunLocally,
+                    ]
+                );
+            } else {
+                assert_eq!(
+                    manifest.runtime_mode,
+                    Some(crate::contracts::RuntimeMode::Portable)
+                );
+                assert_eq!(
+                    manifest.runtime_modes,
+                    vec![crate::contracts::RuntimeMode::Portable]
+                );
+            }
         }
         let mac = manifest_for(BackendId::MacNative, "contract-test");
         assert!(CapabilityId::ALL

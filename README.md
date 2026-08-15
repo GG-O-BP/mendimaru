@@ -19,6 +19,7 @@ Mendimaru is a Tauri GUI app for discovering, installing, launching, and removin
 - **Operations**: Review persistent install, removal, and launch progress, failures, and retryability
 - **Settings**: Configure a native Windows workspace and optional portable Studio paths, or the WinBoat environment on Linux
 - **Portable Runtime**: Build with the project's exact MxBuild and run isolated, readiness-gated web apps on Windows or Linux
+- **WinBoat Run Locally**: Forward a Windows guest Runtime to a dynamic Linux loopback port with readiness and Compose rollback
 
 Mendimaru does not provide a dashboard, VM resource information, advanced download URLs, or manual build-number entry.
 
@@ -150,6 +151,8 @@ The response separates the host, Studio, and optional Runtime platforms and repo
 ### Headless CLI
 
 The installed `mendimaru` executable can inspect or ensure the environment, list/install/remove/start exact Studio Pro versions, query/stop Studio sessions, resolve projects by opaque ID, and query/retry persistent operations without initializing Tauri or opening a dialog. Results are JSON on stdout, errors are JSON on stderr, and `--ndjson` adds structured progress events. `--timeout-seconds` and `Ctrl+C` cancel at the shared operation boundary; interrupted work can be re-queried by operation ID. See the [headless CLI contract](docs/headless-cli.md) for the full command surface, exit codes, schemas, and safety rules.
+
+Linux headless sessions can also prepare Studio Pro Run Locally forwarding with `runtime start --mode studio-run-locally`, then use the common `wait`, `url`, `status`, `logs`, and `stop` commands. See the [WinBoat Run Locally guide](docs/winboat-run-locally.md) for the loopback-only exposure and recovery boundary.
 
 ## Development
 

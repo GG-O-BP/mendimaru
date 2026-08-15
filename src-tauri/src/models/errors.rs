@@ -20,6 +20,12 @@ pub enum CommandErrorCode {
     RuntimeReadinessTimeout,
     RuntimeSessionNotFound,
     RuntimeExited,
+    RuntimeGuestOffline,
+    RuntimePortConflict,
+    RuntimePortForwardingInvalid,
+    RuntimeFirewallBlocked,
+    RuntimeNotListening,
+    RuntimeComposeRecoveryFailed,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -61,6 +67,16 @@ impl From<BackendError> for CommandError {
             BackendErrorCode::RuntimeReadinessTimeout => CommandErrorCode::RuntimeReadinessTimeout,
             BackendErrorCode::RuntimeSessionNotFound => CommandErrorCode::RuntimeSessionNotFound,
             BackendErrorCode::RuntimeExited => CommandErrorCode::RuntimeExited,
+            BackendErrorCode::RuntimeGuestOffline => CommandErrorCode::RuntimeGuestOffline,
+            BackendErrorCode::RuntimePortConflict => CommandErrorCode::RuntimePortConflict,
+            BackendErrorCode::RuntimePortForwardingInvalid => {
+                CommandErrorCode::RuntimePortForwardingInvalid
+            }
+            BackendErrorCode::RuntimeFirewallBlocked => CommandErrorCode::RuntimeFirewallBlocked,
+            BackendErrorCode::RuntimeNotListening => CommandErrorCode::RuntimeNotListening,
+            BackendErrorCode::RuntimeComposeRecoveryFailed => {
+                CommandErrorCode::RuntimeComposeRecoveryFailed
+            }
         };
         Self {
             code,

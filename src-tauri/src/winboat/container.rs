@@ -522,7 +522,7 @@ pub(super) fn http_client(timeout: Duration) -> Result<reqwest::Client, String> 
         .map_err(|error| crate::tr!("error-http-client-create", error = error))
 }
 
-fn inspect_container_status(config: &AppConfig) -> ContainerStatus {
+pub(crate) fn inspect_container_status(config: &AppConfig) -> ContainerStatus {
     inspect_container(config).status
 }
 
@@ -530,6 +530,13 @@ fn inspect_container_status(config: &AppConfig) -> ContainerStatus {
 struct ContainerInspection {
     status: ContainerStatus,
     shared_directory: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimeHostBinding {
+    pub(crate) host_ip: String,
+    pub(crate) host_port: u16,
+    pub(crate) guest_port: u16,
 }
 
 impl ContainerInspection {
@@ -569,6 +576,7 @@ struct RuntimeNetworkSettings {
 #[serde(rename_all = "PascalCase")]
 struct RuntimePortBinding {
     host_ip: String,
+    host_port: String,
 }
 
 #[derive(Deserialize)]
@@ -619,6 +627,64 @@ fn runtime_inspection(config: &AppConfig) -> Result<RuntimeContainerInspection, 
                 error = "the runtime returned no container"
             )
         })
+}
+
+pub(crate) fn runtime_host_binding(
+    config: &AppConfig,
+    guest_port: u16,
+) -> Result<RuntimeHostBinding, String> {
+    let inspection = runtime_inspection(config)?;
+    if !ContainerStatus::from_runtime(&inspection.state.status).is_running() {
+        return Err("the WinBoat container is not running".to_string());
+    }
+    let private_port = format!("{guest_port}/tcp");
+    let bindings = inspection
+        .network_settings
+        .ports
+        .get(&private_port)
+        .and_then(Option::as_ref)
+        .filter(|bindings| !bindings.is_empty())
+        .ok_or_else(|| format!("the WinBoat container has no mapping for {private_port}"))?;
+    if bindings.len() != 1 {
+        return Err(format!(
+            "the WinBoat container has multiple mappings for {private_port}"
+        ));
+    }
+    let binding = &bindings[0];
+    if !is_loopback_host(&binding.host_ip) {
+        return Err(format!(
+            "the WinBoat Runtime mapping for {private_port} is not loopback-only"
+        ));
+    }
+    let host_port = binding
+        .host_port
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port != 0)
+        .ok_or_else(|| {
+            format!("the WinBoat Runtime mapping for {private_port} has no host port")
+        })?;
+    Ok(RuntimeHostBinding {
+        host_ip: binding.host_ip.clone(),
+        host_port,
+        guest_port,
+    })
+}
+
+pub(crate) fn storage_mount_identity(config: &AppConfig) -> Result<Vec<String>, String> {
+    let inspection = runtime_inspection(config)?;
+    let mut sources = inspection
+        .mounts
+        .into_iter()
+        .filter(|mount| mount.destination.eq_ignore_ascii_case("/storage"))
+        .map(|mount| mount.source)
+        .collect::<Vec<_>>();
+    sources.sort();
+    sources.dedup();
+    if sources.is_empty() {
+        return Err("the WinBoat container has no /storage mount".to_string());
+    }
+    Ok(sources)
 }
 
 fn parse_container_inspection(output: &[u8]) -> Option<ContainerInspection> {
