@@ -795,7 +795,7 @@ fn project_tree_digest(root: &Path) -> Result<String, String> {
     }
     let mut total = 0_u64;
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = vec![0_u8; 1024 * 1024];
     for entry in entries {
         let relative = entry
             .path()
@@ -929,7 +929,7 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     let mut file = File::open(path)
         .map_err(|error| format!("could not open an artifact for hashing: {error}"))?;
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         let count = file
             .read(&mut buffer)
