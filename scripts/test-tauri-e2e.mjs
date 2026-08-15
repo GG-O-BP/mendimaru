@@ -24,8 +24,12 @@ const application = path.join(
   "mendimaru",
 );
 const viteUrl = "http://localhost:1420/";
+const httpProbeTimeout = 2_000;
+const webdriverRequestTimeout = 30_000;
+const buildTimeout = 15 * 60_000;
 const processes = [];
 const servers = [];
+const serverSockets = new Map();
 let sessionId;
 let webdriverUrl;
 let temporary;
@@ -224,6 +228,38 @@ try {
     "the idle native window must not continuously repaint for decorative motion",
   );
 
+  const installedRefresh = await command("POST", "/element", {
+    using: "css selector",
+    value: ".installed-section .icon-button",
+  });
+  const installedRefreshId =
+    installedRefresh["element-6066-11e4-a52e-4f735466cecf"];
+  assert(
+    installedRefreshId,
+    "WebDriver did not find the installed refresh action",
+  );
+  await command("POST", `/element/${installedRefreshId}/click`, {});
+  await waitFor(
+    async () =>
+      await execute(`
+        const spinner = document.querySelector(".installed-section .spin");
+        return spinner
+          && getComputedStyle(spinner).animationName === "spin"
+          && document.querySelector(".installed-section .icon-button")?.disabled;
+      `),
+    5_000,
+    "the real installed-version refresh never exposed its busy animation",
+  );
+  await waitFor(
+    async () =>
+      await execute(`
+        return !document.querySelector(".installed-section .spin")
+          && !document.querySelector(".installed-section .icon-button")?.disabled;
+      `),
+    5_000,
+    "the installed-version busy animation did not stop after refresh",
+  );
+
   await assertView("Control+2", "Projects", "Orders");
   await assertView(
     "Control+3",
@@ -240,9 +276,6 @@ try {
     "the real WebView reported an error during the application flow",
   );
 
-  process.stdout.write(
-    "Tauri E2E: real WebKit window passed (dev URL, IPC contract, fixture backend, idle rendering, four-view navigation)\n",
-  );
   succeeded = true;
 } catch (error) {
   await retainFailureScreenshot();
@@ -260,6 +293,12 @@ try {
   } else if (temporary) {
     process.stderr.write(`Tauri E2E evidence retained at ${temporary}\n`);
   }
+}
+
+if (succeeded) {
+  process.stdout.write(
+    "Tauri E2E: real WebKit window passed (dev URL, IPC contract, actual busy motion, idle rendering, four-view navigation)\n",
+  );
 }
 
 async function assertView(shortcut, heading, expectedText) {
@@ -319,6 +358,7 @@ async function webdriverRequest(method, endpoint, body) {
     headers:
       body === undefined ? undefined : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal: globalThis.AbortSignal.timeout(webdriverRequestTimeout),
   });
   const envelope = await response.json();
   if (!response.ok || envelope.value?.error) {
@@ -400,7 +440,7 @@ async function createFixture(root) {
   const freerdp = path.join(bin, "xfreerdp3");
   await writeExecutable(
     freerdp,
-    `#!${process.execPath}\nif (process.argv.includes("/version")) { console.log("FreeRDP version 3.30.0"); process.exit(0); }\nprocess.exit(1);\n`,
+    `#!${process.execPath}\nif (process.argv.includes("/version")) { console.log("FreeRDP version 3.30.0"); process.exit(0); }\nsetTimeout(() => process.exit(1), 600);\n`,
   );
   const chrome = path.join(bin, "google-chrome-stable");
   await writeExecutable(
@@ -490,6 +530,10 @@ function startProcess(commandName, args, options) {
   });
   child.label = options.label;
   child.output = "";
+  child.spawnError = undefined;
+  child.once("error", (error) => {
+    child.spawnError = error;
+  });
   for (const stream of [child.stdout, child.stderr]) {
     stream.on("data", (chunk) => {
       child.output = `${child.output}${chunk}`.slice(-64 * 1024);
@@ -503,7 +547,11 @@ async function runChecked(commandName, args) {
     cwd: repository,
     label: commandName,
   });
-  const code = await onceExit(child);
+  const code = await raceTimeout(onceExit(child), buildTimeout);
+  if (code === "timeout") {
+    await terminate(child);
+    assert.fail(`${commandName} exceeded ${buildTimeout}ms:\n${child.output}`);
+  }
   assert.equal(code, 0, `${commandName} failed:\n${child.output}`);
 }
 
@@ -512,7 +560,11 @@ async function waitForHttp(url, child, timeout) {
     async () => {
       assertRunning(child);
       try {
-        return (await fetch(url)).ok;
+        return (
+          await fetch(url, {
+            signal: globalThis.AbortSignal.timeout(httpProbeTimeout),
+          })
+        ).ok;
       } catch {
         return false;
       }
@@ -527,7 +579,9 @@ async function waitForWebDriver(url, child, timeout) {
     async () => {
       assertRunning(child);
       try {
-        const response = await fetch(`${url}/status`);
+        const response = await fetch(`${url}/status`, {
+          signal: globalThis.AbortSignal.timeout(httpProbeTimeout),
+        });
         return response.ok;
       } catch {
         return false;
@@ -553,9 +607,14 @@ async function waitFor(predicate, timeout, message) {
 }
 
 function assertRunning(child) {
-  if (child.exitCode !== null) {
+  if (child.spawnError) {
     throw new Error(
-      `${child.label} exited with ${child.exitCode}:\n${child.output}`,
+      `${child.label} failed to start: ${child.spawnError.message}`,
+    );
+  }
+  if (childFinished(child)) {
+    throw new Error(
+      `${child.label} exited with ${child.exitCode ?? child.signalCode}:\n${child.output}`,
     );
   }
 }
@@ -580,6 +639,12 @@ async function unusedPort() {
 }
 
 async function listen(server) {
+  const sockets = new Set();
+  serverSockets.set(server, sockets);
+  server.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
@@ -588,23 +653,63 @@ async function listen(server) {
 }
 
 async function closeServer(server) {
-  if (!server.listening) return;
-  await new Promise((resolve) => server.close(resolve));
+  if (!server.listening) {
+    serverSockets.delete(server);
+    return;
+  }
+  const closed = new Promise((resolve) => {
+    server.close(resolve);
+  });
+  for (const socket of serverSockets.get(server) ?? []) socket.destroy();
+  server.closeAllConnections?.();
+  const status = await raceTimeout(closed, 2_000);
+  serverSockets.delete(server);
+  assert.notEqual(status, "timeout", "fixture server did not close cleanly");
 }
 
 async function terminate(child) {
-  if (!child || child.exitCode !== null) return;
+  if (!child || childFinished(child)) return;
   child.kill("SIGTERM");
-  const code = await Promise.race([onceExit(child), delay(2_000, "timeout")]);
-  if (code === "timeout" && child.exitCode === null) {
+  const code = await raceTimeout(onceExit(child), 2_000);
+  if (code === "timeout" && !childFinished(child)) {
     child.kill("SIGKILL");
-    await onceExit(child);
+    await raceTimeout(onceExit(child), 2_000);
+  }
+}
+
+async function raceTimeout(promise, timeout) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((resolve) => {
+        timer = globalThis.setTimeout(() => resolve("timeout"), timeout);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) globalThis.clearTimeout(timer);
   }
 }
 
 function onceExit(child) {
-  if (child.exitCode !== null) return Promise.resolve(child.exitCode);
-  return new Promise((resolve) => child.once("exit", resolve));
+  if (childFinished(child) || child.spawnError) {
+    return Promise.resolve(child.exitCode ?? 1);
+  }
+  return new Promise((resolve) => {
+    const onError = () => finish(1);
+    const onExit = (code) => finish(code ?? 1);
+    const finish = (code) => {
+      child.off("error", onError);
+      child.off("exit", onExit);
+      resolve(code);
+    };
+    child.once("error", onError);
+    child.once("exit", onExit);
+  });
+}
+
+function childFinished(child) {
+  return child.exitCode !== null || child.signalCode !== null;
 }
 
 async function findExecutable(...candidates) {

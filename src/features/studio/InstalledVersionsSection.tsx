@@ -60,6 +60,7 @@ export function InstalledVersionsSection({
             className="icon-button"
             title={t("refresh-installed")}
             onClick={model.onRefresh}
+            disabled={model.sessionsLoading}
           >
             <RefreshCw
               size={16}

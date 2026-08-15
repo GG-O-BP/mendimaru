@@ -196,9 +196,10 @@ tests, real CLI process tests, and JSON Schema validation. `npm run
 test:browser` additionally runs the real Chromium policy and artifact suite.
 On Linux, `npm run test:e2e` separately launches the real Tauri debug binary,
 Vite development server, and WebKit WebView through `tauri-driver`, backed by
-isolated WinBoat/API/project fixtures. The React-only mocked application flow is
-available as `npm run test:app-flow`; it is not a substitute for the native
-window gate.
+isolated WinBoat/API/project fixtures. It observes motion on an actual React
+busy state and then requires the idle WebView to have no running or infinite
+animations. The React-only mocked application flow is available as `npm run
+test:app-flow`; it is not a substitute for the native window gate.
 Linux maintainers can
 run the destructive full adapter lifecycle only against a disposable WinBoat
 test version with an official installer already in the shared cache:

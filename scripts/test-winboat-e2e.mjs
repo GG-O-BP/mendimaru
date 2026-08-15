@@ -61,14 +61,13 @@ if (process.env[innerMarker] !== "1") {
     const completed = childExit(test);
     const visibleRemoteApps = new Set();
     while (test.exitCode === null && test.signalCode === null) {
-      for (const line of await windowLines()) {
-        if (/\sRAIL\.mendimaru-[^\s]*/i.test(line)) {
-          visibleRemoteApps.add(line.trim());
-        }
-      }
-      await delay(100);
+      await recordVisibleRemoteApps(visibleRemoteApps);
+      await delay(25);
     }
     const status = await completed;
+    await recordVisibleRemoteApps(visibleRemoteApps);
+    await delay(50);
+    await recordVisibleRemoteApps(visibleRemoteApps);
     assert.equal(
       status,
       0,
@@ -110,6 +109,17 @@ async function windowLines() {
     "wmctrl could not inspect the virtual desktop",
   );
   return result.stdout.split(/\r?\n/).filter(Boolean);
+}
+
+async function recordVisibleRemoteApps(visibleRemoteApps) {
+  for (const line of await windowLines()) {
+    if (
+      /\sRAIL\.mendimaru-[^\s]*/i.test(line) ||
+      /(?:windows\s+power\s*shell|powershell|conhost|terminal)/i.test(line)
+    ) {
+      visibleRemoteApps.add(line.trim());
+    }
+  }
 }
 
 function capture(command, args) {

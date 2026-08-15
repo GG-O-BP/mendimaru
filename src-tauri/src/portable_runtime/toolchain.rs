@@ -1,5 +1,5 @@
-use super::archive;
 use super::store::{create_private_file, read_json, write_json, RuntimeLayout};
+use super::{archive, process};
 use futures_util::StreamExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -336,10 +336,13 @@ async fn verify_project_version(toolchain: &Toolchain, project_path: &Path) -> R
     if !is_direct_file(project_path) {
         return Err("the Mendix project is not a direct regular file".to_string());
     }
-    let output = tokio::process::Command::new(&toolchain.mx)
+    let mut command = tokio::process::Command::new(&toolchain.mx);
+    command
         .arg("show-version")
         .arg(project_path)
-        .stdin(Stdio::null())
+        .stdin(Stdio::null());
+    process::configure_background_probe(&mut command);
+    let output = command
         .output()
         .await
         .map_err(|error| format!("could not run mx show-version: {error}"))?;
@@ -362,13 +365,13 @@ async fn verify_project_version(toolchain: &Toolchain, project_path: &Path) -> R
 }
 
 async fn project_java_major(toolchain: &Toolchain, project_path: &Path) -> Option<u32> {
-    let output = tokio::process::Command::new(&toolchain.mx)
+    let mut command = tokio::process::Command::new(&toolchain.mx);
+    command
         .arg("show-java-version")
         .arg(project_path)
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .ok()?;
+        .stdin(Stdio::null());
+    process::configure_background_probe(&mut command);
+    let output = command.output().await.ok()?;
     if !output.status.success() || output.stdout.len() > 1024 * 1024 {
         return None;
     }
@@ -383,12 +386,10 @@ async fn project_java_major(toolchain: &Toolchain, project_path: &Path) -> Optio
 }
 
 async fn java_major(executable: &Path) -> Option<u32> {
-    let output = tokio::process::Command::new(executable)
-        .arg("-version")
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .ok()?;
+    let mut command = tokio::process::Command::new(executable);
+    command.arg("-version").stdin(Stdio::null());
+    process::configure_background_probe(&mut command);
+    let output = command.output().await.ok()?;
     if !output.status.success() || output.stderr.len() + output.stdout.len() > 1024 * 1024 {
         return None;
     }

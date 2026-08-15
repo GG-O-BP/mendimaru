@@ -47,6 +47,16 @@ pub(super) fn prevent_standard_handle_inheritance() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(windows)]
+pub(super) fn configure_background_probe(command: &mut tokio::process::Command) {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+pub(super) fn configure_background_probe(_command: &mut tokio::process::Command) {}
+
 #[cfg(unix)]
 pub(super) fn configure_detached_supervisor(command: &mut tokio::process::Command) {
     use std::os::unix::process::CommandExt;
@@ -367,5 +377,29 @@ mod tests {
             start_token: "1".to_string(),
         };
         assert!(!matches(&stale));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn background_probe_does_not_allocate_a_console_window() {
+        const SCRIPT: &str = r#"
+Add-Type -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();' -Name ConsoleWindow -Namespace MendimaruTest
+[Console]::Out.Write(([MendimaruTest.ConsoleWindow]::GetConsoleWindow() -eq [IntPtr]::Zero).ToString())
+"#;
+        let mut command = tokio::process::Command::new("powershell.exe");
+        command.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            SCRIPT,
+        ]);
+        configure_background_probe(&mut command);
+        let output = command
+            .output()
+            .await
+            .expect("run background console-window probe");
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "True");
     }
 }
