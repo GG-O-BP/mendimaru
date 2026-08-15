@@ -244,6 +244,12 @@ mod tests {
             .start_file("bin/start.bat", options)
             .expect("batch file");
         archive.write_all(b"@echo off\r\n").expect("batch contents");
+        archive
+            .start_file("bin/start.ps1", options)
+            .expect("PowerShell file");
+        archive
+            .write_all(b"$ErrorActionPreference = 'Stop'\r\n")
+            .expect("PowerShell contents");
         archive.finish().expect("finish archive");
 
         let destination = temporary.path().join("extracted");
