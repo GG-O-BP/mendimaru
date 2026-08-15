@@ -328,14 +328,19 @@ async function assertView(shortcut, heading, expectedText) {
 }
 
 async function createSession(baseUrl, binary) {
-  const value = await webdriverRequest("POST", "/session", {
-    capabilities: {
-      alwaysMatch: {
-        browserName: "wry",
-        "tauri:options": { application: binary },
+  const value = await webdriverRequest(
+    "POST",
+    "/session",
+    {
+      capabilities: {
+        alwaysMatch: {
+          browserName: "wry",
+          "tauri:options": { application: binary },
+        },
       },
     },
-  });
+    60_000,
+  );
   assert(value.sessionId, "tauri-driver did not return a WebDriver session");
   return value.sessionId;
 }
@@ -352,13 +357,18 @@ async function executeAsync(script, args = []) {
   return command("POST", "/execute/async", { args, script });
 }
 
-async function webdriverRequest(method, endpoint, body) {
+async function webdriverRequest(
+  method,
+  endpoint,
+  body,
+  timeout = webdriverRequestTimeout,
+) {
   const response = await fetch(`${webdriverUrl}${endpoint}`, {
     method,
     headers:
       body === undefined ? undefined : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
-    signal: globalThis.AbortSignal.timeout(webdriverRequestTimeout),
+    signal: globalThis.AbortSignal.timeout(timeout),
   });
   const envelope = await response.json();
   if (!response.ok || envelope.value?.error) {
