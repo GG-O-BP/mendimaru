@@ -38,7 +38,9 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            webkit2gtk-driver \
+            xvfb
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -63,6 +65,10 @@ jobs:
         if: runner.os == 'Linux'
         run: npx playwright install --with-deps chromium
 
+      - name: Install pinned Tauri WebDriver bridge
+        if: runner.os == 'Linux'
+        run: cargo install tauri-driver --version 2.0.6 --locked
+
       - name: Check frontend formatting and lint
         run: |
           npm run format:check
@@ -71,12 +77,16 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Run frontend unit and native E2E tests
+      - name: Run frontend unit and mocked app-flow tests
         run: npm run test:frontend
 
       - name: Run strict Playwright browser E2E
         if: runner.os == 'Linux'
         run: npm run test:browser
+
+      - name: Run real Tauri WebKit E2E
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run test:e2e
 
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --nocapture --test-threads=1

@@ -170,10 +170,13 @@ To validate the project and build an application bundle:
 ```bash
 npm run check
 npm run test:browser
+npm run test:e2e
 npm run tauri build
 ```
 
-`npm run test:e2e` runs the native Windows application-flow suite with mocked OS boundaries. The full Rust suite covers registry parsing, path containment, installer integrity, Windows argument quoting, UAC/exit-code failures, and a fixture-backed install-to-uninstall lifecycle. CI runs the frontend and Rust suites on both Windows and Linux and smoke-builds MSI and NSIS installers on Windows.
+On Linux, `npm run test:e2e` launches the debug executable against the Vite development URL through pinned `tauri-driver` and `WebKitWebDriver`. It uses isolated WinBoat/API/project fixtures and verifies the real WebView, Tauri IPC, online application state, idle rendering, and primary navigation. Install the driver bridge with `cargo install tauri-driver --version 2.0.6 --locked`; the host must also provide `WebKitWebDriver`. `npm run test:app-flow` retains the faster React application-flow suite with mocked OS boundaries, while `npm run test:browser` tests Mendix Runtime pages rather than the Mendimaru desktop shell. CI gates all three layers, runs the frontend and Rust suites on Windows and Linux, and smoke-builds MSI and NSIS installers on Windows.
+
+The full Rust suite covers registry parsing, path containment, installer integrity, Windows argument quoting, UAC/exit-code failures, and a fixture-backed install-to-uninstall lifecycle.
 
 Serialized enum values shared by Rust and TypeScript are registered in `src/shared/contracts/enumValues.json`. TypeScript derives its union types from this registry, and a Rust test rejects contract drift.
 

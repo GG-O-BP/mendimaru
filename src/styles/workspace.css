@@ -81,24 +81,6 @@
   border-color: var(--cyan-dark);
 }
 
-.route-track i {
-  position: absolute;
-  z-index: 1;
-  top: -2px;
-  inset-inline-start: 5px;
-  display: none;
-  width: 6px;
-  height: 6px;
-  background: var(--surface);
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--cyan);
-}
-
-.route-status.online .route-track i {
-  display: block;
-  animation: route-travel 2.6s ease-in-out infinite;
-}
-
 .route-status > strong {
   display: inline-flex;
   min-height: 28px;
@@ -128,23 +110,6 @@
 .route-status.online > strong i {
   background: #1c9a72;
   box-shadow: 0 0 0 3px rgba(28, 154, 114, 0.13);
-}
-
-@keyframes route-travel {
-  0%,
-  100% {
-    transform: translateX(0);
-    opacity: 0;
-  }
-  15% {
-    opacity: 1;
-  }
-  85% {
-    opacity: 1;
-  }
-  100% {
-    transform: translateX(clamp(18px, 4vw, 58px));
-  }
 }
 
 .winboat-control,

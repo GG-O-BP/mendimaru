@@ -166,10 +166,13 @@ npm run tauri dev
 ```bash
 npm run check
 npm run test:browser
+npm run test:e2e
 npm run tauri build
 ```
 
-`npm run test:e2e` は OS 境界をモックした Windows ネイティブのアプリ全体フローを実行します。Rust の全テストではレジストリ解析、パス隔離、ファイル整合性、Windows 引数のエンコード、UAC／終了コードの失敗、インストールから削除までの fixture ライフサイクルを検証します。CI は Windows と Linux の両方でテストし、Windows の MSI／NSIS バンドルをスモークビルドします。
+Linux の `npm run test:e2e` は、固定バージョンの `tauri-driver` と `WebKitWebDriver` を使い、debug 実行ファイルを Vite development URL に接続します。隔離した WinBoat／API／project fixture により、実際の WebView、Tauri IPC、online application state、idle rendering、主要画面の navigation を検証します。driver bridge は `cargo install tauri-driver --version 2.0.6 --locked` でインストールし、host に `WebKitWebDriver` も必要です。`npm run test:app-flow` は OS 境界をモックした高速な React application-flow suite で、`npm run test:browser` は Mendimaru desktop shell ではなく Mendix Runtime page をテストします。CI は 3 層すべてを gate し、Windows／Linux のテストと Windows MSI／NSIS smoke build を実行します。
+
+Rust の全テストでは registry parsing、path containment、file integrity、Windows argument encoding、UAC／exit-code failure、install から uninstall までの fixture lifecycle を検証します。
 
 Rust と TypeScript で共有するシリアライズ済み enum 値は `src/shared/contracts/enumValues.json` で管理します。TypeScript はこのレジストリから union 型を導出し、Rust テストが契約のずれを検出します。
 

@@ -114,9 +114,7 @@ export function AppShell({
                   <Server size={16} aria-hidden="true" />
                   <span>{t("route-linux")}</span>
                 </span>
-                <span className="route-track" aria-hidden="true">
-                  <i />
-                </span>
+                <span className="route-track" aria-hidden="true" />
               </>
             )}
             <span className="route-node windows-node">
