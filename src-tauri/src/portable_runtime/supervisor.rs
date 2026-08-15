@@ -568,15 +568,28 @@ pub(super) async fn start(
     })?;
     let mut reader = BufReader::new(stdout);
     let mut line = String::new();
-    let count = reader.read_line(&mut line).await.map_err(|_| {
-        runtime_error(
-            backend,
-            CapabilityId::RuntimeStart,
-            BackendErrorCode::RuntimeInitializationFailed,
-            Some(record.log_artifact.artifact_id.clone()),
-            true,
-        )
-    })?;
+    let response_timeout =
+        Duration::from_secs(request.readiness_timeout_seconds) + Duration::from_secs(3);
+    let count = tokio::time::timeout(response_timeout, reader.read_line(&mut line))
+        .await
+        .map_err(|_| {
+            runtime_error(
+                backend,
+                CapabilityId::RuntimeStart,
+                BackendErrorCode::RuntimeReadinessTimeout,
+                Some(record.log_artifact.artifact_id.clone()),
+                true,
+            )
+        })?
+        .map_err(|_| {
+            runtime_error(
+                backend,
+                CapabilityId::RuntimeStart,
+                BackendErrorCode::RuntimeInitializationFailed,
+                Some(record.log_artifact.artifact_id.clone()),
+                true,
+            )
+        })?;
     if count == 0 || line.len() > MAX_HANDSHAKE_BYTES {
         return Err(runtime_error(
             backend,

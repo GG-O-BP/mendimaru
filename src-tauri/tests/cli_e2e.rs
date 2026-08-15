@@ -80,8 +80,8 @@ fn run_with_environment(
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            let _ = stdout_reader.join();
-            let _ = stderr_reader.join();
+            drop(stdout_reader);
+            drop(stderr_reader);
             panic!("CLI command {command_name:?} exceeded the 40-second E2E boundary");
         }
         thread::sleep(Duration::from_millis(100));
