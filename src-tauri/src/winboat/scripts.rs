@@ -12,6 +12,7 @@ pub(super) fn launch_studio_script(
     executable_path: &str,
     project_path: Option<&str>,
     windows_report_path: &str,
+    windows_control_path: &str,
     install_root: &str,
     version: &str,
 ) -> String {
@@ -22,6 +23,10 @@ pub(super) fn launch_studio_script(
             &powershell_literal(project_path.unwrap_or_default()),
         )
         .replace("__RESULT_PATH__", &powershell_literal(windows_report_path))
+        .replace(
+            "__CONTROL_PATH__",
+            &powershell_literal(windows_control_path),
+        )
         .replace("__INSTALL_ROOT__", &powershell_literal(install_root))
         .replace("__VERSION__", &powershell_literal(version))
         .replace("__SECURITY_PREAMBLE__", OPERATION_SECURITY_PREAMBLE)
@@ -73,6 +78,7 @@ pub(super) fn studio_sessions_script(
     studios: &[StudioVersion],
     mode: StudioSessionScriptMode,
     windows_report_path: &str,
+    windows_control_path: &str,
     install_root: &str,
 ) -> Result<String, String> {
     #[derive(Serialize)]
@@ -108,6 +114,10 @@ pub(super) fn studio_sessions_script(
         .replace("__TARGET_STARTED_TICKS__", &started_ticks.to_string())
         .replace("__KNOWN_STUDIOS_BASE64__", &known)
         .replace("__RESULT_PATH__", &powershell_literal(windows_report_path))
+        .replace(
+            "__CONTROL_PATH__",
+            &powershell_literal(windows_control_path),
+        )
         .replace("__INSTALL_ROOT__", &powershell_literal(install_root))
         .replace("__SECURITY_PREAMBLE__", OPERATION_SECURITY_PREAMBLE))
 }
@@ -297,6 +307,7 @@ mod tests {
             "studio.exe",
             Some("project.mpr"),
             "launch.json",
+            "launch.control.json",
             "install-root",
             "11.1.0",
         );
@@ -329,6 +340,7 @@ mod tests {
             r"C:\Program Files\Mendix\11.13.0\modeler\studiopro.exe",
             None,
             r"\\host.lan\Data\launch.json",
+            r"\\host.lan\Data\launch.control.json",
             r"C:\Program Files\Mendix",
             "11.13.0",
         );
@@ -351,11 +363,18 @@ mod tests {
         assert!(install.matches("ExpectedSha256 $expectedSha256").count() >= 3);
         assert!(install.matches("Assert-StudioVersionNotRunning").count() >= 3);
         assert!(install.contains("MENDIMARU_STUDIO_RUNNING"));
+        assert!(install.contains("'/VERYSILENT'"));
+        assert!(install.contains("-WindowStyle Hidden -PassThru"));
+        assert!(!install.contains("'/SILENT'"));
         assert!(install.contains("[System.IO.FileMode]::CreateNew"));
         assert!(!install.contains("Unblock-File"));
         assert!(!install.contains("$destinationInfo.Length -eq $sourceInfo.Length"));
         assert!(uninstall.contains("MENDIMARU_UNINSTALL_METADATA_MISSING"));
         assert!(uninstall.contains("MENDIMARU_STUDIO_RUNNING"));
+        assert!(uninstall.contains("'/VERYSILENT'"));
+        assert!(uninstall.contains("'/SUPPRESSMSGBOXES'"));
+        assert!(uninstall.contains("-WindowStyle Hidden -Wait -PassThru"));
+        assert!(!uninstall.contains("@('/SILENT')"));
         assert!(!uninstall.contains("Stop-Process"));
         assert!(!uninstall.contains("Remove-Item -LiteralPath $versionFolder -Recurse"));
     }
@@ -377,6 +396,7 @@ mod tests {
                 started_ticks: 638_908_128_000_000_000,
             },
             r"\\host.lan\Data\session.json",
+            r"\\host.lan\Data\session.control.json",
             r"C:\Program Files\Mendix",
         )
         .expect("session script");
@@ -388,6 +408,8 @@ mod tests {
         assert!(script.contains("return $sessions.ToArray()"));
         assert!(script.contains("Assert-MendimaruTrustedExecutable"));
         assert!(script.contains("CloseMainWindow()"));
+        assert!(script.contains("Read-MendimaruStudioStopRequest"));
+        assert!(script.contains("$controlPath = '\\\\host.lan\\Data\\session.control.json'"));
         assert!(!script.contains("Stop-Process"));
         assert!(!script.contains("__"));
     }

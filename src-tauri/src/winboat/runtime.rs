@@ -652,6 +652,9 @@ fn diagnostic_code(diagnostic: Option<&str>) -> BackendErrorCode {
 }
 
 async fn guest_port_diagnostic(config: &AppConfig, guest_port: u16) -> Option<&'static str> {
+    if !super::registered_client_sessions().is_empty() {
+        return None;
+    }
     let identifier = secure_identifier("runtimeprobe").ok()?;
     let operation_directory = secure_shared_directory(config, ".mendimaru/operations").ok()?;
     let report_path = operation_directory.join(format!("{identifier}.json"));

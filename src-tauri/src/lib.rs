@@ -24,7 +24,7 @@ use downloads::DownloadManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .setup(|app| {
             i18n::initialize("system").map_err(std::io::Error::other)?;
             if let Ok(config) = config::load_config(app.handle()) {
@@ -71,6 +71,10 @@ pub fn run() {
             open_operation_logs,
             open_folder,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running mendimaru");
+        .build(tauri::generate_context!())
+        .expect("error while building mendimaru");
+    let exit_code = app.run_return(|_, _| {});
+    #[cfg(target_os = "linux")]
+    tauri::async_runtime::block_on(winboat::close_all_registered_clients());
+    std::process::exit(exit_code);
 }

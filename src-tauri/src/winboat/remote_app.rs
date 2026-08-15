@@ -57,6 +57,18 @@ impl RemoteAppProcess {
     }
 }
 
+impl Drop for RemoteAppProcess {
+    fn drop(&mut self) {
+        match self.child.try_wait() {
+            Ok(Some(_)) => {}
+            Ok(None) | Err(_) => {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+            }
+        }
+    }
+}
+
 fn container_credentials(config: &AppConfig) -> Result<(String, String), String> {
     let output = Command::new(config.container_runtime.as_str())
         .arg("inspect")
@@ -318,5 +330,28 @@ mod tests {
         let mut complete = vec![0_u8; 64];
         let count = read_diagnostics_at(&diagnostics, &mut complete).expect("reread diagnostics");
         assert_eq!(&complete[..count], b"certificate mismatch");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dropping_a_remote_app_reaps_its_child_process() {
+        let child = std::process::Command::new("sh")
+            .args(["-c", "exec sleep 60"])
+            .spawn()
+            .expect("spawn RemoteApp stand-in");
+        let process_id = child.id();
+        let remote_app = super::RemoteAppProcess {
+            child,
+            diagnostics: std::sync::Mutex::new(
+                tempfile::tempfile().expect("anonymous diagnostics"),
+            ),
+        };
+
+        drop(remote_app);
+
+        assert!(
+            !std::path::Path::new(&format!("/proc/{process_id}")).exists(),
+            "the dropped RemoteApp child was not reaped"
+        );
     }
 }

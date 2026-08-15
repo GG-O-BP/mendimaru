@@ -169,9 +169,17 @@ npm run test:e2e
 npm run tauri build
 ```
 
-Linux에서 `npm run test:e2e`는 고정 버전의 `tauri-driver`와 `WebKitWebDriver`를 통해 debug 실행 파일을 Vite 개발 URL에 연결합니다. 격리된 WinBoat/API/프로젝트 fixture로 실제 WebView, Tauri IPC, 온라인 앱 상태, 실제 작업 중 애니메이션, 유휴 상태의 애니메이션 완전 정지와 주요 화면 전환을 검증합니다. 드라이버 브리지는 `cargo install tauri-driver --version 2.0.6 --locked`로 설치하고 호스트에는 `WebKitWebDriver`도 있어야 합니다. `npm run test:app-flow`는 OS 경계를 모킹한 빠른 React 앱 흐름 테스트이고, `npm run test:browser`는 Mendimaru 데스크톱 셸이 아니라 Mendix Runtime 페이지를 테스트합니다. CI는 세 계층을 모두 통과시킨 뒤 Windows/Linux 테스트와 Windows MSI/NSIS 스모크 빌드를 수행합니다.
+Linux에서 `npm run test:e2e`는 고정 버전의 `tauri-driver`와 `WebKitWebDriver`를 통해 debug 실행 파일을 Vite 개발 URL에 연결합니다. 격리된 WinBoat/API/프로젝트 fixture로 실제 WebView, Tauri IPC, 온라인 앱 상태, 프레임을 샘플링한 경로·작업 중 애니메이션, 허용 목록 밖의 유휴 애니메이션이 없다는 점과 주요 화면 전환을 검증합니다. 드라이버 브리지는 `cargo install tauri-driver --version 2.0.6 --locked`로 설치하고 호스트에는 `WebKitWebDriver`도 있어야 합니다. `npm run test:app-flow`는 OS 경계를 모킹한 빠른 React 앱 흐름 테스트이고, `npm run test:browser`는 Mendimaru 데스크톱 셸이 아니라 Mendix Runtime 페이지를 테스트합니다. CI는 세 계층을 모두 통과시킨 뒤 Windows/Linux 테스트와 Windows MSI/NSIS 스모크 빌드를 수행합니다.
 
-실행 중인 실제 WinBoat에 대한 비파괴 RemoteApp 검증은 `npm run test:winboat-e2e`로 실행합니다. 이 테스트는 세션 조회와 만료된 세션 거부를 확인하며, 격리된 Xvfb 화면에서 백그라운드 PowerShell 창이 하나라도 노출되면 실패합니다. 호스트에는 `xvfb-run`, `xfwm4`, `wmctrl`이 필요합니다.
+실행 중인 실제 WinBoat에 대한 비파괴 RemoteApp 검증은 `npm run test:winboat-smoke`로 실행합니다. 인증된 세션 조회와 만료된 세션 거부를 검증합니다. 실제 상태를 바꾸는 수명주기 검증은 별도로 다음과 같이 실행하며, 이미 설치된 버전은 안전을 위해 거부합니다.
+
+```bash
+MENDIMARU_E2E_ALLOW_MUTATION=1 \
+MENDIMARU_E2E_VERSION=11.13.0 \
+npm run test:winboat-e2e
+```
+
+정확히 지정한 폐기 가능한 버전의 공식 설치 파일이 공유 캐시에 있어야 합니다. 이 테스트는 미설치 → 설치 → 실제 Studio 창 → 실행 중 삭제 거부 → 정상 종료 → 삭제 전 과정을 수행하며, 진행 단계 순서, 정확한 프로세스 식별자, 기존 설치본과 설치 캐시 불변성, 만료·반복 작업 거부, 잔류 프로세스와 예상 밖 RemoteApp/PowerShell 창이 없다는 점까지 검증합니다. 두 실제 VM 테스트 모두 격리된 Xvfb와 `xvfb-run`, `xfwm4`, `wmctrl`이 필요합니다. Arch Linux에서는 `xorg-server-xvfb` 패키지가 `xvfb-run`을 제공합니다. CI에는 실제 WinBoat VM이 없으므로 파괴적 수명주기 검증은 로컬/수동 릴리스 게이트이며 CI에서 통과했다고 주장하지 않습니다.
 
 전체 Rust 테스트는 레지스트리 파싱, 경로 격리, 파일 무결성, Windows 인자 인코딩, UAC/종료 코드 실패와 설치부터 제거까지의 fixture 수명주기를 검증합니다.
 
@@ -188,7 +196,7 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 Windows 네이티브 명령은 경로를 명령 셸에 삽입하지 않습니다. 설치 파일, 설치된 Studio 실행 파일과 등록된 Mendix 제거 프로그램은 Mendix 또는 Siemens가 발행한 유효한 신뢰 Authenticode 서명이 있어야 하며 검증 전후 해시로 파일 교체도 탐지합니다. Windows Installer 제거는 제품 코드에 대한 `/x` 작업과 알려진 비대화형 플래그로 제한하고, 등록 제거 프로그램은 선택한 설치본에 속하면서 허용 목록의 플래그만 사용해야 합니다. UAC 취소나 실패 종료 코드는 성공으로 처리하지 않습니다.
 
-Linux에서는 Windows 사용자명과 암호를 앱 설정에 저장하지 않습니다. RemoteApp 실행 시 실행 중인 WinBoat 컨테이너에서 자격 증명을 읽어 FreeRDP 3의 표준 입력으로 전달합니다. FreeRDP는 앱 전용 TOFU 인증서 핀을 사용하고, 관리자 권한 작업은 Guest API와 RDP가 loopback에만 바인딩된 경우에만 허용합니다. 공유 작업 결과는 시도별 HMAC 키와 재전송 방지 sequence로 인증합니다.
+Linux에서는 Windows 사용자명과 암호를 앱 설정에 저장하지 않습니다. RemoteApp 실행 시 실행 중인 WinBoat 컨테이너에서 자격 증명을 읽어 FreeRDP 3의 표준 입력으로 전달합니다. FreeRDP는 앱 전용 TOFU 인증서 핀을 사용하고, 관리자 권한 작업은 Guest API와 RDP가 loopback에만 바인딩된 경우에만 허용합니다. 공유 작업 결과와 유지 중인 Studio 세션 제어 요청은 시도별 HMAC 키와 재전송 방지 sequence로 인증합니다.
 
 위협 모델, 실행 파일 신뢰 체인, 컨테이너 권한과 잔여 위험 및 신고 방법은 [보안 정책과 WinBoat 신뢰 경계](SECURITY.md)를 참고하세요.
 

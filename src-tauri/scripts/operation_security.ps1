@@ -63,6 +63,103 @@ function Write-MendimaruReport {
     }
 }
 
+function Read-MendimaruAuthenticatedPayload {
+    param([string]$Path)
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if (-not $item.PSIsContainer -and
+        ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
+        $item.Length -le 16384) {
+        $serialized = [IO.File]::ReadAllText($item.FullName)
+    } else {
+        throw 'MENDIMARU_CONTROL_FILE_INVALID'
+    }
+    try {
+        $envelope = $serialized | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw 'MENDIMARU_CONTROL_ENVELOPE_INVALID'
+    }
+    $propertyNames = @($envelope.PSObject.Properties.Name | Sort-Object)
+    if (($propertyNames -join ',') -cne 'mac,nonce,payload,requestId,schemaVersion,sequence' -or
+        [int]$envelope.schemaVersion -ne 1 -or
+        [string]$envelope.requestId -cne $mendimaruRequestId -or
+        [string]$envelope.nonce -cne $mendimaruNonce) {
+        throw 'MENDIMARU_CONTROL_IDENTITY_INVALID'
+    }
+    try {
+        $sequence = [long]$envelope.sequence
+        $payloadBytes = [Convert]::FromBase64String([string]$envelope.payload)
+    } catch {
+        throw 'MENDIMARU_CONTROL_PAYLOAD_INVALID'
+    }
+    if ($sequence -le 0 -or $payloadBytes.Length -gt 8192 -or
+        [string]$envelope.mac -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'MENDIMARU_CONTROL_PAYLOAD_INVALID'
+    }
+    $authenticatedText = "{0}`n{1}`n{2}`n{3}" -f @(
+        $mendimaruRequestId,
+        $mendimaruNonce,
+        $sequence,
+        [string]$envelope.payload
+    )
+    $expectedMac = $script:MendimaruHmac.ComputeHash(
+        [Text.Encoding]::UTF8.GetBytes($authenticatedText)
+    )
+    $providedMac = New-Object byte[] 32
+    for ($index = 0; $index -lt $providedMac.Length; $index++) {
+        $providedMac[$index] = [Convert]::ToByte(
+            ([string]$envelope.mac).Substring($index * 2, 2),
+            16
+        )
+    }
+    $difference = 0
+    for ($index = 0; $index -lt $expectedMac.Length; $index++) {
+        $difference = $difference -bor ($expectedMac[$index] -bxor $providedMac[$index])
+    }
+    if ($difference -ne 0) {
+        throw 'MENDIMARU_CONTROL_AUTHENTICATION_FAILED'
+    }
+    try {
+        $utf8 = New-Object Text.UTF8Encoding($false, $true)
+        $payloadJson = $utf8.GetString($payloadBytes)
+    } catch {
+        throw 'MENDIMARU_CONTROL_PAYLOAD_INVALID'
+    }
+    return [pscustomobject]@{
+        Sequence = $sequence
+        Json = $payloadJson
+    }
+}
+
+function Read-MendimaruStudioStopRequest {
+    param(
+        [string]$Path,
+        [string]$ExpectedSessionId,
+        [int]$ExpectedProcessId,
+        [long]$ExpectedStartedTicks,
+        [long]$PreviousSequence
+    )
+
+    $authenticated = Read-MendimaruAuthenticatedPayload -Path $Path
+    if ($authenticated.Sequence -le $PreviousSequence) {
+        throw 'MENDIMARU_CONTROL_REPLAY'
+    }
+    try {
+        $request = $authenticated.Json | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw 'MENDIMARU_CONTROL_PAYLOAD_INVALID'
+    }
+    $propertyNames = @($request.PSObject.Properties.Name | Sort-Object)
+    if (($propertyNames -join ',') -cne 'action,processId,sessionId,startedTicks' -or
+        [string]$request.action -cne 'studio.stop' -or
+        [string]$request.sessionId -cne $ExpectedSessionId -or
+        [int]$request.processId -ne $ExpectedProcessId -or
+        [long]$request.startedTicks -ne $ExpectedStartedTicks) {
+        throw 'MENDIMARU_CONTROL_TARGET_INVALID'
+    }
+    return $authenticated.Sequence
+}
+
 function Assert-MendimaruDirectPath {
     param(
         [string]$Path,

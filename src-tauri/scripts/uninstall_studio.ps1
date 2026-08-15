@@ -83,7 +83,11 @@ try {
 
     Write-UninstallResult 'running' 'Studio Pro uninstaller is running.' $null $null
     $null = Assert-MendimaruTrustedExecutable -Path $uninstaller -Root $dataRoot
-    $process = Start-Process -FilePath $uninstaller -ArgumentList @('/SILENT') -Wait -PassThru
+    $process = Start-Process -FilePath $uninstaller -ArgumentList @(
+        '/VERYSILENT',
+        '/SUPPRESSMSGBOXES',
+        '/NORESTART'
+    ) -WindowStyle Hidden -Wait -PassThru
     $exitCode = [int]$process.ExitCode
     if (@(0, 1641, 3010) -notcontains $exitCode) {
         throw "MENDIMARU_UNINSTALLER_EXIT_CODE:$exitCode"

@@ -10,6 +10,11 @@ use std::time::Duration;
 const REMOTE_APP_START_GRACE_SECONDS: u64 = 20;
 const INSTALL_REPORT_STALE_SECONDS: u64 = 30;
 
+pub(super) struct WindowsOperationWaitOutcome {
+    pub(super) report: WindowsOperationReport,
+    pub(super) authenticated: crate::winboat::security::AuthenticatedPayload,
+}
+
 pub(super) struct WindowsOperationWaitError {
     pub(super) message: String,
     pub(super) retryable: bool,
@@ -24,7 +29,31 @@ pub(super) async fn wait_for_windows_operation<F>(
     timeout_seconds: u64,
     operation: &str,
     on_report: &mut F,
-) -> Result<WindowsOperationReport, WindowsOperationWaitError>
+) -> Result<WindowsOperationWaitOutcome, WindowsOperationWaitError>
+where
+    F: FnMut(&WindowsOperationReport) + Send,
+{
+    wait_for_windows_operation_after(
+        report_path,
+        security,
+        remote_app,
+        timeout_seconds,
+        operation,
+        None,
+        on_report,
+    )
+    .await
+}
+
+pub(super) async fn wait_for_windows_operation_after<F>(
+    report_path: &Path,
+    security: &OperationSecurity,
+    remote_app: &mut RemoteAppProcess,
+    timeout_seconds: u64,
+    operation: &str,
+    previous_report: Option<&crate::winboat::security::AuthenticatedPayload>,
+    on_report: &mut F,
+) -> Result<WindowsOperationWaitOutcome, WindowsOperationWaitError>
 where
     F: FnMut(&WindowsOperationReport) + Send,
 {
@@ -36,7 +65,9 @@ where
     let mut last_report_timestamp = None;
     let mut last_report_changed_at = None;
     let mut last_report_had_percentage = false;
-    let mut report_sequence = ReportSequenceTracker::default();
+    let mut report_sequence = previous_report
+        .map(ReportSequenceTracker::after)
+        .unwrap_or_default();
 
     loop {
         if remote_app.certificate_failed() {
@@ -83,7 +114,12 @@ where
                         last_progress_signature = Some(progress_signature);
                     }
                     match report.state {
-                        WindowsOperationState::Succeeded => return Ok(report),
+                        WindowsOperationState::Succeeded => {
+                            return Ok(WindowsOperationWaitOutcome {
+                                report,
+                                authenticated,
+                            })
+                        }
                         WindowsOperationState::Failed => {
                             return Err(failed_operation(&report, operation));
                         }

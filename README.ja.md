@@ -170,9 +170,17 @@ npm run test:e2e
 npm run tauri build
 ```
 
-Linux の `npm run test:e2e` は、固定バージョンの `tauri-driver` と `WebKitWebDriver` を使い、debug 実行ファイルを Vite development URL に接続します。隔離した WinBoat／API／project fixture により、実際の WebView、Tauri IPC、online application state、実際の busy-state motion、idle 時の animation 完全停止、主要画面の navigation を検証します。driver bridge は `cargo install tauri-driver --version 2.0.6 --locked` でインストールし、host に `WebKitWebDriver` も必要です。`npm run test:app-flow` は OS 境界をモックした高速な React application-flow suite で、`npm run test:browser` は Mendimaru desktop shell ではなく Mendix Runtime page をテストします。CI は 3 層すべてを gate し、Windows／Linux のテストと Windows MSI／NSIS smoke build を実行します。
+Linux の `npm run test:e2e` は、固定バージョンの `tauri-driver` と `WebKitWebDriver` を使い、debug 実行ファイルを Vite development URL に接続します。隔離した WinBoat／API／project fixture により、実際の WebView、Tauri IPC、online application state、frame sampling を伴う route／busy-state motion、allowlist 外の idle animation がないこと、主要画面の navigation を検証します。driver bridge は `cargo install tauri-driver --version 2.0.6 --locked` でインストールし、host に `WebKitWebDriver` も必要です。`npm run test:app-flow` は OS 境界をモックした高速な React application-flow suite で、`npm run test:browser` は Mendimaru desktop shell ではなく Mendix Runtime page をテストします。CI は 3 層すべてを gate し、Windows／Linux のテストと Windows MSI／NSIS smoke build を実行します。
 
-online の実 WinBoat VM に対する非破壊 RemoteApp gate は `npm run test:winboat-e2e` で実行します。隔離した Xvfb display で session query と stale-session rejection を検証し、background PowerShell window が 1 つでも表示されると失敗します。host には `xvfb-run`、`xfwm4`、`wmctrl` が必要です。
+online の実 WinBoat VM に対する非破壊 RemoteApp gate は `npm run test:winboat-smoke` で実行し、認証済み session query と stale-session rejection を検証します。実際の状態を変更する lifecycle gate は別に実行し、既にインストール済みの version を安全のため拒否します。
+
+```bash
+MENDIMARU_E2E_ALLOW_MUTATION=1 \
+MENDIMARU_E2E_VERSION=11.13.0 \
+npm run test:winboat-e2e
+```
+
+指定した disposable version の公式 installer が shared cache に存在する必要があります。このテストは absent → installed → 実 Studio window → running removal rejection → graceful close → uninstalled を実行し、progress ordering、正確な process identity、既存 installation と installer cache の不変性、stale／repeated action rejection、leaked process や想定外の RemoteApp／PowerShell window がないことまで検証します。両方の live gate は隔離した Xvfb と `xvfb-run`、`xfwm4`、`wmctrl` を必要とします。Arch Linux では `xorg-server-xvfb` が `xvfb-run` を提供します。CI には live WinBoat VM がないため、destructive lifecycle は local/manual release gate であり、CI の検証範囲としては主張しません。
 
 Rust の全テストでは registry parsing、path containment、file integrity、Windows argument encoding、UAC／exit-code failure、install から uninstall までの fixture lifecycle を検証します。
 
@@ -189,7 +197,7 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 Windows ネイティブのコマンドはパスをコマンドシェルへ挿入しません。インストーラー、インストール済みの Studio 実行ファイル、および登録済みの Mendix アンインストーラーには、Mendix または Siemens が発行した有効で信頼済みの Authenticode 署名が必要で、検証前後のハッシュによりファイル置換も検出します。Windows Installer による削除は製品コードへの `/x` 操作と既知の非対話フラグに限定し、登録アンインストーラーは選択したインストールに属し、許可リスト内のフラグだけを使用する必要があります。UAC のキャンセルや失敗終了コードを成功として扱いません。
 
-Linux では Windows のユーザー名とパスワードをアプリ設定に保存しません。RemoteApp 起動時に実行中の WinBoat コンテナから認証情報を読み、FreeRDP 3 の標準入力へ渡します。FreeRDP はアプリ専用の TOFU 証明書ピンを使い、管理者権限の操作は Guest API と RDP がループバックだけにバインドされている場合に限定します。共有操作結果は試行ごとの HMAC キーとリプレイ防止シーケンスで認証します。
+Linux では Windows のユーザー名とパスワードをアプリ設定に保存しません。RemoteApp 起動時に実行中の WinBoat コンテナから認証情報を読み、FreeRDP 3 の標準入力へ渡します。FreeRDP はアプリ専用の TOFU 証明書ピンを使い、管理者権限の操作は Guest API と RDP がループバックだけにバインドされている場合に限定します。共有操作結果と保持中の Studio session-control request は、試行ごとの HMAC キーとリプレイ防止シーケンスで認証します。
 
 脅威モデル、実行ファイルの信頼チェーン、コンテナ権限と残存リスク、報告方法については、[セキュリティポリシーと WinBoat 信頼境界](SECURITY.md)を参照してください。
 

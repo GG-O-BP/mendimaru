@@ -3,6 +3,7 @@ $mode = '__MODE__'
 $targetProcessId = [int]__TARGET_PROCESS_ID__
 $targetStartedTicks = [long]__TARGET_STARTED_TICKS__
 $resultPath = '__RESULT_PATH__'
+$controlPath = '__CONTROL_PATH__'
 $installRoot = '__INSTALL_ROOT__'
 $knownStudiosJson = [Text.Encoding]::UTF8.GetString(
     [Convert]::FromBase64String('__KNOWN_STUDIOS_BASE64__')
@@ -214,16 +215,47 @@ try {
             $process = Get-Process -Id ([int]$session.processId) -ErrorAction Stop
             $process.Refresh()
             Write-SessionResult 'succeeded' 'Studio Pro session is ready to reconnect.' $null @($session)
+            $lastControlSequence = [long]0
+            $closeRequested = $false
             while ($true) {
-                Start-Sleep -Seconds 1
+                Start-Sleep -Milliseconds 500
+                $ended = $false
                 try {
                     $process.Refresh()
                     if ($process.HasExited -or
                         $process.StartTime.ToUniversalTime().Ticks -ne $targetStartedTicks) {
-                        exit 0
+                        $ended = $true
                     }
                 } catch {
+                    $ended = $true
+                }
+                if ($ended) {
+                    if ($closeRequested) {
+                        Write-SessionResult 'succeeded' 'Studio Pro session closed.' $null @()
+                    }
                     exit 0
+                }
+                if (Test-Path -LiteralPath $controlPath) {
+                    try {
+                        $sequence = Read-MendimaruStudioStopRequest `
+                            -Path $controlPath `
+                            -ExpectedSessionId $session.sessionId `
+                            -ExpectedProcessId ([int]$session.processId) `
+                            -ExpectedStartedTicks $targetStartedTicks `
+                            -PreviousSequence $lastControlSequence
+                        $lastControlSequence = $sequence
+                        Remove-Item -LiteralPath $controlPath -Force -ErrorAction Stop
+                        $process.Refresh()
+                        if ($process.StartTime.ToUniversalTime().Ticks -ne $targetStartedTicks) {
+                            continue
+                        }
+                        $closeRequested = $true
+                        if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
+                            $null = $process.CloseMainWindow()
+                        }
+                    } catch {
+                        # Invalid requests never close the selected Studio process.
+                    }
                 }
             }
         }

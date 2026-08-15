@@ -2,6 +2,7 @@ $ErrorActionPreference = 'Stop'
 $executable = '__EXECUTABLE_PATH__'
 $projectPath = '__PROJECT_PATH__'
 $resultPath = '__RESULT_PATH__'
+$controlPath = '__CONTROL_PATH__'
 $installRoot = '__INSTALL_ROOT__'
 $process = $null
 
@@ -226,10 +227,13 @@ try {
     }
     Write-LaunchResult 'succeeded' 'Studio Pro window is ready.' $null $executable $null @($session)
 
-    # Keep the RemoteApp host bound to this exact PID and start time. A reused
-    # PID or another Studio Pro process must never retain this connection.
+    # Keep the RemoteApp host bound to this exact PID and start time. Stop
+    # requests use this same connection so a second RDP client cannot replace
+    # it or expose the Windows RemoteApp selection window.
     $readyProcessId = [int]$readyProcess.Id
     $readyStartedTicks = [long]$readyProcess.StartTime.ToUniversalTime().Ticks
+    $lastControlSequence = [long]0
+    $closeRequested = $false
     while ($true) {
         try {
             $current = Get-Process -Id $readyProcessId -ErrorAction Stop
@@ -240,7 +244,33 @@ try {
         } catch {
             break
         }
+        if (Test-Path -LiteralPath $controlPath) {
+            try {
+                $sequence = Read-MendimaruStudioStopRequest `
+                    -Path $controlPath `
+                    -ExpectedSessionId $sessionId `
+                    -ExpectedProcessId $readyProcessId `
+                    -ExpectedStartedTicks $readyStartedTicks `
+                    -PreviousSequence $lastControlSequence
+                $lastControlSequence = $sequence
+                Remove-Item -LiteralPath $controlPath -Force -ErrorAction Stop
+                $current.Refresh()
+                if ($current.StartTime.ToUniversalTime().Ticks -ne $readyStartedTicks) {
+                    break
+                }
+                $closeRequested = $true
+                if ($current.MainWindowHandle -ne [IntPtr]::Zero) {
+                    $null = $current.CloseMainWindow()
+                }
+            } catch {
+                # An invalid or tampered request never closes Studio Pro. The
+                # host times out while this authenticated launch stays alive.
+            }
+        }
         Start-Sleep -Milliseconds 500
+    }
+    if ($closeRequested) {
+        Write-LaunchResult 'succeeded' 'Studio Pro session closed.' $null $executable $null @()
     }
     exit 0
 } catch {

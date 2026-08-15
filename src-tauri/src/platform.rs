@@ -330,14 +330,96 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    #[ignore = "installs, launches, and uninstalls Studio Pro through the live backend contract"]
+    #[ignore = "installs, launches, observes, stops, and uninstalls a disposable Studio Pro version"]
     fn live_e2e_linux_winboat_backend_lifecycle() {
-        use crate::contracts::{BackendId, CapabilityId, PlatformId};
+        use crate::contracts::{
+            BackendErrorCode, BackendId, CapabilityId, PlatformId, StudioConnectionState,
+            StudioProcessState,
+        };
+        use crate::models::AppConfig;
         use crate::models::StudioInstallPhase;
         use sha2::{Digest, Sha256};
         use std::fs::File;
         use std::io::Read;
         use std::path::Path;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        struct Cleanup<'a> {
+            config: &'a AppConfig,
+            version: &'a str,
+        }
+
+        impl Drop for Cleanup<'_> {
+            fn drop(&mut self) {
+                let sessions =
+                    tauri::async_runtime::block_on(crate::platform::studio_sessions(self.config));
+                if let Ok(sessions) = sessions {
+                    for session in sessions
+                        .into_iter()
+                        .filter(|session| session.version == self.version)
+                    {
+                        if let Err(error) = tauri::async_runtime::block_on(
+                            crate::platform::stop_studio_session(self.config, &session.session_id),
+                        ) {
+                            eprintln!(
+                                "lifecycle cleanup could not stop {}: {error}",
+                                session.session_id
+                            );
+                        }
+                    }
+                }
+                let installed = tauri::async_runtime::block_on(
+                    crate::platform::installed_versions(self.config),
+                );
+                if installed.is_ok_and(|installed| {
+                    installed.iter().any(|item| item.version == self.version)
+                }) {
+                    let nonce = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|duration| duration.as_nanos())
+                        .unwrap_or_default();
+                    if let Err(error) =
+                        tauri::async_runtime::block_on(crate::platform::uninstall_studio(
+                            self.config,
+                            self.version,
+                            &format!("cleanup-{}-{nonce}", self.version),
+                        ))
+                    {
+                        eprintln!(
+                            "lifecycle cleanup could not uninstall {}: {error}",
+                            self.version
+                        );
+                    }
+                }
+            }
+        }
+
+        fn phase_rank(phase: StudioInstallPhase) -> u8 {
+            match phase {
+                StudioInstallPhase::Staging => 0,
+                StudioInstallPhase::Installing => 1,
+                StudioInstallPhase::Finalizing => 2,
+                StudioInstallPhase::Verifying => 3,
+            }
+        }
+
+        fn control_artifacts(config: &AppConfig) -> Vec<String> {
+            let directory = Path::new(&config.shared_directory).join(".mendimaru/operations");
+            let entries = match std::fs::read_dir(directory) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+                Err(error) => panic!("inspect operation control artifacts: {error}"),
+            };
+            let mut artifacts = entries
+                .map(|entry| entry.expect("read operation artifact entry"))
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .filter(|name| {
+                    name.ends_with(".control.json") || name.ends_with(".control.json.tmp")
+                })
+                .collect::<Vec<_>>();
+            artifacts.sort();
+            artifacts
+        }
 
         assert_eq!(
             std::env::var("MENDIMARU_E2E_ALLOW_MUTATION").as_deref(),
@@ -355,23 +437,39 @@ mod tests {
         assert_eq!(manifest.backend, BackendId::LinuxWinboat);
         assert_eq!(manifest.host_platform, PlatformId::Linux);
         assert_eq!(manifest.studio_platform, PlatformId::Windows);
-        assert!(manifest.supports(CapabilityId::StudioDetect));
-        assert!(manifest.supports(CapabilityId::StudioInstall));
-        assert!(!manifest.supports(CapabilityId::RuntimeStart));
+        for capability in [
+            CapabilityId::StudioDetect,
+            CapabilityId::StudioInstall,
+            CapabilityId::StudioUninstall,
+            CapabilityId::StudioStart,
+            CapabilityId::StudioStatus,
+            CapabilityId::StudioStop,
+        ] {
+            assert!(manifest.supports(capability), "missing {capability}");
+        }
 
         let environment = tauri::async_runtime::block_on(super::environment_status(&config));
         assert!(environment.guest_online, "the WinBoat guest must be online");
+        let baseline_control_artifacts = control_artifacts(&config);
 
-        let installed = tauri::async_runtime::block_on(super::installed_versions(&config))
+        let baseline = tauri::async_runtime::block_on(super::installed_versions(&config))
             .expect("the adapter must detect installed versions");
-        if installed.iter().any(|item| item.version == version) {
-            tauri::async_runtime::block_on(super::uninstall_studio(
-                &config,
-                &version,
-                &format!("uninstall-{version}-preflight"),
-            ))
-            .expect("the adapter must normalize a preinstalled E2E version");
-        }
+        assert!(
+            baseline.iter().all(|item| item.version != version),
+            "refusing to delete a preinstalled {version}; select an absent disposable version"
+        );
+        let baseline_sessions = tauri::async_runtime::block_on(super::studio_sessions(&config))
+            .expect("the adapter must inspect the initial Studio sessions");
+        assert!(
+            baseline_sessions
+                .iter()
+                .all(|session| session.version != version),
+            "the disposable version already has a running session"
+        );
+        let _cleanup = Cleanup {
+            config: &config,
+            version: &version,
+        };
 
         let installer_path = Path::new(&config.shared_directory)
             .join(".mendimaru/installers")
@@ -392,17 +490,42 @@ mod tests {
             hasher.update(&buffer[..count]);
         }
         let expected_sha256 = format!("{:x}", hasher.finalize());
+        let installer_size = installer.metadata().expect("inspect E2E installer").len();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time must follow the Unix epoch")
+            .as_nanos();
+
+        let missing_launch = tauri::async_runtime::block_on(super::launch_studio(
+            &config,
+            &version,
+            &format!("missing-launch-{version}-{nonce}"),
+            None,
+        ))
+        .expect_err("an absent Studio version must not launch");
+        assert_eq!(missing_launch.capability, Some(CapabilityId::StudioStart));
+
         let mut progress = Vec::new();
         let executable = tauri::async_runtime::block_on(super::install_studio(
             &config,
             &version,
-            &format!("install-{version}-lifecycle"),
+            &format!("install-{version}-{nonce}"),
             &installer_path,
             &expected_sha256,
-            |update| progress.push(update),
+            |update| {
+                eprintln!(
+                    "lifecycle install: phase={:?} percentage={:?} estimated={}",
+                    update.phase, update.percentage, update.estimated
+                );
+                progress.push(update);
+            },
         ))
         .expect("the adapter must install Studio Pro");
         assert!(executable.to_ascii_lowercase().ends_with("studiopro.exe"));
+        assert_eq!(
+            progress.first().map(|update| update.phase),
+            Some(StudioInstallPhase::Staging)
+        );
         for phase in [
             StudioInstallPhase::Staging,
             StudioInstallPhase::Installing,
@@ -417,28 +540,143 @@ mod tests {
         assert!(progress.iter().all(|update| update
             .percentage
             .is_none_or(|percentage| (0.0..=100.0).contains(&percentage))));
+        assert!(progress
+            .windows(2)
+            .all(|updates| phase_rank(updates[0].phase) <= phase_rank(updates[1].phase)));
+        assert_eq!(
+            progress
+                .last()
+                .map(|update| (update.phase, update.percentage, update.estimated)),
+            Some((StudioInstallPhase::Verifying, Some(100.0), false))
+        );
 
         let installed = tauri::async_runtime::block_on(super::installed_versions(&config))
             .expect("the adapter must detect the new installation");
-        assert!(installed.iter().any(|item| {
-            item.version == version && item.executable_path.eq_ignore_ascii_case(&executable)
-        }));
+        let exact_installations = installed
+            .iter()
+            .filter(|item| item.version == version)
+            .collect::<Vec<_>>();
+        assert_eq!(exact_installations.len(), 1);
+        assert!(exact_installations[0]
+            .executable_path
+            .eq_ignore_ascii_case(&executable));
 
         tauri::async_runtime::block_on(super::launch_studio(
             &config,
             &version,
-            &format!("launch-{version}-lifecycle"),
+            &format!("launch-{version}-{nonce}"),
             None,
         ))
         .expect("the adapter must launch the exact Studio Pro version");
+
+        let sessions = tauri::async_runtime::block_on(super::studio_sessions(&config))
+            .expect("the running Studio session must be observable");
+        let launched = sessions
+            .iter()
+            .filter(|session| session.version == version)
+            .collect::<Vec<_>>();
+        assert_eq!(launched.len(), 1, "exactly one test session must run");
+        let launched = launched[0];
+        assert_eq!(launched.state, StudioProcessState::Running);
+        assert_eq!(launched.connection, StudioConnectionState::Connected);
+        assert!(launched.process_id.is_some());
+        assert!(launched.started_at.is_some());
+        let session_id = launched.session_id.clone();
+        let status =
+            tauri::async_runtime::block_on(super::studio_session_status(&config, &session_id))
+                .expect("the exact launched process identity must remain queryable");
+        assert_eq!(status.session_id, session_id);
+
+        let running_uninstall = tauri::async_runtime::block_on(super::uninstall_studio(
+            &config,
+            &version,
+            &format!("running-uninstall-{version}-{nonce}"),
+        ))
+        .expect_err("uninstall must refuse a running exact-version process");
+        assert_eq!(
+            running_uninstall.capability,
+            Some(CapabilityId::StudioUninstall)
+        );
+        assert_eq!(running_uninstall.code, BackendErrorCode::OperationFailed);
+        assert!(
+            tauri::async_runtime::block_on(super::installed_versions(&config))
+                .expect("installation must remain after rejected uninstall")
+                .iter()
+                .any(|item| item.version == version)
+        );
+
+        tauri::async_runtime::block_on(super::stop_studio_session(&config, &session_id))
+            .expect("the exact Studio process must close normally");
+        let ended_status =
+            tauri::async_runtime::block_on(super::studio_session_status(&config, &session_id))
+                .expect_err("the closed process identity must no longer resolve");
+        assert_eq!(ended_status.capability, Some(CapabilityId::StudioStatus));
+        let repeated_stop =
+            tauri::async_runtime::block_on(super::stop_studio_session(&config, &session_id))
+                .expect_err("a stale process identity must not close another process");
+        assert_eq!(repeated_stop.capability, Some(CapabilityId::StudioStop));
+        assert!(
+            tauri::async_runtime::block_on(super::studio_sessions(&config))
+                .expect("sessions must be readable after close")
+                .iter()
+                .all(|session| session.version != version)
+        );
+
         tauri::async_runtime::block_on(super::uninstall_studio(
             &config,
             &version,
-            &format!("uninstall-{version}-lifecycle"),
+            &format!("uninstall-{version}-{nonce}"),
         ))
         .expect("the adapter must uninstall the exact Studio Pro version");
-        let installed = tauri::async_runtime::block_on(super::installed_versions(&config))
+        let final_installed = tauri::async_runtime::block_on(super::installed_versions(&config))
             .expect("the adapter must detect versions after uninstall");
-        assert!(installed.iter().all(|item| item.version != version));
+        assert!(final_installed.iter().all(|item| item.version != version));
+
+        let missing_uninstall = tauri::async_runtime::block_on(super::uninstall_studio(
+            &config,
+            &version,
+            &format!("missing-uninstall-{version}-{nonce}"),
+        ))
+        .expect_err("a second uninstall must not report false success");
+        assert_eq!(
+            missing_uninstall.capability,
+            Some(CapabilityId::StudioUninstall)
+        );
+        let missing_launch = tauri::async_runtime::block_on(super::launch_studio(
+            &config,
+            &version,
+            &format!("post-delete-launch-{version}-{nonce}"),
+            None,
+        ))
+        .expect_err("a deleted Studio version must not launch");
+        assert_eq!(missing_launch.capability, Some(CapabilityId::StudioStart));
+
+        let mut before = baseline
+            .iter()
+            .map(|item| (&item.version, &item.executable_path))
+            .collect::<Vec<_>>();
+        before.sort();
+        let mut after = final_installed
+            .iter()
+            .map(|item| (&item.version, &item.executable_path))
+            .collect::<Vec<_>>();
+        after.sort();
+        assert_eq!(
+            after, before,
+            "the test modified another Studio installation"
+        );
+        assert_eq!(
+            File::open(&installer_path)
+                .expect("the cached installer must remain")
+                .metadata()
+                .expect("inspect cached installer after lifecycle")
+                .len(),
+            installer_size
+        );
+        assert_eq!(
+            control_artifacts(&config),
+            baseline_control_artifacts,
+            "the lifecycle leaked an authenticated control artifact"
+        );
     }
 }

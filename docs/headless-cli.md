@@ -123,7 +123,10 @@ keeper through a user-owned `0700` cache directory and `0600` Unix socket. This
 avoids opening a second RDP connection, which would replace the active
 RemoteApp connection. Socket names are irreversible hashes of Studio session
 IDs; no password, project path, or command line is persisted. A stale or
-untrusted socket is never treated as a live session.
+untrusted socket is never treated as a live session. Stop uses an authenticated,
+replay-protected request for the exact PID and process start tick through the
+retained connection and waits for Windows to report that process gone; killing
+only the local FreeRDP client never counts as a successful stop.
 
 ## Interruption and retry
 

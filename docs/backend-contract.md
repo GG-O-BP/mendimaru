@@ -197,33 +197,43 @@ test:browser` additionally runs the real Chromium policy and artifact suite.
 On Linux, `npm run test:e2e` separately launches the real Tauri debug binary,
 Vite development server, and WebKit WebView through `tauri-driver`, backed by
 isolated WinBoat/API/project fixtures. It observes motion on an actual React
-busy state and then requires the idle WebView to have no running or infinite
-animations. The React-only mocked application flow is available as `npm run
+busy state, samples multiple frames of the online route marker, and then
+requires every idle animation except that explicitly allowlisted route motion
+to be stopped. The React-only mocked application flow is available as `npm run
 test:app-flow`; it is not a substitute for the native window gate.
-Linux maintainers can
-run the destructive full adapter lifecycle only against a disposable WinBoat
-test version with an official installer already in the shared cache:
 
-```bash
-MENDIMARU_E2E_ALLOW_MUTATION=1 \
-MENDIMARU_E2E_VERSION=11.13.0 \
-cargo test --manifest-path src-tauri/Cargo.toml \
-  platform::tests::live_e2e_linux_winboat_backend_lifecycle \
-  -- --ignored --exact --nocapture --test-threads=1
-```
-
-The test normalizes that exact version to absent, installs it through the common
-adapter, verifies all progress phases and exact-version detection, launches a
-real Studio window, uninstalls it officially, and verifies it is absent again.
 The non-destructive live session suite can run against an existing, online
 WinBoat VM:
 
 ```bash
-npm run test:winboat-e2e
+npm run test:winboat-smoke
 ```
 
 It queries current-user sessions through the authenticated RemoteApp transport
 and verifies that reconnect and close both reject a stale PID/start-time pair.
-It also runs FreeRDP under Xvfb and an isolated window manager, failing if any
-background operation exposes a RAIL/PowerShell window. The host must provide
-`xvfb-run`, `xfwm4`, and `wmctrl`.
+
+Linux maintainers can run the destructive full adapter lifecycle only against
+a disposable, currently absent WinBoat test version with an official installer
+already in the shared cache:
+
+```bash
+MENDIMARU_E2E_ALLOW_MUTATION=1 \
+MENDIMARU_E2E_VERSION=11.13.0 \
+npm run test:winboat-e2e
+```
+
+The test refuses a preinstalled target rather than deleting user state. It
+installs through the common adapter, verifies progress ordering and exact-version
+detection, observes a real Studio window, rejects removal while running, closes
+the exact authenticated process through its existing RemoteApp connection,
+uninstalls it officially, and verifies that it remains absent under repeated and
+post-delete operations. It also verifies that pre-existing installations and the
+installer cache are unchanged. Both live gates run FreeRDP under Xvfb and an
+isolated window manager, failing on leaked child processes or any unexpected
+RAIL/PowerShell window. The host must provide `xvfb-run`, `xfwm4`, and `wmctrl`;
+Arch Linux provides `xvfb-run` in `xorg-server-xvfb`.
+
+The live lifecycle is a local/manual release gate because hosted CI has no
+WinBoat VM. CI still runs the fixture-backed native WebView gate, React flow,
+browser policy suite, and Rust tests; those layers are not presented as proof of
+the live install-to-delete boundary.

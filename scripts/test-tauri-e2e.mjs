@@ -156,22 +156,57 @@ try {
     const marker = document.querySelector(".route-track i");
     if (!marker) return null;
     const style = getComputedStyle(marker);
+    const animation = marker.getAnimations()[0];
     return {
       animationName: style.animationName,
       iterationCount: style.animationIterationCount,
+      playState: animation?.playState ?? null,
+      currentTime: animation?.currentTime ?? null,
     };
   `);
-  assert.deepEqual(
-    routeMotion,
-    { animationName: "route-arrival", iterationCount: "1" },
-    "the online route must animate once instead of repainting forever",
+  assert.equal(routeMotion?.animationName, "route-travel");
+  assert.equal(routeMotion?.iterationCount, "infinite");
+  assert.equal(routeMotion?.playState, "running");
+  assert.equal(typeof routeMotion?.currentTime, "number");
+
+  const routeFrames = [];
+  for (let sample = 0; sample < 8; sample += 1) {
+    routeFrames.push(
+      await execute(`
+        const marker = document.querySelector(".route-status.online .route-track i");
+        if (!marker) return null;
+        const animation = marker.getAnimations()[0];
+        const style = getComputedStyle(marker);
+        return {
+          currentTime: animation?.currentTime ?? null,
+          opacity: style.opacity,
+          transform: style.transform,
+        };
+      `),
+    );
+    await delay(120);
+  }
+  assert(
+    routeFrames.every(
+      (frame) => frame && typeof frame.currentTime === "number",
+    ),
+    "the online route animation must remain attached for every sampled frame",
+  );
+  assert(
+    routeFrames.at(-1).currentTime > routeFrames[0].currentTime + 500,
+    "the online route animation timeline did not advance",
+  );
+  assert(
+    new Set(routeFrames.map((frame) => frame.transform)).size >= 4,
+    `the online route marker did not visibly move: ${JSON.stringify(routeFrames)}`,
   );
 
   const activeMotion = await execute(`
     const probe = document.createElement("div");
+    probe.id = "mendimaru-e2e-motion-probe";
     probe.setAttribute("aria-hidden", "true");
     probe.innerHTML = \`
-      <span class="spin"></span>
+      <div class="spin"></div>
       <div class="download-bar" aria-busy="true">
         <div class="progress-track"><span class="active"></span></div>
         <div class="progress-stages"><span class="current"><i></i></span></div>
@@ -188,7 +223,6 @@ try {
         probe.querySelector(".progress-stages i"),
       ).animationName,
     };
-    probe.remove();
     return result;
   `);
   assert.deepEqual(
@@ -201,6 +235,53 @@ try {
     "busy and installation states must retain visible motion",
   );
 
+  const busyFrames = [];
+  for (let sample = 0; sample < 8; sample += 1) {
+    busyFrames.push(
+      await execute(`
+        const probe = document.querySelector("#mendimaru-e2e-motion-probe");
+        if (!probe) return null;
+        const spinner = getComputedStyle(probe.querySelector(".spin"));
+        const shimmer = getComputedStyle(
+          probe.querySelector(".progress-track > span"),
+          "::after",
+        );
+        const stage = getComputedStyle(
+          probe.querySelector(".progress-stages i"),
+        );
+        return {
+          spinnerTransform: spinner.transform,
+          shimmerTransform: shimmer.transform,
+          stageTransform: stage.transform,
+          stageOpacity: stage.opacity,
+        };
+      `),
+    );
+    await delay(120);
+  }
+  assert(
+    busyFrames.every(Boolean),
+    "the busy-motion probe disappeared while frames were sampled",
+  );
+  for (const property of [
+    "spinnerTransform",
+    "shimmerTransform",
+    "stageTransform",
+  ]) {
+    assert(
+      new Set(busyFrames.map((frame) => frame[property])).size >= 4,
+      `${property} did not visibly change: ${JSON.stringify(busyFrames)}`,
+    );
+  }
+  assert(
+    new Set(busyFrames.map((frame) => frame.stageOpacity)).size >= 4,
+    `stageOpacity did not visibly change: ${JSON.stringify(busyFrames)}`,
+  );
+  await execute(`
+    document.querySelector("#mendimaru-e2e-motion-probe")?.remove();
+    return true;
+  `);
+
   await delay(1_100);
 
   const idleMotion = await execute(`
@@ -208,24 +289,41 @@ try {
       .filter((animation) => animation.effect?.getTiming().iterations === Infinity)
       .map((animation) => ({
         animationName: getComputedStyle(animation.effect.target).animationName,
-        className: animation.effect.target.className,
+        isOnlineRoute: animation.effect.target.matches(
+          ".route-status.online .route-track i",
+        ),
       }));
     return {
       infiniteAnimations,
-      runningAnimations: document.getAnimations()
-        .filter((animation) => animation.playState === "running")
-        .map((animation) => animation.id || animation.constructor.name),
+      unexpectedRunningAnimations: document.getAnimations()
+        .filter((animation) => {
+          const target = animation.effect?.target;
+          const name = target ? getComputedStyle(target).animationName : "";
+          const allowlisted =
+            name === "route-travel" &&
+            target instanceof Element &&
+            target.matches(".route-status.online .route-track i");
+          return animation.playState === "running" && !allowlisted;
+        })
+        .map((animation) => ({
+          animationName: animation.effect?.target
+            ? getComputedStyle(animation.effect.target).animationName
+            : "",
+          className: animation.effect?.target?.className ?? "",
+        })),
       routeMarkerPresent: Boolean(document.querySelector(".route-track i")),
     };
   `);
   assert.deepEqual(
     idleMotion,
     {
-      infiniteAnimations: [],
-      runningAnimations: [],
+      infiniteAnimations: [
+        { animationName: "route-travel", isOnlineRoute: true },
+      ],
+      unexpectedRunningAnimations: [],
       routeMarkerPresent: true,
     },
-    "the idle native window must not continuously repaint for decorative motion",
+    "the idle native window may run only the online route indicator",
   );
 
   const installedRefresh = await command("POST", "/element", {
@@ -297,7 +395,7 @@ try {
 
 if (succeeded) {
   process.stdout.write(
-    "Tauri E2E: real WebKit window passed (dev URL, IPC contract, actual busy motion, idle rendering, four-view navigation)\n",
+    "Tauri E2E: real WebKit window passed (dev URL, IPC contract, sampled route/busy motion, bounded idle rendering, four-view navigation)\n",
   );
 }
 

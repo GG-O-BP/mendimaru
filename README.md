@@ -174,9 +174,17 @@ npm run test:e2e
 npm run tauri build
 ```
 
-On Linux, `npm run test:e2e` launches the debug executable against the Vite development URL through pinned `tauri-driver` and `WebKitWebDriver`. It uses isolated WinBoat/API/project fixtures and verifies the real WebView, Tauri IPC, online application state, actual busy-state motion, zero idle animations, and primary navigation. Install the driver bridge with `cargo install tauri-driver --version 2.0.6 --locked`; the host must also provide `WebKitWebDriver`. `npm run test:app-flow` retains the faster React application-flow suite with mocked OS boundaries, while `npm run test:browser` tests Mendix Runtime pages rather than the Mendimaru desktop shell. CI gates all three layers, runs the frontend and Rust suites on Windows and Linux, and smoke-builds MSI and NSIS installers on Windows.
+On Linux, `npm run test:e2e` launches the debug executable against the Vite development URL through pinned `tauri-driver` and `WebKitWebDriver`. It uses isolated WinBoat/API/project fixtures and verifies the real WebView, Tauri IPC, online application state, sampled route and busy-state motion, the absence of every non-allowlisted idle animation, and primary navigation. Install the driver bridge with `cargo install tauri-driver --version 2.0.6 --locked`; the host must also provide `WebKitWebDriver`. `npm run test:app-flow` retains the faster React application-flow suite with mocked OS boundaries, while `npm run test:browser` tests Mendix Runtime pages rather than the Mendimaru desktop shell. CI gates all three layers, runs the frontend and Rust suites on Windows and Linux, and smoke-builds MSI and NSIS installers on Windows.
 
-Run `npm run test:winboat-e2e` for the non-destructive RemoteApp gate against an online WinBoat VM. It verifies session queries and stale-session rejection on an isolated Xvfb display, failing if any background PowerShell window becomes visible. The host must provide `xvfb-run`, `xfwm4`, and `wmctrl`.
+Run `npm run test:winboat-smoke` for the non-destructive RemoteApp gate against an online WinBoat VM. It verifies authenticated session queries and stale-session rejection. The destructive lifecycle gate is deliberately separate and refuses a version that was already installed:
+
+```bash
+MENDIMARU_E2E_ALLOW_MUTATION=1 \
+MENDIMARU_E2E_VERSION=11.13.0 \
+npm run test:winboat-e2e
+```
+
+The exact disposable version must have an official installer in the shared cache. The lifecycle verifies absent → installed → real Studio window → running-removal rejection → graceful close → uninstalled, including progress ordering, exact process identity, unchanged pre-existing installations and installer cache, stale/repeated action rejection, and no leaked processes or unexpected RemoteApp/PowerShell windows. Both live gates use isolated Xvfb and require `xvfb-run`, `xfwm4`, and `wmctrl`; on Arch Linux, `xvfb-run` is provided by `xorg-server-xvfb`. Because CI has no live WinBoat VM, this destructive gate is a local/manual release gate rather than a CI claim.
 
 The full Rust suite covers registry parsing, path containment, installer integrity, Windows argument quoting, UAC/exit-code failures, and a fixture-backed install-to-uninstall lifecycle.
 
@@ -193,7 +201,7 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 Native Windows commands never interpolate paths into a command shell. Installers, installed Studio executables, and registered Mendix uninstallers must have a valid trusted Authenticode signature whose publisher is Mendix or Siemens; files are hashed before and after verification to detect replacement. Windows Installer removal is limited to a product-code `/x` operation and known non-interactive flags, while registered uninstallers must belong to the selected installation and use an allowlisted flag set. UAC cancellation and non-success process exit codes leave the operation failed rather than reporting a false install or removal.
 
-On Linux, Mendimaru does not store the Windows username or password in its app settings. When launching a RemoteApp, it reads credentials from the running WinBoat container and passes them to FreeRDP 3 through standard input, keeping the password out of process arguments and app logs. FreeRDP uses an app-scoped TOFU certificate pin, and privileged operations require loopback-only Guest API and RDP bindings. Shared operation results are authenticated with per-attempt HMAC keys and replay-protected sequence numbers.
+On Linux, Mendimaru does not store the Windows username or password in its app settings. When launching a RemoteApp, it reads credentials from the running WinBoat container and passes them to FreeRDP 3 through standard input, keeping the password out of process arguments and app logs. FreeRDP uses an app-scoped TOFU certificate pin, and privileged operations require loopback-only Guest API and RDP bindings. Shared operation results and retained Studio session-control requests are authenticated with per-attempt HMAC keys and replay-protected sequence numbers.
 
 See [Security policy and WinBoat trust boundary](SECURITY.md) for the threat model, executable trust chain, container privileges, residual risks, and reporting guidance.
 

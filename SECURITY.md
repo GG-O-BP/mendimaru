@@ -20,6 +20,8 @@ Linux writes operation scripts into its application-owned directory under the sh
 
 Each attempt has a CSPRNG request ID, nonce, and 256-bit HMAC key. The key is sent inside the TLS-protected RDP operation and is never written to the shared workspace. Result files use an atomic, versioned envelope containing the request identity, monotonic sequence, base64 payload, and HMAC-SHA256. The host rejects malformed, oversized, stale, replayed, symlinked, or unauthenticated results.
 
+While a Studio RemoteApp is retained, close requests use the same per-attempt identity and key through a create-new control envelope. Windows accepts only a positive, increasing sequence and a closed payload matching the exact session ID, PID, and process start tick before calling `CloseMainWindow`. Invalid, replayed, overwritten, or retargeted requests never close a process. The host waits for a later authenticated empty-session report; terminating only the local FreeRDP client is not reported as a successful Studio stop.
+
 ## Persistent operation history
 
 The operation center persists only an allowlisted host-side summary in the application's host-only configuration directory, outside the untrusted shared workspace: random operation ID, operation kind, target version, protected-project marker, state, stage, bounded progress, timestamps, stable error code, optional Windows exit code, and retryability. It does not store project paths, command payloads, download URLs, credentials, HMAC keys, or raw backend errors. The history file is bounded, schema-checked, rejected if it or an application-owned ancestor is a symbolic link, written with private permissions on Unix, and replaced through a synced temporary file.

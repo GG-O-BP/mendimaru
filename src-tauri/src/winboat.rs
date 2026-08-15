@@ -16,7 +16,7 @@ pub use container::{
 pub(crate) use operation::WindowsOperationFailure;
 pub(crate) use sessions::stop as stop_studio_session;
 pub(crate) use sessions::{
-    disconnect_all_clients, disconnect_registered_client, registered_client_sessions,
+    close_all_registered_clients, registered_client_sessions, stop_registered_client,
 };
 pub(crate) use sessions::{list as studio_sessions, reconnect as reconnect_studio_session};
 pub use studio::{install_studio, launch_studio, launch_uninstaller, open_linux_folder};
@@ -318,10 +318,11 @@ mod tests {
         assert!(script.contains("PBM_GETPOS"));
         assert!(script.contains("TNewProgressBar"));
         assert!(script.contains("IsWindowVisible(window)"));
-        assert!(script.contains("'/SILENT'"));
+        assert!(script.contains("'/VERYSILENT'"));
+        assert!(!script.contains("'/SILENT'"));
         assert!(script.contains("'/SUPPRESSMSGBOXES'"));
         assert!(script.contains("'/NORESTART'"));
-        assert!(script.contains(") -PassThru"));
+        assert!(script.contains(") -WindowStyle Hidden -PassThru"));
         assert!(!script.contains(") -Wait -PassThru"));
         assert!(script.contains("Write-InstallResult 'verifying'"));
         assert!(script.contains("Write-InstallResult 'succeeded'"));
@@ -350,6 +351,7 @@ mod tests {
             r"C:\Program Files\Mendix\11.13.0\modeler\studiopro.exe",
             Some(r"\\host.lan\Data\Orders\Orders.mpr"),
             r"\\host.lan\Data\.mendimaru\operations\launch.json",
+            r"\\host.lan\Data\.mendimaru\operations\launch.control.json",
             r"C:\Program Files\Mendix",
             "11.13.0",
         );
@@ -362,6 +364,9 @@ mod tests {
         assert!(script.contains("$baseline.Add"));
         assert!(script.contains("$record.ParentProcessId -eq $LaunchProcessId"));
         assert!(script.contains("$current.StartTime.ToUniversalTime().Ticks"));
+        assert!(script.contains("Read-MendimaruStudioStopRequest"));
+        assert!(script.contains("[string]$request.action -cne 'studio.stop'"));
+        assert!(script.contains("Remove-Item -LiteralPath $controlPath"));
         assert!(!script.contains("$studioProcesses.Count -gt 0"));
         assert!(script.contains("sessionId = $sessionId"));
         assert!(script.contains("version = '11.13.0'"));

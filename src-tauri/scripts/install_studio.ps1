@@ -302,12 +302,12 @@ try {
     $null = Assert-MendimaruTrustedExecutable -Path $localInstaller -Root $stagingDirectory -ExpectedSha256 $expectedSha256
     $process = Start-Process -FilePath $localInstaller -ArgumentList @(
         '/SP-',
-        '/SILENT',
+        '/VERYSILENT',
         '/SUPPRESSMSGBOXES',
         '/NOCANCEL',
         '/NORESTART',
         $logArgument
-    ) -PassThru
+    ) -WindowStyle Hidden -PassThru
 
     $installerStartedAt = Get-Date
     $bestPhasePercentage = 0.0

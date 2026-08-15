@@ -14,6 +14,7 @@ const ID_BYTES: usize = 16;
 
 type HmacSha256 = Hmac<Sha256>;
 
+#[derive(Clone)]
 pub(super) struct OperationSecurity {
     request_id: String,
     nonce: String,
@@ -38,16 +39,6 @@ impl OperationSecurity {
             key,
             script_sha256: script_sha256.to_string(),
         })
-    }
-
-    #[cfg(test)]
-    pub(super) fn request_id(&self) -> &str {
-        &self.request_id
-    }
-
-    #[cfg(test)]
-    pub(super) fn nonce(&self) -> &str {
-        &self.nonce
     }
 
     #[cfg(test)]
@@ -109,6 +100,12 @@ pub(super) struct ReportSequenceTracker {
 }
 
 impl ReportSequenceTracker {
+    pub(super) fn after(report: &AuthenticatedPayload) -> Self {
+        Self {
+            last: Some((report.sequence, report.mac)),
+        }
+    }
+
     pub(super) fn accept(
         &mut self,
         report: &AuthenticatedPayload,
@@ -259,6 +256,34 @@ fn authenticated_message(request_id: &str, nonce: &str, sequence: u64, payload: 
     format!("{request_id}\n{nonce}\n{sequence}\n{payload}")
 }
 
+pub(super) fn authenticated_envelope(
+    security: &OperationSecurity,
+    sequence: u64,
+    payload: &[u8],
+) -> Result<Vec<u8>, String> {
+    if sequence == 0 {
+        return Err("the authenticated payload sequence must be positive".to_string());
+    }
+    if payload.len() > MAX_PAYLOAD_BYTES {
+        return Err("the authenticated payload is too large".to_string());
+    }
+    let payload = BASE64_STANDARD.encode(payload);
+    let message = authenticated_message(&security.request_id, &security.nonce, sequence, &payload);
+    let mut signer =
+        HmacSha256::new_from_slice(&security.key).expect("a 256-bit HMAC key is always accepted");
+    signer.update(message.as_bytes());
+    let mac = hex_encode(&signer.finalize().into_bytes());
+    serde_json::to_vec(&serde_json::json!({
+        "schemaVersion": ENVELOPE_SCHEMA_VERSION,
+        "requestId": security.request_id,
+        "nonce": security.nonce,
+        "sequence": sequence,
+        "payload": payload,
+        "mac": mac,
+    }))
+    .map_err(|error| format!("could not serialize an authenticated payload: {error}"))
+}
+
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -290,22 +315,11 @@ pub(super) fn authenticated_report_fixture(
     sequence: u64,
     payload: &[u8],
 ) -> String {
-    let payload = BASE64_STANDARD.encode(payload);
-    let message =
-        authenticated_message(security.request_id(), security.nonce(), sequence, &payload);
-    let mut signer =
-        HmacSha256::new_from_slice(&security.key).expect("a 256-bit HMAC key is always accepted");
-    signer.update(message.as_bytes());
-    let mac = hex_encode(&signer.finalize().into_bytes());
-    serde_json::json!({
-        "schemaVersion": ENVELOPE_SCHEMA_VERSION,
-        "requestId": security.request_id(),
-        "nonce": security.nonce(),
-        "sequence": sequence,
-        "payload": payload,
-        "mac": mac,
-    })
-    .to_string()
+    String::from_utf8(
+        authenticated_envelope(security, sequence, payload)
+            .expect("the fixture envelope serializes"),
+    )
+    .expect("the fixture envelope is UTF-8")
 }
 
 #[cfg(test)]

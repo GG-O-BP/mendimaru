@@ -4,9 +4,9 @@ mod runner;
 
 use super::container::ensure_private_operation_transport;
 use super::remote_app::{spawn_powershell_file, RemoteAppProcess};
-use super::security::OperationSecurity;
+use super::security::{AuthenticatedPayload, OperationSecurity};
 use crate::models::AppConfig;
-use runner::wait_for_windows_operation;
+use runner::{wait_for_windows_operation, wait_for_windows_operation_after};
 use std::path::Path;
 use std::time::Duration;
 
@@ -28,6 +28,8 @@ pub(crate) struct WindowsOperationFailure {
 pub(super) struct WindowsOperationOutcome {
     pub(super) report: WindowsOperationReport,
     pub(super) remote_app: Option<RemoteAppProcess>,
+    pub(super) security: Option<OperationSecurity>,
+    pub(super) authenticated: AuthenticatedPayload,
 }
 
 impl From<String> for WindowsOperationFailure {
@@ -78,14 +80,20 @@ where
         )
         .await
         {
-            Ok(report) => {
+            Ok(wait) => {
                 let remote_app = if request.keep_remote_app_alive {
                     Some(remote_app)
                 } else {
                     stop_remote_app(&mut remote_app);
                     None
                 };
-                return Ok(WindowsOperationOutcome { report, remote_app });
+                let security = request.keep_remote_app_alive.then_some(security);
+                return Ok(WindowsOperationOutcome {
+                    report: wait.report,
+                    remote_app,
+                    security,
+                    authenticated: wait.authenticated,
+                });
             }
             Err(error) => {
                 stop_remote_app(&mut remote_app);
@@ -102,6 +110,32 @@ where
         }
     }
     unreachable!("the RemoteApp attempt loop always returns")
+}
+
+pub(super) async fn wait_for_followup_windows_operation(
+    report_path: &Path,
+    security: &OperationSecurity,
+    previous_report: &AuthenticatedPayload,
+    remote_app: &mut RemoteAppProcess,
+    timeout_seconds: u64,
+    operation: &str,
+) -> Result<(WindowsOperationReport, AuthenticatedPayload), WindowsOperationFailure> {
+    let wait = wait_for_windows_operation_after(
+        report_path,
+        security,
+        remote_app,
+        timeout_seconds,
+        operation,
+        Some(previous_report),
+        &mut |_| {},
+    )
+    .await
+    .map_err(|error| WindowsOperationFailure {
+        message: error.message,
+        exit_code: error.exit_code,
+        retryable: error.retryable || error.user_retryable,
+    })?;
+    Ok((wait.report, wait.authenticated))
 }
 
 async fn remove_stale_report(report_path: &Path) -> Result<(), String> {

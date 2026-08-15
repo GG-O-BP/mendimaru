@@ -802,7 +802,7 @@ fn session_keeper_dispatch(arguments: &[OsString]) -> i32 {
         {
             let _ = crate::operations::interrupt_completed_launch_with_paths(&paths, &operation_id);
         }
-        crate::winboat::disconnect_all_clients();
+        tauri::async_runtime::block_on(crate::winboat::close_all_registered_clients());
         EXIT_OPERATION_FAILED
     }
 }
@@ -982,14 +982,14 @@ async fn serve_session_keeper(
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
     let Ok(listener) = tokio::net::UnixListener::from_std(listener) else {
-        crate::winboat::disconnect_all_clients();
+        crate::winboat::close_all_registered_clients().await;
         return;
     };
     loop {
         tokio::select! {
             accepted = listener.accept() => {
                 let Ok((stream, _)) = accepted else {
-                    crate::winboat::disconnect_all_clients();
+                    crate::winboat::close_all_registered_clients().await;
                     return;
                 };
                 let (read_half, mut write_half) = stream.into_split();
@@ -1012,7 +1012,9 @@ async fn serve_session_keeper(
                 } else if matches!(read, Ok(Ok(count)) if count > 0)
                     && request.trim_end() == "stop"
                 {
-                    should_stop = crate::winboat::disconnect_registered_client(session_id);
+                    should_stop = crate::winboat::stop_registered_client(session_id)
+                        .await
+                        .unwrap_or(false);
                     SessionKeeperIpcResponse {
                         ok: should_stop,
                         session: None,

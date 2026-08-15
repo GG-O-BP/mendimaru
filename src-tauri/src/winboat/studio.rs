@@ -25,6 +25,7 @@ pub async fn launch_studio(
     project_mpr_path: Option<&str>,
 ) -> Result<(), WindowsOperationFailure> {
     validate_operation_id(operation_id)?;
+    ensure_no_registered_remote_app()?;
     ensure_guest_online(config).await?;
     let versions = installed_versions(config).await?;
     let selected = versions
@@ -40,15 +41,23 @@ pub async fn launch_studio(
     let label = format!("Studio Pro {}", selected.version);
     let operation_directory = secure_shared_directory(config, ".mendimaru/operations")?;
     let report_path = operation_directory.join(format!("{operation_id}.json"));
+    let control_path = operation_directory.join(format!("{operation_id}.control.json"));
+    ensure_control_path_available(&control_path)?;
     let windows_report_path = linux_path_to_windows_share(
         Path::new(&config.shared_directory),
         &report_path,
+        &config.windows_shared_directory,
+    )?;
+    let windows_control_path = linux_path_to_windows_share(
+        Path::new(&config.shared_directory),
+        &control_path,
         &config.windows_shared_directory,
     )?;
     let script = launch_studio_script(
         &selected.executable_path,
         project_argument.as_deref(),
         &windows_report_path,
+        &windows_control_path,
         &config.mendix_install_root,
         version,
     );
@@ -84,7 +93,40 @@ pub async fn launch_studio(
         .remote_app
         .take()
         .ok_or_else(|| WindowsOperationFailure::from("RemoteApp was not retained".to_string()))?;
-    super::sessions::register_launch_client(version, &outcome.report.sessions, client)?;
+    let security = outcome.security.take().ok_or_else(|| {
+        WindowsOperationFailure::from("RemoteApp operation security was not retained".to_string())
+    })?;
+    super::sessions::register_launch_client(
+        version,
+        &outcome.report.sessions,
+        client,
+        report_path,
+        control_path,
+        security,
+        outcome.authenticated,
+    )?;
+    Ok(())
+}
+
+fn ensure_control_path_available(control_path: &Path) -> Result<(), String> {
+    let mut temporary = control_path.as_os_str().to_os_string();
+    temporary.push(".tmp");
+    for path in [control_path.to_path_buf(), temporary.into()] {
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => {
+                return Err(format!(
+                    "the Studio Pro control path already exists: {}",
+                    path.display()
+                ))
+            }
+            Err(error) => {
+                return Err(format!(
+                    "the Studio Pro control path could not be inspected: {error}"
+                ))
+            }
+        }
+    }
     Ok(())
 }
 
@@ -102,6 +144,7 @@ where
     validate_version(version)?;
     validate_operation_id(operation_id)?;
     validate_sha256(expected_sha256)?;
+    ensure_no_registered_remote_app()?;
     ensure_guest_online(config).await?;
     let operation_directory = secure_shared_directory(config, ".mendimaru/operations")?;
     let report_path = operation_directory.join(format!("{operation_id}.json"));
@@ -257,6 +300,7 @@ pub async fn launch_uninstaller(
 ) -> Result<(), WindowsOperationFailure> {
     validate_version(version)?;
     validate_operation_id(operation_id)?;
+    ensure_no_registered_remote_app()?;
     ensure_guest_online(config).await?;
     let operation_directory = secure_shared_directory(config, ".mendimaru/operations")?;
     let report_path = operation_directory.join(format!("{operation_id}.json"));
@@ -288,6 +332,17 @@ pub async fn launch_uninstaller(
         |_| {},
     )
     .await?;
+    Ok(())
+}
+
+fn ensure_no_registered_remote_app() -> Result<(), WindowsOperationFailure> {
+    if !super::sessions::registered_client_sessions().is_empty() {
+        return Err(WindowsOperationFailure {
+            message: "a connected Studio Pro RemoteApp session is still running".to_string(),
+            exit_code: None,
+            retryable: false,
+        });
+    }
     Ok(())
 }
 
