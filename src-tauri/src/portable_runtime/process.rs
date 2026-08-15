@@ -31,7 +31,6 @@ pub(super) fn configure_detached_supervisor(command: &mut tokio::process::Comman
 
 #[cfg(windows)]
 pub(super) fn configure_detached_supervisor(command: &mut tokio::process::Command) {
-    use std::os::windows::process::CommandExt;
     use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
     command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
 }
@@ -68,7 +67,6 @@ pub(super) fn configure_runtime_child(command: &mut tokio::process::Command) {
 
 #[cfg(windows)]
 pub(super) fn configure_runtime_child(command: &mut tokio::process::Command) {
-    use std::os::windows::process::CommandExt;
     use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW};
     command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
 }
@@ -152,10 +150,14 @@ fn platform_identity(pid: u32) -> Result<ProcessIdentity, String> {
     use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, STILL_ACTIVE};
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-        SYNCHRONIZE,
+        PROCESS_SYNCHRONIZE,
     };
     unsafe {
-        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, 0, pid);
+        let handle = OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            0,
+            pid,
+        );
         if handle.is_null() {
             return Err(format!(
                 "could not open process identity: {}",
@@ -170,7 +172,8 @@ fn platform_identity(pid: u32) -> Result<ProcessIdentity, String> {
         let mut exit = creation;
         let mut kernel = creation;
         let mut user = creation;
-        let active = GetExitCodeProcess(handle, &mut exit_code) != 0 && exit_code == STILL_ACTIVE;
+        let active =
+            GetExitCodeProcess(handle, &mut exit_code) != 0 && exit_code == STILL_ACTIVE as u32;
         let times = GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user) != 0;
         CloseHandle(handle);
         if !active || !times {
@@ -208,13 +211,14 @@ fn platform_identity(pid: u32) -> Result<ProcessIdentity, String> {
 
 #[cfg(windows)]
 pub(super) struct RuntimeContainment {
-    handle: windows_sys::Win32::Foundation::HANDLE,
+    _handle: std::os::windows::io::OwnedHandle,
 }
 
 #[cfg(windows)]
 impl RuntimeContainment {
     pub(super) fn attach(pid: u32) -> Result<Self, String> {
         use std::mem::size_of;
+        use std::os::windows::io::{FromRawHandle, OwnedHandle};
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
             SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
@@ -262,16 +266,9 @@ impl RuntimeContainment {
                 ));
             }
             windows_sys::Win32::Foundation::CloseHandle(process);
-            Ok(Self { handle: job })
-        }
-    }
-}
-
-#[cfg(windows)]
-impl Drop for RuntimeContainment {
-    fn drop(&mut self) {
-        unsafe {
-            windows_sys::Win32::Foundation::CloseHandle(self.handle);
+            Ok(Self {
+                _handle: OwnedHandle::from_raw_handle(job),
+            })
         }
     }
 }
