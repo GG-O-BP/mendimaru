@@ -535,6 +535,9 @@ async function writeExecutable(file, content) {
 function startProcess(commandName, args, options) {
   const child = spawn(commandName, args, {
     cwd: options.cwd,
+    // Vite and tauri-driver both create grandchildren.  A dedicated process
+    // group lets cleanup stop the complete tree instead of only its launcher.
+    detached: true,
     env: options.env ?? process.env,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -678,13 +681,53 @@ async function closeServer(server) {
 }
 
 async function terminate(child) {
-  if (!child || childFinished(child)) return;
-  child.kill("SIGTERM");
-  const code = await raceTimeout(onceExit(child), 2_000);
-  if (code === "timeout" && !childFinished(child)) {
-    child.kill("SIGKILL");
-    await raceTimeout(onceExit(child), 2_000);
+  if (!child) return;
+  try {
+    if (processTreeRunning(child)) {
+      signalProcessTree(child, "SIGTERM");
+      if (!(await waitForProcessTreeExit(child, 2_000))) {
+        signalProcessTree(child, "SIGKILL");
+        assert.equal(
+          await waitForProcessTreeExit(child, 2_000),
+          true,
+          `${child.label} process tree did not terminate`,
+        );
+      }
+    }
+  } finally {
+    // A surviving grandchild can otherwise keep these pipe handles open and
+    // prevent Node from exiting even after every assertion has passed.
+    child.stdout?.destroy();
+    child.stderr?.destroy();
   }
+}
+
+function signalProcessTree(child, signal) {
+  try {
+    process.kill(-child.pid, signal);
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
+  }
+}
+
+function processTreeRunning(child) {
+  if (!child.pid) return false;
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === "ESRCH") return false;
+    throw error;
+  }
+}
+
+async function waitForProcessTreeExit(child, timeout) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (!processTreeRunning(child)) return true;
+    await delay(25);
+  }
+  return !processTreeRunning(child);
 }
 
 async function raceTimeout(promise, timeout) {
