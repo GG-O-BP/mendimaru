@@ -71,7 +71,7 @@ jobs:
         run: npm run test:frontend
 
       - name: Run Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --nocapture
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --nocapture --test-threads=1
 
       - name: Run Rust clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
