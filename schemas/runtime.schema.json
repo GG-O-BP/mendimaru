@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/runtime.schema.json",
+  "title": "Mendimaru Portable Runtime contracts",
+  "type": "object",
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/buildResult" },
+    { "$ref": "#/$defs/status" },
+    { "$ref": "#/$defs/logBatch" }
+  ],
+  "$defs": {
+    "artifact": {
+      "$ref": "https://github.com/GG-O-BP/mendimaru/schemas/artifact.schema.json"
+    },
+    "errorCode": {
+      "$ref": "https://github.com/GG-O-BP/mendimaru/schemas/backend-error.schema.json#/properties/code"
+    },
+    "buildResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "packageArtifact",
+        "consistencyArtifact",
+        "buildLogArtifact",
+        "requiredVersion",
+        "toolchainVersion",
+        "cacheHit",
+        "capabilityBasis"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^session_[0-9a-f]{32}$"
+        },
+        "packageArtifact": { "$ref": "#/$defs/artifact" },
+        "consistencyArtifact": { "$ref": "#/$defs/artifact" },
+        "buildLogArtifact": { "$ref": "#/$defs/artifact" },
+        "requiredVersion": { "type": "string", "minLength": 5 },
+        "toolchainVersion": { "type": "string", "minLength": 5 },
+        "cacheHit": { "type": "boolean" },
+        "capabilityBasis": { "type": "string", "minLength": 1 }
+      }
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "sessionId", "mode", "state"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "sessionId": {
+          "type": "string",
+          "pattern": "^runtime_[0-9a-f]{32}$"
+        },
+        "mode": { "const": "portable" },
+        "state": {
+          "enum": ["starting", "running", "ready", "stopped", "failed"]
+        },
+        "processId": { "type": "integer", "minimum": 1 },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "url": {
+          "type": "string",
+          "pattern": "^http://127\\.0\\.0\\.1:[1-9][0-9]{0,4}$"
+        },
+        "failureCode": { "$ref": "#/$defs/errorCode" },
+        "logArtifact": { "$ref": "#/$defs/artifact" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": { "state": { "const": "ready" } },
+            "required": ["state"]
+          },
+          "then": {
+            "type": "object",
+            "properties": { "url": true },
+            "required": ["url"]
+          },
+          "else": {
+            "type": "object",
+            "properties": { "url": false }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": { "state": { "const": "failed" } },
+            "required": ["state"]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "failureCode": true,
+              "logArtifact": true
+            },
+            "required": ["failureCode", "logArtifact"]
+          }
+        }
+      ]
+    },
+    "logBatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "entries", "truncated"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^runtime_[0-9a-f]{32}$"
+        },
+        "entries": {
+          "type": "array",
+          "maxItems": 65536,
+          "items": { "type": "string", "maxLength": 1048576 }
+        },
+        "nextCursor": { "type": "string", "pattern": "^[0-9]+$" },
+        "truncated": { "type": "boolean" }
+      }
+    }
+  }
+}

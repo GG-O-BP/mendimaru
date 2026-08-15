@@ -79,6 +79,10 @@ pub trait RuntimeBackend: BackendIdentity {
         unsupported(self.backend_id(), CapabilityId::RuntimeStart)
     }
 
+    fn status<'a>(&'a self, _session_id: &'a str) -> BackendFuture<'a, RuntimeStatus> {
+        unsupported(self.backend_id(), CapabilityId::RuntimeStatus)
+    }
+
     fn wait<'a>(&'a self, _session_id: &'a str) -> BackendFuture<'a, RuntimeStatus> {
         unsupported(self.backend_id(), CapabilityId::RuntimeWait)
     }
@@ -197,13 +201,15 @@ pub fn manifest_for(backend: BackendId, architecture: &str) -> CapabilityManifes
         .into_iter()
         .map(|id| capability_for(backend, id, architecture))
         .collect();
+    let portable_runtime = matches!(backend, BackendId::LinuxWinboat | BackendId::WindowsNative)
+        && architecture == "x86_64";
     CapabilityManifest {
         schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
         backend,
         host_platform,
         studio_platform,
-        runtime_platform: None,
-        runtime_mode: None,
+        runtime_platform: portable_runtime.then_some(host_platform),
+        runtime_mode: portable_runtime.then_some(crate::contracts::RuntimeMode::Portable),
         architecture: architecture.to_string(),
         capabilities,
     }
@@ -222,6 +228,22 @@ fn capability_for(backend: BackendId, id: CapabilityId, architecture: &str) -> C
                 | CapabilityId::StudioStart
                 | CapabilityId::StudioStatus
                 | CapabilityId::StudioStop
+        )
+    {
+        return Capability::supported(id, required_permissions(backend, id));
+    }
+
+    if matches!(backend, BackendId::LinuxWinboat | BackendId::WindowsNative)
+        && architecture == "x86_64"
+        && matches!(
+            id,
+            CapabilityId::RuntimeBuild
+                | CapabilityId::RuntimeStart
+                | CapabilityId::RuntimeStatus
+                | CapabilityId::RuntimeWait
+                | CapabilityId::RuntimeUrl
+                | CapabilityId::RuntimeStop
+                | CapabilityId::RuntimeLogs
         )
     {
         return Capability::supported(id, required_permissions(backend, id));
@@ -260,6 +282,23 @@ fn capability_for(backend: BackendId, id: CapabilityId, architecture: &str) -> C
                 .to_string();
         limitation.required_version =
             Some("supported Apple Silicon macOS and a compatible Studio Pro release".to_string());
+    } else if matches!(backend, BackendId::LinuxWinboat | BackendId::WindowsNative)
+        && architecture != "x86_64"
+        && matches!(
+            id,
+            CapabilityId::RuntimeBuild
+                | CapabilityId::RuntimeStart
+                | CapabilityId::RuntimeStatus
+                | CapabilityId::RuntimeWait
+                | CapabilityId::RuntimeUrl
+                | CapabilityId::RuntimeStop
+                | CapabilityId::RuntimeLogs
+        )
+    {
+        limitation.message =
+            "Portable Runtime orchestration requires an official x86_64 MxBuild package"
+                .to_string();
+        limitation.required_version = Some("x86_64 host architecture".to_string());
     }
     Capability::unsupported(id, limitation)
         .with_required_permissions(required_permissions(backend, id))
@@ -280,6 +319,18 @@ fn required_permissions(backend: BackendId, id: CapabilityId) -> &'static [&'sta
         (BackendId::WindowsNative, CapabilityId::StudioStart) => &["interactive-desktop-session"],
         (BackendId::WindowsNative, CapabilityId::StudioStatus)
         | (BackendId::WindowsNative, CapabilityId::StudioStop) => &["interactive-desktop-session"],
+        (BackendId::LinuxWinboat | BackendId::WindowsNative, CapabilityId::RuntimeBuild) => {
+            &["network-access", "java-runtime", "private-cache"]
+        }
+        (
+            BackendId::LinuxWinboat | BackendId::WindowsNative,
+            CapabilityId::RuntimeStart
+            | CapabilityId::RuntimeStatus
+            | CapabilityId::RuntimeWait
+            | CapabilityId::RuntimeUrl
+            | CapabilityId::RuntimeStop
+            | CapabilityId::RuntimeLogs,
+        ) => &["loopback-bind", "java-runtime", "private-cache"],
         (BackendId::MacNative, CapabilityId::StudioInstall)
         | (BackendId::MacNative, CapabilityId::StudioUninstall) => {
             &["macos-administrator-approval"]
@@ -441,7 +492,49 @@ impl StudioBackend for LinuxWinboatBackend<'_> {
 }
 
 #[cfg(target_os = "linux")]
-impl RuntimeBackend for LinuxWinboatBackend<'_> {}
+impl RuntimeBackend for LinuxWinboatBackend<'_> {
+    fn build<'a>(
+        &'a self,
+        request: &'a RuntimeBuildRequest,
+    ) -> BackendFuture<'a, RuntimeBuildResult> {
+        Box::pin(crate::portable_runtime::build(request, self.backend_id()))
+    }
+
+    fn start<'a>(&'a self, request: &'a RuntimeStartRequest) -> BackendFuture<'a, RuntimeStatus> {
+        Box::pin(crate::portable_runtime::start(request, self.backend_id()))
+    }
+
+    fn status<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, RuntimeStatus> {
+        Box::pin(crate::portable_runtime::status(
+            session_id,
+            self.backend_id(),
+        ))
+    }
+
+    fn wait<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, RuntimeStatus> {
+        Box::pin(crate::portable_runtime::wait(session_id, self.backend_id()))
+    }
+
+    fn url<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, String> {
+        Box::pin(crate::portable_runtime::url(session_id, self.backend_id()))
+    }
+
+    fn stop<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, ()> {
+        Box::pin(crate::portable_runtime::stop(session_id, self.backend_id()))
+    }
+
+    fn logs<'a>(
+        &'a self,
+        session_id: &'a str,
+        cursor: Option<&'a str>,
+    ) -> BackendFuture<'a, RuntimeLogBatch> {
+        Box::pin(crate::portable_runtime::logs(
+            session_id,
+            cursor,
+            self.backend_id(),
+        ))
+    }
+}
 #[cfg(target_os = "linux")]
 impl UiAutomationBackend for LinuxWinboatBackend<'_> {}
 #[cfg(target_os = "linux")]
@@ -576,7 +669,49 @@ impl StudioBackend for WindowsNativeBackend<'_> {
 }
 
 #[cfg(target_os = "windows")]
-impl RuntimeBackend for WindowsNativeBackend<'_> {}
+impl RuntimeBackend for WindowsNativeBackend<'_> {
+    fn build<'a>(
+        &'a self,
+        request: &'a RuntimeBuildRequest,
+    ) -> BackendFuture<'a, RuntimeBuildResult> {
+        Box::pin(crate::portable_runtime::build(request, self.backend_id()))
+    }
+
+    fn start<'a>(&'a self, request: &'a RuntimeStartRequest) -> BackendFuture<'a, RuntimeStatus> {
+        Box::pin(crate::portable_runtime::start(request, self.backend_id()))
+    }
+
+    fn status<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, RuntimeStatus> {
+        Box::pin(crate::portable_runtime::status(
+            session_id,
+            self.backend_id(),
+        ))
+    }
+
+    fn wait<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, RuntimeStatus> {
+        Box::pin(crate::portable_runtime::wait(session_id, self.backend_id()))
+    }
+
+    fn url<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, String> {
+        Box::pin(crate::portable_runtime::url(session_id, self.backend_id()))
+    }
+
+    fn stop<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, ()> {
+        Box::pin(crate::portable_runtime::stop(session_id, self.backend_id()))
+    }
+
+    fn logs<'a>(
+        &'a self,
+        session_id: &'a str,
+        cursor: Option<&'a str>,
+    ) -> BackendFuture<'a, RuntimeLogBatch> {
+        Box::pin(crate::portable_runtime::logs(
+            session_id,
+            cursor,
+            self.backend_id(),
+        ))
+    }
+}
 #[cfg(target_os = "windows")]
 impl UiAutomationBackend for WindowsNativeBackend<'_> {}
 #[cfg(target_os = "windows")]
@@ -755,7 +890,7 @@ mod tests {
     }
 
     #[test]
-    fn production_capabilities_match_the_implemented_studio_surface() {
+    fn production_capabilities_match_the_implemented_studio_and_runtime_surface() {
         for backend in [BackendId::LinuxWinboat, BackendId::WindowsNative] {
             let manifest = manifest_for(backend, "x86_64");
             for capability in CapabilityId::ALL {
@@ -767,9 +902,20 @@ mod tests {
                         | CapabilityId::StudioStart
                         | CapabilityId::StudioStatus
                         | CapabilityId::StudioStop
+                        | CapabilityId::RuntimeBuild
+                        | CapabilityId::RuntimeStart
+                        | CapabilityId::RuntimeStatus
+                        | CapabilityId::RuntimeWait
+                        | CapabilityId::RuntimeUrl
+                        | CapabilityId::RuntimeStop
+                        | CapabilityId::RuntimeLogs
                 );
                 assert_eq!(manifest.supports(capability), expected);
             }
+            assert_eq!(
+                manifest.runtime_mode,
+                Some(crate::contracts::RuntimeMode::Portable)
+            );
         }
         let mac = manifest_for(BackendId::MacNative, "contract-test");
         assert!(CapabilityId::ALL
@@ -824,8 +970,10 @@ mod tests {
         assert_eq!(manifest.schema_version, CONTRACT_SCHEMA_VERSION);
         assert_eq!(manifest.capabilities.len(), CapabilityId::ALL.len());
         let calls = [
-            tauri::async_runtime::block_on(backend.status("session"))
+            tauri::async_runtime::block_on(StudioBackend::status(backend, "session"))
                 .expect_err("Studio status is unsupported"),
+            tauri::async_runtime::block_on(RuntimeBackend::status(backend, "session"))
+                .expect_err("Runtime status is unsupported"),
             tauri::async_runtime::block_on(backend.url("session"))
                 .expect_err("Runtime URL is unsupported"),
             tauri::async_runtime::block_on(backend.capabilities("session"))
@@ -835,6 +983,7 @@ mod tests {
         ];
         let expected = [
             CapabilityId::StudioStatus,
+            CapabilityId::RuntimeStatus,
             CapabilityId::RuntimeUrl,
             CapabilityId::UiCapabilities,
             CapabilityId::BrowserArtifacts,

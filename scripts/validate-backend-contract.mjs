@@ -10,6 +10,7 @@ const schemaFiles = [
   "schemas/artifact.schema.json",
   "schemas/cli-response.schema.json",
   "schemas/cli-event.schema.json",
+  "schemas/runtime.schema.json",
 ];
 const schemas = schemaFiles.map((path) =>
   JSON.parse(fs.readFileSync(path, "utf8")),
@@ -143,6 +144,75 @@ validate(
   },
   "CLI progress event",
 );
+const runtimeSessionId = `runtime_${"12".repeat(16)}`;
+const runtimeBuildSessionId = `session_${"56".repeat(16)}`;
+const runtimeLogArtifact = {
+  schemaVersion: "1.0.0",
+  artifactId: `artifact_${"34".repeat(16)}`,
+  sessionId: runtimeSessionId,
+  backend: manifest.backend,
+  kind: "runtime-log",
+  createdAt: snapshot.capturedAt,
+  mediaType: "text/plain; charset=utf-8",
+  location: `mendimaru-cache://artifact_${"34".repeat(16)}`,
+};
+const buildArtifact = (suffix, kind, mediaType) => ({
+  schemaVersion: "1.0.0",
+  artifactId: `artifact_${suffix.repeat(16)}`,
+  sessionId: runtimeBuildSessionId,
+  backend: manifest.backend,
+  kind,
+  createdAt: snapshot.capturedAt,
+  mediaType,
+  location: `mendimaru-cache://artifact_${suffix.repeat(16)}`,
+  sha256: suffix.repeat(32),
+  sizeBytes: 16,
+});
+validate(
+  schemas[6].$id,
+  {
+    sessionId: runtimeBuildSessionId,
+    packageArtifact: buildArtifact("67", "runtime-package", "application/zip"),
+    consistencyArtifact: buildArtifact(
+      "78",
+      "consistency-report",
+      "application/json",
+    ),
+    buildLogArtifact: buildArtifact(
+      "89",
+      "build-log",
+      "text/plain; charset=utf-8",
+    ),
+    requiredVersion: "11.12.2",
+    toolchainVersion: "11.12.2",
+    cacheHit: false,
+    capabilityBasis: "Mendix Portable Runtime documentation, 2026-06",
+  },
+  "Portable Runtime build result",
+);
+validate(
+  schemas[6].$id,
+  {
+    schemaVersion: "1.0.0",
+    sessionId: runtimeSessionId,
+    mode: "portable",
+    state: "ready",
+    processId: 4242,
+    startedAt: snapshot.capturedAt,
+    url: "http://127.0.0.1:49152",
+    logArtifact: runtimeLogArtifact,
+  },
+  "Portable Runtime ready status",
+);
+validate(
+  schemas[6].$id,
+  {
+    sessionId: runtimeSessionId,
+    entries: ["2026-08-15T00:00:00Z stdout runtime ready"],
+    truncated: false,
+  },
+  "Portable Runtime log batch",
+);
 
 const expectedIds = new Set([
   "studio.detect",
@@ -153,6 +223,7 @@ const expectedIds = new Set([
   "studio.stop",
   "runtime.build",
   "runtime.start",
+  "runtime.status",
   "runtime.wait",
   "runtime.url",
   "runtime.stop",
@@ -183,6 +254,29 @@ for (const capability of manifest.capabilities) {
       `${capability.id} has the wrong unsupported code`,
     );
   }
+}
+const runtimeCapabilities = manifest.capabilities.filter(({ id }) =>
+  id.startsWith("runtime."),
+);
+const portableHost = ["linux", "windows"].includes(manifest.hostPlatform);
+assert(
+  runtimeCapabilities.every(({ status }) =>
+    portableHost ? status === "supported" : status === "unsupported",
+  ),
+  "Runtime capability status does not match the documented host matrix",
+);
+if (portableHost) {
+  assert(
+    manifest.runtimePlatform === manifest.hostPlatform,
+    "Portable Runtime platform differs from the host",
+  );
+  assert(manifest.runtimeMode === "portable", "Runtime mode is not portable");
+} else {
+  assert(
+    !("runtimePlatform" in manifest),
+    "unsupported host has runtimePlatform",
+  );
+  assert(!("runtimeMode" in manifest), "unsupported host has runtimeMode");
 }
 for (const leaked of [
   "apiUrl",

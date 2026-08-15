@@ -19,6 +19,13 @@ mendimaru studio status [--session-id STUDIO_SESSION_ID]
 mendimaru studio stop --session-id STUDIO_SESSION_ID
 mendimaru project list
 mendimaru project version --project-id PROJECT_ID
+mendimaru runtime build --project-id PROJECT_ID [--clean]
+mendimaru runtime start --project-id PROJECT_ID [--clean]
+mendimaru runtime status --session-id RUNTIME_SESSION_ID
+mendimaru runtime wait --session-id RUNTIME_SESSION_ID
+mendimaru runtime url --session-id RUNTIME_SESSION_ID
+mendimaru runtime stop --session-id RUNTIME_SESSION_ID
+mendimaru runtime logs --session-id RUNTIME_SESSION_ID [--cursor CURSOR]
 mendimaru operation list
 mendimaru operation status --operation-id OPERATION_ID
 mendimaru operation retry --operation-id OPERATION_ID
@@ -51,6 +58,12 @@ invocation session ID, and immutable capability snapshot. Mutation successes
 also include their persistent operation ID; Studio session commands include the
 Studio session ID when one was selected.
 
+Runtime lifecycle results include an independent `runtimeSessionId`. Runtime
+status, build artifacts, and bounded log batches validate against
+[`runtime.schema.json`](../schemas/runtime.schema.json); see
+[`portable-runtime.md`](portable-runtime.md) for exact-version, readiness,
+cache, licensing, and secret-handling rules.
+
 Exit codes are stable:
 
 | Code | Meaning                                                       |
@@ -78,6 +91,12 @@ match the one unambiguous version declared by that project. A missing,
 ambiguous, or mismatched version fails before an operation record is created or
 the platform backend is contacted. There is no nearest-version fallback,
 implicit upgrade, or mutation of the `.mpr` file.
+
+`runtime build` and `runtime start` always derive their exact version from the
+opaque project ID. `--clean` rebuilds only that project's cached portable
+package. Runtime configuration and credentials have no CLI flags; callers may
+provide the bounded `MENDIMARU_RUNTIME_ENV_JSON` process environment described
+in the Portable Runtime guide. A Runtime URL is withheld until HTTP readiness.
 
 On Linux, a detached per-session keeper owns the verified FreeRDP process after
 `studio start` returns. `studio status` and `studio stop` communicate with that

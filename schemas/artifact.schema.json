@@ -15,7 +15,10 @@
   "properties": {
     "schemaVersion": { "const": "1.0.0" },
     "artifactId": { "type": "string", "pattern": "^artifact_[0-9a-f]{32}$" },
-    "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
+    "sessionId": {
+      "type": "string",
+      "pattern": "^(?:session|runtime)_[0-9a-f]{32}$"
+    },
     "backend": {
       "enum": ["linux-winboat", "windows-native", "mac-native"]
     },
@@ -23,6 +26,9 @@
       "enum": [
         "studio-log",
         "runtime-log",
+        "runtime-package",
+        "consistency-report",
+        "build-log",
         "browser-trace",
         "browser-report",
         "screenshot",

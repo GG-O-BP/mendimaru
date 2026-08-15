@@ -4,6 +4,7 @@ mod windows_native;
 
 use crate::contracts::{
     BackendId, BackendResult, CapabilityId, CapabilityManifest, CapabilitySnapshot,
+    RuntimeBuildRequest, RuntimeBuildResult, RuntimeLogBatch, RuntimeStartRequest, RuntimeStatus,
     StudioSessionStatus,
 };
 use crate::models::{
@@ -111,8 +112,7 @@ pub async fn studio_session_status(
 ) -> BackendResult<StudioSessionStatus> {
     validate_studio_session_id(session_id)
         .map_err(crate::contracts::BackendError::invalid_request)?;
-    backend::active_backend(config, None)?
-        .status(session_id)
+    backend::StudioBackend::status(backend::active_backend(config, None)?.as_ref(), session_id)
         .await
 }
 
@@ -128,6 +128,51 @@ pub async fn stop_studio_session(config: &AppConfig, session_id: &str) -> Backen
     validate_studio_session_id(session_id)
         .map_err(crate::contracts::BackendError::invalid_request)?;
     backend::StudioBackend::stop(backend::active_backend(config, None)?.as_ref(), session_id).await
+}
+
+pub async fn build_runtime(
+    config: &AppConfig,
+    request: &RuntimeBuildRequest,
+) -> BackendResult<RuntimeBuildResult> {
+    backend::active_backend(config, None)?.build(request).await
+}
+
+pub async fn start_runtime(
+    config: &AppConfig,
+    request: &RuntimeStartRequest,
+) -> BackendResult<RuntimeStatus> {
+    backend::RuntimeBackend::start(backend::active_backend(config, None)?.as_ref(), request).await
+}
+
+pub async fn wait_runtime(config: &AppConfig, session_id: &str) -> BackendResult<RuntimeStatus> {
+    backend::RuntimeBackend::wait(backend::active_backend(config, None)?.as_ref(), session_id).await
+}
+
+pub async fn runtime_status(config: &AppConfig, session_id: &str) -> BackendResult<RuntimeStatus> {
+    backend::RuntimeBackend::status(backend::active_backend(config, None)?.as_ref(), session_id)
+        .await
+}
+
+pub async fn runtime_url(config: &AppConfig, session_id: &str) -> BackendResult<String> {
+    backend::active_backend(config, None)?.url(session_id).await
+}
+
+pub async fn stop_runtime(config: &AppConfig, session_id: &str) -> BackendResult<()> {
+    crate::platform::backend::RuntimeBackend::stop(
+        backend::active_backend(config, None)?.as_ref(),
+        session_id,
+    )
+    .await
+}
+
+pub async fn runtime_logs(
+    config: &AppConfig,
+    session_id: &str,
+    cursor: Option<&str>,
+) -> BackendResult<RuntimeLogBatch> {
+    backend::active_backend(config, None)?
+        .logs(session_id, cursor)
+        .await
 }
 
 fn validate_studio_session_id(session_id: &str) -> Result<(), String> {

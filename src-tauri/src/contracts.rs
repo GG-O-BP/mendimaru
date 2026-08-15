@@ -95,6 +95,8 @@ pub enum CapabilityId {
     RuntimeBuild,
     #[serde(rename = "runtime.start")]
     RuntimeStart,
+    #[serde(rename = "runtime.status")]
+    RuntimeStatus,
     #[serde(rename = "runtime.wait")]
     RuntimeWait,
     #[serde(rename = "runtime.url")]
@@ -122,7 +124,7 @@ pub enum CapabilityId {
 }
 
 impl CapabilityId {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::StudioDetect,
         Self::StudioInstall,
         Self::StudioUninstall,
@@ -131,6 +133,7 @@ impl CapabilityId {
         Self::StudioStop,
         Self::RuntimeBuild,
         Self::RuntimeStart,
+        Self::RuntimeStatus,
         Self::RuntimeWait,
         Self::RuntimeUrl,
         Self::RuntimeStop,
@@ -155,6 +158,7 @@ impl CapabilityId {
             Self::StudioStop => "studio.stop",
             Self::RuntimeBuild => "runtime.build",
             Self::RuntimeStart => "runtime.start",
+            Self::RuntimeStatus => "runtime.status",
             Self::RuntimeWait => "runtime.wait",
             Self::RuntimeUrl => "runtime.url",
             Self::RuntimeStop => "runtime.stop",
@@ -192,6 +196,14 @@ pub enum BackendErrorCode {
     InvalidRequest,
     PreconditionFailed,
     OperationFailed,
+    ToolchainUnavailable,
+    RuntimeVersionUnsupported,
+    ConsistencyFailed,
+    RuntimeBuildFailed,
+    RuntimeInitializationFailed,
+    RuntimeReadinessTimeout,
+    RuntimeSessionNotFound,
+    RuntimeExited,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -475,6 +487,9 @@ pub type BackendResult<T> = Result<T, BackendError>;
 pub enum ArtifactKind {
     StudioLog,
     RuntimeLog,
+    RuntimePackage,
+    ConsistencyReport,
+    BuildLog,
     BrowserTrace,
     BrowserReport,
     Screenshot,
@@ -526,7 +541,7 @@ impl ArtifactDescriptor {
     }
 }
 
-fn secure_identifier(prefix: &str) -> Result<String, BackendError> {
+pub(crate) fn secure_identifier(prefix: &str) -> Result<String, BackendError> {
     let mut random = [0_u8; 16];
     getrandom::fill(&mut random).map_err(|error| BackendError {
         schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
@@ -594,6 +609,7 @@ pub enum StudioReconnectUnavailable {
 pub struct RuntimeBuildRequest {
     pub session_id: String,
     pub project_path: String,
+    pub required_version: String,
     pub clean: bool,
 }
 
@@ -602,6 +618,12 @@ pub struct RuntimeBuildRequest {
 pub struct RuntimeBuildResult {
     pub session_id: String,
     pub package_artifact: ArtifactDescriptor,
+    pub consistency_artifact: ArtifactDescriptor,
+    pub build_log_artifact: ArtifactDescriptor,
+    pub required_version: String,
+    pub toolchain_version: String,
+    pub cache_hit: bool,
+    pub capability_basis: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -611,6 +633,7 @@ pub struct RuntimeStartRequest {
     pub mode: RuntimeMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub package_artifact_id: Option<String>,
+    pub readiness_timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -626,10 +649,20 @@ pub enum RuntimeState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeStatus {
+    pub schema_version: String,
     pub session_id: String,
+    pub mode: RuntimeMode,
     pub state: RuntimeState,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_code: Option<BackendErrorCode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_artifact: Option<ArtifactDescriptor>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -639,6 +672,7 @@ pub struct RuntimeLogBatch {
     pub entries: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -768,6 +802,14 @@ mod tests {
                 BackendErrorCode::InvalidRequest,
                 BackendErrorCode::PreconditionFailed,
                 BackendErrorCode::OperationFailed,
+                BackendErrorCode::ToolchainUnavailable,
+                BackendErrorCode::RuntimeVersionUnsupported,
+                BackendErrorCode::ConsistencyFailed,
+                BackendErrorCode::RuntimeBuildFailed,
+                BackendErrorCode::RuntimeInitializationFailed,
+                BackendErrorCode::RuntimeReadinessTimeout,
+                BackendErrorCode::RuntimeSessionNotFound,
+                BackendErrorCode::RuntimeExited,
             ],
         );
         assert_registry(
@@ -789,6 +831,9 @@ mod tests {
             [
                 ArtifactKind::StudioLog,
                 ArtifactKind::RuntimeLog,
+                ArtifactKind::RuntimePackage,
+                ArtifactKind::ConsistencyReport,
+                ArtifactKind::BuildLog,
                 ArtifactKind::BrowserTrace,
                 ArtifactKind::BrowserReport,
                 ArtifactKind::Screenshot,
@@ -932,6 +977,7 @@ mod tests {
                 "cli-event",
                 include_str!("../../schemas/cli-event.schema.json"),
             ),
+            ("runtime", include_str!("../../schemas/runtime.schema.json")),
         ] {
             let schema: serde_json::Value = serde_json::from_str(source)
                 .unwrap_or_else(|error| panic!("{name} schema must be valid JSON: {error}"));

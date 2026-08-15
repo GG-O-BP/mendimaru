@@ -44,6 +44,7 @@
         "studio.stop",
         "runtime.build",
         "runtime.start",
+        "runtime.status",
         "runtime.wait",
         "runtime.url",
         "runtime.stop",
@@ -64,7 +65,15 @@
         "backend_mismatch",
         "invalid_request",
         "precondition_failed",
-        "operation_failed"
+        "operation_failed",
+        "toolchain_unavailable",
+        "runtime_version_unsupported",
+        "consistency_failed",
+        "runtime_build_failed",
+        "runtime_initialization_failed",
+        "runtime_readiness_timeout",
+        "runtime_session_not_found",
+        "runtime_exited"
       ]
     },
     "limitation": {
@@ -136,8 +145,8 @@
         "architecture": { "type": "string", "minLength": 1 },
         "capabilities": {
           "type": "array",
-          "minItems": 20,
-          "maxItems": 20,
+          "minItems": 21,
+          "maxItems": 21,
           "items": { "$ref": "#/$defs/capability" }
         }
       }

@@ -13,7 +13,15 @@
         "backend_mismatch",
         "invalid_request",
         "precondition_failed",
-        "operation_failed"
+        "operation_failed",
+        "toolchain_unavailable",
+        "runtime_version_unsupported",
+        "consistency_failed",
+        "runtime_build_failed",
+        "runtime_initialization_failed",
+        "runtime_readiness_timeout",
+        "runtime_session_not_found",
+        "runtime_exited"
       ]
     },
     "message": { "type": "string", "minLength": 1 },
@@ -35,7 +43,15 @@
             "backend_mismatch",
             "invalid_request",
             "precondition_failed",
-            "operation_failed"
+            "operation_failed",
+            "toolchain_unavailable",
+            "runtime_version_unsupported",
+            "consistency_failed",
+            "runtime_build_failed",
+            "runtime_initialization_failed",
+            "runtime_readiness_timeout",
+            "runtime_session_not_found",
+            "runtime_exited"
           ]
         },
         "message": { "type": "string", "minLength": 1 },

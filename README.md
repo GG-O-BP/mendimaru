@@ -18,6 +18,7 @@ Mendimaru is a Tauri GUI app for discovering, installing, launching, and removin
 - **Projects**: Find and launch `.mpr` projects in the configured workspace
 - **Operations**: Review persistent install, removal, and launch progress, failures, and retryability
 - **Settings**: Configure a native Windows workspace and optional portable Studio paths, or the WinBoat environment on Linux
+- **Portable Runtime**: Build with the project's exact MxBuild and run isolated, readiness-gated web apps on Windows or Linux
 
 Mendimaru does not provide a dashboard, VM resource information, advanced download URLs, or manual build-number entry.
 

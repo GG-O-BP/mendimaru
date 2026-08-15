@@ -43,14 +43,14 @@ headless surface and stream contract are documented in
 
 Do not infer one identity from another:
 
-| Backend          | `hostPlatform` | `studioPlatform` |
-| ---------------- | -------------- | ---------------- |
-| `linux-winboat`  | `linux`        | `windows`        |
-| `windows-native` | `windows`      | `windows`        |
-| `mac-native`     | `macos`        | `macos`          |
+| Backend          | `hostPlatform` | `studioPlatform` | `runtimePlatform` | `runtimeMode` |
+| ---------------- | -------------- | ---------------- | ----------------- | ------------- |
+| `linux-winboat`  | `linux`        | `windows`        | `linux`           | `portable`    |
+| `windows-native` | `windows`      | `windows`        | `windows`         | `portable`    |
+| `mac-native`     | `macos`        | `macos`          | absent            | absent        |
 
-`runtimePlatform` and `runtimeMode` are optional and independent. They remain
-absent until a Runtime adapter selects a concrete execution mode. A common
+`runtimePlatform` and `runtimeMode` are optional and independent. They are
+present only where a Runtime adapter selects a concrete supported mode. A common
 request, session, error, or artifact must not require RDP, UNC, Compose,
 Windows registry, app-bundle, or TCC fields.
 
@@ -71,7 +71,7 @@ another backend, another Studio version, or another Runtime mode.
 Every manifest contains exactly one entry for every action in these contracts:
 
 - `StudioBackend`: `detect`, `install`, `uninstall`, `start`, `status`, `stop`
-- `RuntimeBackend`: `build`, `start`, `wait`, `url`, `stop`, `logs`
+- `RuntimeBackend`: `build`, `start`, `status`, `wait`, `url`, `stop`, `logs`
 - `UiAutomationBackend`: `capabilities`, `tree`, `find`, `action`, `wait`,
   `screenshot`
 - `BrowserBackend`: `test`, `artifacts`
@@ -92,12 +92,15 @@ executable that happens to exist. A supported action may still return a
 currently available.
 
 The current Linux+WinBoat and Windows native adapters support Studio `detect`,
-`install`, `uninstall`, `start`, `status`, and `stop`. Session identity binds an
+`install`, `uninstall`, `start`, `status`, and `stop`, plus Portable Runtime
+`build`, `start`, `wait`, `url`, `stop`, and `logs`. Session identity binds an
 exact process ID to its process start time; adapters also verify the current
 Windows user and the executable path of the detected installation before a
-session can be shown or closed. Runtime, UI automation, and browser execution
-remain explicitly unsupported. `mac-native` is registered but reports all
-operations as unsupported until issue #11 supplies the native implementation.
+session can be shown or closed. Runtime versions are exact-policy gated and the
+manifest records `portable` mode independently of the Windows Studio backend.
+UI automation and browser execution remain explicitly unsupported. `mac-native`
+is registered but reports all operations as unsupported until issue #11
+supplies the native implementation.
 
 ## Errors, sessions, and artifacts
 
@@ -122,6 +125,13 @@ initial supported shape remains within the current `1.0.0` contract.
 location, media type, digest, size, and backend diagnostic reference are
 optional. This keeps platform paths out of the portable required shape while
 allowing an adapter to provide a verified local artifact.
+
+`RuntimeStatus` is the shared successful lifecycle payload on Linux and
+Windows. It exposes only the opaque Runtime session ID, `portable` mode, state,
+optional process ID/start time/ready URL/failure code, and log artifact. The
+initial supported shape is version `1.0.0`; deployment paths, admin ports,
+credentials, and host launcher details remain private. The exact orchestration
+and policy are documented in [`portable-runtime.md`](portable-runtime.md).
 
 ## Adding an adapter
 
