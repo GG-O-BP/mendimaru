@@ -738,15 +738,17 @@ async function executable(file) {
 }
 
 async function retainFailureScreenshot() {
-  if (!sessionId || !temporary) return;
-  try {
-    const screenshot = await command("GET", "/screenshot");
-    await fs.writeFile(
-      path.join(temporary, "tauri-e2e-failure.png"),
-      Buffer.from(screenshot, "base64"),
-    );
-  } catch {
-    // The original failure remains the useful result if the window already exited.
+  if (!temporary) return;
+  if (sessionId) {
+    try {
+      const screenshot = await command("GET", "/screenshot");
+      await fs.writeFile(
+        path.join(temporary, "tauri-e2e-failure.png"),
+        Buffer.from(screenshot, "base64"),
+      );
+    } catch {
+      // The original failure remains the useful result if the window already exited.
+    }
   }
   for (const child of processes) {
     if (child.output) {
@@ -754,6 +756,7 @@ async function retainFailureScreenshot() {
         path.join(temporary, `${child.label}.log`),
         child.output,
       );
+      process.stderr.write(`\n[${child.label}]\n${child.output}\n`);
     }
   }
 }

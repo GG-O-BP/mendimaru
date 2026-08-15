@@ -86,7 +86,17 @@ jobs:
 
       - name: Run real Tauri WebKit E2E
         if: runner.os == 'Linux'
+        env:
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
         run: xvfb-run --auto-servernum npm run test:e2e
+
+      - name: Upload Tauri WebKit E2E failure evidence
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tauri-webkit-e2e-failure
+          path: /tmp/mendimaru-tauri-e2e-*
+          if-no-files-found: ignore
 
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --nocapture --test-threads=1

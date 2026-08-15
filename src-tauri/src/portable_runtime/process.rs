@@ -49,7 +49,6 @@ pub(super) fn prevent_standard_handle_inheritance() -> Result<(), String> {
 
 #[cfg(windows)]
 pub(super) fn configure_background_probe(command: &mut tokio::process::Command) {
-    use std::os::windows::process::CommandExt;
     use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
     command.creation_flags(CREATE_NO_WINDOW);
 }
