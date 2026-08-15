@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub use compose::{compose_file_is_valid, compose_shared_directory};
+#[cfg(target_os = "linux")]
 pub(crate) use compose::{ensure_runtime_port_mapping, runtime_port_mapping};
 pub(crate) use compose::{restore_file, snapshot_file, update_shared_mount, FileSnapshot};
 pub use store::{load_config, persist_config};
