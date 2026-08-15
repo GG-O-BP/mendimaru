@@ -373,14 +373,14 @@ fn write_portable_package(path: &Path, runtime_source: &str) {
         .start_file("bin/start.bat", executable_options)
         .expect("Windows batch launcher");
     archive
-        .write_all(b"@echo off\r\nnode \"%~dp0fake-runtime.cjs\" %*\r\n")
+        .write_all(b"@echo off\r\nnode.exe \"%~dp0fake-runtime.cjs\" %*\r\n")
         .expect("Windows batch contents");
     archive
         .start_file("bin/start.ps1", executable_options)
         .expect("Windows PowerShell launcher");
     archive
         .write_all(
-            b"$runtime = Join-Path $PSScriptRoot 'fake-runtime.cjs'\r\n& node $runtime @args\r\nexit $LASTEXITCODE\r\n",
+            b"$runtime = Join-Path $PSScriptRoot 'fake-runtime.cjs'\r\n& node.exe $runtime @args\r\nexit $LASTEXITCODE\r\n",
         )
         .expect("Windows PowerShell contents");
     archive

@@ -904,6 +904,8 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
     validate_payload(&payload).map_err(|_| ())?;
     let directory = layout.session_directory(session_id).map_err(|_| ())?;
     let deployment = directory.join("deployment");
+    let temp_directory = directory.join("tmp");
+    store::ensure_private_directory(&temp_directory).map_err(|_| ())?;
     let protected_paths = vec![
         directory.to_string_lossy().to_string(),
         deployment.to_string_lossy().to_string(),
@@ -917,7 +919,8 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
         written: 0,
         saturated: false,
     }));
-    let mut command = runtime_command(&deployment, &override_path, &payload).map_err(|_| ())?;
+    let mut command =
+        runtime_command(&deployment, &override_path, &temp_directory, &payload).map_err(|_| ())?;
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(_) => {
@@ -1125,9 +1128,11 @@ async fn wait_then_force(child: &mut tokio::process::Child, identity: &ProcessId
 fn runtime_command(
     deployment: &Path,
     override_path: &Path,
+    temp_directory: &Path,
     payload: &SupervisorPayload,
 ) -> Result<tokio::process::Command, String> {
     ensure_direct_directory(deployment)?;
+    ensure_direct_directory(temp_directory)?;
     let default_config = deployment.join("etc/Default");
     let mut command = if cfg!(windows) {
         let launcher = deployment.join("bin/start.ps1");
@@ -1161,7 +1166,9 @@ fn runtime_command(
         .env_clear()
         .env("JAVA_HOME", &payload.java_home)
         .env("M2EE_ADMIN_PASS", &payload.admin_password)
-        .env("MX_LOG_LEVEL", "INFO");
+        .env("MX_LOG_LEVEL", "INFO")
+        .env("TEMP", temp_directory)
+        .env("TMP", temp_directory);
     let java_bin = Path::new(&payload.java_home).join("bin");
     let inherited_path = std::env::var_os("PATH").unwrap_or_default();
     let joined = std::env::join_paths(
@@ -1169,7 +1176,15 @@ fn runtime_command(
     )
     .map_err(|error| format!("could not construct the runtime PATH: {error}"))?;
     command.env("PATH", joined);
-    for name in ["HOME", "USERPROFILE", "SYSTEMROOT", "COMSPEC"] {
+    for name in [
+        "HOME",
+        "USERPROFILE",
+        "SYSTEMROOT",
+        "WINDIR",
+        "SYSTEMDRIVE",
+        "COMSPEC",
+        "PATHEXT",
+    ] {
         if let Some(value) = std::env::var_os(name) {
             command.env(name, value);
         }
