@@ -380,7 +380,7 @@ fn write_portable_package(path: &Path, runtime_source: &str) {
         .expect("Windows PowerShell launcher");
     archive
         .write_all(
-            b"$runtime = Join-Path $PSScriptRoot 'fake-runtime.cjs'\r\n& node.exe $runtime @args\r\nexit $LASTEXITCODE\r\n",
+            b"$ErrorActionPreference = 'Stop'\r\n[Console]::Out.WriteLine('fixture PowerShell launcher entered')\r\ntry {\r\n  $runtime = Join-Path $PSScriptRoot 'fake-runtime.cjs'\r\n  & node.exe $runtime @args\r\n  exit $LASTEXITCODE\r\n} catch {\r\n  [Console]::Error.WriteLine('fixture PowerShell launcher failed: ' + $_.Exception.GetType().FullName)\r\n  exit 127\r\n}\r\n",
         )
         .expect("Windows PowerShell contents");
     archive

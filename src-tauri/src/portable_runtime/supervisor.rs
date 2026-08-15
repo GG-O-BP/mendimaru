@@ -29,6 +29,35 @@ const MAX_LOG_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_LOG_BATCH_BYTES: u64 = 64 * 1024;
 const SUPERVISOR_ACK_TIMEOUT: Duration = Duration::from_secs(10);
 const STOP_GRACE_PERIOD: Duration = Duration::from_secs(20);
+const INHERITED_RUNTIME_ENVIRONMENT: &[&str] = &[
+    "HOME",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "USERNAME",
+    "USERDOMAIN",
+    "SYSTEMROOT",
+    "WINDIR",
+    "SYSTEMDRIVE",
+    "COMSPEC",
+    "PATHEXT",
+    "PROGRAMDATA",
+    "ALLUSERSPROFILE",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "PROGRAMW6432",
+    "COMMONPROGRAMFILES",
+    "COMMONPROGRAMFILES(X86)",
+    "COMMONPROGRAMW6432",
+    "PSModulePath",
+    "WinPSModulePath",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+    "PROCESSOR_IDENTIFIER",
+    "PROCESSOR_LEVEL",
+    "PROCESSOR_REVISION",
+    "OS",
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -893,25 +922,7 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
     {
         return Err(());
     }
-    let mut stdin = BufReader::new(tokio::io::stdin());
-    let mut payload_line = String::new();
-    let count = stdin.read_line(&mut payload_line).await.map_err(|_| ())?;
-    if count == 0 || payload_line.len() > MAX_HANDSHAKE_BYTES {
-        return Err(());
-    }
-    let payload: SupervisorPayload = serde_json::from_str(&payload_line).map_err(|_| ())?;
-    payload_line.zeroize();
-    validate_payload(&payload).map_err(|_| ())?;
     let directory = layout.session_directory(session_id).map_err(|_| ())?;
-    let deployment = directory.join("deployment");
-    let temp_directory = directory.join("tmp");
-    store::ensure_private_directory(&temp_directory).map_err(|_| ())?;
-    let protected_paths = vec![
-        directory.to_string_lossy().to_string(),
-        deployment.to_string_lossy().to_string(),
-    ];
-    let redactor = Arc::new(SecretRedactor::new(&payload, &protected_paths));
-    let override_path = directory.join("runtime-overrides.json");
     let log_file =
         store::create_private_file(&directory.join("runtime.log"), false).map_err(|_| ())?;
     let log = Arc::new(Mutex::new(LogSink {
@@ -919,6 +930,69 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
         written: 0,
         saturated: false,
     }));
+    let mut stdin = BufReader::new(tokio::io::stdin());
+    let mut payload_line = String::new();
+    let count = match stdin.read_line(&mut payload_line).await {
+        Ok(count) => count,
+        Err(_) => {
+            fail_initialization(&layout, &mut record, &log, "runtime handshake read failed").await;
+            return Err(());
+        }
+    };
+    if count == 0 || payload_line.len() > MAX_HANDSHAKE_BYTES {
+        payload_line.zeroize();
+        fail_initialization(
+            &layout,
+            &mut record,
+            &log,
+            "runtime handshake size validation failed",
+        )
+        .await;
+        return Err(());
+    }
+    let parsed_payload = serde_json::from_str(&payload_line);
+    payload_line.zeroize();
+    let payload: SupervisorPayload = match parsed_payload {
+        Ok(payload) => payload,
+        Err(_) => {
+            fail_initialization(
+                &layout,
+                &mut record,
+                &log,
+                "runtime handshake parsing failed",
+            )
+            .await;
+            return Err(());
+        }
+    };
+    if validate_payload(&payload).is_err() {
+        fail_initialization(
+            &layout,
+            &mut record,
+            &log,
+            "runtime handshake validation failed",
+        )
+        .await;
+        return Err(());
+    }
+    let deployment = directory.join("deployment");
+    let temp_directory = directory.join("tmp");
+    if store::ensure_private_directory(&temp_directory).is_err() {
+        fail_initialization(
+            &layout,
+            &mut record,
+            &log,
+            "runtime temporary directory initialization failed",
+        )
+        .await;
+        return Err(());
+    }
+    let protected_paths = vec![
+        directory.to_string_lossy().to_string(),
+        deployment.to_string_lossy().to_string(),
+    ];
+    let redactor = Arc::new(SecretRedactor::new(&payload, &protected_paths));
+    let override_path = directory.join("runtime-overrides.json");
     let mut command = match runtime_command(&deployment, &override_path, &temp_directory, &payload)
     {
         Ok(command) => command,
@@ -1196,6 +1270,15 @@ fn runtime_command(
         .env("MX_LOG_LEVEL", "INFO")
         .env("TEMP", temp_directory)
         .env("TMP", temp_directory);
+    if cfg!(windows) {
+        command
+            .env("APPDATA", temp_directory)
+            .env("LOCALAPPDATA", temp_directory)
+            .env(
+                "PSModuleAnalysisCachePath",
+                temp_directory.join("PowerShellModuleAnalysisCache"),
+            );
+    }
     let java_bin = Path::new(&payload.java_home).join("bin");
     let inherited_path = std::env::var_os("PATH").unwrap_or_default();
     let joined = std::env::join_paths(
@@ -1203,15 +1286,7 @@ fn runtime_command(
     )
     .map_err(|error| format!("could not construct the runtime PATH: {error}"))?;
     command.env("PATH", joined);
-    for name in [
-        "HOME",
-        "USERPROFILE",
-        "SYSTEMROOT",
-        "WINDIR",
-        "SYSTEMDRIVE",
-        "COMSPEC",
-        "PATHEXT",
-    ] {
+    for name in INHERITED_RUNTIME_ENVIRONMENT {
         if let Some(value) = std::env::var_os(name) {
             command.env(name, value);
         }
@@ -1302,6 +1377,21 @@ async fn append_internal_log(sink: &Arc<Mutex<LogSink>>, message: &str) {
         sink.written += entry.len() as u64;
         let _ = sink.file.flush().await;
     }
+}
+
+async fn fail_initialization(
+    layout: &RuntimeLayout,
+    record: &mut SessionRecord,
+    log: &Arc<Mutex<LogSink>>,
+    message: &str,
+) {
+    append_internal_log(log, message).await;
+    fail_and_respond(
+        layout,
+        record,
+        BackendErrorCode::RuntimeInitializationFailed,
+    )
+    .await;
 }
 
 async fn fail_and_respond(
@@ -1431,9 +1521,19 @@ fn valid_environment_name(name: &str) -> bool {
 }
 
 fn reserved_environment_name(name: &str) -> bool {
-    name == "M2EE_ADMIN_PASS"
-        || name == "JAVA_HOME"
-        || name == "PATH"
+    [
+        "M2EE_ADMIN_PASS",
+        "JAVA_HOME",
+        "PATH",
+        "TEMP",
+        "TMP",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PSModuleAnalysisCachePath",
+    ]
+    .iter()
+    .chain(INHERITED_RUNTIME_ENVIRONMENT.iter())
+    .any(|reserved| name.eq_ignore_ascii_case(reserved))
         || name == ENVIRONMENT_JSON
         || name.starts_with("MENDIMARU_")
         || matches!(
@@ -1699,6 +1799,11 @@ mod tests {
             "M2EE_ADMIN_PASS",
             "JAVA_HOME",
             "PATH",
+            "TEMP",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "PSMODULEPATH",
+            "PROGRAMFILES",
             "MENDIMARU_CACHE_DIR",
             "ADMIN_PORT",
             "ADMIN_ADDRESSES",
