@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "Mendix network policy fixture",
+  "beforeEach": [
+    { "action": "goto", "path": "/" },
+    {
+      "action": "fill",
+      "locator": { "by": "label", "value": "Username" },
+      "value": "fixture-user"
+    },
+    {
+      "action": "fill",
+      "locator": { "by": "label", "value": "Password" },
+      "valueFromEnv": "MENDIMARU_TEST_PASSWORD"
+    },
+    {
+      "action": "click",
+      "locator": { "by": "role", "role": "button", "name": "Sign in" }
+    }
+  ],
+  "tests": [
+    {
+      "name": "HTTP failures obey policy",
+      "steps": [
+        {
+          "action": "click",
+          "locator": { "by": "testId", "value": "network-error" }
+        },
+        {
+          "action": "expectText",
+          "locator": { "by": "role", "role": "status", "name": "Result" },
+          "value": "Network handled"
+        }
+      ]
+    }
+  ]
+}

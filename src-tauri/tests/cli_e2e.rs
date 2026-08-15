@@ -1,6 +1,8 @@
 use mendimaru_lib::models::{AppConfig, ContainerRuntime};
 use serde_json::Value;
 use std::fs;
+#[cfg(target_os = "linux")]
+use std::io::{BufRead, BufReader};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -115,6 +117,249 @@ fn stderr_json(output: &Output) -> Value {
     assert!(!output.status.success(), "command unexpectedly succeeded");
     assert!(output.stdout.is_empty(), "failure polluted stdout");
     serde_json::from_slice(&output.stderr).expect("stderr is one JSON document")
+}
+
+#[cfg(target_os = "linux")]
+struct FixtureProcess(std::process::Child);
+
+#[cfg(target_os = "linux")]
+impl Drop for FixtureProcess {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn start_browser_fixture() -> (FixtureProcess, u16) {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("repository root");
+    let mut child = Command::new("node")
+        .arg(repository.join("tests/browser/fixture-server.mjs"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start browser fixture server");
+    let stdout = child.stdout.take().expect("fixture stdout");
+    let mut line = String::new();
+    BufReader::new(stdout)
+        .read_line(&mut line)
+        .expect("read fixture port");
+    let port = serde_json::from_str::<Value>(&line).expect("fixture port JSON")["port"]
+        .as_u64()
+        .and_then(|value| u16::try_from(value).ok())
+        .expect("fixture port");
+    (FixtureProcess(child), port)
+}
+
+#[cfg(target_os = "linux")]
+fn browser_secret_variants(value: &str) -> Vec<Vec<u8>> {
+    use base64::Engine;
+
+    let percent = |uppercase: bool| {
+        value
+            .bytes()
+            .map(|byte| {
+                if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+                    (byte as char).to_string()
+                } else if uppercase {
+                    format!("%{byte:02X}")
+                } else {
+                    format!("%{byte:02x}")
+                }
+            })
+            .collect::<String>()
+    };
+    let html = |quote: bool| {
+        value
+            .chars()
+            .map(|character| match character {
+                '&' => "&amp;".to_string(),
+                '<' => "&lt;".to_string(),
+                '>' => "&gt;".to_string(),
+                '"' if quote => "&quot;".to_string(),
+                '\'' if quote => "&#39;".to_string(),
+                _ => character.to_string(),
+            })
+            .collect::<String>()
+    };
+    let percent_upper = percent(true);
+    let percent_lower = percent(false);
+    let json = serde_json::to_string(value).expect("encode secret as JSON");
+    vec![
+        value.as_bytes().to_vec(),
+        percent_upper.as_bytes().to_vec(),
+        percent_upper.replace("%20", "+").into_bytes(),
+        percent_lower.as_bytes().to_vec(),
+        percent_lower.replace("%20", "+").into_bytes(),
+        json.as_bytes()[1..json.len() - 1].to_vec(),
+        html(false).into_bytes(),
+        html(true).into_bytes(),
+        base64::engine::general_purpose::STANDARD
+            .encode(value)
+            .into_bytes(),
+        base64::engine::general_purpose::URL_SAFE
+            .encode(value)
+            .into_bytes(),
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(value)
+            .into_bytes(),
+    ]
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn real_binary_runs_playwright_and_publishes_secret_free_failure_evidence() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let config_directory = temporary.path().join("missing-config");
+
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("repository root");
+    let doctor = stdout_json(&run(&config_directory, &["browser", "doctor", "--json"]));
+    assert_complete_envelope(&doctor, "browser.doctor");
+    assert_eq!(doctor["data"]["ready"], true);
+    assert_eq!(doctor["data"]["nodeSupported"], true);
+    assert_eq!(doctor["data"]["minimumNodeVersion"], "22.22.2");
+    let (_fixture, port) = start_browser_fixture();
+    let base_url = format!("http://127.0.0.1:{port}/");
+    let username = std::ffi::OsStr::new("fixture-user");
+    let password_value = "native CLI canary-P@\"ss&word</trace+2026";
+    let password = std::ffi::OsStr::new(password_value);
+    let environment = [
+        ("MENDIMARU_TEST_USERNAME", username),
+        ("MENDIMARU_TEST_PASSWORD", password),
+    ];
+
+    let success = run_with_environment(
+        &config_directory,
+        &[
+            "browser",
+            "test",
+            "--base-url",
+            &base_url,
+            "--suite-path",
+            repository
+                .join("tests/browser/smoke.browser.json")
+                .to_str()
+                .expect("suite path"),
+            "--fail-on-console-error",
+            "--fail-on-network-failure",
+            "--json",
+        ],
+        &environment,
+    );
+    let success = stdout_json(&success);
+    assert!(
+        !config_directory.join("config.json").exists(),
+        "explicit browser URLs must not require or create app configuration"
+    );
+    assert_complete_envelope(&success, "browser.test");
+    assert_eq!(success["data"]["outcome"], "passed");
+    assert_eq!(success["data"]["passed"], 1);
+    assert_eq!(success["data"]["failed"], 0);
+    assert!(success["data"]["artifacts"]
+        .as_array()
+        .is_some_and(|artifacts| artifacts.len() >= 5));
+    let success_session = success["data"]["sessionId"]
+        .as_str()
+        .expect("browser session");
+
+    let listed = stdout_json(&run(
+        &config_directory,
+        &["browser", "artifacts", "--session-id", success_session],
+    ));
+    assert_complete_envelope(&listed, "browser.artifacts");
+    assert_eq!(listed["data"], success["data"]["artifacts"]);
+
+    let failure = run_with_environment(
+        &config_directory,
+        &[
+            "browser",
+            "test",
+            "--base-url",
+            &base_url,
+            "--suite-path",
+            repository
+                .join("tests/browser/failure.browser.json")
+                .to_str()
+                .expect("suite path"),
+            "--json",
+        ],
+        &environment,
+    );
+    assert_eq!(failure.status.code(), Some(1));
+    assert!(failure.stderr.is_empty());
+    let failure: Value = serde_json::from_slice(&failure.stdout).expect("failure summary JSON");
+    assert_complete_envelope(&failure, "browser.test");
+    assert_eq!(failure["ok"], true);
+    assert_eq!(failure["data"]["outcome"], "failed");
+    assert_eq!(failure["data"]["failed"], 1);
+    assert!(failure["data"]["artifacts"]
+        .as_array()
+        .expect("failure artifacts")
+        .iter()
+        .any(|artifact| artifact["kind"] == "browser-trace"));
+
+    let failure_session = failure["data"]["sessionId"]
+        .as_str()
+        .expect("failure browser session");
+    let run_directory = config_directory
+        .join("isolated-cache/browser-tests/runs")
+        .join(failure_session);
+    let secrets = browser_secret_variants(password_value);
+    for entry in fs::read_dir(&run_directory).expect("browser run directory") {
+        let path = entry.expect("browser artifact entry").path();
+        if path.extension().and_then(|value| value.to_str()) == Some("zip") {
+            let file = fs::File::open(&path).expect("trace archive");
+            let mut archive = zip::ZipArchive::new(file).expect("valid trace archive");
+            for index in 0..archive.len() {
+                let mut member = archive.by_index(index).expect("trace member");
+                assert!(!secrets.iter().any(|secret| member
+                    .name_raw()
+                    .windows(secret.len())
+                    .any(|value| value == secret)));
+                let mut bytes = Vec::new();
+                member.read_to_end(&mut bytes).expect("read trace member");
+                assert!(!secrets
+                    .iter()
+                    .any(|secret| bytes.windows(secret.len()).any(|window| window == secret)));
+            }
+        } else {
+            let bytes = fs::read(&path).expect("read browser artifact");
+            assert!(!secrets
+                .iter()
+                .any(|secret| bytes.windows(secret.len()).any(|window| window == secret)));
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_native_rejects_browser_test_before_configuration_or_suite_access() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let missing_config = temporary.path().join("missing-config");
+    let missing_suite = temporary.path().join("must-not-be-read.json");
+    let output = run(
+        &missing_config,
+        &[
+            "browser",
+            "test",
+            "--base-url",
+            "http://127.0.0.1:8080/",
+            "--suite-path",
+            missing_suite.to_str().expect("suite path"),
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(3));
+    assert!(output.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&output.stderr).expect("structured error");
+    assert_eq!(error["error"]["code"], "unsupported_capability");
+    assert_eq!(error["error"]["capability"], "browser.test");
+    assert!(!missing_config.exists());
+    assert!(!missing_suite.exists());
 }
 
 #[test]
@@ -551,9 +796,50 @@ if (secret) {
   console.log("raw=" + secret);
   console.log("encoded=" + Buffer.from(secret).toString("base64"));
 }
-const runtime = http.createServer((_request, response) => {
-  response.writeHead(200, { "content-type": "text/plain" });
-  response.end("ready");
+const page = `<!doctype html><html><body><main>
+  <section id="login-panel">
+    <h1>Fixture sign in</h1>
+    <form id="login-form">
+      <label>Username <input autocomplete="username"></label>
+      <label>Password <input type="password" autocomplete="current-password"></label>
+      <button type="submit">Sign in</button>
+    </form>
+  </section>
+  <section id="app-panel" hidden>
+    <h1>Task board</h1>
+    <p id="private-output" data-testid="private-output"></p>
+    <label>Task <input class="mx-name-TaskInput"></label>
+    <button class="mx-name-AddTask" type="button">Add task</button>
+    <label><input class="mx-name-TaskDone" type="checkbox"> Done</label>
+    <p role="status" aria-label="Result">Waiting</p>
+  </section>
+</main><script>
+const login = document.querySelector('#login-panel');
+const app = document.querySelector('#app-panel');
+const result = document.querySelector('[role="status"]');
+document.querySelector('#login-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const fields = document.querySelectorAll('input');
+  if (!fields[0].value || !fields[1].value) return;
+  document.querySelector('#private-output').textContent = fields[1].value;
+  login.hidden = true;
+  app.hidden = false;
+});
+document.querySelector('.mx-name-AddTask').addEventListener('click', async () => {
+  const task = document.querySelector('.mx-name-TaskInput').value;
+  const response = await fetch('/api/save', { method: 'POST', body: task });
+  if (response.ok) result.textContent = 'Saved: ' + task;
+});
+</script></body></html>`;
+const runtime = http.createServer((request, response) => {
+  if (request.url === "/api/save" && request.method === "POST") {
+    request.resume();
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end('{"saved":true}');
+    return;
+  }
+  response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  response.end(page);
 });
 const admin = http.createServer((request, response) => {
   response.writeHead(request.url === "/probes/ready" ? 200 : 404);
@@ -643,8 +929,9 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
     let started = stdout_json(&started_output);
     assert_complete_envelope(&started, "runtime.start");
     assert_eq!(started["data"]["build"]["cacheHit"], true);
-    assert_eq!(started["data"]["runtime"]["schemaVersion"], "2.0.0");
+    assert_eq!(started["data"]["runtime"]["schemaVersion"], "3.0.0");
     assert_eq!(started["data"]["runtime"]["mode"], "portable");
+    assert_eq!(started["data"]["runtime"]["runtimeVersion"], "11.12.2");
     assert_eq!(started["data"]["runtime"]["state"], "ready");
     let session_id = started["runtimeSessionId"]
         .as_str()
@@ -657,6 +944,61 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
     eprintln!("E2E lifecycle probing runtime HTTP endpoint");
     assert_http_ok(url);
     eprintln!("E2E lifecycle observed runtime HTTP readiness");
+
+    #[cfg(target_os = "linux")]
+    {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root");
+        let browser_suite = repository.join("tests/browser/smoke.browser.json");
+        let browser_password_value = "portable browser P@\"ss&word</trace+2026";
+        let browser_output = run_with_environment(
+            &fixture.config_directory,
+            &[
+                "browser",
+                "test",
+                "--runtime-session-id",
+                session_id,
+                "--suite-path",
+                browser_suite.to_str().expect("browser suite path"),
+                "--fail-on-console-error",
+                "--fail-on-network-failure",
+                "--json",
+            ],
+            &[
+                (
+                    "MENDIMARU_TEST_USERNAME",
+                    std::ffi::OsStr::new("fixture-user"),
+                ),
+                (
+                    "MENDIMARU_TEST_PASSWORD",
+                    std::ffi::OsStr::new(browser_password_value),
+                ),
+            ],
+        );
+        let browser = stdout_json(&browser_output);
+        assert_complete_envelope(&browser, "browser.test");
+        assert_eq!(browser["data"]["outcome"], "passed");
+        let browser_session = browser["data"]["sessionId"]
+            .as_str()
+            .expect("browser session");
+        let manifest: Value = serde_json::from_slice(
+            &fs::read(
+                fixture
+                    .config_directory
+                    .join("isolated-cache/browser-tests/runs")
+                    .join(browser_session)
+                    .join("artifact-manifest.json"),
+            )
+            .expect("Portable browser manifest"),
+        )
+        .expect("Portable browser manifest JSON");
+        assert_eq!(manifest["runtimeMode"], "portable");
+        assert_eq!(manifest["runtimePlatform"], "linux");
+        assert_eq!(manifest["runtimeVersion"], "11.12.2");
+        let serialized = serde_json::to_string(&manifest).expect("serialize browser manifest");
+        assert!(!serialized.contains(browser_password_value));
+    }
 
     for (verb, expected_command) in [
         ("status", "runtime.status"),
@@ -685,6 +1027,7 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
                 "{verb} lost Runtime readiness; logs:\n{}",
                 fixture_runtime_logs(&fixture),
             );
+            assert_eq!(observed["data"]["runtimeVersion"], "11.12.2");
         }
     }
 
@@ -1374,7 +1717,7 @@ fn real_binary_recovers_compose_and_distinguishes_winboat_runtime_failures() {
     assert!(!offline.compose_log.exists());
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn real_binary_never_reports_winboat_ready_before_http_responds() {
     let fixture = WinboatRuntimeFixture::new();
@@ -1403,7 +1746,26 @@ fn real_binary_never_reports_winboat_ready_before_http_responds() {
         .as_str()
         .expect("starting WinBoat Runtime session");
 
-    fixture.set_runtime_binding(fixture.runtime_port, "127.0.0.1", "winboat-storage");
+    let unread_suite = fixture.fake_state.join("must-not-read.browser.json");
+    let rejected = fixture.run(&[
+        "browser",
+        "test",
+        "--runtime-session-id",
+        session_id,
+        "--suite-path",
+        unread_suite.to_str().expect("unread suite path"),
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]);
+    assert_eq!(rejected.status.code(), Some(1));
+    let error = stderr_json(&rejected);
+    assert_eq!(error["error"]["code"], "precondition_failed");
+    assert_eq!(error["error"]["capability"], "browser.test");
+    assert!(!unread_suite.exists());
+
+    let (_browser_fixture, browser_port) = start_browser_fixture();
+    fixture.set_runtime_binding(browser_port, "127.0.0.1", "winboat-storage");
     let ready = stdout_json(&fixture.run(&[
         "runtime",
         "wait",
@@ -1416,6 +1778,62 @@ fn real_binary_never_reports_winboat_ready_before_http_responds() {
     assert_eq!(ready["data"]["state"], "ready");
     assert_eq!(ready["data"]["httpReady"], true);
     assert_http_ok(ready["data"]["url"].as_str().expect("ready URL"));
+
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("repository root");
+    let browser_suite = repository.join("tests/browser/smoke.browser.json");
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let paths =
+        std::iter::once(fixture.fake_bin.clone()).chain(std::env::split_paths(&current_path));
+    let path = std::env::join_paths(paths).expect("fake Docker PATH");
+    let browser_password_value = "WinBoat browser P@\"ss&word</trace+2026";
+    let browser = stdout_json(&run_with_environment(
+        &fixture.config_directory,
+        &[
+            "browser",
+            "test",
+            "--runtime-session-id",
+            session_id,
+            "--suite-path",
+            browser_suite.to_str().expect("browser suite path"),
+            "--fail-on-console-error",
+            "--fail-on-network-failure",
+            "--json",
+        ],
+        &[
+            ("PATH", path.as_os_str()),
+            (
+                "MENDIMARU_TEST_USERNAME",
+                std::ffi::OsStr::new("fixture-user"),
+            ),
+            (
+                "MENDIMARU_TEST_PASSWORD",
+                std::ffi::OsStr::new(browser_password_value),
+            ),
+        ],
+    ));
+    assert_eq!(browser["data"]["outcome"], "passed");
+    let browser_session = browser["data"]["sessionId"]
+        .as_str()
+        .expect("WinBoat browser session");
+    let manifest: Value = serde_json::from_slice(
+        &fs::read(
+            fixture
+                .config_directory
+                .join("isolated-cache/browser-tests/runs")
+                .join(browser_session)
+                .join("artifact-manifest.json"),
+        )
+        .expect("WinBoat browser manifest"),
+    )
+    .expect("WinBoat browser manifest JSON");
+    assert_eq!(manifest["runtimeMode"], "studio-run-locally");
+    assert_eq!(manifest["runtimePlatform"], "windows");
+    assert_eq!(manifest["backend"], "linux-winboat");
+    assert!(!serde_json::to_string(&manifest)
+        .expect("serialize browser manifest")
+        .contains(browser_password_value));
 
     let stopped = fixture.run(&[
         "runtime",
@@ -1495,7 +1913,7 @@ fn windows_native_rejects_winboat_runtime_mode_without_reading_compose() {
 }
 
 fn assert_complete_envelope(document: &Value, command: &str) {
-    assert_eq!(document["schemaVersion"], "2.0.0");
+    assert_eq!(document["schemaVersion"], "3.0.0");
     assert_eq!(document["command"], command);
     assert!(document["ok"].is_boolean());
     assert!(document["platform"].is_string());

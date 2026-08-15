@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "Mendix fixture failure evidence",
+  "beforeEach": [
+    { "action": "goto", "path": "/" },
+    {
+      "action": "fill",
+      "locator": { "by": "label", "value": "Username" },
+      "valueFromEnv": "MENDIMARU_TEST_USERNAME",
+      "sensitive": false
+    },
+    {
+      "action": "fill",
+      "locator": { "by": "label", "value": "Password" },
+      "valueFromEnv": "MENDIMARU_TEST_PASSWORD"
+    },
+    {
+      "action": "click",
+      "locator": { "by": "role", "role": "button", "name": "Sign in" }
+    }
+  ],
+  "tests": [
+    {
+      "name": "failed assertion captures safe artifacts",
+      "steps": [
+        {
+          "action": "expectText",
+          "locator": { "by": "role", "role": "status", "name": "Result" },
+          "value": "This assertion must fail"
+        }
+      ]
+    }
+  ]
+}

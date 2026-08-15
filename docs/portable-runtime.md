@@ -81,7 +81,9 @@ and binds both to `127.0.0.1`. Success is returned only after the admin
 `/probes/ready` endpoint is healthy. The documented application
 `/health/ready` endpoint and an HTTP 200 application root are compatibility
 checks for package variants without the admin probe. `runtime url` returns a URL
-only while the session remains ready.
+only while the session remains ready. Runtime status also retains the exact
+project-selected Runtime version so downstream browser manifests can report the
+tested engine without inferring it from a package path.
 
 Each session has its own deployment, embedded database, uploaded files, ports,
 PID/start-time identity, log, and state record. Linux process groups and Windows

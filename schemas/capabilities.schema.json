@@ -15,7 +15,7 @@
     "data"
   ],
   "properties": {
-    "schemaVersion": { "const": "2.0.0" },
+    "schemaVersion": { "const": "3.0.0" },
     "command": { "const": "capabilities" },
     "ok": { "const": true },
     "platform": { "$ref": "#/$defs/platformId" },
@@ -142,7 +142,7 @@
         "capabilities"
       ],
       "properties": {
-        "schemaVersion": { "const": "2.0.0" },
+        "schemaVersion": { "const": "3.0.0" },
         "backend": { "$ref": "#/$defs/backendId" },
         "hostPlatform": { "$ref": "#/$defs/platformId" },
         "studioPlatform": { "$ref": "#/$defs/platformId" },
@@ -169,7 +169,7 @@
       "additionalProperties": false,
       "required": ["schemaVersion", "snapshotId", "capturedAt", "manifest"],
       "properties": {
-        "schemaVersion": { "const": "2.0.0" },
+        "schemaVersion": { "const": "3.0.0" },
         "snapshotId": { "type": "string", "pattern": "^cap_[0-9a-f]{32}$" },
         "capturedAt": { "type": "string", "format": "date-time" },
         "manifest": { "$ref": "#/$defs/capabilityManifest" }

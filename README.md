@@ -154,6 +154,8 @@ The installed `mendimaru` executable can inspect or ensure the environment, list
 
 Linux headless sessions can also prepare Studio Pro Run Locally forwarding with `runtime start --mode studio-run-locally`, then use the common `wait`, `url`, `status`, `logs`, and `stop` commands. See the [WinBoat Run Locally guide](docs/winboat-run-locally.md) for the loopback-only exposure and recovery boundary.
 
+On Linux, `browser test` runs the same declarative Playwright/Chromium suite against an explicit URL, a Portable Runtime session, or a WinBoat Run Locally session. Browser downloads are explicit, and failed runs retain masked HTML, DOM/accessibility, screenshot, trace, console, and network evidence under bounded retention. See the [browser testing guide](docs/browser-testing.md).
+
 ## Development
 
 Development requires Node.js 22.22.2 or later, Rust, and the Tauri system dependencies for the host platform. Linux integration additionally requires WinBoat, Docker or Podman, FreeRDP 3, and Chrome or Chromium. Native Windows catalog discovery uses Edge or Chrome.
@@ -167,6 +169,7 @@ To validate the project and build an application bundle:
 
 ```bash
 npm run check
+npm run test:browser
 npm run tauri build
 ```
 

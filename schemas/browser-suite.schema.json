@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/browser-suite.schema.json",
+  "title": "Mendimaru declarative Playwright suite",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name", "tests"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "beforeEach": {
+      "type": "array",
+      "maxItems": 500,
+      "items": { "$ref": "#/$defs/step" }
+    },
+    "tests": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "steps"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "steps": {
+            "type": "array",
+            "maxItems": 500,
+            "items": { "$ref": "#/$defs/step" }
+          }
+        }
+      }
+    },
+    "maskLocators": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/locator" }
+    },
+    "secretEnv": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/environmentName" }
+    },
+    "storageStateEnv": { "$ref": "#/$defs/environmentName" }
+  },
+  "$defs": {
+    "environmentName": {
+      "type": "string",
+      "pattern": "^MENDIMARU_TEST_[A-Z0-9_]{1,64}$"
+    },
+    "locator": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["by", "role", "name"],
+          "properties": {
+            "by": { "const": "role" },
+            "role": { "type": "string", "minLength": 1, "maxLength": 80 },
+            "name": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "exact": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["by", "value"],
+          "properties": {
+            "by": {
+              "enum": ["label", "testId", "mendixName", "text"]
+            },
+            "value": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "exact": { "type": "boolean" }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "by": { "const": "mendixName" } } },
+              "then": {
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "step": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "path"],
+          "properties": {
+            "action": { "const": "goto" },
+            "path": { "type": "string", "minLength": 1, "maxLength": 2048 },
+            "waitUntil": {
+              "enum": ["commit", "domcontentloaded", "load", "networkidle"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "path"],
+          "properties": {
+            "action": { "const": "expectUrl" },
+            "path": { "type": "string", "minLength": 1, "maxLength": 2048 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "locator"],
+          "properties": {
+            "action": {
+              "enum": [
+                "click",
+                "check",
+                "uncheck",
+                "expectVisible",
+                "expectHidden"
+              ]
+            },
+            "locator": { "$ref": "#/$defs/locator" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "locator"],
+          "properties": {
+            "action": { "const": "fill" },
+            "locator": { "$ref": "#/$defs/locator" },
+            "value": { "type": "string", "maxLength": 8192 },
+            "valueFromEnv": { "$ref": "#/$defs/environmentName" },
+            "sensitive": { "type": "boolean" }
+          },
+          "oneOf": [
+            {
+              "properties": {
+                "value": { "type": "string" },
+                "valueFromEnv": false,
+                "sensitive": false
+              },
+              "required": ["value"]
+            },
+            {
+              "properties": {
+                "value": false,
+                "valueFromEnv": { "type": "string" }
+              },
+              "required": ["valueFromEnv"]
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "locator", "value"],
+          "properties": {
+            "action": {
+              "enum": ["selectOption", "expectText", "expectValue"]
+            },
+            "locator": { "$ref": "#/$defs/locator" },
+            "value": { "type": "string", "maxLength": 8192 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "locator", "key"],
+          "properties": {
+            "action": { "const": "press" },
+            "locator": { "$ref": "#/$defs/locator" },
+            "key": { "type": "string", "minLength": 1, "maxLength": 80 }
+          }
+        }
+      ]
+    }
+  }
+}

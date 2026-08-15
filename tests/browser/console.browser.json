@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "Mendix console policy fixture",
+  "beforeEach": [
+    { "action": "goto", "path": "/" },
+    {
+      "action": "fill",
+      "locator": { "by": "label", "value": "Username" },
+      "value": "fixture-user"
+    },
+    {
+      "action": "fill",
+      "locator": { "by": "label", "value": "Password" },
+      "valueFromEnv": "MENDIMARU_TEST_PASSWORD"
+    },
+    {
+      "action": "click",
+      "locator": { "by": "role", "role": "button", "name": "Sign in" }
+    }
+  ],
+  "tests": [
+    {
+      "name": "console errors obey policy",
+      "steps": [
+        {
+          "action": "click",
+          "locator": { "by": "testId", "value": "console-error" }
+        }
+      ]
+    }
+  ]
+}

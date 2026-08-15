@@ -59,6 +59,10 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Install pinned Playwright Chromium
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+
       - name: Check frontend formatting and lint
         run: |
           npm run format:check
@@ -69,6 +73,10 @@ jobs:
 
       - name: Run frontend unit and native E2E tests
         run: npm run test:frontend
+
+      - name: Run strict Playwright browser E2E
+        if: runner.os == 'Linux'
+        run: npm run test:browser
 
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --nocapture --test-threads=1

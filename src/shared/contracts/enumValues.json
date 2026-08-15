@@ -92,6 +92,11 @@
     "dom-snapshot": true,
     "diagnostic": true
   },
+  "browserTestOutcome": {
+    "passed": true,
+    "failed": true,
+    "skipped": true
+  },
   "studioProcessState": {
     "starting": true,
     "running": true,

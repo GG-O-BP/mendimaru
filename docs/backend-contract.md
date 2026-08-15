@@ -102,8 +102,11 @@ Windows user and the executable path of the detected installation before a
 session can be shown or closed. Runtime versions are exact-policy gated and the
 manifest records all supported Runtime modes independently of the Windows
 Studio backend.
-UI automation and browser execution remain explicitly unsupported. `mac-native`
-is registered but reports all operations as unsupported until issue #11
+UI automation remains explicitly unsupported. Linux `x86_64` and `aarch64`
+support browser test execution and integrity-checked artifact lookup for both
+Portable and WinBoat Runtime URLs. Windows/macOS browser execution remains
+explicitly unsupported until issue #27 validates native parity. `mac-native` is
+registered but otherwise reports operations as unsupported until issue #11
 supplies the native implementation.
 
 ## Errors, sessions, and artifacts
@@ -129,6 +132,12 @@ initial supported shape was introduced in `1.0.0` and is unchanged in `2.0.0`.
 location, media type, digest, size, and backend diagnostic reference are
 optional. This keeps platform paths out of the portable required shape while
 allowing an adapter to provide a verified local artifact.
+
+Version `3.0.0` introduces the supported browser result and manifest shapes,
+including per-test outcomes, browser/Playwright versions, and verified artifact
+descriptors. The optional Runtime `runtimeVersion` is carried into a browser
+manifest when the adapter can establish it. See
+[`browser-testing.md`](browser-testing.md).
 
 `RuntimeStatus` is the shared successful lifecycle payload on Linux and
 Windows. Version `2.0.0` adds the backend identity and an explicit `httpReady`
@@ -157,9 +166,12 @@ launcher details remain private. See
 
 ## Compatibility and versioning
 
-The current schema version is `2.0.0` and follows semantic versioning. Version
-2 adds multi-mode capability discovery, explicit Runtime backend/readiness,
-WinBoat Run Locally status fields, and its distinct failure codes:
+The current schema version is `3.0.0` and follows semantic versioning. Version
+2 added multi-mode capability discovery, explicit Runtime backend/readiness,
+WinBoat Run Locally status fields, and its distinct failure codes. Version 3
+adds the first supported browser-test contract and optional Runtime version
+metadata. It is a major version because `runtimeVersion` is a new serialized
+field and the previously unsupported browser result now has a complete shape:
 
 - Patch: documentation or validation corrections that do not change accepted
   data or meaning.
@@ -180,7 +192,9 @@ agent contract.
 ## Verification
 
 `npm run check` runs lint, format, frontend tests, Rust contract/fake-adapter
-tests, real CLI process tests, and JSON Schema validation. Linux maintainers can
+tests, real CLI process tests, and JSON Schema validation. `npm run
+test:browser` additionally runs the real Chromium policy and artifact suite.
+Linux maintainers can
 run the destructive full adapter lifecycle only against a disposable WinBoat
 test version with an official installer already in the shared cache:
 

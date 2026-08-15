@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/browser.schema.json",
+  "title": "Mendimaru browser test contracts",
+  "$defs": {
+    "doctor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "runnerVersion",
+        "ready",
+        "nodeVersion",
+        "minimumNodeVersion",
+        "nodeSupported",
+        "playwrightVersion",
+        "chromium",
+        "downloadPolicy"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "3.0.0" },
+        "runnerVersion": { "const": "1.0.0" },
+        "ready": { "type": "boolean" },
+        "nodeVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "minimumNodeVersion": { "const": "22.22.2" },
+        "nodeSupported": { "type": "boolean" },
+        "playwrightVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "chromium": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["installed", "launchable"],
+          "properties": {
+            "installed": { "type": "boolean" },
+            "launchable": { "type": "boolean" },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            }
+          }
+        },
+        "downloadPolicy": { "const": "explicit-only" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "ready": { "const": true } },
+            "required": ["ready"]
+          },
+          "then": {
+            "properties": {
+              "nodeSupported": { "const": true },
+              "chromium": {
+                "type": "object",
+                "required": ["version"],
+                "properties": {
+                  "installed": { "const": true },
+                  "launchable": { "const": true },
+                  "version": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "outcome": { "enum": ["passed", "failed", "skipped"] },
+    "testCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "outcome", "completedSteps", "totalSteps"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "outcome": { "$ref": "#/$defs/outcome" },
+        "completedSteps": { "type": "integer", "minimum": 0 },
+        "totalSteps": { "type": "integer", "minimum": 0 },
+        "failure": { "type": "string", "minLength": 1, "maxLength": 8192 }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "navigationTimeoutMilliseconds",
+        "actionTimeoutMilliseconds",
+        "assertionTimeoutMilliseconds",
+        "failOnConsoleError",
+        "failOnNetworkFailure",
+        "recordVideo",
+        "recordHar",
+        "maxArtifactBytes",
+        "retentionRuns"
+      ],
+      "properties": {
+        "navigationTimeoutMilliseconds": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 300000
+        },
+        "actionTimeoutMilliseconds": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 300000
+        },
+        "assertionTimeoutMilliseconds": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 300000
+        },
+        "failOnConsoleError": { "type": "boolean" },
+        "failOnNetworkFailure": { "type": "boolean" },
+        "recordVideo": { "type": "boolean" },
+        "recordHar": { "type": "boolean" },
+        "maxArtifactBytes": {
+          "type": "integer",
+          "minimum": 1048576,
+          "maximum": 536870912
+        },
+        "retentionRuns": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "sessionId",
+        "outcome",
+        "passed",
+        "failed",
+        "skipped",
+        "startedAt",
+        "finishedAt",
+        "browserName",
+        "browserVersion",
+        "playwrightVersion",
+        "tests",
+        "artifacts"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "3.0.0" },
+        "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
+        "outcome": { "$ref": "#/$defs/outcome" },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "finishedAt": { "type": "string", "format": "date-time" },
+        "browserName": { "const": "chromium" },
+        "browserVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "playwrightVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "tests": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/testCase" }
+        },
+        "artifacts": {
+          "type": "array",
+          "maxItems": 512,
+          "items": {
+            "$ref": "https://github.com/GG-O-BP/mendimaru/schemas/artifact.schema.json"
+          }
+        }
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "sessionId",
+        "createdAt",
+        "hostPlatform",
+        "studioPlatform",
+        "backend",
+        "runtimeMode",
+        "browser",
+        "playwrightVersion",
+        "runnerVersion",
+        "suite",
+        "policy",
+        "artifacts"
+      ],
+      "properties": {
+        "schemaVersion": { "const": "3.0.0" },
+        "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "hostPlatform": {
+          "enum": ["linux", "windows", "macos", "unsupported"]
+        },
+        "studioPlatform": {
+          "enum": ["linux", "windows", "macos", "unsupported"]
+        },
+        "runtimePlatform": { "enum": ["linux", "windows", "macos"] },
+        "backend": {
+          "enum": ["linux-winboat", "windows-native", "mac-native"]
+        },
+        "runtimeMode": {
+          "enum": ["portable", "studio-run-locally", "external-url"]
+        },
+        "studioVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "runtimeVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "browser": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "const": "chromium" },
+            "version": { "type": "string", "minLength": 1, "maxLength": 80 }
+          }
+        },
+        "playwrightVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "runnerVersion": { "const": "1.0.0" },
+        "suite": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "tests"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+            "tests": { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        },
+        "policy": { "$ref": "#/$defs/policy" },
+        "artifacts": {
+          "type": "array",
+          "maxItems": 511,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file", "kind", "mediaType", "sha256", "sizeBytes"],
+            "properties": {
+              "file": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._-]{1,120}$"
+              },
+              "kind": {
+                "enum": [
+                  "browser-trace",
+                  "browser-report",
+                  "screenshot",
+                  "ui-tree",
+                  "dom-snapshot",
+                  "diagnostic"
+                ]
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "sizeBytes": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  }
+}
