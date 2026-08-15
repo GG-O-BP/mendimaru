@@ -612,16 +612,40 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
     ] {
         let observed = stdout_json(&run_portable(
             &fixture,
-            &["runtime", verb, "--session-id", session_id, "--json"],
+            &[
+                "runtime",
+                verb,
+                "--session-id",
+                session_id,
+                "--json",
+                "--timeout-seconds",
+                "15",
+            ],
             None,
         ));
         assert_complete_envelope(&observed, expected_command);
         assert_eq!(observed["runtimeSessionId"], session_id);
+        if verb != "url" {
+            assert_eq!(
+                observed["data"]["state"],
+                "ready",
+                "{verb} lost Runtime readiness; logs:\n{}",
+                fixture_runtime_logs(&fixture),
+            );
+        }
     }
 
     let logs = stdout_json(&run_portable(
         &fixture,
-        &["runtime", "logs", "--session-id", session_id, "--json"],
+        &[
+            "runtime",
+            "logs",
+            "--session-id",
+            session_id,
+            "--json",
+            "--timeout-seconds",
+            "15",
+        ],
         None,
     ));
     assert_complete_envelope(&logs, "runtime.logs");
@@ -632,14 +656,30 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
 
     let stopped = stdout_json(&run_portable(
         &fixture,
-        &["runtime", "stop", "--session-id", session_id, "--json"],
+        &[
+            "runtime",
+            "stop",
+            "--session-id",
+            session_id,
+            "--json",
+            "--timeout-seconds",
+            "30",
+        ],
         None,
     ));
     assert_complete_envelope(&stopped, "runtime.stop");
     assert_eq!(stopped["data"]["completed"], true);
     let status = stdout_json(&run_portable(
         &fixture,
-        &["runtime", "status", "--session-id", session_id, "--json"],
+        &[
+            "runtime",
+            "status",
+            "--session-id",
+            session_id,
+            "--json",
+            "--timeout-seconds",
+            "15",
+        ],
         None,
     ));
     assert_eq!(status["data"]["state"], "stopped");
