@@ -359,11 +359,7 @@ try {
   );
 
   await assertView("Control+2", "Projects", "Orders");
-  await assertView(
-    "Control+3",
-    "Operation center",
-    "No operations have been recorded",
-  );
+  await assertView("Control+3", "Operation center", "11.12.2");
   await assertView("Control+4", "Settings", "Environment diagnostics");
   await assertView("Control+1", "Studio Pro", "11.12.2");
 
@@ -597,6 +593,36 @@ async function createFixture(root) {
       null,
       2,
     )}\n`,
+  );
+  await fs.writeFile(
+    path.join(xdgConfig, "com.ggobp.mendimaru", "operation-history.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        records: [
+          {
+            schemaVersion: "1.0.0",
+            id: "install-11.12.2-0123456789abcdef0123456789abcdef",
+            kind: "install",
+            targetVersion: "11.12.2",
+            protectedProject: false,
+            state: "succeeded",
+            stage: "completed",
+            percentage: 100,
+            estimated: false,
+            startedAt: "2026-08-14T00:00:00Z",
+            updatedAt: "2026-08-14T00:01:00Z",
+            finishedAt: "2026-08-14T00:01:00Z",
+            retryable: false,
+            logAvailable: false,
+          },
+        ],
+        legacyScanComplete: true,
+      },
+      null,
+      2,
+    )}\n`,
+    { mode: 0o600 },
   );
   await fs.writeFile(
     path.join(xdgCache, "com.ggobp.mendimaru", "studio-version-catalog.json"),

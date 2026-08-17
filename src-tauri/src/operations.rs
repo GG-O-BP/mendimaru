@@ -15,6 +15,7 @@ use tauri::AppHandle;
 
 const HISTORY_FILE_NAME: &str = "operation-history.json";
 const HISTORY_SCHEMA_VERSION: &str = "1.0.0";
+const LEGACY_RECORD_SCHEMA_VERSIONS: &[&str] = &["1.0.0", "2.0.0"];
 const MAX_HISTORY_BYTES: u64 = 512 * 1024;
 const MAX_RECORDS: usize = 250;
 const MAX_IDENTIFIER_BYTES: usize = 160;
@@ -642,9 +643,10 @@ fn load_history(path: &Path) -> Result<OperationHistory, String> {
     if content.len() as u64 > MAX_HISTORY_BYTES {
         return Err("operation history exceeds the safe size limit".to_string());
     }
-    let history: OperationHistory = serde_json::from_slice(&content)
+    let mut history: OperationHistory = serde_json::from_slice(&content)
         .map_err(|error| format!("operation history is invalid: {error}"))?;
     validate_history(&history)?;
+    migrate_record_schema_versions(&mut history);
     Ok(history)
 }
 
@@ -659,7 +661,7 @@ fn validate_history(history: &OperationHistory) -> Result<(), String> {
     for record in &history.records {
         validate_identifier(&record.id)?;
         validate_target_version(&record.target_version)?;
-        if record.schema_version != CONTRACT_SCHEMA_VERSION || !ids.insert(&record.id) {
+        if !compatible_record_schema_version(&record.schema_version) || !ids.insert(&record.id) {
             return Err("operation history contains an invalid record".to_string());
         }
         if let Some(retry_of) = &record.retry_of {
@@ -681,6 +683,16 @@ fn validate_history(history: &OperationHistory) -> Result<(), String> {
         validate_record_semantics(record)?;
     }
     Ok(())
+}
+
+fn compatible_record_schema_version(version: &str) -> bool {
+    version == CONTRACT_SCHEMA_VERSION || LEGACY_RECORD_SCHEMA_VERSIONS.contains(&version)
+}
+
+fn migrate_record_schema_versions(history: &mut OperationHistory) {
+    for record in &mut history.records {
+        record.schema_version = CONTRACT_SCHEMA_VERSION.to_string();
+    }
 }
 
 fn validate_record_semantics(record: &OperationRecord) -> Result<(), String> {
@@ -1193,6 +1205,88 @@ mod tests {
         let serialized = fs::read_to_string(history_path(&config)).expect("read history");
         assert!(!serialized.contains("host.lan"));
         assert!(!serialized.contains("Program Files"));
+    }
+
+    #[test]
+    fn migrates_compatible_record_contract_versions_on_the_next_write() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let config = config(temporary.path());
+        begin(
+            &config,
+            OperationKind::Install,
+            "11.12.2",
+            false,
+            OperationStage::Installing,
+            None,
+        )
+        .expect("begin operation")
+        .succeed()
+        .expect("finish operation");
+
+        let history = history_path(&config);
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&fs::read(&history).expect("read history"))
+                .expect("parse history");
+        legacy["records"][0]["schemaVersion"] = serde_json::json!("1.0.0");
+        fs::write(
+            &history,
+            serde_json::to_vec_pretty(&legacy).expect("serialize legacy history"),
+        )
+        .expect("write legacy history");
+
+        let records = list(&config).expect("load compatible legacy history");
+        assert_eq!(
+            records[0].schema_version,
+            crate::contracts::CONTRACT_SCHEMA_VERSION
+        );
+
+        begin(
+            &config,
+            OperationKind::Uninstall,
+            "11.13.0",
+            false,
+            OperationStage::Uninstalling,
+            None,
+        )
+        .expect("begin operation after migration")
+        .succeed()
+        .expect("finish operation after migration");
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&fs::read(&history).expect("read migrated history"))
+                .expect("parse migrated history");
+        assert!(persisted["records"]
+            .as_array()
+            .expect("records")
+            .iter()
+            .all(|record| record["schemaVersion"] == crate::contracts::CONTRACT_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn rejects_unknown_future_record_contract_versions_without_overwriting_evidence() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let config = config(temporary.path());
+        begin(
+            &config,
+            OperationKind::Install,
+            "11.12.2",
+            false,
+            OperationStage::Installing,
+            None,
+        )
+        .expect("begin operation")
+        .succeed()
+        .expect("finish operation");
+
+        let history = history_path(&config);
+        let mut future: serde_json::Value =
+            serde_json::from_slice(&fs::read(&history).expect("read history"))
+                .expect("parse history");
+        future["records"][0]["schemaVersion"] = serde_json::json!("99.0.0");
+        let future = serde_json::to_vec_pretty(&future).expect("serialize future history");
+        fs::write(&history, &future).expect("write future history");
+
+        assert!(list(&config).is_err());
+        assert_eq!(fs::read(&history).expect("future evidence remains"), future);
     }
 
     #[test]
