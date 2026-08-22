@@ -25,6 +25,7 @@ export interface ProjectsPageModel {
   search: string;
   sharedDirectory: string;
   installedSet: Set<string>;
+  installedVersionsLoaded: boolean;
   isLaunching: boolean;
   isBusy: (key: string) => boolean;
   launchKeyFor: (project: MendixProject) => string;
@@ -163,7 +164,9 @@ export function ProjectsPage({
                           type="button"
                           className="button primary compact"
                           onClick={() => model.onLaunch(project)}
-                          disabled={model.isLaunching}
+                          disabled={
+                            !model.installedVersionsLoaded || model.isLaunching
+                          }
                         >
                           {model.isBusy(launchKey) ? (
                             <LoaderCircle size={16} className="spin" />

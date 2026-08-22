@@ -181,6 +181,11 @@ export interface StudioVersion {
   removable: boolean;
 }
 
+export interface InstalledVersionsCache {
+  versions: StudioVersion[];
+  capturedAt?: string;
+}
+
 export interface DownloadableVersion {
   version: string;
   releaseDate?: string;

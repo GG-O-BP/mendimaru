@@ -60,16 +60,41 @@ export function InstalledVersionsSection({
             className="icon-button"
             title={t("refresh-installed")}
             onClick={model.onRefresh}
-            disabled={model.sessionsLoading}
+            disabled={model.loading || model.sessionsLoading}
           >
             <RefreshCw
               size={16}
-              className={model.sessionsLoading ? "spin" : undefined}
+              className={
+                model.loading || model.sessionsLoading ? "spin" : undefined
+              }
             />
           </button>
         }
       />
       <div className="installed-grid">
+        {model.loading && model.versions.length === 0 && (
+          <div className="installed-loading" role="status">
+            <LoaderCircle size={18} className="spin" />
+            <div>
+              <strong>{t("installed-loading-title")}</strong>
+              <span>{t("installed-loading-detail")}</span>
+            </div>
+          </div>
+        )}
+        {model.error && (
+          <div className="inline-error installed-error" role="alert">
+            <span>{model.error}</span>
+            <button type="button" onClick={model.onRefresh}>
+              {t("action-retry")}
+            </button>
+          </div>
+        )}
+        {model.stale && model.versions.length > 0 && (
+          <div className="installed-stale" role="status">
+            <LoaderCircle size={15} className={model.loading ? "spin" : ""} />
+            {t("installed-cache-verifying")}
+          </div>
+        )}
         {model.versions.map((version) => {
           const launchKey = `launch-${version.version}`;
           const uninstallKey = `uninstall-${version.version}`;
@@ -103,7 +128,7 @@ export function InstalledVersionsSection({
                   type="button"
                   className="button light"
                   onClick={() => model.onLaunch(version)}
-                  disabled={!online || model.isLaunching}
+                  disabled={!online || !model.loaded || model.isLaunching}
                 >
                   {model.isBusy(launchKey) ? (
                     <LoaderCircle size={17} className="spin" />
@@ -129,6 +154,7 @@ export function InstalledVersionsSection({
                   onClick={() => model.onUninstall(version)}
                   disabled={
                     !online ||
+                    !model.loaded ||
                     !version.removable ||
                     versionSessions.length > 0 ||
                     model.isBusy(uninstallKey)
@@ -190,6 +216,7 @@ export function InstalledVersionsSection({
                             onClick={() => model.onReconnect(session)}
                             disabled={
                               !online ||
+                              !model.loaded ||
                               !session.reconnectable ||
                               reconnectBusy ||
                               stopBusy ||
@@ -212,6 +239,7 @@ export function InstalledVersionsSection({
                             onClick={() => model.onStop(session)}
                             disabled={
                               !online ||
+                              !model.loaded ||
                               stopBusy ||
                               reconnectBusy ||
                               mutationBusy
@@ -233,7 +261,7 @@ export function InstalledVersionsSection({
             </article>
           );
         })}
-        {model.versions.length === 0 && (
+        {model.loaded && !model.loading && model.versions.length === 0 && (
           <EmptyState
             icon={AppWindow}
             title={t("empty-installed-title")}

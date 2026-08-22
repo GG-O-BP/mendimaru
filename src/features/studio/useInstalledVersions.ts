@@ -6,6 +6,7 @@ import type { InstalledVersionsDependencies } from "./dependencies";
 
 export function useInstalledVersions({
   t,
+  installedVersionsSourceKey,
   notify,
   requestConfirmation,
   runAction,
@@ -15,8 +16,25 @@ export function useInstalledVersions({
   const [installedVersions, setInstalledVersions] = useState<StudioVersion[]>(
     [],
   );
+  const [installedLoading, setInstalledLoading] = useState(true);
+  const [installedLoaded, setInstalledLoaded] = useState(false);
+  const [installedStale, setInstalledStale] = useState(false);
+  const [installedError, setInstalledError] = useState<string | null>(null);
+  const [displayedInstalledSource, setDisplayedInstalledSource] = useState(
+    installedVersionsSourceKey,
+  );
+  const [verifiedInstalledSource, setVerifiedInstalledSource] = useState<
+    string | null
+  >(null);
+  const [installedErrorSource, setInstalledErrorSource] = useState<
+    string | null
+  >(null);
   const [sessions, setSessions] = useState<StudioSessionStatus[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [displayedSessionsSource, setDisplayedSessionsSource] = useState<
+    string | null
+  >(null);
+  const installedRequest = useRef(0);
   const sessionRequest = useRef(0);
   const launchLock = useRef(false);
 
@@ -26,38 +44,76 @@ export function useInstalledVersions({
       setSessionsLoading(true);
       try {
         const next = await tauriApi.getStudioSessions();
-        if (request === sessionRequest.current) setSessions(next);
+        if (request === sessionRequest.current) {
+          setDisplayedSessionsSource(installedVersionsSourceKey);
+          setSessions(next);
+        }
       } catch (error) {
+        if (request === sessionRequest.current) {
+          setDisplayedSessionsSource(installedVersionsSourceKey);
+          setSessions([]);
+        }
         if (!silent) onWarning(errorText(error, t));
       } finally {
         if (request === sessionRequest.current) setSessionsLoading(false);
       }
     },
-    [onWarning, t],
+    [installedVersionsSourceKey, onWarning, t],
   );
 
   const refreshInstalled = useCallback(
     async (silent = false) => {
+      const request = ++installedRequest.current;
+      setInstalledLoading(true);
+      setInstalledLoaded(false);
+      setInstalledStale(true);
+      setInstalledError(null);
       let next: StudioVersion[] | undefined;
       try {
         next = await tauriApi.getInstalledVersions();
-        setInstalledVersions(next);
+        if (request === installedRequest.current) {
+          setDisplayedInstalledSource(installedVersionsSourceKey);
+          setVerifiedInstalledSource(installedVersionsSourceKey);
+          setInstalledErrorSource(null);
+          setInstalledVersions(next);
+          setInstalledLoaded(true);
+          setInstalledStale(false);
+        }
       } catch (error) {
-        if (!silent) onWarning(errorText(error, t));
+        if (request === installedRequest.current) {
+          const message = errorText(error, t);
+          setInstalledErrorSource(installedVersionsSourceKey);
+          setInstalledError(message);
+          if (!silent) onWarning(message);
+        }
+      } finally {
+        if (request === installedRequest.current) setInstalledLoading(false);
       }
-      await refreshSessions(silent);
-      return next;
+      if (request === installedRequest.current) await refreshSessions(silent);
+      return request === installedRequest.current ? next : undefined;
     },
-    [onWarning, refreshSessions, t],
+    [installedVersionsSourceKey, onWarning, refreshSessions, t],
   );
 
   useEffect(() => {
-    const initialRefresh = window.setTimeout(
-      () => void refreshInstalled(true),
-      0,
-    );
-    return () => window.clearTimeout(initialRefresh);
-  }, [refreshInstalled]);
+    let active = true;
+    void tauriApi
+      .getInstalledVersionsCache()
+      .then((cached) => {
+        if (!active || cached.versions.length === 0) return;
+        setDisplayedInstalledSource(installedVersionsSourceKey);
+        setInstalledVersions(cached.versions);
+        setInstalledStale(true);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) void refreshInstalled(true);
+      });
+    return () => {
+      active = false;
+      installedRequest.current += 1;
+    };
+  }, [installedVersionsSourceKey, refreshInstalled]);
 
   const launchVersion = useCallback(
     (
@@ -159,12 +215,27 @@ export function useInstalledVersions({
     () => new Set(installedVersions.map((version) => version.version)),
     [installedVersions],
   );
+  const installedSourceMatches =
+    displayedInstalledSource === installedVersionsSourceKey;
+  const installedSourceVerified =
+    verifiedInstalledSource === installedVersionsSourceKey;
+  const sessionsSourceMatches =
+    displayedSessionsSource === installedVersionsSourceKey;
 
   return {
-    installedVersions,
-    installedSet,
-    sessions,
-    sessionsLoading,
+    installedVersions: installedSourceMatches ? installedVersions : [],
+    installedSet: installedSourceMatches ? installedSet : new Set<string>(),
+    installedLoading:
+      installedErrorSource !== installedVersionsSourceKey &&
+      (!installedSourceVerified || installedLoading),
+    installedLoaded: installedSourceVerified && installedLoaded,
+    installedStale: installedSourceMatches && installedStale,
+    installedError:
+      installedErrorSource === installedVersionsSourceKey
+        ? installedError
+        : null,
+    sessions: sessionsSourceMatches ? sessions : [],
+    sessionsLoading: !sessionsSourceMatches || sessionsLoading,
     isLaunching: hasBusyPrefix("launch-"),
     refreshInstalled,
     refreshSessions,

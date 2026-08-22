@@ -16,7 +16,7 @@ pub struct WinApp {
     pub source: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioVersion {
     pub version: String,
@@ -25,6 +25,14 @@ pub struct StudioVersion {
     pub install_root: String,
     pub source: String,
     pub removable: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InstalledVersionsCache {
+    pub versions: Vec<StudioVersion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub captured_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

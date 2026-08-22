@@ -1,6 +1,7 @@
 use crate::models::AppConfig;
 use serde_yaml::Value;
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
@@ -10,6 +11,7 @@ pub(crate) struct FileSnapshot {
 }
 
 const LOOPBACK_IPV4: &str = "127.0.0.1";
+const MAX_COMPOSE_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RuntimePortMapping {
@@ -38,7 +40,25 @@ pub fn compose_file_is_valid(compose_file: &str) -> bool {
 }
 
 pub(super) fn read_compose(path: &Path) -> Result<Value, String> {
-    let content = fs::read_to_string(path)
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| crate::tr!("error-compose-read", error = error))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(crate::tr!(
+            "error-compose-read",
+            error = "the Compose file must be a regular file"
+        ));
+    }
+    if metadata.len() > MAX_COMPOSE_BYTES {
+        return Err(crate::tr!(
+            "error-compose-read",
+            error = "the Compose file exceeds the safe size limit"
+        ));
+    }
+    let file =
+        fs::File::open(path).map_err(|error| crate::tr!("error-compose-read", error = error))?;
+    let mut content = String::with_capacity(metadata.len() as usize);
+    file.take(MAX_COMPOSE_BYTES + 1)
+        .read_to_string(&mut content)
         .map_err(|error| crate::tr!("error-compose-read", error = error))?;
     serde_yaml::from_str(&content).map_err(|error| crate::tr!("error-compose-parse", error = error))
 }
@@ -47,10 +67,7 @@ fn write_compose(path: &Path, compose: &Value) -> Result<(), String> {
     let serialized = serde_yaml::to_string(compose)
         .map_err(|error| crate::tr!("error-compose-serialize", error = error))?;
     let temporary_path = path.with_extension("yml.mendimaru.tmp");
-    fs::write(&temporary_path, serialized)
-        .map_err(|error| crate::tr!("error-compose-save", error = error))?;
-    fs::rename(&temporary_path, path)
-        .map_err(|error| crate::tr!("error-compose-save", error = error))
+    atomic_replace(path, &temporary_path, serialized.as_bytes())
 }
 
 pub(super) fn apply_compose_detection(config: &mut AppConfig, compose: &Value) {
@@ -314,9 +331,18 @@ pub(crate) fn update_shared_mount(
     }
 
     let backup_path = compose_path.with_extension("yml.mendimaru.bak");
-    if !backup_path.exists() {
-        fs::copy(compose_path, &backup_path)
-            .map_err(|error| crate::tr!("error-compose-backup", error = error))?;
+    match fs::symlink_metadata(&backup_path) {
+        Ok(metadata) if !metadata.is_file() || metadata.file_type().is_symlink() => {
+            return Err(crate::tr!(
+                "error-compose-backup",
+                error = "the Compose backup file is unsafe"
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            create_backup(compose_path, &backup_path)?;
+        }
+        Err(error) => return Err(crate::tr!("error-compose-backup", error = error)),
     }
 
     let service = service_value_mut(&mut compose)
@@ -347,10 +373,30 @@ pub(crate) fn update_shared_mount(
 }
 
 pub(crate) fn snapshot_file(path: &Path) -> Result<FileSnapshot, String> {
-    let content = if path.is_file() {
-        Some(fs::read(path).map_err(|error| crate::tr!("error-compose-read", error = error))?)
-    } else {
-        None
+    let content = match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return Err(crate::tr!(
+                    "error-compose-read",
+                    error = "the Compose file must be a regular file"
+                ));
+            }
+            if metadata.len() > MAX_COMPOSE_BYTES {
+                return Err(crate::tr!(
+                    "error-compose-read",
+                    error = "the Compose file exceeds the safe size limit"
+                ));
+            }
+            let mut content = Vec::with_capacity(metadata.len() as usize);
+            fs::File::open(path)
+                .map_err(|error| crate::tr!("error-compose-read", error = error))?
+                .take(MAX_COMPOSE_BYTES + 1)
+                .read_to_end(&mut content)
+                .map_err(|error| crate::tr!("error-compose-read", error = error))?;
+            Some(content)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(crate::tr!("error-compose-read", error = error)),
     };
     Ok(FileSnapshot {
         path: path.to_path_buf(),
@@ -362,14 +408,121 @@ pub(crate) fn restore_file(snapshot: &FileSnapshot) -> Result<(), String> {
     match &snapshot.content {
         Some(content) => {
             let temporary_path = snapshot.path.with_extension("yml.mendimaru.restore.tmp");
-            fs::write(&temporary_path, content)
-                .map_err(|error| crate::tr!("error-compose-save", error = error))?;
-            fs::rename(&temporary_path, &snapshot.path)
-                .map_err(|error| crate::tr!("error-compose-save", error = error))
+            atomic_replace(&snapshot.path, &temporary_path, content)
         }
         None if snapshot.path.exists() => fs::remove_file(&snapshot.path)
             .map_err(|error| crate::tr!("error-compose-save", error = error)),
         None => Ok(()),
+    }
+}
+
+fn create_backup(source: &Path, backup: &Path) -> Result<(), String> {
+    let source_metadata = fs::symlink_metadata(source)
+        .map_err(|error| crate::tr!("error-compose-backup", error = error))?;
+    if !source_metadata.is_file() || source_metadata.file_type().is_symlink() {
+        return Err(crate::tr!(
+            "error-compose-backup",
+            error = "the Compose file must be a regular file"
+        ));
+    }
+    let mut source_file = fs::File::open(source)
+        .map_err(|error| crate::tr!("error-compose-backup", error = error))?;
+    let mut options = fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(source_metadata.permissions().mode() & 0o777);
+    }
+    let mut backup_file = options
+        .open(backup)
+        .map_err(|error| crate::tr!("error-compose-backup", error = error))?;
+    let result = std::io::copy(&mut source_file, &mut backup_file)
+        .and_then(|_| backup_file.sync_all())
+        .map(|_| ())
+        .map_err(|error| crate::tr!("error-compose-backup", error = error));
+    if result.is_err() {
+        let _ = fs::remove_file(backup);
+    }
+    result
+}
+
+fn atomic_replace(path: &Path, temporary_path: &Path, content: &[u8]) -> Result<(), String> {
+    let result = (|| {
+        let target_metadata = fs::symlink_metadata(path)
+            .map_err(|error| crate::tr!("error-compose-save", error = error))?;
+        if !target_metadata.is_file() || target_metadata.file_type().is_symlink() {
+            return Err(crate::tr!(
+                "error-compose-save",
+                error = "the Compose file must be a regular file"
+            ));
+        }
+        if let Ok(metadata) = fs::symlink_metadata(temporary_path) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(crate::tr!(
+                    "error-compose-save",
+                    error = "the temporary Compose file is unsafe"
+                ));
+            }
+            fs::remove_file(temporary_path)
+                .map_err(|error| crate::tr!("error-compose-save", error = error))?;
+        }
+        let mut options = fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            options.mode(target_metadata.permissions().mode() & 0o777);
+        }
+        let mut temporary = options
+            .open(temporary_path)
+            .map_err(|error| crate::tr!("error-compose-save", error = error))?;
+        temporary
+            .write_all(content)
+            .and_then(|_| temporary.sync_all())
+            .map_err(|error| crate::tr!("error-compose-save", error = error))?;
+        replace_file(temporary_path, path)
+            .map_err(|error| crate::tr!("error-compose-save", error = error))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(temporary_path);
+    }
+    result
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 
@@ -537,5 +690,50 @@ mod tests {
 
         fs::write(&compose, "services: [unterminated\n").expect("write malformed compose");
         assert!(!compose_file_is_valid(&compose.to_string_lossy()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_and_oversized_compose_files() {
+        use std::os::unix::fs::symlink;
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let target = temporary.path().join("target.yml");
+        let compose = temporary.path().join("docker-compose.yml");
+        fs::write(&target, "services:\n  windows:\n    image: test\n").expect("target compose");
+        symlink(&target, &compose).expect("compose symlink");
+        assert!(!compose_file_is_valid(&compose.to_string_lossy()));
+        assert!(snapshot_file(&compose).is_err());
+
+        fs::remove_file(&compose).expect("remove compose symlink");
+        fs::write(&compose, vec![b'x'; super::MAX_COMPOSE_BYTES as usize + 1])
+            .expect("oversized compose");
+        assert!(!compose_file_is_valid(&compose.to_string_lossy()));
+        assert!(snapshot_file(&compose).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_symlinked_compose_temporary_and_backup_files() {
+        use std::os::unix::fs::symlink;
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("docker-compose.yml");
+        let victim = temporary.path().join("victim");
+        fs::write(
+            &compose,
+            "services:\n  windows:\n    volumes:\n      - /old:/shared\n",
+        )
+        .expect("compose");
+        fs::write(&victim, "unchanged").expect("victim");
+
+        let write_link = compose.with_extension("yml.mendimaru.tmp");
+        symlink(&victim, &write_link).expect("write symlink");
+        assert!(update_shared_mount(&compose, "/new").is_err());
+        assert_eq!(fs::read_to_string(&victim).expect("victim"), "unchanged");
+
+        let backup_link = compose.with_extension("yml.mendimaru.bak");
+        fs::remove_file(&backup_link).expect("remove created backup");
+        symlink(&victim, &backup_link).expect("backup symlink");
+        assert!(update_shared_mount(&compose, "/new").is_err());
+        assert_eq!(fs::read_to_string(&victim).expect("victim"), "unchanged");
     }
 }

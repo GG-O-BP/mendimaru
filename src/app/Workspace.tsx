@@ -51,6 +51,7 @@ export function Workspace({
   const processedSetup = useRef(0);
   const studio = useStudio({
     t,
+    installedVersionsSourceKey: installedVersionsSourceKey(environment.config),
     notify,
     requestConfirmation,
     runAction,
@@ -181,4 +182,16 @@ export function Workspace({
       )}
     </AppShell>
   );
+}
+
+function installedVersionsSourceKey(config: EnvironmentController["config"]) {
+  if (!config) return "unconfigured";
+  return JSON.stringify([
+    config.containerRuntime,
+    config.containerName,
+    config.apiUrl,
+    config.mendixInstallRoot,
+    config.mendixDataRoot,
+    config.windowsStudioPaths,
+  ]);
 }

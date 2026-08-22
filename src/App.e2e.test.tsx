@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   getEnvironmentStatus: vi.fn(),
   getEnvironmentDiagnosticReport: vi.fn(),
   exportEnvironmentDiagnosticReport: vi.fn(),
+  getInstalledVersionsCache: vi.fn(),
   getInstalledVersions: vi.fn(),
   getStudioSessions: vi.fn(),
   getDownloadableVersionsCache: vi.fn(),
@@ -74,6 +75,7 @@ vi.mock("./api/tauri", () => ({
     getEnvironmentStatus: mocks.getEnvironmentStatus,
     getEnvironmentDiagnosticReport: mocks.getEnvironmentDiagnosticReport,
     exportEnvironmentDiagnosticReport: mocks.exportEnvironmentDiagnosticReport,
+    getInstalledVersionsCache: mocks.getInstalledVersionsCache,
     getInstalledVersions: mocks.getInstalledVersions,
     getStudioSessions: mocks.getStudioSessions,
     getDownloadableVersionsCache: mocks.getDownloadableVersionsCache,
@@ -234,6 +236,9 @@ beforeEach(() => {
     '{"schemaVersion":"1.0.0","checks":[]}',
   );
   mocks.exportEnvironmentDiagnosticReport.mockResolvedValue(true);
+  mocks.getInstalledVersionsCache.mockResolvedValue({
+    versions: [],
+  });
   mocks.getInstalledVersions.mockImplementation(async () => [...installed]);
   mocks.getStudioSessions.mockImplementation(async () => [...sessions]);
   mocks.getDownloadableVersionsCache.mockResolvedValue(catalog);
@@ -302,6 +307,106 @@ async function renderReadyApp() {
 }
 
 describe("native Windows application E2E", () => {
+  it("shows cached installed versions immediately but blocks installs until live detection completes", async () => {
+    let finishDetection: (versions: StudioVersion[]) => void = () => {
+      throw new Error("detection resolver was not initialized");
+    };
+    mocks.getInstalledVersionsCache.mockResolvedValue({
+      versions: [removableStudio],
+      capturedAt: "2026-08-22T00:00:00Z",
+    });
+    mocks.getInstalledVersions.mockImplementationOnce(
+      () =>
+        new Promise<StudioVersion[]>((resolve) => {
+          finishDetection = resolve;
+        }),
+    );
+
+    await renderReadyApp();
+
+    expect(await screen.findByText("11.12.2")).toBeVisible();
+    expect(screen.getByText("installed-cache-verifying")).toBeVisible();
+    expect(screen.queryByText("empty-installed-title")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "action-install" }),
+    ).toBeDisabled();
+    expect(screen.queryByTitle("action-force-redownload")).toBeNull();
+    expect(
+      screen.getAllByRole("button", { name: "action-launch" })[0],
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+    expect(
+      await screen.findByRole("button", { name: "action-open" }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /nav-studio/ }));
+
+    finishDetection([removableStudio, portableStudio]);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "action-install" }),
+      ).toBeEnabled(),
+    );
+    expect(screen.queryByText("installed-cache-verifying")).toBeNull();
+  });
+
+  it("shows a real loading state and never enables installs before an uncached detection completes", async () => {
+    let finishDetection: (versions: StudioVersion[]) => void = () => {
+      throw new Error("detection resolver was not initialized");
+    };
+    mocks.getInstalledVersions.mockImplementationOnce(
+      () =>
+        new Promise<StudioVersion[]>((resolve) => {
+          finishDetection = resolve;
+        }),
+    );
+
+    await renderReadyApp();
+
+    expect(await screen.findByText("installed-loading-title")).toBeVisible();
+    expect(screen.queryByText("empty-installed-title")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "action-install" }),
+    ).toBeDisabled();
+    expect(screen.queryByTitle("action-force-redownload")).toBeNull();
+
+    finishDetection([removableStudio, portableStudio]);
+
+    expect(await screen.findByText("11.12.2")).toBeVisible();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "action-install" }),
+      ).toBeEnabled(),
+    );
+  });
+
+  it("keeps the last known list, exposes detection failure, and supports retry", async () => {
+    mocks.getInstalledVersionsCache.mockResolvedValue({
+      versions: [removableStudio],
+      capturedAt: "2026-08-22T00:00:00Z",
+    });
+    mocks.getInstalledVersions
+      .mockRejectedValueOnce(new Error("guest apps unavailable"))
+      .mockResolvedValueOnce([removableStudio, portableStudio]);
+
+    await renderReadyApp();
+
+    expect(await screen.findByText("guest apps unavailable")).toBeVisible();
+    expect(screen.getByText("11.12.2")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "action-install" }),
+    ).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "action-retry" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "action-install" }),
+      ).toBeEnabled(),
+    );
+    expect(screen.queryByText("guest apps unavailable")).toBeNull();
+  });
+
   it("renders native capabilities without any WinBoat route or control", async () => {
     await renderReadyApp();
 

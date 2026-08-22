@@ -13,6 +13,7 @@ import type { Translate } from "../../i18n";
 interface ProjectLauncherDependencies {
   t: Translate;
   installedVersions: StudioVersion[];
+  installedVersionsLoaded: boolean;
   catalogVersions: DownloadableVersion[];
   downloadProgress: DownloadProgress | null;
   isInstalling: boolean;
@@ -53,6 +54,7 @@ export interface ProjectLaunchAssistantState {
 export function useProjectLauncher({
   t,
   installedVersions,
+  installedVersionsLoaded,
   catalogVersions,
   downloadProgress,
   isInstalling,
@@ -240,6 +242,7 @@ export function useProjectLauncher({
 
   const launchProject = useCallback(
     (project: MendixProject) => {
+      if (!installedVersionsLoaded) return;
       if (launchPendingFor(project)) {
         openAssistant(project);
         return;
@@ -258,6 +261,7 @@ export function useProjectLauncher({
     [
       completeLaunch,
       installedByVersion,
+      installedVersionsLoaded,
       launchPendingFor,
       openAssistant,
       remember,
@@ -326,7 +330,7 @@ export function useProjectLauncher({
   }, []);
 
   const continueAssistant = useCallback(() => {
-    if (!assistant?.selectedVersion) return;
+    if (!assistant?.selectedVersion || !installedVersionsLoaded) return;
     const { project, selectedVersion } = assistant;
     const sequence = ++actionSequence.current;
     const installed = installedByVersion.get(selectedVersion);
@@ -354,6 +358,7 @@ export function useProjectLauncher({
     completeLaunch,
     installVersion,
     installedByVersion,
+    installedVersionsLoaded,
     remember,
     reportPreferenceError,
     t,
@@ -405,6 +410,7 @@ export function useProjectLauncher({
     versionOptions,
     selectedInstalled,
     selectedDownloadable,
+    installedVersionsLoaded,
     safetyRequired,
     actionBusy,
     downloadProgress,

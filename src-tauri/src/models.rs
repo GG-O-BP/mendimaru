@@ -22,7 +22,9 @@ pub use operation::{
     OperationError, OperationKind, OperationRecord, OperationStage, OperationState,
 };
 pub use projects::MendixProject;
-pub use studio::{StudioInstallPhase, StudioInstallProgress, StudioVersion, WinApp};
+pub use studio::{
+    InstalledVersionsCache, StudioInstallPhase, StudioInstallProgress, StudioVersion, WinApp,
+};
 
 #[cfg(test)]
 mod tests {

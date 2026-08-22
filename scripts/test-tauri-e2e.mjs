@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { constants as fsConstants, promises as fs } from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -119,6 +120,22 @@ try {
     return true;
   `);
 
+  await waitFor(
+    async () =>
+      await execute(`
+        const installRow = Array.from(document.querySelectorAll(".manifest-table tbody tr"))
+          .find((row) => row.querySelector(".version-cell strong")?.textContent === "11.13.0");
+        return document.body.innerText.includes("11.12.2")
+          && document.body.innerText.includes(
+            "Showing the last known installation list while Windows verifies it.",
+          )
+          && installRow?.querySelector(".manifest-action .button")?.disabled === true
+          && !installRow?.querySelector('[aria-label="Force a fresh download"]');
+      `),
+    1_500,
+    "the cached installed list was not rendered safely before live detection",
+  );
+
   assert.match(
     await command("GET", "/title"),
     /^mendimaru — Mendix Studio Pro Manager$/,
@@ -143,10 +160,13 @@ try {
   await waitFor(
     async () =>
       await execute(`
+        const installRow = Array.from(document.querySelectorAll(".manifest-table tbody tr"))
+          .find((row) => row.querySelector(".version-cell strong")?.textContent === "11.13.0");
         return document.querySelector(".route-status")?.classList.contains("online")
           && document.body.innerText.includes("WinBoat online")
           && document.body.innerText.includes("11.12.2")
-          && document.body.innerText.includes("11.13.0");
+          && document.body.innerText.includes("11.13.0")
+          && installRow?.querySelector(".manifest-action .button")?.disabled === false;
       `),
     20_000,
     "the fixture-backed native commands did not populate the online Studio view",
@@ -165,7 +185,7 @@ try {
     };
   `);
   assert.equal(routeMotion?.animationName, "route-travel");
-  assert.equal(routeMotion?.iterationCount, "infinite");
+  assert.equal(routeMotion?.iterationCount, "2");
   assert.equal(routeMotion?.playState, "running");
   assert.equal(typeof routeMotion?.currentTime, "number");
 
@@ -282,7 +302,15 @@ try {
     return true;
   `);
 
-  await delay(1_100);
+  await waitFor(
+    async () =>
+      await execute(`
+        return document.getAnimations()
+          .every((animation) => animation.playState !== "running");
+      `),
+    7_000,
+    "the bounded route animation did not become idle",
+  );
 
   const idleMotion = await execute(`
     const infiniteAnimations = document.getAnimations()
@@ -317,13 +345,11 @@ try {
   assert.deepEqual(
     idleMotion,
     {
-      infiniteAnimations: [
-        { animationName: "route-travel", isOnlineRoute: true },
-      ],
+      infiniteAnimations: [],
       unexpectedRunningAnimations: [],
       routeMarkerPresent: true,
     },
-    "the idle native window may run only the online route indicator",
+    "the idle native window must not retain continuous animations",
   );
 
   const installedRefresh = await command("POST", "/element", {
@@ -391,7 +417,7 @@ try {
 
 if (succeeded) {
   process.stdout.write(
-    "Tauri E2E: real WebKit window passed (dev URL, IPC contract, sampled route/busy motion, bounded idle rendering, four-view navigation)\n",
+    "Tauri E2E: real WebKit window passed (dev URL, IPC contract, sampled bounded route/busy motion, idle rendering, four-view navigation)\n",
   );
 }
 
@@ -491,13 +517,14 @@ async function createFixture(root) {
     }),
   ]);
 
-  const api = http.createServer((request, response) => {
+  const api = http.createServer(async (request, response) => {
     response.setHeader("content-type", "application/json");
     if (request.url === "/health") {
       response.end('{"status":"ok"}');
       return;
     }
     if (request.url === "/apps") {
+      await delay(2_000);
       response.end(
         JSON.stringify([
           {
@@ -647,8 +674,59 @@ async function createFixture(root) {
       2,
     )}\n`,
   );
+  await fs.writeFile(
+    path.join(
+      xdgCache,
+      "com.ggobp.mendimaru",
+      "installed-studio-versions.json",
+    ),
+    `${JSON.stringify(
+      {
+        schemaVersion: "1.0.0",
+        sourceIdentity: installedCacheSourceIdentity({
+          containerRuntime: "docker",
+          containerName: "MendimaruTauriE2E",
+          apiUrl: `http://127.0.0.1:${apiPort}`,
+          mendixInstallRoot: String.raw`C:\Program Files\Mendix`,
+          mendixDataRoot: String.raw`C:\ProgramData\Mendix`,
+          windowsStudioPaths: [],
+        }),
+        capturedAt: "2026-08-15T00:00:00Z",
+        versions: [
+          {
+            version: "11.12.2",
+            displayName: "Studio Pro",
+            executablePath: String.raw`C:\Program Files\Mendix\11.12.2\modeler\studiopro.exe`,
+            installRoot: String.raw`C:\Program Files\Mendix\11.12.2`,
+            source: "Tauri E2E fixture cache",
+            removable: true,
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+    { mode: 0o600 },
+  );
 
   return { bin, chrome, xdgCache, xdgConfig };
+}
+
+function installedCacheSourceIdentity(config) {
+  const hash = createHash("sha256");
+  for (const value of [
+    process.platform,
+    config.containerRuntime,
+    config.containerName,
+    config.apiUrl,
+    config.mendixInstallRoot,
+    config.mendixDataRoot,
+    ...config.windowsStudioPaths,
+  ]) {
+    hash.update(value);
+    hash.update(Buffer.from([0]));
+  }
+  return hash.digest("hex");
 }
 
 async function writeExecutable(file, content) {

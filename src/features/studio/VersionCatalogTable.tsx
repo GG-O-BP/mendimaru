@@ -46,6 +46,7 @@ export function VersionCatalogTable({
               releaseDate={releaseDates[index] || version.releaseDate || "—"}
               online={online}
               alreadyInstalled={catalog.installedSet.has(version.version)}
+              installedVersionsLoaded={catalog.installedVersionsLoaded}
               installing={catalog.isBusy(`install-${version.version}`)}
               installationBusy={catalog.isInstalling}
               onInstall={catalog.onInstall}
@@ -63,6 +64,7 @@ function VersionRow({
   releaseDate,
   online,
   alreadyInstalled,
+  installedVersionsLoaded,
   installing,
   installationBusy,
   onInstall,
@@ -72,15 +74,18 @@ function VersionRow({
   releaseDate: string;
   online: boolean;
   alreadyInstalled: boolean;
+  installedVersionsLoaded: boolean;
   installing: boolean;
   installationBusy: boolean;
   onInstall: CatalogModel["onInstall"];
 }) {
-  const availability = alreadyInstalled
-    ? "installed"
-    : online
-      ? "available"
-      : "offline";
+  const availability = !installedVersionsLoaded
+    ? "checking"
+    : alreadyInstalled
+      ? "installed"
+      : online
+        ? "available"
+        : "offline";
 
   return (
     <tr>
@@ -98,18 +103,25 @@ function VersionRow({
       <td>
         <span className={`availability-state ${availability}`}>
           <i />
-          {alreadyInstalled
-            ? t("action-installed")
-            : online
-              ? t("status-available")
-              : t("connection-offline")}
+          {!installedVersionsLoaded
+            ? t("status-checking-installed")
+            : alreadyInstalled
+              ? t("action-installed")
+              : online
+                ? t("status-available")
+                : t("connection-offline")}
         </span>
       </td>
       <td className="manifest-action">
         <button
           type="button"
           className={`button compact ${alreadyInstalled ? "quiet" : "primary"}`}
-          disabled={!online || alreadyInstalled || installationBusy}
+          disabled={
+            !online ||
+            !installedVersionsLoaded ||
+            alreadyInstalled ||
+            installationBusy
+          }
           onClick={() => onInstall(version)}
         >
           {installing ? (
@@ -125,7 +137,7 @@ function VersionRow({
               ? t("action-installed")
               : t("action-install")}
         </button>
-        {!alreadyInstalled && (
+        {installedVersionsLoaded && !alreadyInstalled && (
           <button
             type="button"
             className="icon-button compact"

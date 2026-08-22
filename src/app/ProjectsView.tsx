@@ -29,6 +29,7 @@ export function ProjectsView({
   const launcher = useProjectLauncher({
     t,
     installedVersions: studio.installedVersions,
+    installedVersionsLoaded: studio.installedLoaded,
     catalogVersions: studio.catalog.versions,
     downloadProgress: studio.downloadProgress,
     isInstalling: studio.isInstalling,
@@ -45,6 +46,7 @@ export function ProjectsView({
     search: projects.search,
     sharedDirectory: config.sharedDirectory,
     installedSet: studio.installedSet,
+    installedVersionsLoaded: studio.installedLoaded,
     isLaunching: studio.isLaunching,
     isBusy,
     launchKeyFor: launcher.launchKeyFor,

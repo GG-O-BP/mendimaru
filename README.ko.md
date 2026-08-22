@@ -127,6 +127,8 @@ Windows에서는 시스템 및 사용자 표준 경로의 Microsoft Edge와 Chro
 
 제거할 때도 Windows 제거 프로세스가 끝나고 해당 버전의 `StudioPro.exe`가 사라진 것을 확인한 뒤 설치된 버전 목록을 자동으로 갱신합니다.
 
+앱을 시작하면 호스트의 비공개 캐시에서 마지막으로 검증된 설치 버전 목록을 복원하므로 알려진 Studio Pro 릴리스가 즉시 표시됩니다. 현재 Windows 목록은 백그라운드에서 다시 검증하며, 검증이 성공할 때까지 설치·제거·실행·프로젝트 열기 동작을 잠급니다. 검증에 실패해도 설치 목록을 빈 상태로 오인하지 않고 마지막 목록과 명시적인 재시도를 유지합니다.
+
 Linux WinBoat 모드에서는 Studio Pro 실행 버튼이 Windows 프로세스의 실제 창이 생성되고 FreeRDP가 표시할 준비를 마칠 때까지 비활성화됩니다. 실행 준비 중에는 다른 버전과 프로젝트의 실행 버튼도 잠겨 중복 실행을 방지합니다. Windows는 공유 작업 스크립트의 해시를 고정하고 고유한 전용 경로에 복사해 그 사본만 실행합니다. 설치·제거는 이미 관리자 권한인 WinBoat 세션의 토큰을 상속하므로 별도의 UAC 창을 표시하지 않습니다.
 
 ## Linux 공유 워크스페이스
@@ -169,7 +171,7 @@ npm run test:e2e
 npm run tauri build
 ```
 
-Linux에서 `npm run test:e2e`는 고정 버전의 `tauri-driver`와 `WebKitWebDriver`를 통해 debug 실행 파일을 Vite 개발 URL에 연결합니다. 격리된 WinBoat/API/프로젝트 fixture로 실제 WebView, Tauri IPC, 온라인 앱 상태, 프레임을 샘플링한 경로·작업 중 애니메이션, 허용 목록 밖의 유휴 애니메이션이 없다는 점과 주요 화면 전환을 검증합니다. 드라이버 브리지는 `cargo install tauri-driver --version 2.0.6 --locked`로 설치하고 호스트에는 `WebKitWebDriver`도 있어야 합니다. `npm run test:app-flow`는 OS 경계를 모킹한 빠른 React 앱 흐름 테스트이고, `npm run test:browser`는 Mendimaru 데스크톱 셸이 아니라 Mendix Runtime 페이지를 테스트합니다. CI는 세 계층을 모두 통과시킨 뒤 Windows/Linux 테스트와 Windows MSI/NSIS 스모크 빌드를 수행합니다.
+Linux에서 `npm run test:e2e`는 고정 버전의 `tauri-driver`와 `WebKitWebDriver`를 통해 debug 실행 파일을 Vite 개발 URL에 연결합니다. 격리된 WinBoat/API/프로젝트 fixture로 실제 WebView, Tauri IPC, 온라인 앱 상태, 프레임을 샘플링한 제한된 경로·작업 중 애니메이션, 유휴 상태에서 지속 애니메이션이 없다는 점과 주요 화면 전환을 검증합니다. 드라이버 브리지는 `cargo install tauri-driver --version 2.0.6 --locked`로 설치하고 호스트에는 `WebKitWebDriver`도 있어야 합니다. `npm run test:app-flow`는 OS 경계를 모킹한 빠른 React 앱 흐름 테스트이고, `npm run test:browser`는 Mendimaru 데스크톱 셸이 아니라 Mendix Runtime 페이지를 테스트합니다. CI는 세 계층을 모두 통과시킨 뒤 Windows/Linux 테스트와 Windows MSI/NSIS 스모크 빌드를 수행합니다.
 
 실행 중인 실제 WinBoat에 대한 비파괴 RemoteApp 검증은 `npm run test:winboat-smoke`로 실행합니다. 인증된 세션 조회와 만료된 세션 거부를 검증합니다. 실제 상태를 바꾸는 수명주기 검증은 별도로 다음과 같이 실행하며, 이미 설치된 버전은 안전을 위해 거부합니다.
 

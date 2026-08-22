@@ -27,6 +27,10 @@ export function StudioView({
       installed={{
         versions: studio.installedVersions,
         sessions: studio.sessions,
+        loading: studio.installedLoading,
+        loaded: studio.installedLoaded,
+        stale: studio.installedStale,
+        error: studio.installedError,
         sessionsLoading: studio.sessionsLoading,
         isLaunching: studio.isLaunching,
         isBusy,
@@ -46,6 +50,7 @@ export function StudioView({
         error: studio.catalogError,
         hasMore: studio.hasMore,
         installedSet: studio.installedSet,
+        installedVersionsLoaded: studio.installedLoaded,
         isInstalling: studio.isInstalling,
         isBusy,
         onSearch: studio.setSearch,

@@ -8,7 +8,8 @@ import type {
 } from "../../domain/types";
 import type { Translate } from "../../i18n";
 
-const REFRESH_INTERVAL_MS = 1_500;
+const ACTIVE_REFRESH_INTERVAL_MS = 1_500;
+const IDLE_REFRESH_INTERVAL_MS = 15_000;
 
 export function useOperations({
   t,
@@ -28,6 +29,9 @@ export function useOperations({
   const [operations, setOperations] = useState<OperationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const refreshSequence = useRef(0);
+  const hasRunningOperations = operations.some(
+    (operation) => operation.state === "running",
+  );
 
   const refresh = useCallback(
     async (silent = false) => {
@@ -51,14 +55,16 @@ export function useOperations({
     const initialRefresh = window.setTimeout(() => void refresh(true), 0);
     const interval = window.setInterval(
       () => void refresh(true),
-      REFRESH_INTERVAL_MS,
+      hasRunningOperations
+        ? ACTIVE_REFRESH_INTERVAL_MS
+        : IDLE_REFRESH_INTERVAL_MS,
     );
     return () => {
       refreshSequence.current += 1;
       window.clearTimeout(initialRefresh);
       window.clearInterval(interval);
     };
-  }, [refresh]);
+  }, [hasRunningOperations, refresh]);
 
   const retry = useCallback(
     (operation: OperationRecord) => {

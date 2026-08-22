@@ -3,15 +3,28 @@ use crate::app_paths::AppPaths;
 use crate::contracts::StudioSessionStatus;
 use crate::downloads::{DownloadManager, DOWNLOAD_EVENT};
 use crate::models::{
-    CommandError, CommandErrorCode, DownloadableVersion, OperationRecord, StudioVersion,
-    StudioVersionCatalog,
+    CommandError, CommandErrorCode, DownloadableVersion, InstalledVersionsCache, OperationRecord,
+    StudioVersion, StudioVersionCatalog,
 };
 use tauri::{AppHandle, Emitter, State};
 
 #[tauri::command]
 pub(crate) async fn get_installed_versions(app: AppHandle) -> CommandResult<Vec<StudioVersion>> {
     let config = load_command_config(&app)?;
-    Ok(crate::platform::installed_versions(&config).await?)
+    let versions = crate::platform::installed_versions(&config).await?;
+    if let Ok(paths) = AppPaths::from_app(&app) {
+        let _ = crate::studio_cache::save(&paths, &config, &versions);
+    }
+    Ok(versions)
+}
+
+#[tauri::command]
+pub(crate) fn get_installed_versions_cache(
+    app: AppHandle,
+) -> CommandResult<InstalledVersionsCache> {
+    let paths = AppPaths::from_app(&app)?;
+    let config = load_command_config(&app)?;
+    Ok(crate::studio_cache::load(&paths, &config).unwrap_or_default())
 }
 
 #[tauri::command]

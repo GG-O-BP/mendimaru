@@ -63,6 +63,7 @@ export function ProjectLaunchAssistant({
 
   const canContinue =
     Boolean(state.selectedVersion) &&
+    launcher.installedVersionsLoaded &&
     (launcher.selectedInstalled || launcher.selectedDownloadable) &&
     state.lookupState !== "loading" &&
     !launcher.actionBusy &&

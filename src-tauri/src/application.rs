@@ -557,6 +557,10 @@ where
 {
     crate::platform::validate_version(&version)
         .map_err(|_| invalid_request("the Studio Pro version is invalid"))?;
+    ensure_version_not_installed(
+        &crate::platform::installed_versions(config).await?,
+        &version,
+    )?;
     ensure_no_running_session(config, &version, CapabilityId::StudioInstall).await?;
     let mut tracker = OperationTracker::begin_with_paths(
         paths,
@@ -715,6 +719,23 @@ async fn ensure_no_running_session(
     Ok(())
 }
 
+fn ensure_version_not_installed(
+    installed_versions: &[StudioVersion],
+    version: &str,
+) -> ApplicationResult<()> {
+    if installed_versions
+        .iter()
+        .any(|installed| installed.version == version)
+    {
+        return Err(precondition_error(
+            CapabilityId::StudioInstall,
+            &crate::tr!("error-studio-already-installed", version = version),
+            false,
+        ));
+    }
+    Ok(())
+}
+
 fn session_conflict_error(_message: String) -> CommandError {
     precondition_error(
         CapabilityId::StudioStatus,
@@ -795,9 +816,12 @@ fn precondition_error(capability: CapabilityId, message: &str, retryable: bool) 
 
 #[cfg(test)]
 mod tests {
-    use super::{exact_project_launch_path, launch_project, operation, project, projects};
+    use super::{
+        ensure_version_not_installed, exact_project_launch_path, launch_project, operation,
+        project, projects,
+    };
     use crate::app_paths::AppPaths;
-    use crate::models::{AppConfig, CommandErrorCode, ContainerRuntime};
+    use crate::models::{AppConfig, CommandErrorCode, ContainerRuntime, StudioVersion};
     use crate::operations::OperationTracker;
     use std::fs;
 
@@ -820,6 +844,24 @@ mod tests {
             windows_studio_paths: Vec::new(),
             startup_timeout_seconds: 1,
         }
+    }
+
+    #[test]
+    fn installation_rejects_an_exact_version_that_is_already_installed() {
+        crate::i18n::initialize("en-US").expect("localization");
+        let installed = StudioVersion {
+            version: "11.12.3".into(),
+            display_name: "Studio Pro 11.12.3".into(),
+            executable_path: r"C:\Program Files\Mendix\11.12.3\modeler\StudioPro.exe".into(),
+            install_root: r"C:\Program Files\Mendix\11.12.3".into(),
+            source: "fixture".into(),
+            removable: true,
+        };
+        let error = ensure_version_not_installed(&[installed], "11.12.3")
+            .expect_err("duplicate install must fail");
+        assert_eq!(error.code, CommandErrorCode::PreconditionFailed);
+        assert!(error.message.contains("11.12.3"));
+        ensure_version_not_installed(&[], "11.12.3").expect("absent version may install");
     }
 
     #[test]

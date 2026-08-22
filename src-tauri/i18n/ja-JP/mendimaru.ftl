@@ -97,6 +97,9 @@ native-workspace-missing-detail = Studio Proをインストールまたは起動
 installed-title = インストール済みバージョン
 installed-meta = すぐに起動できるStudio Pro
 refresh-installed = インストール済みバージョンを更新
+installed-loading-title = インストール済みStudio Proを確認しています
+installed-loading-detail = 現在のWindowsインストール一覧を読み込んでいます。
+installed-cache-verifying = 前回確認した一覧を表示し、Windowsで再検証しています。
 studio-session-count = %count%件実行中
 studio-session-no-project = プロジェクトを検出できません
 studio-session-started = 開始 %date%
@@ -145,6 +148,7 @@ manifest-release = リリース日
 manifest-status = 状態
 manifest-actions = 操作
 status-available = インストール可能
+status-checking-installed = インストール状況を確認中
 
 # インストールの進行状況
 progress-starting = インストールを準備しています。
@@ -392,6 +396,7 @@ error-container-start = WinBoatコンテナーを起動できませんでした:
 operation-container-start = WinBoatコンテナーの起動
 error-winboat-open = WinBoatを開けませんでした: { $error }
 error-studio-install-not-found = Studio Pro { $version }のインストールが見つかりませんでした。
+error-studio-already-installed = Studio Pro { $version }はすでにインストールされています。
 error-runtime-directory-create = 実行状態ディレクトリを作成できませんでした: { $error }
 operation-studio-launch = Studio Proの起動
 error-launch-path-missing = Studio Proのウィンドウは開きましたが、実行ファイルのパスを確認できませんでした。

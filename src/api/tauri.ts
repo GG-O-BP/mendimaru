@@ -7,6 +7,7 @@ import type {
   DownloadableVersion,
   DownloadProgress,
   EnvironmentStatus,
+  InstalledVersionsCache,
   LocalizationBundle,
   MendixProject,
   OperationRecord,
@@ -30,6 +31,7 @@ const commands = {
   getEnvironmentDiagnosticReport: "get_environment_diagnostic_report",
   exportEnvironmentDiagnosticReport: "export_environment_diagnostic_report",
   getInstalledVersions: "get_installed_versions",
+  getInstalledVersionsCache: "get_installed_versions_cache",
   getStudioSessions: "get_studio_sessions",
   getDownloadableVersionsCache: "get_downloadable_versions_cache",
   fetchDownloadableVersions: "fetch_downloadable_versions",
@@ -79,6 +81,8 @@ export const tauriApi = {
     invoke<boolean>(commands.exportEnvironmentDiagnosticReport),
   getInstalledVersions: () =>
     invoke<StudioVersion[]>(commands.getInstalledVersions),
+  getInstalledVersionsCache: () =>
+    invoke<InstalledVersionsCache>(commands.getInstalledVersionsCache),
   getStudioSessions: () =>
     invoke<StudioSessionStatus[]>(commands.getStudioSessions),
   getDownloadableVersionsCache: () =>

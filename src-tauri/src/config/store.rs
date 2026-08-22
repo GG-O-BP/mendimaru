@@ -1,10 +1,12 @@
 use crate::app_paths::AppPaths;
 use crate::models::AppConfig;
 use std::fs;
+use std::io::Read;
 use std::path::PathBuf;
 use tauri::AppHandle;
 
 const CONFIG_FILE_NAME: &str = "config.json";
+const MAX_CONFIG_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug)]
 pub(crate) struct ConfigSnapshot {
@@ -18,10 +20,30 @@ pub fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
 
 pub(crate) fn load_config_from(paths: &AppPaths) -> Result<AppConfig, String> {
     let path = config_path(paths);
-    if !path.is_file() {
-        return super::detect_config();
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return super::detect_config()
+        }
+        Err(error) => return Err(crate::tr!("error-config-read", error = error)),
+    };
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(crate::tr!(
+            "error-config-read",
+            error = "the configuration file must be a regular file"
+        ));
     }
-    let content = fs::read_to_string(&path)
+    if metadata.len() > MAX_CONFIG_BYTES {
+        return Err(crate::tr!(
+            "error-config-read",
+            error = "the configuration file exceeds the safe size limit"
+        ));
+    }
+    let file =
+        fs::File::open(&path).map_err(|error| crate::tr!("error-config-read", error = error))?;
+    let mut content = String::with_capacity(metadata.len() as usize);
+    file.take(MAX_CONFIG_BYTES + 1)
+        .read_to_string(&mut content)
         .map_err(|error| crate::tr!("error-config-read", error = error))?;
     serde_json::from_str::<AppConfig>(&content)
         .map_err(|error| crate::tr!("error-config-parse", error = error))
@@ -41,10 +63,30 @@ pub(crate) fn persist_config_from(paths: &AppPaths, config: &AppConfig) -> Resul
 
 pub(crate) fn snapshot_config(app: &AppHandle) -> Result<ConfigSnapshot, String> {
     let path = config_path(&AppPaths::from_app(app)?);
-    let content = if path.is_file() {
-        Some(fs::read(&path).map_err(|error| crate::tr!("error-config-read", error = error))?)
-    } else {
-        None
+    let content = match fs::symlink_metadata(&path) {
+        Ok(metadata) => {
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return Err(crate::tr!(
+                    "error-config-read",
+                    error = "the configuration file must be a regular file"
+                ));
+            }
+            if metadata.len() > MAX_CONFIG_BYTES {
+                return Err(crate::tr!(
+                    "error-config-read",
+                    error = "the configuration file exceeds the safe size limit"
+                ));
+            }
+            let mut content = Vec::with_capacity(metadata.len() as usize);
+            fs::File::open(&path)
+                .map_err(|error| crate::tr!("error-config-read", error = error))?
+                .take(MAX_CONFIG_BYTES + 1)
+                .read_to_end(&mut content)
+                .map_err(|error| crate::tr!("error-config-read", error = error))?;
+            Some(content)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(crate::tr!("error-config-read", error = error)),
     };
     Ok(ConfigSnapshot { path, content })
 }
@@ -60,10 +102,83 @@ pub(crate) fn restore_config(snapshot: &ConfigSnapshot) -> Result<(), String> {
 
 fn atomic_write(path: &std::path::Path, content: &[u8]) -> Result<(), String> {
     let temporary_path = path.with_extension("json.tmp");
-    fs::write(&temporary_path, content)
-        .map_err(|error| crate::tr!("error-config-save", error = error))?;
-    fs::rename(&temporary_path, path)
-        .map_err(|error| crate::tr!("error-config-save", error = error))
+    let result = (|| {
+        if let Ok(metadata) = fs::symlink_metadata(path) {
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return Err(crate::tr!(
+                    "error-config-save",
+                    error = "the configuration file must be a regular file"
+                ));
+            }
+        }
+        if let Ok(metadata) = fs::symlink_metadata(&temporary_path) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(crate::tr!(
+                    "error-config-save",
+                    error = "the temporary configuration file is unsafe"
+                ));
+            }
+            fs::remove_file(&temporary_path)
+                .map_err(|error| crate::tr!("error-config-save", error = error))?;
+        }
+        let mut options = fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut temporary = options
+            .open(&temporary_path)
+            .map_err(|error| crate::tr!("error-config-save", error = error))?;
+        use std::io::Write;
+        temporary
+            .write_all(content)
+            .and_then(|_| temporary.sync_all())
+            .map_err(|error| crate::tr!("error-config-save", error = error))?;
+        replace_file(&temporary_path, path)
+            .map_err(|error| crate::tr!("error-config-save", error = error))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary_path);
+    }
+    result
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_file(source: &std::path::Path, destination: &std::path::Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file(source: &std::path::Path, destination: &std::path::Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn config_path(paths: &AppPaths) -> PathBuf {
@@ -102,6 +217,30 @@ mod tests {
             load_config_from(&paths).expect("load headless config"),
             expected
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_and_oversized_configuration_files() {
+        use std::os::unix::fs::symlink;
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let paths = AppPaths::for_tests(
+            temporary.path().join("config"),
+            temporary.path().join("cache"),
+        );
+        paths.ensure_config_directory().expect("config directory");
+        let target = temporary.path().join("target.json");
+        fs::write(&target, b"{}").expect("target config");
+        symlink(&target, paths.config_directory().join("config.json")).expect("config symlink");
+        assert!(load_config_from(&paths).is_err());
+
+        fs::remove_file(paths.config_directory().join("config.json")).expect("remove symlink");
+        fs::write(
+            paths.config_directory().join("config.json"),
+            vec![b'x'; super::MAX_CONFIG_BYTES as usize + 1],
+        )
+        .expect("oversized config");
+        assert!(load_config_from(&paths).is_err());
     }
 
     fn config_for_store(workspace: &std::path::Path) -> AppConfig {

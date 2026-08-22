@@ -97,6 +97,9 @@ native-workspace-missing-detail = Studio Pro를 설치하거나 실행하기 전
 installed-title = 설치된 버전
 installed-meta = 바로 실행할 수 있는 Studio Pro
 refresh-installed = 설치된 버전 새로고침
+installed-loading-title = 설치된 Studio Pro 버전을 확인하고 있습니다
+installed-loading-detail = 현재 Windows 설치 목록을 읽는 중입니다.
+installed-cache-verifying = 마지막으로 확인한 설치 목록을 표시하고 있으며 Windows에서 다시 검증 중입니다.
 studio-session-count = %count%개 실행 중
 studio-session-no-project = 감지된 프로젝트 없음
 studio-session-started = 시작 %date%
@@ -145,6 +148,7 @@ manifest-release = 출시일
 manifest-status = 상태
 manifest-actions = 작업
 status-available = 설치 가능
+status-checking-installed = 설치 여부 확인 중
 
 # 설치 진행 상태
 progress-starting = 설치를 준비하고 있습니다.
@@ -392,6 +396,7 @@ error-container-start = WinBoat 컨테이너를 시작하지 못했습니다: { 
 operation-container-start = WinBoat 컨테이너 시작
 error-winboat-open = WinBoat를 열 수 없습니다: { $error }
 error-studio-install-not-found = Studio Pro { $version } 설치를 찾을 수 없습니다.
+error-studio-already-installed = Studio Pro { $version } 버전은 이미 설치되어 있습니다.
 error-runtime-directory-create = 실행 상태 디렉터리를 만들 수 없습니다: { $error }
 operation-studio-launch = Studio Pro 실행
 error-launch-path-missing = Studio Pro 창은 열렸지만 실행 경로를 확인하지 못했습니다.

@@ -3,6 +3,7 @@ import type { Translate } from "../../i18n";
 
 export interface StudioDependencies {
   t: Translate;
+  installedVersionsSourceKey: string;
   notify: (kind: ToastKind, title: string, detail?: string) => void;
   requestConfirmation: (state: ConfirmationState) => void;
   runAction: (key: string, action: () => Promise<void>) => Promise<void>;
@@ -14,6 +15,7 @@ export interface StudioDependencies {
 export type InstalledVersionsDependencies = Pick<
   StudioDependencies,
   | "t"
+  | "installedVersionsSourceKey"
   | "notify"
   | "requestConfirmation"
   | "runAction"

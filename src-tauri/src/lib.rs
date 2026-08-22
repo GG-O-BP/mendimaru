@@ -16,6 +16,7 @@ mod portable_runtime;
 mod project_launches;
 mod projects;
 mod settings;
+mod studio_cache;
 #[cfg_attr(target_os = "windows", allow(dead_code, unused_imports))]
 mod winboat;
 
@@ -49,6 +50,7 @@ pub fn run() {
             get_environment_diagnostic_report,
             export_environment_diagnostic_report,
             get_installed_versions,
+            get_installed_versions_cache,
             get_studio_sessions,
             get_downloadable_versions_cache,
             fetch_downloadable_versions,

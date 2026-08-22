@@ -94,7 +94,7 @@
 }
 
 .route-status.online .route-track i {
-  animation: route-travel 2.6s ease-in-out infinite;
+  animation: route-travel 2.6s ease-in-out 2;
 }
 
 @keyframes route-travel {

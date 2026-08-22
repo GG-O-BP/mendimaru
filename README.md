@@ -130,6 +130,8 @@ Installers are stored in `.mendimaru/installers` under the configured workspace.
 
 Likewise, removal is complete only after the official Windows uninstaller exits and `StudioPro.exe` for that version disappears. The installed-version list is then refreshed automatically.
 
+At startup, the GUI restores the last verified installed-version list from a private host cache so known Studio Pro releases appear immediately. The current Windows list is verified in the background; install, remove, launch, and project-open actions remain locked until that verification succeeds. If verification fails, the last known list remains visible with an explicit retry instead of being treated as an empty installation.
+
 In Linux WinBoat mode, the Studio Pro launch button remains disabled until the Windows process has created a real window and FreeRDP is ready to display it. While a launch is being prepared, launch buttons for other versions and projects are also locked to prevent duplicate launches. Windows hash-pins the shared operation script, copies it to a unique private path, and executes only that copy. Installation and removal inherit the token of the already elevated WinBoat session, so no separate UAC window is shown.
 
 ## Linux shared workspace
@@ -174,7 +176,7 @@ npm run test:e2e
 npm run tauri build
 ```
 
-On Linux, `npm run test:e2e` launches the debug executable against the Vite development URL through pinned `tauri-driver` and `WebKitWebDriver`. It uses isolated WinBoat/API/project fixtures and verifies the real WebView, Tauri IPC, online application state, sampled route and busy-state motion, the absence of every non-allowlisted idle animation, and primary navigation. Install the driver bridge with `cargo install tauri-driver --version 2.0.6 --locked`; the host must also provide `WebKitWebDriver`. `npm run test:app-flow` retains the faster React application-flow suite with mocked OS boundaries, while `npm run test:browser` tests Mendix Runtime pages rather than the Mendimaru desktop shell. CI gates all three layers, runs the frontend and Rust suites on Windows and Linux, and smoke-builds MSI and NSIS installers on Windows.
+On Linux, `npm run test:e2e` launches the debug executable against the Vite development URL through pinned `tauri-driver` and `WebKitWebDriver`. It uses isolated WinBoat/API/project fixtures and verifies the real WebView, Tauri IPC, online application state, sampled bounded route and busy-state motion, the absence of continuous idle animation, and primary navigation. Install the driver bridge with `cargo install tauri-driver --version 2.0.6 --locked`; the host must also provide `WebKitWebDriver`. `npm run test:app-flow` retains the faster React application-flow suite with mocked OS boundaries, while `npm run test:browser` tests Mendix Runtime pages rather than the Mendimaru desktop shell. CI gates all three layers, runs the frontend and Rust suites on Windows and Linux, and smoke-builds MSI and NSIS installers on Windows.
 
 Run `npm run test:winboat-smoke` for the non-destructive RemoteApp gate against an online WinBoat VM. It verifies authenticated session queries and stale-session rejection. The destructive lifecycle gate is deliberately separate and refuses a version that was already installed:
 

@@ -97,6 +97,9 @@ native-workspace-missing-detail = Choose an existing Windows workspace in Settin
 installed-title = Installed versions
 installed-meta = Studio Pro versions ready to launch
 refresh-installed = Refresh installed versions
+installed-loading-title = Checking installed Studio Pro versions
+installed-loading-detail = Reading the current Windows installation list.
+installed-cache-verifying = Showing the last known installation list while Windows verifies it.
 studio-session-count = %count% running
 studio-session-no-project = No project detected
 studio-session-started = Started %date%
@@ -145,6 +148,7 @@ manifest-release = Released
 manifest-status = Status
 manifest-actions = Actions
 status-available = Available
+status-checking-installed = Checking installation
 
 # Installation progress
 progress-starting = Preparing the installation.
@@ -392,6 +396,7 @@ error-container-start = Could not start the WinBoat container: { $error }
 operation-container-start = starting the WinBoat container
 error-winboat-open = Could not open WinBoat: { $error }
 error-studio-install-not-found = Could not find the Studio Pro { $version } installation.
+error-studio-already-installed = Studio Pro { $version } is already installed.
 error-runtime-directory-create = Could not create the runtime status directory: { $error }
 operation-studio-launch = launching Studio Pro
 error-launch-path-missing = The Studio Pro window opened, but its executable path could not be verified.
