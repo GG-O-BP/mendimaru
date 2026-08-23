@@ -1112,6 +1112,8 @@ fn real_binary_distinguishes_portable_consistency_build_and_readiness_failures()
     let temporary = tempfile::tempdir().expect("temporary directory");
     let fixture = portable_fixture(temporary.path(), "success", NEVER_READY_RUNTIME);
     let project_id = fixture_project_id(&fixture);
+    // Leave enough of the operation budget for the readiness probe after the
+    // fixture build, which is measurably slower on Windows CI runners.
     let failed = run_portable(
         &fixture,
         &[
@@ -1121,7 +1123,7 @@ fn real_binary_distinguishes_portable_consistency_build_and_readiness_failures()
             &project_id,
             "--json",
             "--timeout-seconds",
-            "8",
+            "20",
         ],
         None,
     );

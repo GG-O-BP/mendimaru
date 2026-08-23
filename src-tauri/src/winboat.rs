@@ -260,9 +260,11 @@ mod tests {
         let decoded = BASE64_STANDARD
             .decode(encode_powershell_script(script))
             .expect("valid base64");
-        let utf16: Vec<u16> = decoded
-            .chunks_exact(2)
-            .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        let (code_units, remainder) = decoded.as_chunks::<2>();
+        assert!(remainder.is_empty());
+        let utf16: Vec<u16> = code_units
+            .iter()
+            .map(|bytes| u16::from_le_bytes(*bytes))
             .collect();
         assert_eq!(String::from_utf16(&utf16).expect("valid UTF-16"), script);
     }

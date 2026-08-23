@@ -1,7 +1,7 @@
 # Maintainer: GGOBP <GGOBP at protonmail dot ch>
 
 pkgname=mendimaru
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Manage Mendix Studio Pro on Linux through WinBoat"
 arch=('x86_64')

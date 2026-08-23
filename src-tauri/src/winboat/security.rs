@@ -292,9 +292,12 @@ fn hex_decode(value: &str) -> Option<Vec<u8>> {
     if !value.len().is_multiple_of(2) || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return None;
     }
-    value
-        .as_bytes()
-        .chunks_exact(2)
+    let (pairs, remainder) = value.as_bytes().as_chunks::<2>();
+    if !remainder.is_empty() {
+        return None;
+    }
+    pairs
+        .iter()
         .map(|pair| {
             let pair = std::str::from_utf8(pair).ok()?;
             u8::from_str_radix(pair, 16).ok()
