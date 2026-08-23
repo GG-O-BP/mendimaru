@@ -254,3 +254,4 @@ jobs:
           foreach ($installer in $installers) {
             gh release upload $env:RELEASE_TAG $installer.FullName `
               --repo $env:GITHUB_REPOSITORY --clobber
+          }
