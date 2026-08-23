@@ -43,8 +43,8 @@ Keep these versions identical before creating a tag:
 Then push the release tag:
 
 ```sh
-git tag -a v0.2.0 -m "Mendimaru 0.2.0"
-git push origin v0.2.0
+git tag -a v0.2.1 -m "Mendimaru 0.2.1"
+git push origin v0.2.1
 ```
 
 The workflow creates the GitHub release, calculates the source archive's
@@ -57,7 +57,7 @@ The updater defaults to a non-publishing dry run:
 
 ```sh
 bash scripts/update-mendimaru-aur.sh \
-  --tag v0.2.0 \
+  --tag v0.2.1 \
   --verify-source
 ```
 
