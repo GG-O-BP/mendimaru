@@ -939,6 +939,12 @@ pub(super) fn dispatch(arguments: &[std::ffi::OsString]) -> i32 {
 
 async fn supervisor_main(session_id: &str) -> Result<(), ()> {
     let layout = RuntimeLayout::discover().map_err(|_| ())?;
+    let mut stdin = BufReader::new(tokio::io::stdin());
+    let mut payload_line = String::new();
+    // The parent can persist this process's exact PID and start token only
+    // after spawning it. The handshake is written after that atomic update,
+    // so reading it first is the supervisor registration barrier.
+    let read_result = stdin.read_line(&mut payload_line).await;
     let mut record: SessionRecord =
         store::read_json(&layout.session_record(session_id).map_err(|_| ())?).map_err(|_| ())?;
     if record.session_id != session_id
@@ -955,9 +961,7 @@ async fn supervisor_main(session_id: &str) -> Result<(), ()> {
         written: 0,
         saturated: false,
     }));
-    let mut stdin = BufReader::new(tokio::io::stdin());
-    let mut payload_line = String::new();
-    let count = match stdin.read_line(&mut payload_line).await {
+    let count = match read_result {
         Ok(count) => count,
         Err(_) => {
             fail_initialization(&layout, &mut record, &log, "runtime handshake read failed").await;
