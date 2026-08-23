@@ -13,6 +13,7 @@ export function ProjectsView({
   t,
   localization,
   config,
+  requiresWinboat,
   projects,
   studio,
   isBusy,
@@ -21,6 +22,7 @@ export function ProjectsView({
   t: Translate;
   localization: LocalizationBundle;
   config: AppConfig;
+  requiresWinboat: boolean;
   projects: ReturnType<typeof useProjects>;
   studio: ReturnType<typeof useStudio>;
   isBusy: (key: string) => boolean;
@@ -30,6 +32,11 @@ export function ProjectsView({
     t,
     installedVersions: studio.installedVersions,
     installedVersionsLoaded: studio.installedLoaded,
+    studioSessionsLoading: studio.sessionsLoading,
+    connectedRemoteAppVersion: requiresWinboat
+      ? studio.sessions.find((session) => session.connection === "connected")
+          ?.version
+      : undefined,
     catalogVersions: studio.catalog.versions,
     downloadProgress: studio.downloadProgress,
     isInstalling: studio.isInstalling,
@@ -47,6 +54,8 @@ export function ProjectsView({
     sharedDirectory: config.sharedDirectory,
     installedSet: studio.installedSet,
     installedVersionsLoaded: studio.installedLoaded,
+    studioSessionsLoading: studio.sessionsLoading,
+    connectedRemoteAppVersion: launcher.connectedRemoteAppVersion,
     isLaunching: studio.isLaunching,
     isBusy,
     launchKeyFor: launcher.launchKeyFor,

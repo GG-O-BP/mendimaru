@@ -627,6 +627,82 @@ describe("native Windows application E2E", () => {
     });
   });
 
+  it("blocks another project and Studio mutation while a WinBoat RemoteApp is connected", async () => {
+    const linuxConfig: AppConfig = {
+      ...config,
+      winboatExecutable: "/opt/winboat/winboat",
+      composeFile: "/home/dev/.winboat/docker-compose.yml",
+      containerName: "WinBoat",
+      apiUrl: "http://127.0.0.1:47280",
+      rdpHost: "127.0.0.1",
+      rdpPort: 47300,
+      sharedDirectory: "/home/dev/Mendix",
+      windowsSharedDirectory: String.raw`\\host.lan\Data`,
+      freerdpBinary: "xfreerdp3",
+    };
+    sessions = [
+      {
+        schemaVersion: "1.0.0",
+        sessionId: "studio-2152-639230493975253883",
+        version: "10.24.9",
+        state: "running",
+        processId: 2152,
+        startedAt: "2026-08-23T02:36:37Z",
+        connection: "connected",
+        reconnectable: false,
+        reconnectUnavailable: "already-connected",
+      },
+    ];
+    mocks.getConfig.mockResolvedValue(linuxConfig);
+    mocks.getEnvironmentStatus.mockResolvedValue({
+      ...status,
+      platform: {
+        ...status.platform,
+        kind: "linux-winboat",
+        requiresWinboat: true,
+      },
+      winboatAvailable: true,
+      winboatInitialized: true,
+      composeAvailable: true,
+      freerdpAvailable: true,
+      containerStatus: "running",
+    });
+
+    render(<App />);
+    await screen.findByText("route-linux");
+    const installedCard = (await screen.findByText("11.12.2")).closest(
+      "article",
+    );
+    expect(installedCard).not.toBeNull();
+    expect(
+      within(installedCard!).getByRole("button", { name: "action-launch" }),
+    ).toBeDisabled();
+    expect(
+      within(installedCard!).getAllByTitle(
+        "studio-connected-session-blocks-detail",
+      )[1],
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "action-install" }),
+    ).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+    expect(
+      await screen.findByText("studio-connected-session-blocks-title"),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "action-open" })).toBeDisabled();
+    expect(mocks.launchStudioPro).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /nav-studio/ }));
+    const connectedRow = (
+      await screen.findByText("studio-session-connected")
+    ).closest<HTMLElement>(".studio-session");
+    expect(connectedRow).not.toBeNull();
+    expect(
+      within(connectedRow!).getByTitle("action-stop-session"),
+    ).toBeEnabled();
+  });
+
   it("keeps an explicit version choice when an older exact lookup completes later", async () => {
     installed = [portableStudio];
     let finishLookup: (version: DownloadableVersion) => void = () => {

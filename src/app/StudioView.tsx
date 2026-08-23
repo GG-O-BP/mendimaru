@@ -17,6 +17,11 @@ export function StudioView({
   studio: ReturnType<typeof useStudio>;
   isBusy: (key: string) => boolean;
 }) {
+  const connectedRemoteAppVersion = environment.status?.platform.requiresWinboat
+    ? studio.sessions.find((session) => session.connection === "connected")
+        ?.version
+    : undefined;
+
   return (
     <StudioPage
       t={t}
@@ -27,6 +32,7 @@ export function StudioView({
       installed={{
         versions: studio.installedVersions,
         sessions: studio.sessions,
+        connectedRemoteAppVersion,
         loading: studio.installedLoading,
         loaded: studio.installedLoaded,
         stale: studio.installedStale,
@@ -51,6 +57,8 @@ export function StudioView({
         hasMore: studio.hasMore,
         installedSet: studio.installedSet,
         installedVersionsLoaded: studio.installedLoaded,
+        studioSessionsLoading: studio.sessionsLoading,
+        connectedRemoteAppVersion,
         isInstalling: studio.isInstalling,
         isBusy,
         onSearch: studio.setSearch,

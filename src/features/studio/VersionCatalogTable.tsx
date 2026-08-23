@@ -47,6 +47,8 @@ export function VersionCatalogTable({
               online={online}
               alreadyInstalled={catalog.installedSet.has(version.version)}
               installedVersionsLoaded={catalog.installedVersionsLoaded}
+              studioSessionsLoading={catalog.studioSessionsLoading}
+              connectedRemoteAppVersion={catalog.connectedRemoteAppVersion}
               installing={catalog.isBusy(`install-${version.version}`)}
               installationBusy={catalog.isInstalling}
               onInstall={catalog.onInstall}
@@ -65,6 +67,8 @@ function VersionRow({
   online,
   alreadyInstalled,
   installedVersionsLoaded,
+  studioSessionsLoading,
+  connectedRemoteAppVersion,
   installing,
   installationBusy,
   onInstall,
@@ -75,6 +79,8 @@ function VersionRow({
   online: boolean;
   alreadyInstalled: boolean;
   installedVersionsLoaded: boolean;
+  studioSessionsLoading: boolean;
+  connectedRemoteAppVersion?: string;
   installing: boolean;
   installationBusy: boolean;
   onInstall: CatalogModel["onInstall"];
@@ -119,8 +125,17 @@ function VersionRow({
           disabled={
             !online ||
             !installedVersionsLoaded ||
+            studioSessionsLoading ||
+            Boolean(connectedRemoteAppVersion) ||
             alreadyInstalled ||
             installationBusy
+          }
+          title={
+            connectedRemoteAppVersion
+              ? t("studio-connected-session-blocks-detail", {
+                  version: connectedRemoteAppVersion,
+                })
+              : undefined
           }
           onClick={() => onInstall(version)}
         >
@@ -141,9 +156,20 @@ function VersionRow({
           <button
             type="button"
             className="icon-button compact"
-            title={t("action-force-redownload")}
             aria-label={t("action-force-redownload")}
-            disabled={!online || installationBusy}
+            disabled={
+              !online ||
+              studioSessionsLoading ||
+              Boolean(connectedRemoteAppVersion) ||
+              installationBusy
+            }
+            title={
+              connectedRemoteAppVersion
+                ? t("studio-connected-session-blocks-detail", {
+                    version: connectedRemoteAppVersion,
+                  })
+                : t("action-force-redownload")
+            }
             onClick={() => onInstall(version, true)}
           >
             <RefreshCw size={15} />

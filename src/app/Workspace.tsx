@@ -164,6 +164,9 @@ export function Workspace({
           t={t}
           localization={localization}
           config={environment.config}
+          requiresWinboat={Boolean(
+            environment.status?.platform.requiresWinboat,
+          )}
           projects={projects}
           studio={studio}
           isBusy={isBusy}

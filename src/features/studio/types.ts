@@ -18,6 +18,7 @@ export const EMPTY_VERSION_SUPPORT_FILTERS: VersionSupportFilters = {
 export interface InstalledVersionsModel {
   versions: StudioVersion[];
   sessions: StudioSessionStatus[];
+  connectedRemoteAppVersion?: string;
   loading: boolean;
   loaded: boolean;
   stale: boolean;
@@ -43,6 +44,8 @@ export interface CatalogModel {
   hasMore: boolean;
   installedSet: Set<string>;
   installedVersionsLoaded: boolean;
+  studioSessionsLoading: boolean;
+  connectedRemoteAppVersion?: string;
   isInstalling: boolean;
   isBusy: (key: string) => boolean;
   onSearch: (value: string) => void;

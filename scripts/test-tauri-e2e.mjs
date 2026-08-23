@@ -175,6 +175,13 @@ try {
   const routeMotion = await execute(`
     const marker = document.querySelector(".route-track i");
     if (!marker) return null;
+    // The production route animation is intentionally bounded and may have
+    // finished while native commands were populating the view. Restart the
+    // same CSS animation on the real marker so sampling never depends on host
+    // speed or the exact point at which WebDriver attached.
+    marker.style.animation = "none";
+    void marker.offsetWidth;
+    marker.style.animation = "";
     const style = getComputedStyle(marker);
     const animation = marker.getAnimations()[0];
     return {

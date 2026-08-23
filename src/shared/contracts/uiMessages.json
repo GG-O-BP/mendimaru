@@ -102,6 +102,8 @@
   "studio-session-start-unknown": true,
   "studio-session-process": true,
   "studio-session-connected": true,
+  "studio-connected-session-blocks-title": true,
+  "studio-connected-session-blocks-detail": true,
   "studio-session-disconnected": true,
   "studio-session-native": true,
   "studio-session-actions-aria": true,

@@ -132,7 +132,7 @@ Likewise, removal is complete only after the official Windows uninstaller exits 
 
 At startup, the GUI restores the last verified installed-version list from a private host cache so known Studio Pro releases appear immediately. The current Windows list is verified in the background; install, remove, launch, and project-open actions remain locked until that verification succeeds. If verification fails, the last known list remains visible with an explicit retry instead of being treated as an empty installation.
 
-In Linux WinBoat mode, the Studio Pro launch button remains disabled until the Windows process has created a real window and FreeRDP is ready to display it. While a launch is being prepared, launch buttons for other versions and projects are also locked to prevent duplicate launches. Windows hash-pins the shared operation script, copies it to a unique private path, and executes only that copy. Installation and removal inherit the token of the already elevated WinBoat session, so no separate UAC window is shown.
+In Linux WinBoat mode, the Studio Pro launch button remains disabled until the Windows process has created a real window and FreeRDP is ready to display it. WinBoat can retain only one connected Studio Pro RemoteApp at a time, so while one is connected Mendimaru locks new Studio launches, project opening, installation, and removal until that session is closed from the Studio Pro view. The same actions stay locked while a launch is being prepared. Windows hash-pins the shared operation script, copies it to a unique private path, and executes only that copy. Installation and removal inherit the token of the already elevated WinBoat session, so no separate UAC window is shown.
 
 ## Linux shared workspace
 

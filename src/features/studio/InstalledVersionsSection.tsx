@@ -128,7 +128,20 @@ export function InstalledVersionsSection({
                   type="button"
                   className="button light"
                   onClick={() => model.onLaunch(version)}
-                  disabled={!online || !model.loaded || model.isLaunching}
+                  disabled={
+                    !online ||
+                    !model.loaded ||
+                    model.sessionsLoading ||
+                    Boolean(model.connectedRemoteAppVersion) ||
+                    model.isLaunching
+                  }
+                  title={
+                    model.connectedRemoteAppVersion
+                      ? t("studio-connected-session-blocks-detail", {
+                          version: model.connectedRemoteAppVersion,
+                        })
+                      : undefined
+                  }
                 >
                   {model.isBusy(launchKey) ? (
                     <LoaderCircle size={17} className="spin" />
@@ -143,18 +156,24 @@ export function InstalledVersionsSection({
                   type="button"
                   className="icon-button danger inverse"
                   title={
-                    versionSessions.length > 0
-                      ? t("running-version-title")
-                      : version.removable
-                        ? t("remove-version-title", {
-                            version: version.version,
-                          })
-                        : t("removal-unavailable-title")
+                    model.connectedRemoteAppVersion
+                      ? t("studio-connected-session-blocks-detail", {
+                          version: model.connectedRemoteAppVersion,
+                        })
+                      : versionSessions.length > 0
+                        ? t("running-version-title")
+                        : version.removable
+                          ? t("remove-version-title", {
+                              version: version.version,
+                            })
+                          : t("removal-unavailable-title")
                   }
                   onClick={() => model.onUninstall(version)}
                   disabled={
                     !online ||
                     !model.loaded ||
+                    model.sessionsLoading ||
+                    Boolean(model.connectedRemoteAppVersion) ||
                     !version.removable ||
                     versionSessions.length > 0 ||
                     model.isBusy(uninstallKey)

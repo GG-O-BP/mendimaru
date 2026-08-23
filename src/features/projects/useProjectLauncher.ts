@@ -14,6 +14,8 @@ interface ProjectLauncherDependencies {
   t: Translate;
   installedVersions: StudioVersion[];
   installedVersionsLoaded: boolean;
+  studioSessionsLoading: boolean;
+  connectedRemoteAppVersion?: string;
   catalogVersions: DownloadableVersion[];
   downloadProgress: DownloadProgress | null;
   isInstalling: boolean;
@@ -55,6 +57,8 @@ export function useProjectLauncher({
   t,
   installedVersions,
   installedVersionsLoaded,
+  studioSessionsLoading,
+  connectedRemoteAppVersion,
   catalogVersions,
   downloadProgress,
   isInstalling,
@@ -242,7 +246,12 @@ export function useProjectLauncher({
 
   const launchProject = useCallback(
     (project: MendixProject) => {
-      if (!installedVersionsLoaded) return;
+      if (
+        !installedVersionsLoaded ||
+        studioSessionsLoading ||
+        connectedRemoteAppVersion
+      )
+        return;
       if (launchPendingFor(project)) {
         openAssistant(project);
         return;
@@ -262,6 +271,8 @@ export function useProjectLauncher({
       completeLaunch,
       installedByVersion,
       installedVersionsLoaded,
+      studioSessionsLoading,
+      connectedRemoteAppVersion,
       launchPendingFor,
       openAssistant,
       remember,
@@ -330,7 +341,13 @@ export function useProjectLauncher({
   }, []);
 
   const continueAssistant = useCallback(() => {
-    if (!assistant?.selectedVersion || !installedVersionsLoaded) return;
+    if (
+      !assistant?.selectedVersion ||
+      !installedVersionsLoaded ||
+      studioSessionsLoading ||
+      connectedRemoteAppVersion
+    )
+      return;
     const { project, selectedVersion } = assistant;
     const sequence = ++actionSequence.current;
     const installed = installedByVersion.get(selectedVersion);
@@ -359,6 +376,8 @@ export function useProjectLauncher({
     installVersion,
     installedByVersion,
     installedVersionsLoaded,
+    studioSessionsLoading,
+    connectedRemoteAppVersion,
     remember,
     reportPreferenceError,
     t,
@@ -411,6 +430,8 @@ export function useProjectLauncher({
     selectedInstalled,
     selectedDownloadable,
     installedVersionsLoaded,
+    studioSessionsLoading,
+    connectedRemoteAppVersion,
     safetyRequired,
     actionBusy,
     downloadProgress,

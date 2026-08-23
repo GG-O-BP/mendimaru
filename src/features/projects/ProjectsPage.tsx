@@ -26,6 +26,8 @@ export interface ProjectsPageModel {
   sharedDirectory: string;
   installedSet: Set<string>;
   installedVersionsLoaded: boolean;
+  studioSessionsLoading: boolean;
+  connectedRemoteAppVersion?: string;
   isLaunching: boolean;
   isBusy: (key: string) => boolean;
   launchKeyFor: (project: MendixProject) => string;
@@ -93,6 +95,21 @@ export function ProjectsPage({
           meta={t("projects-manifest-meta")}
           action={<ProjectTools t={t} model={model} />}
         />
+
+        {model.connectedRemoteAppVersion && (
+          <div className="project-session-notice" role="status">
+            <strong>
+              {t("studio-connected-session-blocks-title", {
+                version: model.connectedRemoteAppVersion,
+              })}
+            </strong>
+            <span>
+              {t("studio-connected-session-blocks-detail", {
+                version: model.connectedRemoteAppVersion,
+              })}
+            </span>
+          </div>
+        )}
 
         {model.projects.length > 0 ? (
           <div className="manifest-table-wrap">
@@ -165,7 +182,17 @@ export function ProjectsPage({
                           className="button primary compact"
                           onClick={() => model.onLaunch(project)}
                           disabled={
-                            !model.installedVersionsLoaded || model.isLaunching
+                            !model.installedVersionsLoaded ||
+                            model.studioSessionsLoading ||
+                            Boolean(model.connectedRemoteAppVersion) ||
+                            model.isLaunching
+                          }
+                          title={
+                            model.connectedRemoteAppVersion
+                              ? t("studio-connected-session-blocks-detail", {
+                                  version: model.connectedRemoteAppVersion,
+                                })
+                              : undefined
                           }
                         >
                           {model.isBusy(launchKey) ? (

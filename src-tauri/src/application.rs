@@ -459,6 +459,7 @@ pub(crate) async fn launch(
 ) -> ApplicationResult<String> {
     crate::platform::validate_version(&version)
         .map_err(|_| invalid_request("the Studio Pro version is invalid"))?;
+    ensure_no_connected_remote_app(CapabilityId::StudioStart)?;
     let protected_project = project_mpr_path.is_some();
     let tracker = OperationTracker::begin_with_paths(
         paths,
@@ -524,6 +525,7 @@ pub(crate) async fn uninstall(
 ) -> ApplicationResult<String> {
     crate::platform::validate_version(&version)
         .map_err(|_| invalid_request("the Studio Pro version is invalid"))?;
+    ensure_no_connected_remote_app(CapabilityId::StudioUninstall)?;
     ensure_no_running_session(config, &version, CapabilityId::StudioUninstall).await?;
     let tracker = OperationTracker::begin_with_paths(
         paths,
@@ -557,6 +559,7 @@ where
 {
     crate::platform::validate_version(&version)
         .map_err(|_| invalid_request("the Studio Pro version is invalid"))?;
+    ensure_no_connected_remote_app(CapabilityId::StudioInstall)?;
     ensure_version_not_installed(
         &crate::platform::installed_versions(config).await?,
         &version,
@@ -736,6 +739,34 @@ fn ensure_version_not_installed(
     Ok(())
 }
 
+fn ensure_no_connected_remote_app(capability: CapabilityId) -> ApplicationResult<()> {
+    #[cfg(target_os = "linux")]
+    let connected_version = crate::winboat::registered_client_sessions()
+        .first()
+        .map(|session| session.version.clone());
+    #[cfg(not(target_os = "linux"))]
+    let connected_version: Option<String> = None;
+
+    ensure_no_connected_remote_app_version(connected_version.as_deref(), capability)
+}
+
+fn ensure_no_connected_remote_app_version(
+    connected_version: Option<&str>,
+    capability: CapabilityId,
+) -> ApplicationResult<()> {
+    if let Some(version) = connected_version {
+        return Err(precondition_error(
+            capability,
+            &crate::tr!(
+                "error-studio-connected-session-blocks-operation",
+                version = version
+            ),
+            false,
+        ));
+    }
+    Ok(())
+}
+
 fn session_conflict_error(_message: String) -> CommandError {
     precondition_error(
         CapabilityId::StudioStatus,
@@ -817,10 +848,11 @@ fn precondition_error(capability: CapabilityId, message: &str, retryable: bool) 
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_version_not_installed, exact_project_launch_path, launch_project, operation,
-        project, projects,
+        ensure_no_connected_remote_app_version, ensure_version_not_installed,
+        exact_project_launch_path, launch_project, operation, project, projects,
     };
     use crate::app_paths::AppPaths;
+    use crate::contracts::CapabilityId;
     use crate::models::{AppConfig, CommandErrorCode, ContainerRuntime, StudioVersion};
     use crate::operations::OperationTracker;
     use std::fs;
@@ -862,6 +894,30 @@ mod tests {
         assert_eq!(error.code, CommandErrorCode::PreconditionFailed);
         assert!(error.message.contains("11.12.3"));
         ensure_version_not_installed(&[], "11.12.3").expect("absent version may install");
+    }
+
+    #[test]
+    fn connected_remote_app_rejects_new_mutations_as_preconditions() {
+        crate::i18n::initialize("en-US").expect("localization");
+        for capability in [
+            CapabilityId::StudioStart,
+            CapabilityId::StudioInstall,
+            CapabilityId::StudioUninstall,
+        ] {
+            let error = ensure_no_connected_remote_app_version(Some("11.13.0"), capability)
+                .expect_err("connected RemoteApp must block another mutation");
+            assert_eq!(error.code, CommandErrorCode::PreconditionFailed);
+            assert!(error.message.contains("11.13.0"));
+            assert_eq!(
+                error
+                    .details
+                    .as_deref()
+                    .and_then(|details| details.capability),
+                Some(capability)
+            );
+        }
+        ensure_no_connected_remote_app_version(None, CapabilityId::StudioStart)
+            .expect("no connected RemoteApp permits launch");
     }
 
     #[test]

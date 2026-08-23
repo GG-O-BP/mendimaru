@@ -64,6 +64,8 @@ export function ProjectLaunchAssistant({
   const canContinue =
     Boolean(state.selectedVersion) &&
     launcher.installedVersionsLoaded &&
+    !launcher.studioSessionsLoading &&
+    !launcher.connectedRemoteAppVersion &&
     (launcher.selectedInstalled || launcher.selectedDownloadable) &&
     state.lookupState !== "loading" &&
     !launcher.actionBusy &&
@@ -102,6 +104,22 @@ export function ProjectLaunchAssistant({
           </div>
         </header>
         <p id={descriptionId}>{t("project-launch-description")}</p>
+
+        {launcher.connectedRemoteAppVersion && (
+          <div className="project-launch-blocked" role="alert">
+            <AlertTriangle size={18} aria-hidden="true" />
+            <span>
+              <strong>
+                {t("studio-connected-session-blocks-title", {
+                  version: launcher.connectedRemoteAppVersion,
+                })}
+              </strong>
+              {t("studio-connected-session-blocks-detail", {
+                version: launcher.connectedRemoteAppVersion,
+              })}
+            </span>
+          </div>
+        )}
 
         <dl className="project-launch-requirement">
           <div>
