@@ -444,10 +444,7 @@ fn client_is_connected(session_id: &str) -> bool {
     let Ok(mut clients) = clients() else {
         return false;
     };
-    clients.retain(|_, client| match client.process.try_wait() {
-        Ok(Some(_)) => false,
-        Ok(None) | Err(_) => true,
-    });
+    retain_live_clients(&mut clients);
     if clients.contains_key(session_id) {
         return true;
     }
@@ -459,10 +456,7 @@ pub(crate) fn registered_client_sessions() -> Vec<StudioSessionStatus> {
     let Ok(mut clients) = clients() else {
         return Vec::new();
     };
-    clients.retain(|_, client| match client.process.try_wait() {
-        Ok(Some(_)) => false,
-        Ok(None) | Err(_) => true,
-    });
+    retain_live_clients(&mut clients);
     let mut sessions = clients
         .values()
         .map(|client| client.status.clone())
@@ -480,6 +474,43 @@ pub(crate) fn registered_client_sessions() -> Vec<StudioSessionStatus> {
     }
     sessions.sort_by_key(|session| std::cmp::Reverse(session.started_at));
     sessions
+}
+
+fn retain_live_clients(clients: &mut HashMap<String, RegisteredClient>) {
+    clients.retain(|_, client| {
+        match client.process.try_wait() {
+            Ok(Some(_)) => return false,
+            Err(_) => return true,
+            Ok(None) => {}
+        }
+        match read_session_active(&mut client.control) {
+            Ok(false) => {
+                terminate_client_process(&mut client.process);
+                false
+            }
+            Ok(true) | Err(_) => true,
+        }
+    });
+}
+
+fn read_session_active(control: &mut RegisteredControl) -> Result<bool, String> {
+    let content = fs::read(&control.report_path)
+        .map_err(|error| format!("could not read the Studio Pro session report: {error}"))?;
+    let authenticated = super::security::authenticate_report(&content, &control.security)
+        .map_err(|error| error.to_string())?;
+    if authenticated.sequence < control.previous_report.sequence {
+        return Err("the Studio Pro session report sequence regressed".to_string());
+    }
+    if authenticated.sequence == control.previous_report.sequence {
+        return Ok(true);
+    }
+    let report = super::operation::parse_install_report(&authenticated.payload)
+        .map_err(|error| error.to_string())?;
+    if report.state != super::operation::WindowsOperationState::Succeeded {
+        return Err("the Studio Pro session report did not succeed".to_string());
+    }
+    control.previous_report = authenticated;
+    Ok(!report.sessions.is_empty())
 }
 
 pub(crate) fn disconnect_all_clients() {
@@ -814,8 +845,8 @@ fn remove_regular_file(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::{
-        datetime_ticks, list, normalize_sessions, parse_session_id, reconnect, safe_project_name,
-        stop, write_stop_control, RegisteredControl, SessionIdentity,
+        datetime_ticks, list, normalize_sessions, parse_session_id, read_session_active, reconnect,
+        safe_project_name, stop, write_stop_control, RegisteredControl, SessionIdentity,
     };
     use crate::models::StudioVersion;
     use crate::winboat::operation::WindowsStudioSessionReport;
@@ -958,6 +989,36 @@ mod tests {
             write_stop_control("studio-4242-638908128000000000", identity, &mut control,).is_err(),
             "an existing control request must never be overwritten"
         );
+    }
+
+    #[test]
+    fn removes_a_disconnected_launch_after_an_authenticated_empty_session_report() {
+        let directory = tempfile::tempdir().expect("temporary report directory");
+        let report_path = directory.path().join("launch.json");
+        let security = OperationSecurity::fixture();
+        let running_payload = br#"{"state":"succeeded","message":"Studio Pro window is ready.","percentage":null,"estimated":false,"timestamp":"2026-08-23T03:00:00Z","exitCode":null,"executablePath":null,"error":null,"sessions":[{"sessionId":"studio-4242-638915148000000000","version":"11.12.3","processId":4242,"startedAt":"2026-08-23T03:00:00Z","projectName":null,"hasWindow":true}]}"#;
+        let previous_report = authenticate_report(
+            authenticated_report_fixture(&security, 2, running_payload).as_bytes(),
+            &security,
+        )
+        .expect("running report authenticates");
+        let closed_payload = br#"{"state":"succeeded","message":"Studio Pro session closed.","percentage":null,"estimated":false,"timestamp":"2026-08-23T03:01:00Z","exitCode":null,"executablePath":null,"error":null,"sessions":[]}"#;
+        std::fs::write(
+            &report_path,
+            authenticated_report_fixture(&security, 3, closed_payload),
+        )
+        .expect("write closed report");
+        let mut control = RegisteredControl {
+            report_path,
+            control_path: directory.path().join("launch.control.json"),
+            security,
+            previous_report,
+            next_sequence: 1,
+            cleanup_report: false,
+        };
+
+        assert!(!read_session_active(&mut control).expect("closed report is valid"));
+        assert_eq!(control.previous_report.sequence, 3);
     }
 
     #[test]

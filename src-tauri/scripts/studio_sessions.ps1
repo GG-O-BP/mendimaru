@@ -216,7 +216,6 @@ try {
             $process.Refresh()
             Write-SessionResult 'succeeded' 'Studio Pro session is ready to reconnect.' $null @($session)
             $lastControlSequence = [long]0
-            $closeRequested = $false
             while ($true) {
                 Start-Sleep -Milliseconds 500
                 $ended = $false
@@ -230,9 +229,7 @@ try {
                     $ended = $true
                 }
                 if ($ended) {
-                    if ($closeRequested) {
-                        Write-SessionResult 'succeeded' 'Studio Pro session closed.' $null @()
-                    }
+                    Write-SessionResult 'succeeded' 'Studio Pro session closed.' $null @()
                     exit 0
                 }
                 if (Test-Path -LiteralPath $controlPath) {
@@ -249,7 +246,6 @@ try {
                         if ($process.StartTime.ToUniversalTime().Ticks -ne $targetStartedTicks) {
                             continue
                         }
-                        $closeRequested = $true
                         if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
                             $null = $process.CloseMainWindow()
                         }

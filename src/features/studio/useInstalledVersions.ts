@@ -4,6 +4,8 @@ import { tauriApi } from "../../api/tauri";
 import type { StudioSessionStatus, StudioVersion } from "../../domain/types";
 import type { InstalledVersionsDependencies } from "./dependencies";
 
+const ACTIVE_SESSION_REFRESH_INTERVAL_MS = 1_000;
+
 export function useInstalledVersions({
   t,
   installedVersionsSourceKey,
@@ -36,10 +38,15 @@ export function useInstalledVersions({
   >(null);
   const installedRequest = useRef(0);
   const sessionRequest = useRef(0);
+  const sessionRefreshSourceInFlight = useRef<string | null>(null);
   const launchLock = useRef(false);
 
   const refreshSessions = useCallback(
     async (silent = false) => {
+      if (sessionRefreshSourceInFlight.current === installedVersionsSourceKey) {
+        return;
+      }
+      sessionRefreshSourceInFlight.current = installedVersionsSourceKey;
       const request = ++sessionRequest.current;
       setSessionsLoading(true);
       try {
@@ -56,6 +63,11 @@ export function useInstalledVersions({
         if (!silent) onWarning(errorText(error, t));
       } finally {
         if (request === sessionRequest.current) setSessionsLoading(false);
+        if (
+          sessionRefreshSourceInFlight.current === installedVersionsSourceKey
+        ) {
+          sessionRefreshSourceInFlight.current = null;
+        }
       }
     },
     [installedVersionsSourceKey, onWarning, t],
@@ -114,6 +126,24 @@ export function useInstalledVersions({
       installedRequest.current += 1;
     };
   }, [installedVersionsSourceKey, refreshInstalled]);
+
+  useEffect(() => {
+    if (
+      !sessions.some((session) => session.connection === "connected") ||
+      displayedSessionsSource !== installedVersionsSourceKey
+    ) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      void refreshSessions(true);
+    }, ACTIVE_SESSION_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [
+    displayedSessionsSource,
+    installedVersionsSourceKey,
+    refreshSessions,
+    sessions,
+  ]);
 
   const launchVersion = useCallback(
     (

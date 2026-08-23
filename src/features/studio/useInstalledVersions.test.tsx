@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { StudioVersion } from "../../domain/types";
+import type { StudioSessionStatus, StudioVersion } from "../../domain/types";
 import { useInstalledVersions } from "./useInstalledVersions";
 
 const api = vi.hoisted(() => ({
@@ -23,6 +23,20 @@ function version(value: string): StudioVersion {
     installRoot: `C:\\Program Files\\Mendix\\${value}`,
     source: "fixture",
     removable: true,
+  };
+}
+
+function session(): StudioSessionStatus {
+  return {
+    schemaVersion: "1.0.0",
+    sessionId: "studio-4242-638908236000000000",
+    version: "11.12.3",
+    state: "running",
+    processId: 4242,
+    startedAt: "2026-08-15T03:00:00Z",
+    connection: "connected",
+    reconnectable: false,
+    reconnectUnavailable: "already-connected",
   };
 }
 
@@ -154,6 +168,39 @@ describe("useInstalledVersions", () => {
     expect(result.current.installedLoading).toBe(true);
   });
 
+  it("starts a session refresh for a newly configured source without waiting for the obsolete one", async () => {
+    const obsoleteSessions = deferred<StudioSessionStatus[]>();
+    api.getInstalledVersions.mockResolvedValue([version("11.12.3")]);
+    api.getStudioSessions
+      .mockImplementationOnce(() => obsoleteSessions.promise)
+      .mockResolvedValueOnce([]);
+    const dependencies = {
+      t: (key: string) => key,
+      notify: vi.fn(),
+      requestConfirmation: vi.fn(),
+      runAction: async (_key: string, action: () => Promise<void>) => action(),
+      hasBusyPrefix: () => false,
+      onWarning: vi.fn(),
+    };
+    const { rerender } = renderHook(
+      ({ sourceKey }) =>
+        useInstalledVersions({
+          ...dependencies,
+          installedVersionsSourceKey: sourceKey,
+        }),
+      { initialProps: { sourceKey: "environment-a" } },
+    );
+
+    await waitFor(() => expect(api.getStudioSessions).toHaveBeenCalledTimes(1));
+    rerender({ sourceKey: "environment-b" });
+    await waitFor(() => expect(api.getStudioSessions).toHaveBeenCalledTimes(2));
+
+    obsoleteSessions.resolve([]);
+    await act(async () => {
+      await obsoleteSessions.promise;
+    });
+  });
+
   it("stops loading after a live detection failure while keeping cached data untrusted", async () => {
     api.getInstalledVersionsCache.mockResolvedValue({
       versions: [version("11.6.9")],
@@ -178,5 +225,33 @@ describe("useInstalledVersions", () => {
     expect(result.current.installedVersions[0]?.version).toBe("11.6.9");
     expect(result.current.installedLoading).toBe(false);
     expect(result.current.installedLoaded).toBe(false);
+  });
+
+  it("automatically removes a session after Studio Pro exits", async () => {
+    api.getInstalledVersions.mockResolvedValue([version("11.12.3")]);
+    let sessions = [session()];
+    api.getStudioSessions.mockImplementation(async () => [...sessions]);
+    const { result } = renderHook(() =>
+      useInstalledVersions({
+        t: (key: string) => key,
+        installedVersionsSourceKey: "environment-a",
+        notify: vi.fn(),
+        requestConfirmation: vi.fn(),
+        runAction: async (_key: string, action: () => Promise<void>) =>
+          action(),
+        hasBusyPrefix: () => false,
+        onWarning: vi.fn(),
+      }),
+    );
+
+    await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+    sessions = [];
+    await waitFor(
+      () => expect(api.getStudioSessions.mock.calls.length).toBeGreaterThan(1),
+      {
+        timeout: 2_500,
+      },
+    );
+    await waitFor(() => expect(result.current.sessions).toEqual([]));
   });
 });

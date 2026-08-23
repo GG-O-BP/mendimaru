@@ -233,7 +233,6 @@ try {
     $readyProcessId = [int]$readyProcess.Id
     $readyStartedTicks = [long]$readyProcess.StartTime.ToUniversalTime().Ticks
     $lastControlSequence = [long]0
-    $closeRequested = $false
     while ($true) {
         try {
             $current = Get-Process -Id $readyProcessId -ErrorAction Stop
@@ -258,7 +257,6 @@ try {
                 if ($current.StartTime.ToUniversalTime().Ticks -ne $readyStartedTicks) {
                     break
                 }
-                $closeRequested = $true
                 if ($current.MainWindowHandle -ne [IntPtr]::Zero) {
                     $null = $current.CloseMainWindow()
                 }
@@ -269,9 +267,7 @@ try {
         }
         Start-Sleep -Milliseconds 500
     }
-    if ($closeRequested) {
-        Write-LaunchResult 'succeeded' 'Studio Pro session closed.' $null $executable $null @()
-    }
+    Write-LaunchResult 'succeeded' 'Studio Pro session closed.' $null $executable $null @()
     exit 0
 } catch {
     $exitCode = if ($null -ne $process -and $process.HasExited) { [int]$process.ExitCode } else { $null }

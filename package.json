@@ -27,6 +27,7 @@
     "format:check": "prettier --check . && cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
     "check": "npm run lint && npm run format:check && npm run build && npm run test",
     "preview": "vite preview",
+    "tarui": "npm run tauri --",
     "tauri": "cross-env NO_STRIP=1 tauri"
   },
   "dependencies": {

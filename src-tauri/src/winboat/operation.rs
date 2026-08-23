@@ -12,7 +12,6 @@ use std::time::Duration;
 
 #[cfg(test)]
 pub(super) use reason::localize_windows_reason;
-#[cfg(test)]
 pub(super) use report::parse_install_report;
 pub(super) use report::{
     WindowsOperationReport, WindowsOperationState, WindowsStudioSessionReport,
