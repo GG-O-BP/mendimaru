@@ -24,7 +24,10 @@ pub(crate) fn get_installed_versions_cache(
 ) -> CommandResult<InstalledVersionsCache> {
     let paths = AppPaths::from_app(&app)?;
     let config = load_command_config(&app)?;
-    Ok(crate::studio_cache::load(&paths, &config).unwrap_or_default())
+    let cache = crate::studio_cache::load(&paths, &config).unwrap_or_default();
+    #[cfg(target_os = "linux")]
+    crate::winboat::seed_installed_versions_cache(&config, &cache.versions);
+    Ok(cache)
 }
 
 #[tauri::command]

@@ -35,6 +35,7 @@ export function StudioView({
         connectedRemoteAppVersion,
         loading: studio.installedLoading,
         loaded: studio.installedLoaded,
+        launchReady: studio.launchReady,
         stale: studio.installedStale,
         error: studio.installedError,
         sessionsLoading: studio.sessionsLoading,

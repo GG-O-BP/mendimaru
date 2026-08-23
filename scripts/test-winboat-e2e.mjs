@@ -15,6 +15,12 @@ assert(
   "usage: test-winboat-e2e.mjs [--smoke|--lifecycle]",
 );
 const lifecycle = mode === "--lifecycle";
+if (process.platform !== "linux") {
+  process.stdout.write(
+    `WinBoat ${lifecycle ? "lifecycle E2E" : "session smoke"}: not applicable on ${process.platform}\n`,
+  );
+  process.exit(0);
+}
 const version = process.env.MENDIMARU_E2E_VERSION ?? "";
 if (lifecycle) {
   assert.equal(
@@ -34,11 +40,6 @@ const liveTest = lifecycle
 const innerMarker = "MENDIMARU_WINBOAT_E2E_XVFB";
 const lifecycleTimeout = 75 * 60_000;
 
-assert.equal(
-  process.platform,
-  "linux",
-  "the live WinBoat RemoteApp E2E runs on Linux only",
-);
 if (lifecycle) validateWindowClassifier();
 
 if (process.env[innerMarker] !== "1") {

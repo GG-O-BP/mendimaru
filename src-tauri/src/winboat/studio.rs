@@ -1,9 +1,12 @@
-use super::client::installed_versions;
+use super::client::installed_versions_cached;
 use super::container::ensure_guest_online;
 use super::operation::{
     run_windows_operation, WindowsOperationFailure, WindowsOperationRequest, WindowsOperationState,
+    WindowsStudioSessionReport,
 };
-use super::scripts::{install_script, launch_studio_script, uninstall_script};
+use super::scripts::{
+    abort_studio_launch_script, install_script, launch_studio_script, uninstall_script,
+};
 use crate::models::{AppConfig, StudioInstallPhase, StudioInstallProgress};
 use crate::platform::validate_version;
 use crate::projects::{linux_path_to_windows_share, scan_projects};
@@ -13,10 +16,16 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 const STUDIO_LAUNCH_TIMEOUT_SECONDS: u64 = 5 * 60;
+const STUDIO_LAUNCH_ATTEMPTS: usize = 2;
+const STUDIO_LAUNCH_RETRY_DELAY_SECONDS: u64 = 2;
+const FAILED_LAUNCH_ABORT_TIMEOUT_SECONDS: u64 = 90;
 const INSTALL_TIMEOUT_SECONDS: u64 = 45 * 60;
 const UNINSTALL_TIMEOUT_SECONDS: u64 = 15 * 60;
+const WINDOWS_EPOCH_TICKS: i64 = 621_355_968_000_000_000;
+const TICKS_PER_SECOND: i64 = 10_000_000;
 
 pub async fn launch_studio(
     config: &AppConfig,
@@ -27,7 +36,7 @@ pub async fn launch_studio(
     validate_operation_id(operation_id)?;
     ensure_no_registered_remote_app()?;
     ensure_guest_online(config).await?;
-    let versions = installed_versions(config).await?;
+    let versions = installed_versions_cached(config).await?;
     let selected = versions
         .into_iter()
         .find(|installed| installed.version == version)
@@ -63,20 +72,63 @@ pub async fn launch_studio(
     );
     let command = write_command_script(config, operation_id, &script)?;
     let operation = crate::tr!("operation-studio-launch");
-    let mut outcome = run_windows_operation(
-        config,
-        WindowsOperationRequest {
-            script_path: &command.path,
-            script_sha256: &command.sha256,
-            label: &label,
-            report_path: &report_path,
-            timeout_seconds: STUDIO_LAUNCH_TIMEOUT_SECONDS,
-            operation: &operation,
-            keep_remote_app_alive: true,
-        },
-        |_| {},
-    )
-    .await?;
+    let mut completed = None;
+    for attempt in 0..STUDIO_LAUNCH_ATTEMPTS {
+        let mut launched_session = None;
+        let result = run_windows_operation(
+            config,
+            WindowsOperationRequest {
+                script_path: &command.path,
+                script_sha256: &command.sha256,
+                label: &label,
+                report_path: &report_path,
+                timeout_seconds: STUDIO_LAUNCH_TIMEOUT_SECONDS,
+                operation: &operation,
+                keep_remote_app_alive: true,
+            },
+            |report| {
+                if report.state == WindowsOperationState::Running && report.sessions.len() == 1 {
+                    launched_session = report.sessions.first().cloned();
+                }
+            },
+        )
+        .await;
+        match result {
+            Ok(outcome) => {
+                completed = Some(outcome);
+                break;
+            }
+            Err(mut error) => {
+                let Some(session) = launched_session else {
+                    return Err(error);
+                };
+                match abort_incomplete_launch(config, &selected, &session, operation_id, attempt)
+                    .await
+                {
+                    Ok(()) if attempt + 1 < STUDIO_LAUNCH_ATTEMPTS => {
+                        tokio::time::sleep(Duration::from_secs(STUDIO_LAUNCH_RETRY_DELAY_SECONDS))
+                            .await;
+                        continue;
+                    }
+                    Ok(()) => {
+                        error.retryable = true;
+                        return Err(error);
+                    }
+                    Err(abort_error) => {
+                        error.message = format!(
+                            "{} Incomplete launch cleanup also failed: {}",
+                            error.message, abort_error.message
+                        );
+                        error.retryable = false;
+                        return Err(error);
+                    }
+                }
+            }
+        }
+    }
+    let mut outcome = completed.ok_or_else(|| {
+        WindowsOperationFailure::from("Studio Pro launch attempts were exhausted".to_string())
+    })?;
     if outcome
         .report
         .executable_path
@@ -106,6 +158,95 @@ pub async fn launch_studio(
         outcome.authenticated,
     )?;
     Ok(())
+}
+
+async fn abort_incomplete_launch(
+    config: &AppConfig,
+    selected: &crate::models::StudioVersion,
+    session: &WindowsStudioSessionReport,
+    operation_id: &str,
+    attempt: usize,
+) -> Result<(), WindowsOperationFailure> {
+    let (process_id, started_ticks) = validate_incomplete_launch_identity(selected, session)?;
+    let abort_id = format!("{operation_id}-abort-{}", attempt + 1);
+    let operation_directory = secure_shared_directory(config, ".mendimaru/operations")?;
+    let report_path = operation_directory.join(format!("{abort_id}.json"));
+    let windows_report_path = linux_path_to_windows_share(
+        Path::new(&config.shared_directory),
+        &report_path,
+        &config.windows_shared_directory,
+    )?;
+    let script = abort_studio_launch_script(
+        &selected.executable_path,
+        &windows_report_path,
+        &config.mendix_install_root,
+        process_id,
+        started_ticks,
+    );
+    let command = write_command_script(config, &abort_id, &script)?;
+    run_windows_operation(
+        config,
+        WindowsOperationRequest {
+            script_path: &command.path,
+            script_sha256: &command.sha256,
+            label: "Clean up incomplete Studio Pro launch",
+            report_path: &report_path,
+            timeout_seconds: FAILED_LAUNCH_ABORT_TIMEOUT_SECONDS,
+            operation: "cleaning up incomplete Studio Pro launch",
+            keep_remote_app_alive: false,
+        },
+        |_| {},
+    )
+    .await
+    .map(|_| ())
+}
+
+fn validate_incomplete_launch_identity(
+    selected: &crate::models::StudioVersion,
+    session: &WindowsStudioSessionReport,
+) -> Result<(u32, i64), WindowsOperationFailure> {
+    let remainder = session
+        .session_id
+        .strip_prefix("studio-")
+        .ok_or_else(|| "Windows returned an invalid incomplete launch identity".to_string())?;
+    let (process_id, started_ticks) = remainder
+        .split_once('-')
+        .ok_or_else(|| "Windows returned an invalid incomplete launch identity".to_string())?;
+    let process_id = process_id
+        .parse::<u32>()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| "Windows returned an invalid incomplete launch identity".to_string())?;
+    let started_ticks = started_ticks
+        .parse::<i64>()
+        .ok()
+        .filter(|value| *value > WINDOWS_EPOCH_TICKS)
+        .ok_or_else(|| "Windows returned an invalid incomplete launch identity".to_string())?;
+    let started_at = chrono::DateTime::parse_from_rfc3339(&session.started_at)
+        .map_err(|_| "Windows returned an invalid incomplete launch start time".to_string())?;
+    let reported_ticks = WINDOWS_EPOCH_TICKS
+        .checked_add(
+            started_at
+                .timestamp()
+                .checked_mul(TICKS_PER_SECOND)
+                .ok_or_else(|| {
+                    "Windows returned an invalid incomplete launch start time".to_string()
+                })?,
+        )
+        .and_then(|ticks| ticks.checked_add(i64::from(started_at.timestamp_subsec_nanos() / 100)))
+        .ok_or_else(|| "Windows returned an invalid incomplete launch start time".to_string())?;
+    if session.version != selected.version
+        || session.process_id != process_id
+        || reported_ticks != started_ticks
+        || session.has_window
+    {
+        return Err(
+            "Windows returned an inconsistent incomplete launch identity"
+                .to_string()
+                .into(),
+        );
+    }
+    Ok((process_id, started_ticks))
 }
 
 fn ensure_control_path_available(control_path: &Path) -> Result<(), String> {
@@ -202,6 +343,7 @@ where
         .filter(|path| !path.is_empty())
         .ok_or_else(|| crate::tr!("error-install-path-missing"))?;
     progress_state.complete(&mut on_progress);
+    super::version_cache::invalidate();
     Ok(executable_path)
 }
 
@@ -332,6 +474,7 @@ pub async fn launch_uninstaller(
         |_| {},
     )
     .await?;
+    super::version_cache::invalidate();
     Ok(())
 }
 
@@ -488,8 +631,9 @@ fn safe_operation_name(value: &str) -> String {
 
 #[cfg(test)]
 mod progress_tests {
-    use super::{validate_operation_id, InstallProgressState};
-    use crate::models::{StudioInstallPhase, StudioInstallProgress};
+    use super::{validate_incomplete_launch_identity, validate_operation_id, InstallProgressState};
+    use crate::models::{StudioInstallPhase, StudioInstallProgress, StudioVersion};
+    use crate::winboat::operation::WindowsStudioSessionReport;
 
     #[test]
     fn successful_install_synthesizes_transient_phases_missed_between_polls() {
@@ -547,5 +691,38 @@ mod progress_tests {
                 (StudioInstallPhase::Verifying, Some(100.0)),
             ]
         );
+    }
+
+    #[test]
+    fn incomplete_launch_cleanup_requires_one_consistent_exact_process_identity() {
+        let selected = StudioVersion {
+            version: "11.12.2".into(),
+            display_name: "Studio Pro 11.12.2".into(),
+            executable_path: r"C:\Program Files\Mendix\11.12.2\modeler\studiopro.exe".into(),
+            install_root: r"C:\Program Files\Mendix\11.12.2".into(),
+            source: "fixture".into(),
+            removable: true,
+        };
+        let valid = WindowsStudioSessionReport {
+            session_id: "studio-4242-639223488000000000".into(),
+            version: "11.12.2".into(),
+            process_id: 4242,
+            started_at: "2026-08-15T00:00:00Z".into(),
+            project_name: None,
+            has_window: false,
+        };
+
+        assert_eq!(
+            validate_incomplete_launch_identity(&selected, &valid).expect("valid identity"),
+            (4242, 639_223_488_000_000_000)
+        );
+
+        let mut mismatch = valid.clone();
+        mismatch.process_id = 4243;
+        assert!(validate_incomplete_launch_identity(&selected, &mismatch).is_err());
+
+        let mut ready = valid;
+        ready.has_window = true;
+        assert!(validate_incomplete_launch_identity(&selected, &ready).is_err());
     }
 }

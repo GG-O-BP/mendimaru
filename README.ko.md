@@ -162,10 +162,10 @@ npm install
 npm run tauri dev
 ```
 
-검증과 번들 생성:
+호스트에 독립적인 검증과 번들 생성:
 
 ```bash
-npm run check
+npm run check:portable
 npm run test:browser
 npm run test:e2e
 npm run tauri build
@@ -173,15 +173,15 @@ npm run tauri build
 
 Linux에서 `npm run test:e2e`는 고정 버전의 `tauri-driver`와 `WebKitWebDriver`를 통해 debug 실행 파일을 Vite 개발 URL에 연결합니다. 격리된 WinBoat/API/프로젝트 fixture로 실제 WebView, Tauri IPC, 온라인 앱 상태, 프레임을 샘플링한 제한된 경로·작업 중 애니메이션, 유휴 상태에서 지속 애니메이션이 없다는 점과 주요 화면 전환을 검증합니다. 드라이버 브리지는 `cargo install tauri-driver --version 2.0.6 --locked`로 설치하고 호스트에는 `WebKitWebDriver`도 있어야 합니다. `npm run test:app-flow`는 OS 경계를 모킹한 빠른 React 앱 흐름 테스트이고, `npm run test:browser`는 Mendimaru 데스크톱 셸이 아니라 Mendix Runtime 페이지를 테스트합니다. CI는 세 계층을 모두 통과시킨 뒤 Windows/Linux 테스트와 Windows MSI/NSIS 스모크 빌드를 수행합니다.
 
-실행 중인 실제 WinBoat에 대한 비파괴 RemoteApp 검증은 `npm run test:winboat-smoke`로 실행합니다. 인증된 세션 조회와 만료된 세션 거부를 검증합니다. 실제 상태를 바꾸는 수명주기 검증은 별도로 다음과 같이 실행하며, 이미 설치된 버전은 안전을 위해 거부합니다.
+실행 중인 실제 WinBoat에 대한 비파괴 RemoteApp 검증은 `npm run test:winboat-smoke`로 실행합니다. 인증된 세션 조회와 만료된 세션 거부를 검증합니다. Linux의 전체 `npm run check`는 실제 상태를 바꾸는 수명주기 검증을 더 이상 조용히 제외하지 않고 필수로 실행합니다. 설치되어 있지 않은 폐기 가능한 버전과 명시적인 변경 허용값을 지정해야 합니다.
 
 ```bash
 MENDIMARU_E2E_ALLOW_MUTATION=1 \
 MENDIMARU_E2E_VERSION=11.13.0 \
-npm run test:winboat-e2e
+npm run check
 ```
 
-정확히 지정한 폐기 가능한 버전의 공식 설치 파일이 공유 캐시에 있어야 합니다. 이 테스트는 미설치 → 설치 → 실제 Studio 창 → 실행 중 삭제 거부 → 정상 종료 → 삭제 전 과정을 수행하며, 진행 단계 순서, 정확한 프로세스 식별자, 기존 설치본과 설치 캐시 불변성, 만료·반복 작업 거부, 잔류 프로세스와 예상 밖 RemoteApp/PowerShell 창이 없다는 점까지 검증합니다. 두 실제 VM 테스트 모두 격리된 Xvfb와 `xvfb-run`, `xfwm4`, `wmctrl`이 필요합니다. Arch Linux에서는 `xorg-server-xvfb` 패키지가 `xvfb-run`을 제공합니다. CI에는 실제 WinBoat VM이 없으므로 파괴적 수명주기 검증은 로컬/수동 릴리스 게이트이며 CI에서 통과했다고 주장하지 않습니다.
+같은 환경변수로 `npm run test:winboat-e2e`를 실행하면 수명주기만 따로 검증할 수 있습니다. 정확히 지정한 폐기 가능한 버전의 공식 설치 파일이 공유 캐시에 있어야 합니다. 테스트는 이미 설치된 대상을 거부하고 미설치 → 설치 → 실제 Studio 창 → 실행 중 삭제 거부 → 정상 종료 → 삭제 전 과정을 수행하며, 진행 단계 순서, 정확한 프로세스 식별자, 기존 설치본과 설치 캐시 불변성, 만료·반복 작업 거부, 잔류 프로세스와 예상 밖 RemoteApp/PowerShell 창이 없다는 점까지 검증합니다. 두 실제 VM 테스트 모두 격리된 Xvfb와 `xvfb-run`, `xfwm4`, `wmctrl`이 필요합니다. Arch Linux에서는 `xorg-server-xvfb` 패키지가 `xvfb-run`을 제공합니다. 다른 호스트 플랫폼에서는 WinBoat 수명주기를 적용 대상이 아닌 것으로 보고합니다. 호스팅 CI에는 실제 WinBoat VM이 없으므로 portable 구성요소 게이트만 실행하며 로컬 live 결과를 통과했다고 주장하지 않습니다.
 
 전체 Rust 테스트는 레지스트리 파싱, 경로 격리, 파일 무결성, Windows 인자 인코딩, UAC/종료 코드 실패와 설치부터 제거까지의 fixture 수명주기를 검증합니다.
 

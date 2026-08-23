@@ -130,8 +130,7 @@ export function InstalledVersionsSection({
                   onClick={() => model.onLaunch(version)}
                   disabled={
                     !online ||
-                    !model.loaded ||
-                    model.sessionsLoading ||
+                    !model.launchReady ||
                     Boolean(model.connectedRemoteAppVersion) ||
                     model.isLaunching
                   }

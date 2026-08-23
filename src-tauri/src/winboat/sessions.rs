@@ -1,4 +1,4 @@
-use super::client::installed_versions;
+use super::client::installed_versions_cached;
 use super::container::ensure_guest_online;
 use super::operation::{
     run_windows_operation, wait_for_followup_windows_operation, WindowsOperationFailure,
@@ -72,7 +72,7 @@ pub(crate) async fn list(
         return Ok(registered);
     }
     ensure_guest_online(config).await?;
-    let studios = installed_versions(config).await?;
+    let studios = installed_versions_cached(config).await?;
     let outcome = execute(
         config,
         &studios,
@@ -100,7 +100,7 @@ pub(crate) async fn reconnect(
         ));
     }
     ensure_guest_online(config).await?;
-    let studios = installed_versions(config).await?;
+    let studios = installed_versions_cached(config).await?;
     let mut execution = execute(
         config,
         &studios,
@@ -171,7 +171,7 @@ pub(crate) async fn stop(
         ));
     }
     ensure_guest_online(config).await?;
-    let studios = installed_versions(config).await?;
+    let studios = installed_versions_cached(config).await?;
     execute(
         config,
         &studios,

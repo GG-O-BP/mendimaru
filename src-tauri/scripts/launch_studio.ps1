@@ -143,8 +143,47 @@ function Get-StudioProcesses {
     return $matches.ToArray()
 }
 
+function Get-StudioProcessRecord {
+    param([int]$ProcessId)
+
+    try {
+        $candidate = Get-Process -Id $ProcessId -ErrorAction Stop
+        if (-not [Mendimaru.ProcessSecurity]::IsCurrentUser($ProcessId)) {
+            return $null
+        }
+        $candidate.Refresh()
+        $candidatePath = [string]$candidate.Path
+        if ([string]::IsNullOrWhiteSpace($candidatePath) -or
+            -not $candidatePath.Equals(
+                $executable,
+                [StringComparison]::OrdinalIgnoreCase
+            )) {
+            return $null
+        }
+        return [pscustomobject]@{
+            Process = $candidate
+            ParentProcessId = [Mendimaru.ProcessSecurity]::ParentProcessId($ProcessId)
+        }
+    } catch {
+        return $null
+    }
+}
+
 function Get-ReadyStudioProcess {
     param($Baseline, [int]$LaunchProcessId)
+
+    $direct = Get-StudioProcessRecord $LaunchProcessId
+    if ($null -ne $direct) {
+        $candidate = $direct.Process
+        $identity = '{0}-{1}' -f @(
+            $candidate.Id,
+            $candidate.StartTime.ToUniversalTime().Ticks
+        )
+        if (-not $Baseline.Contains($identity) -and
+            $candidate.MainWindowHandle -ne [IntPtr]::Zero) {
+            return $candidate
+        }
+    }
 
     foreach ($record in (@(Get-StudioProcesses) | Sort-Object { $_.Process.StartTime } -Descending)) {
         $candidate = $record.Process
@@ -164,8 +203,6 @@ function Get-ReadyStudioProcess {
 }
 
 try {
-    $null = Assert-MendimaruTrustedExecutable -Path $executable -Root $installRoot
-
     Write-LaunchResult 'starting' 'Studio Pro is starting.' $null $executable $null @()
     $baseline = [Collections.Generic.HashSet[string]]::new(
         [StringComparer]::Ordinal
@@ -185,19 +222,38 @@ try {
         $process = Start-Process -FilePath $executable -ArgumentList $quotedProjectPath -PassThru
     }
 
-    $minimumReadyAt = (Get-Date).AddSeconds(2)
+    $process.Refresh()
+    $launchedSessionId = 'studio-{0}-{1}' -f @(
+        $process.Id,
+        $process.StartTime.ToUniversalTime().Ticks
+    )
+    $launchedProjectName = if ([string]::IsNullOrWhiteSpace($projectPath)) {
+        $null
+    } else {
+        [IO.Path]::GetFileNameWithoutExtension($projectPath)
+    }
+    $launchedSession = [ordered]@{
+        sessionId = $launchedSessionId
+        version = '__VERSION__'
+        processId = [int]$process.Id
+        startedAt = $process.StartTime.ToUniversalTime().ToString('o')
+        projectName = $launchedProjectName
+        hasWindow = $false
+    }
+    Write-LaunchResult 'running' 'Studio Pro process is running.' $null $executable $null @($launchedSession)
+
     $handoffDeadline = (Get-Date).AddSeconds(15)
     $deadline = (Get-Date).AddMinutes(4)
     $readyProcess = $null
     do {
         $readyProcess = Get-ReadyStudioProcess $baseline $process.Id
-        if ($null -ne $readyProcess -and (Get-Date) -ge $minimumReadyAt) {
+        if ($null -ne $readyProcess) {
             break
         }
         if ($process.HasExited -and $null -eq $readyProcess -and (Get-Date) -ge $handoffDeadline) {
             throw "MENDIMARU_STUDIO_EXITED_BEFORE_WINDOW:$($process.ExitCode)"
         }
-        Start-Sleep -Milliseconds 500
+        Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
 
     if ($null -eq $readyProcess) {
@@ -206,7 +262,7 @@ try {
 
     # Give FreeRDP time to publish the confirmed Windows handle as a local
     # RemoteApp window before the Linux-side launch button is enabled again.
-    Start-Sleep -Milliseconds 1200
+    Start-Sleep -Milliseconds 750
     $readyProcess.Refresh()
     $sessionId = 'studio-{0}-{1}' -f @(
         $readyProcess.Id,
@@ -271,6 +327,16 @@ try {
     exit 0
 } catch {
     $exitCode = if ($null -ne $process -and $process.HasExited) { [int]$process.ExitCode } else { $null }
+    if ($null -ne $process -and -not $process.HasExited) {
+        try {
+            $record = Get-StudioProcessRecord ([int]$process.Id)
+            if ($null -ne $record -and $record.Process.MainWindowHandle -ne [IntPtr]::Zero) {
+                $null = $record.Process.CloseMainWindow()
+            }
+        } catch {
+            # The authenticated host-side abort path owns forced cleanup.
+        }
+    }
     Write-LaunchResult 'failed' 'Studio Pro failed to start.' $exitCode $executable $_.Exception.Message @()
     exit 1
 }

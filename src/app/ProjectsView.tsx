@@ -32,6 +32,7 @@ export function ProjectsView({
     t,
     installedVersions: studio.installedVersions,
     installedVersionsLoaded: studio.installedLoaded,
+    studioLaunchReady: studio.launchReady,
     studioSessionsLoading: studio.sessionsLoading,
     connectedRemoteAppVersion: requiresWinboat
       ? studio.sessions.find((session) => session.connection === "connected")
@@ -54,6 +55,7 @@ export function ProjectsView({
     sharedDirectory: config.sharedDirectory,
     installedSet: studio.installedSet,
     installedVersionsLoaded: studio.installedLoaded,
+    studioLaunchReady: studio.launchReady,
     studioSessionsLoading: studio.sessionsLoading,
     connectedRemoteAppVersion: launcher.connectedRemoteAppVersion,
     isLaunching: studio.isLaunching,

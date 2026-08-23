@@ -21,6 +21,7 @@ export interface InstalledVersionsModel {
   connectedRemoteAppVersion?: string;
   loading: boolean;
   loaded: boolean;
+  launchReady: boolean;
   stale: boolean;
   error: string | null;
   sessionsLoading: boolean;

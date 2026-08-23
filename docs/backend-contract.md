@@ -191,8 +191,8 @@ agent contract.
 
 ## Verification
 
-`npm run check` runs lint, format, frontend tests, Rust contract/fake-adapter
-tests, real CLI process tests, and JSON Schema validation. `npm run
+`npm run check:portable` runs lint, format, frontend tests, Rust
+contract/fake-adapter tests, real CLI process tests, and JSON Schema validation. `npm run
 test:browser` additionally runs the real Chromium policy and artifact suite.
 On Linux, `npm run test:e2e` separately launches the real Tauri debug binary,
 Vite development server, and WebKit WebView through `tauri-driver`, backed by
@@ -212,15 +212,20 @@ npm run test:winboat-smoke
 It queries current-user sessions through the authenticated RemoteApp transport
 and verifies that reconnect and close both reject a stale PID/start-time pair.
 
-Linux maintainers can run the destructive full adapter lifecycle only against
-a disposable, currently absent WinBoat test version with an official installer
-already in the shared cache:
+On Linux, `npm run check` appends the destructive full adapter lifecycle so the
+live Studio Pro boundary is not silently excluded from the exhaustive local
+gate. It requires a disposable, currently absent WinBoat test version with an
+official installer already in the shared cache:
 
 ```bash
 MENDIMARU_E2E_ALLOW_MUTATION=1 \
 MENDIMARU_E2E_VERSION=11.13.0 \
-npm run test:winboat-e2e
+npm run check
 ```
+
+The same environment variables with `npm run test:winboat-e2e` run only the
+live lifecycle. On non-Linux hosts the WinBoat lifecycle reports itself as not
+applicable.
 
 The test refuses a preinstalled target rather than deleting user state. It
 installs through the common adapter, verifies progress ordering and exact-version
@@ -233,7 +238,7 @@ isolated window manager, failing on leaked child processes or any unexpected
 RAIL/PowerShell window. The host must provide `xvfb-run`, `xfwm4`, and `wmctrl`;
 Arch Linux provides `xvfb-run` in `xorg-server-xvfb`.
 
-The live lifecycle is a local/manual release gate because hosted CI has no
-WinBoat VM. CI still runs the fixture-backed native WebView gate, React flow,
-browser policy suite, and Rust tests; those layers are not presented as proof of
-the live install-to-delete boundary.
+Hosted CI has no live WinBoat VM, so it runs the portable component gates. It
+still runs the fixture-backed native WebView gate, React flow, browser policy
+suite, and Rust tests; those layers are not presented as proof of the live
+install-to-delete boundary.

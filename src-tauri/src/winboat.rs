@@ -8,6 +8,9 @@ mod scripts;
 mod security;
 mod sessions;
 mod studio;
+mod version_cache;
+
+use crate::models::{AppConfig, StudioVersion};
 
 pub use client::installed_versions;
 pub use container::{
@@ -20,6 +23,10 @@ pub(crate) use sessions::{
 };
 pub(crate) use sessions::{list as studio_sessions, reconnect as reconnect_studio_session};
 pub use studio::{install_studio, launch_studio, launch_uninstaller, open_linux_folder};
+
+pub(crate) fn seed_installed_versions_cache(config: &AppConfig, versions: &[StudioVersion]) {
+    version_cache::seed(config, versions);
+}
 
 #[cfg(test)]
 use client::parse_studio_versions;
@@ -358,7 +365,12 @@ mod tests {
 
         assert!(script.contains("MainWindowHandle -ne [IntPtr]::Zero"));
         assert!(script.contains("Start-Process -FilePath $executable"));
-        assert!(script.contains("Start-Sleep -Milliseconds 1200"));
+        assert!(script.contains("Write-LaunchResult 'running'"));
+        assert!(script.contains("sessionId = $launchedSessionId"));
+        assert!(script.contains("hasWindow = $false"));
+        assert!(script.contains("Start-Sleep -Milliseconds 750"));
+        assert!(script.contains("Get-StudioProcessRecord $LaunchProcessId"));
+        assert!(script.contains("Start-Sleep -Milliseconds 250"));
         assert!(script.contains("Get-StudioProcesses"));
         assert!(script.contains("ProcessSecurity]::IsCurrentUser"));
         assert!(script.contains("$baseline.Add"));

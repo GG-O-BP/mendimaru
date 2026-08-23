@@ -307,7 +307,7 @@ async function renderReadyApp() {
 }
 
 describe("native Windows application E2E", () => {
-  it("shows cached installed versions immediately but blocks installs until live detection completes", async () => {
+  it("shows cached installed versions immediately, allows verified-backend launch, and blocks installs until live detection completes", async () => {
     let finishDetection: (versions: StudioVersion[]) => void = () => {
       throw new Error("detection resolver was not initialized");
     };
@@ -333,11 +333,11 @@ describe("native Windows application E2E", () => {
     expect(screen.queryByTitle("action-force-redownload")).toBeNull();
     expect(
       screen.getAllByRole("button", { name: "action-launch" })[0],
-    ).toBeDisabled();
+    ).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
     expect(
       await screen.findByRole("button", { name: "action-open" }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: /nav-studio/ }));
 
     finishDetection([removableStudio, portableStudio]);

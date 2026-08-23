@@ -14,6 +14,7 @@ const EMPTY_CATALOG: StudioVersionCatalog = {
   versions: [],
   loadedPages: [],
 };
+const INITIAL_CATALOG_REFRESH_DELAY_MS = 5_000;
 
 type CatalogRequestState =
   | { status: "idle" }
@@ -50,6 +51,7 @@ export function useVersionCatalog({ t }: VersionCatalogDependencies) {
 
   useEffect(() => {
     let active = true;
+    let refresh: number | undefined;
     void tauriApi
       .getDownloadableVersionsCache()
       .then((cached) => {
@@ -57,10 +59,15 @@ export function useVersionCatalog({ t }: VersionCatalogDependencies) {
       })
       .catch(() => undefined)
       .finally(() => {
-        if (active) void fetchCatalogPage(1);
+        if (!active) return;
+        refresh = window.setTimeout(
+          () => void fetchCatalogPage(1),
+          INITIAL_CATALOG_REFRESH_DELAY_MS,
+        );
       });
     return () => {
       active = false;
+      if (refresh !== undefined) window.clearTimeout(refresh);
     };
   }, [fetchCatalogPage]);
 

@@ -134,6 +134,89 @@ describe("useInstalledVersions", () => {
     expect(result.current.installedStale).toBe(false);
   });
 
+  it("starts installed-version and session verification in parallel after loading the cache", async () => {
+    const liveVersions = deferred<StudioVersion[]>();
+    api.getInstalledVersionsCache.mockResolvedValue({
+      versions: [version("11.12.3")],
+    });
+    api.getInstalledVersions.mockImplementation(() => liveVersions.promise);
+    const dependencies = {
+      t: (key: string) => key,
+      installedVersionsSourceKey: "environment-a",
+      notify: vi.fn(),
+      requestConfirmation: vi.fn(),
+      runAction: async (_key: string, action: () => Promise<void>) => action(),
+      hasBusyPrefix: () => false,
+      onWarning: vi.fn(),
+    };
+    renderHook(() => useInstalledVersions(dependencies));
+
+    await waitFor(() =>
+      expect(api.getStudioSessions.mock.calls.length).toBeGreaterThan(0),
+    );
+    expect(api.getInstalledVersions).toHaveBeenCalledTimes(1);
+
+    liveVersions.resolve([version("11.12.3")]);
+    await act(async () => {
+      await liveVersions.promise;
+    });
+  });
+
+  it("waits for cold-start version detection before inspecting sessions", async () => {
+    const liveVersions = deferred<StudioVersion[]>();
+    api.getInstalledVersions.mockImplementation(() => liveVersions.promise);
+    const dependencies = {
+      t: (key: string) => key,
+      installedVersionsSourceKey: "environment-a",
+      notify: vi.fn(),
+      requestConfirmation: vi.fn(),
+      runAction: async (_key: string, action: () => Promise<void>) => action(),
+      hasBusyPrefix: () => false,
+      onWarning: vi.fn(),
+    };
+    renderHook(() => useInstalledVersions(dependencies));
+
+    await waitFor(() =>
+      expect(api.getInstalledVersions).toHaveBeenCalledTimes(1),
+    );
+    expect(api.getStudioSessions).not.toHaveBeenCalled();
+
+    liveVersions.resolve([version("11.12.3")]);
+    await waitFor(() => expect(api.getStudioSessions).toHaveBeenCalledTimes(1));
+  });
+
+  it("rechecks sessions when live detection changes the cached Studio paths", async () => {
+    const liveVersions = deferred<StudioVersion[]>();
+    const firstSessions = deferred<StudioSessionStatus[]>();
+    api.getInstalledVersionsCache.mockResolvedValue({
+      versions: [version("11.6.9")],
+    });
+    api.getInstalledVersions.mockImplementation(() => liveVersions.promise);
+    api.getStudioSessions
+      .mockImplementationOnce(() => firstSessions.promise)
+      .mockResolvedValueOnce([]);
+    const dependencies = {
+      t: (key: string) => key,
+      installedVersionsSourceKey: "environment-a",
+      notify: vi.fn(),
+      requestConfirmation: vi.fn(),
+      runAction: async (_key: string, action: () => Promise<void>) => action(),
+      hasBusyPrefix: () => false,
+      onWarning: vi.fn(),
+    };
+    renderHook(() => useInstalledVersions(dependencies));
+
+    await waitFor(() => expect(api.getStudioSessions).toHaveBeenCalledTimes(1));
+    liveVersions.resolve([version("11.12.3")]);
+    await act(async () => {
+      await liveVersions.promise;
+    });
+    expect(api.getStudioSessions).toHaveBeenCalledTimes(1);
+
+    firstSessions.resolve([]);
+    await waitFor(() => expect(api.getStudioSessions).toHaveBeenCalledTimes(2));
+  });
+
   it("invalidates trusted versions immediately when the configured source changes", async () => {
     api.getInstalledVersionsCache
       .mockResolvedValueOnce({ versions: [version("11.6.9")] })

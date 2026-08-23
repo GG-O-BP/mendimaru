@@ -6,6 +6,21 @@ import type { InstalledVersionsDependencies } from "./dependencies";
 
 const ACTIVE_SESSION_REFRESH_INTERVAL_MS = 1_000;
 
+function sameStudioPaths(left: StudioVersion[], right: StudioVersion[]) {
+  if (left.length !== right.length) return false;
+  const rightByVersion = new Map(
+    right.map((version) => [
+      version.version,
+      version.executablePath.toLowerCase(),
+    ]),
+  );
+  return left.every(
+    (version) =>
+      rightByVersion.get(version.version) ===
+      version.executablePath.toLowerCase(),
+  );
+}
+
 export function useInstalledVersions({
   t,
   installedVersionsSourceKey,
@@ -101,31 +116,54 @@ export function useInstalledVersions({
       } finally {
         if (request === installedRequest.current) setInstalledLoading(false);
       }
-      if (request === installedRequest.current) await refreshSessions(silent);
       return request === installedRequest.current ? next : undefined;
     },
-    [installedVersionsSourceKey, onWarning, refreshSessions, t],
+    [installedVersionsSourceKey, onWarning, t],
   );
 
   useEffect(() => {
     let active = true;
-    void tauriApi
-      .getInstalledVersionsCache()
-      .then((cached) => {
-        if (!active || cached.versions.length === 0) return;
-        setDisplayedInstalledSource(installedVersionsSourceKey);
-        setInstalledVersions(cached.versions);
-        setInstalledStale(true);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (active) void refreshInstalled(true);
-      });
+    const initialize = async () => {
+      let cachedVersions: StudioVersion[] = [];
+      try {
+        const cached = await tauriApi.getInstalledVersionsCache();
+        if (!active) return;
+        cachedVersions = cached.versions;
+        if (cachedVersions.length > 0) {
+          setDisplayedInstalledSource(installedVersionsSourceKey);
+          setInstalledVersions(cachedVersions);
+          setInstalledStale(true);
+        }
+      } catch {
+        // A missing or invalid cache is equivalent to a cold start.
+      }
+      if (!active) return;
+
+      const installed = refreshInstalled(true);
+      if (cachedVersions.length === 0) {
+        const next = await installed;
+        if (active && next !== undefined) await refreshSessions(true);
+        return;
+      }
+
+      const sessions = refreshSessions(true);
+      const next = await installed;
+      if (
+        !active ||
+        next === undefined ||
+        sameStudioPaths(cachedVersions, next)
+      ) {
+        return;
+      }
+      await sessions;
+      if (active) await refreshSessions(true);
+    };
+    void initialize();
     return () => {
       active = false;
       installedRequest.current += 1;
     };
-  }, [installedVersionsSourceKey, refreshInstalled]);
+  }, [installedVersionsSourceKey, refreshInstalled, refreshSessions]);
 
   useEffect(() => {
     if (
@@ -259,6 +297,7 @@ export function useInstalledVersions({
       installedErrorSource !== installedVersionsSourceKey &&
       (!installedSourceVerified || installedLoading),
     installedLoaded: installedSourceVerified && installedLoaded,
+    launchReady: installedSourceMatches && installedVersions.length > 0,
     installedStale: installedSourceMatches && installedStale,
     installedError:
       installedErrorSource === installedVersionsSourceKey

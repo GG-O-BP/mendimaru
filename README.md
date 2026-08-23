@@ -167,10 +167,10 @@ npm install
 npm run tauri dev
 ```
 
-To validate the project and build an application bundle:
+To run the host-portable validation suite and build an application bundle:
 
 ```bash
-npm run check
+npm run check:portable
 npm run test:browser
 npm run test:e2e
 npm run tauri build
@@ -178,15 +178,15 @@ npm run tauri build
 
 On Linux, `npm run test:e2e` launches the debug executable against the Vite development URL through pinned `tauri-driver` and `WebKitWebDriver`. It uses isolated WinBoat/API/project fixtures and verifies the real WebView, Tauri IPC, online application state, sampled bounded route and busy-state motion, the absence of continuous idle animation, and primary navigation. Install the driver bridge with `cargo install tauri-driver --version 2.0.6 --locked`; the host must also provide `WebKitWebDriver`. `npm run test:app-flow` retains the faster React application-flow suite with mocked OS boundaries, while `npm run test:browser` tests Mendix Runtime pages rather than the Mendimaru desktop shell. CI gates all three layers, runs the frontend and Rust suites on Windows and Linux, and smoke-builds MSI and NSIS installers on Windows.
 
-Run `npm run test:winboat-smoke` for the non-destructive RemoteApp gate against an online WinBoat VM. It verifies authenticated session queries and stale-session rejection. The destructive lifecycle gate is deliberately separate and refuses a version that was already installed:
+Run `npm run test:winboat-smoke` for the non-destructive RemoteApp gate against an online WinBoat VM. It verifies authenticated session queries and stale-session rejection. On Linux, the exhaustive `npm run check` command also requires the destructive lifecycle gate instead of silently excluding it. Supply an absent disposable version and explicit mutation permission:
 
 ```bash
 MENDIMARU_E2E_ALLOW_MUTATION=1 \
 MENDIMARU_E2E_VERSION=11.13.0 \
-npm run test:winboat-e2e
+npm run check
 ```
 
-The exact disposable version must have an official installer in the shared cache. The lifecycle verifies absent → installed → real Studio window → running-removal rejection → graceful close → uninstalled, including progress ordering, exact process identity, unchanged pre-existing installations and installer cache, stale/repeated action rejection, and no leaked processes or unexpected RemoteApp/PowerShell windows. Both live gates use isolated Xvfb and require `xvfb-run`, `xfwm4`, and `wmctrl`; on Arch Linux, `xvfb-run` is provided by `xorg-server-xvfb`. Because CI has no live WinBoat VM, this destructive gate is a local/manual release gate rather than a CI claim.
+Use `npm run test:winboat-e2e` with the same environment variables to run only the lifecycle. The exact disposable version must have an official installer in the shared cache. The lifecycle refuses a preinstalled target and verifies absent → installed → real Studio window → running-removal rejection → graceful close → uninstalled, including progress ordering, exact process identity, unchanged pre-existing installations and installer cache, stale/repeated action rejection, and no leaked processes or unexpected RemoteApp/PowerShell windows. Both live gates use isolated Xvfb and require `xvfb-run`, `xfwm4`, and `wmctrl`; on Arch Linux, `xvfb-run` is provided by `xorg-server-xvfb`. Other host platforms report the WinBoat lifecycle as not applicable. Because hosted CI has no live WinBoat VM, it runs the portable component gates rather than claiming this local live result.
 
 The full Rust suite covers registry parsing, path containment, installer integrity, Windows argument quoting, UAC/exit-code failures, and a fixture-backed install-to-uninstall lifecycle.
 

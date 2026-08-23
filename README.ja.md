@@ -161,10 +161,10 @@ npm install
 npm run tauri dev
 ```
 
-プロジェクトの検証とアプリバンドルの生成：
+ホストに依存しない検証とアプリバンドルの生成：
 
 ```bash
-npm run check
+npm run check:portable
 npm run test:browser
 npm run test:e2e
 npm run tauri build
@@ -172,15 +172,15 @@ npm run tauri build
 
 Linux の `npm run test:e2e` は、固定バージョンの `tauri-driver` と `WebKitWebDriver` を使い、debug 実行ファイルを Vite development URL に接続します。隔離した WinBoat／API／project fixture により、実際の WebView、Tauri IPC、online application state、frame sampling を伴う route／busy-state motion、allowlist 外の idle animation がないこと、主要画面の navigation を検証します。driver bridge は `cargo install tauri-driver --version 2.0.6 --locked` でインストールし、host に `WebKitWebDriver` も必要です。`npm run test:app-flow` は OS 境界をモックした高速な React application-flow suite で、`npm run test:browser` は Mendimaru desktop shell ではなく Mendix Runtime page をテストします。CI は 3 層すべてを gate し、Windows／Linux のテストと Windows MSI／NSIS smoke build を実行します。
 
-online の実 WinBoat VM に対する非破壊 RemoteApp gate は `npm run test:winboat-smoke` で実行し、認証済み session query と stale-session rejection を検証します。実際の状態を変更する lifecycle gate は別に実行し、既にインストール済みの version を安全のため拒否します。
+online の実 WinBoat VM に対する非破壊 RemoteApp gate は `npm run test:winboat-smoke` で実行し、認証済み session query と stale-session rejection を検証します。Linux の完全な `npm run check` は、実際の状態を変更する lifecycle gate を黙って除外せず、必須で実行します。未インストールの disposable version と明示的な変更許可を指定してください。
 
 ```bash
 MENDIMARU_E2E_ALLOW_MUTATION=1 \
 MENDIMARU_E2E_VERSION=11.13.0 \
-npm run test:winboat-e2e
+npm run check
 ```
 
-指定した disposable version の公式 installer が shared cache に存在する必要があります。このテストは absent → installed → 実 Studio window → running removal rejection → graceful close → uninstalled を実行し、progress ordering、正確な process identity、既存 installation と installer cache の不変性、stale／repeated action rejection、leaked process や想定外の RemoteApp／PowerShell window がないことまで検証します。両方の live gate は隔離した Xvfb と `xvfb-run`、`xfwm4`、`wmctrl` を必要とします。Arch Linux では `xorg-server-xvfb` が `xvfb-run` を提供します。CI には live WinBoat VM がないため、destructive lifecycle は local/manual release gate であり、CI の検証範囲としては主張しません。
+同じ環境変数で `npm run test:winboat-e2e` を実行すると、lifecycle だけを個別に検証できます。指定した disposable version の公式 installer が shared cache に存在する必要があります。このテストは既にインストール済みの対象を拒否し、absent → installed → 実 Studio window → running removal rejection → graceful close → uninstalled を実行して、progress ordering、正確な process identity、既存 installation と installer cache の不変性、stale／repeated action rejection、leaked process や想定外の RemoteApp／PowerShell window がないことまで検証します。両方の live gate は隔離した Xvfb と `xvfb-run`、`xfwm4`、`wmctrl` を必要とします。Arch Linux では `xorg-server-xvfb` が `xvfb-run` を提供します。他の host platform では WinBoat lifecycle を適用対象外として報告します。hosted CI には live WinBoat VM がないため、portable component gate のみを実行し、local live result の通過を主張しません。
 
 Rust の全テストでは registry parsing、path containment、file integrity、Windows argument encoding、UAC／exit-code failure、install から uninstall までの fixture lifecycle を検証します。
 

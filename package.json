@@ -25,7 +25,8 @@
     "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "format": "prettier --write . && cargo fmt --manifest-path src-tauri/Cargo.toml",
     "format:check": "prettier --check . && cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
-    "check": "npm run lint && npm run format:check && npm run build && npm run test",
+    "check:portable": "npm run lint && npm run format:check && npm run build && npm run test",
+    "check": "npm run check:portable && npm run test:winboat-e2e",
     "preview": "vite preview",
     "tarui": "npm run tauri --",
     "tauri": "cross-env NO_STRIP=1 tauri"

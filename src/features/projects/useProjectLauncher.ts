@@ -14,6 +14,7 @@ interface ProjectLauncherDependencies {
   t: Translate;
   installedVersions: StudioVersion[];
   installedVersionsLoaded: boolean;
+  studioLaunchReady: boolean;
   studioSessionsLoading: boolean;
   connectedRemoteAppVersion?: string;
   catalogVersions: DownloadableVersion[];
@@ -57,6 +58,7 @@ export function useProjectLauncher({
   t,
   installedVersions,
   installedVersionsLoaded,
+  studioLaunchReady,
   studioSessionsLoading,
   connectedRemoteAppVersion,
   catalogVersions,
@@ -246,12 +248,7 @@ export function useProjectLauncher({
 
   const launchProject = useCallback(
     (project: MendixProject) => {
-      if (
-        !installedVersionsLoaded ||
-        studioSessionsLoading ||
-        connectedRemoteAppVersion
-      )
-        return;
+      if (!studioLaunchReady || connectedRemoteAppVersion) return;
       if (launchPendingFor(project)) {
         openAssistant(project);
         return;
@@ -270,8 +267,7 @@ export function useProjectLauncher({
     [
       completeLaunch,
       installedByVersion,
-      installedVersionsLoaded,
-      studioSessionsLoading,
+      studioLaunchReady,
       connectedRemoteAppVersion,
       launchPendingFor,
       openAssistant,
@@ -343,8 +339,7 @@ export function useProjectLauncher({
   const continueAssistant = useCallback(() => {
     if (
       !assistant?.selectedVersion ||
-      !installedVersionsLoaded ||
-      studioSessionsLoading ||
+      !studioLaunchReady ||
       connectedRemoteAppVersion
     )
       return;
@@ -375,8 +370,7 @@ export function useProjectLauncher({
     completeLaunch,
     installVersion,
     installedByVersion,
-    installedVersionsLoaded,
-    studioSessionsLoading,
+    studioLaunchReady,
     connectedRemoteAppVersion,
     remember,
     reportPreferenceError,
@@ -430,6 +424,7 @@ export function useProjectLauncher({
     selectedInstalled,
     selectedDownloadable,
     installedVersionsLoaded,
+    studioLaunchReady,
     studioSessionsLoading,
     connectedRemoteAppVersion,
     safetyRequired,

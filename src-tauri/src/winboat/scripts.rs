@@ -1,4 +1,5 @@
 const LAUNCH_STUDIO_TEMPLATE: &str = include_str!("../../scripts/launch_studio.ps1");
+const ABORT_STUDIO_LAUNCH_TEMPLATE: &str = include_str!("../../scripts/abort_studio_launch.ps1");
 const INSTALL_STUDIO_TEMPLATE: &str = include_str!("../../scripts/install_studio.ps1");
 const UNINSTALL_STUDIO_TEMPLATE: &str = include_str!("../../scripts/uninstall_studio.ps1");
 const STUDIO_SESSIONS_TEMPLATE: &str = include_str!("../../scripts/studio_sessions.ps1");
@@ -29,6 +30,22 @@ pub(super) fn launch_studio_script(
         )
         .replace("__INSTALL_ROOT__", &powershell_literal(install_root))
         .replace("__VERSION__", &powershell_literal(version))
+        .replace("__SECURITY_PREAMBLE__", OPERATION_SECURITY_PREAMBLE)
+}
+
+pub(super) fn abort_studio_launch_script(
+    executable_path: &str,
+    windows_report_path: &str,
+    install_root: &str,
+    process_id: u32,
+    started_ticks: i64,
+) -> String {
+    ABORT_STUDIO_LAUNCH_TEMPLATE
+        .replace("__EXECUTABLE_PATH__", &powershell_literal(executable_path))
+        .replace("__RESULT_PATH__", &powershell_literal(windows_report_path))
+        .replace("__INSTALL_ROOT__", &powershell_literal(install_root))
+        .replace("__TARGET_PROCESS_ID__", &process_id.to_string())
+        .replace("__TARGET_STARTED_TICKS__", &started_ticks.to_string())
         .replace("__SECURITY_PREAMBLE__", OPERATION_SECURITY_PREAMBLE)
 }
 
@@ -296,8 +313,9 @@ if ($null -eq $failure) {{ exit 0 }} else {{ exit 1 }}
 #[cfg(test)]
 mod tests {
     use super::{
-        install_script, launch_studio_script, runtime_port_probe_script, studio_sessions_script,
-        uninstall_script, StudioSessionScriptMode,
+        abort_studio_launch_script, install_script, launch_studio_script,
+        runtime_port_probe_script, studio_sessions_script, uninstall_script,
+        StudioSessionScriptMode,
     };
     use crate::models::StudioVersion;
 
@@ -319,8 +337,15 @@ mod tests {
             &"ab".repeat(32),
             "share-root",
         );
+        let abort = abort_studio_launch_script(
+            "studio.exe",
+            "abort.json",
+            "install-root",
+            4242,
+            639_223_488_000_000_000,
+        );
         let uninstall = uninstall_script("data-root", "install-root", "11.1.0", "remove.json");
-        for script in [launch, install, uninstall] {
+        for script in [launch, abort, install, uninstall] {
             assert!(!script.contains("__"), "unreplaced placeholder in script");
         }
     }
@@ -344,6 +369,13 @@ mod tests {
             r"C:\Program Files\Mendix",
             "11.13.0",
         );
+        let abort = abort_studio_launch_script(
+            r"C:\Program Files\Mendix\11.13.0\modeler\studiopro.exe",
+            r"\\host.lan\Data\abort.json",
+            r"C:\Program Files\Mendix",
+            4242,
+            639_223_488_000_000_000,
+        );
         let uninstall = uninstall_script(
             r"C:\ProgramData\Mendix",
             r"C:\Program Files\Mendix",
@@ -351,7 +383,7 @@ mod tests {
             r"\\host.lan\Data\uninstall.json",
         );
 
-        for script in [&install, &launch, &uninstall] {
+        for script in [&install, &launch, &abort, &uninstall] {
             assert!(script.contains("Get-AuthenticodeSignature"));
             assert!(script.contains("-cne 'Valid'"));
             assert!(script.contains("cn=mendix technology b.v."));
@@ -360,6 +392,20 @@ mod tests {
             assert!(script.contains("ReparsePoint"));
             assert!(script.contains("Write-MendimaruReport"));
         }
+        assert_eq!(
+            launch
+                .matches("Assert-MendimaruTrustedExecutable -Path $executable")
+                .count(),
+            1,
+            "launch verifies the exact executable once immediately before spawning it"
+        );
+        assert!(abort.contains("$targetProcessId = [int]4242"));
+        assert!(abort.contains("$targetStartedTicks = [long]639223488000000000"));
+        assert!(abort.contains("ProcessSecurity]::IsCurrentUser($targetProcessId)"));
+        assert!(abort.contains("$candidate.StartTime.ToUniversalTime().Ticks"));
+        assert!(abort.contains("[string]$candidate.Path"));
+        assert!(abort.contains("Stop-Process -Id $targetProcessId -Force"));
+        assert!(!abort.contains("Get-Process -Name"));
         assert!(install.matches("ExpectedSha256 $expectedSha256").count() >= 3);
         assert!(install.matches("Assert-StudioVersionNotRunning").count() >= 3);
         assert!(install.contains("MENDIMARU_STUDIO_RUNNING"));

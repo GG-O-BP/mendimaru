@@ -24,7 +24,22 @@ pub async fn installed_versions(config: &AppConfig) -> Result<Vec<StudioVersion>
         .json::<Vec<WinApp>>()
         .await
         .map_err(|error| crate::tr!("error-windows-apps-parse", error = error))?;
-    Ok(parse_studio_versions(apps, &config.mendix_install_root))
+    let versions = parse_studio_versions(apps, &config.mendix_install_root);
+    super::version_cache::store(config, &versions);
+    Ok(versions)
+}
+
+pub(super) async fn installed_versions_cached(
+    config: &AppConfig,
+) -> Result<Vec<StudioVersion>, String> {
+    if let Some(versions) = super::version_cache::get(config) {
+        return Ok(versions);
+    }
+    let _refresh = super::version_cache::refresh_guard().await;
+    if let Some(versions) = super::version_cache::get(config) {
+        return Ok(versions);
+    }
+    installed_versions(config).await
 }
 
 pub(super) fn parse_studio_versions(apps: Vec<WinApp>, install_root: &str) -> Vec<StudioVersion> {

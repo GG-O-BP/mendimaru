@@ -26,6 +26,7 @@ export interface ProjectsPageModel {
   sharedDirectory: string;
   installedSet: Set<string>;
   installedVersionsLoaded: boolean;
+  studioLaunchReady: boolean;
   studioSessionsLoading: boolean;
   connectedRemoteAppVersion?: string;
   isLaunching: boolean;
@@ -182,8 +183,7 @@ export function ProjectsPage({
                           className="button primary compact"
                           onClick={() => model.onLaunch(project)}
                           disabled={
-                            !model.installedVersionsLoaded ||
-                            model.studioSessionsLoading ||
+                            !model.studioLaunchReady ||
                             Boolean(model.connectedRemoteAppVersion) ||
                             model.isLaunching
                           }
