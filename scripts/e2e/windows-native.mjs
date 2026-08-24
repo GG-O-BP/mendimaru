@@ -55,7 +55,9 @@ let launchedStudioProcessId;
 
 async function run() {
   await mkdir(ARTIFACT_DIRECTORY, { recursive: true });
-  const isolatedRoot = await mkdtemp(join(tmpdir(), "mendimaru-e2e-"));
+  const isolatedRoot = await realpath(
+    await mkdtemp(join(tmpdir(), "mendimaru-e2e-")),
+  );
   const primaryWorkspace = join(isolatedRoot, "workspace");
   const secondaryWorkspace = join(isolatedRoot, "workspace-secondary");
   await writeFile(join(isolatedRoot, MARKER_NAME), MARKER_CONTENT, "utf8");
@@ -193,8 +195,9 @@ async function run() {
 
     const config = await client.invoke("get_config");
     report.configSharedDirectory = config.sharedDirectory;
+    report.expectedSharedDirectory = primaryWorkspace;
     recordAssertion(
-      sameWindowsPath(config.sharedDirectory, primaryWorkspace),
+      await sameWindowsPath(config.sharedDirectory, primaryWorkspace),
       "the E2E build uses only its isolated workspace",
     );
 
@@ -322,7 +325,7 @@ async function run() {
       "native settings save",
     );
     recordAssertion(
-      sameWindowsPath(
+      await sameWindowsPath(
         (await client.invoke("get_config")).sharedDirectory,
         secondaryWorkspace,
       ),
@@ -839,10 +842,14 @@ function numberEnvironment(name, fallback) {
   return parsed;
 }
 
-function sameWindowsPath(left, right) {
+async function sameWindowsPath(left, right) {
+  const [canonicalLeft, canonicalRight] = await Promise.all([
+    realpath(left),
+    realpath(right),
+  ]);
   return (
-    left.replaceAll("/", "\\").toLowerCase() ===
-    right.replaceAll("/", "\\").toLowerCase()
+    canonicalLeft.replaceAll("/", "\\").toLowerCase() ===
+    canonicalRight.replaceAll("/", "\\").toLowerCase()
   );
 }
 
