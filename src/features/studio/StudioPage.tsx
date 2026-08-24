@@ -42,7 +42,7 @@ export function StudioPage({
   );
 
   return (
-    <div className="studio-page">
+    <div className="studio-page" data-testid="studio-page">
       <PageTitle
         eyebrow={t("studio-eyebrow")}
         title={t("nav-studio")}

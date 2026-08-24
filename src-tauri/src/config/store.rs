@@ -1,7 +1,9 @@
 use crate::models::AppConfig;
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+#[cfg(not(feature = "e2e"))]
+use tauri::Manager;
 
 const CONFIG_FILE_NAME: &str = "config.json";
 
@@ -18,8 +20,12 @@ pub fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
     }
     let content = fs::read_to_string(&path)
         .map_err(|error| crate::tr!("error-config-read", error = error))?;
-    serde_json::from_str::<AppConfig>(&content)
-        .map_err(|error| crate::tr!("error-config-parse", error = error))
+    let mut config = serde_json::from_str::<AppConfig>(&content)
+        .map_err(|error| crate::tr!("error-config-parse", error = error))?;
+    if super::migrate_legacy_windows_workspace(&mut config) {
+        persist_config(app, &config)?;
+    }
+    Ok(config)
 }
 
 pub fn persist_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
@@ -61,6 +67,12 @@ fn atomic_write(path: &std::path::Path, content: &[u8]) -> Result<(), String> {
 }
 
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    #[cfg(feature = "e2e")]
+    {
+        let _ = app;
+        crate::e2e::directory("config").map(|directory| directory.join(CONFIG_FILE_NAME))
+    }
+    #[cfg(not(feature = "e2e"))]
     app.path()
         .app_config_dir()
         .map(|directory| directory.join(CONFIG_FILE_NAME))

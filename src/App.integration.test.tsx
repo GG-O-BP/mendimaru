@@ -220,7 +220,7 @@ async function renderReadyApp() {
   await screen.findByText("route-native-windows");
 }
 
-describe("native Windows application E2E", () => {
+describe("native Windows application integration", () => {
   it("renders native capabilities without any WinBoat route or control", async () => {
     await renderReadyApp();
 

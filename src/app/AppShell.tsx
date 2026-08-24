@@ -56,7 +56,7 @@ export function AppShell({
 }) {
   const nativeWindows = winBoatControl.kind === "native";
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-testid="app-shell">
       <aside className="harbor-sidebar">
         <div className="brand-lockup">
           <HarborMark />
@@ -71,6 +71,7 @@ export function AppShell({
             <button
               type="button"
               key={key}
+              data-testid={`nav-${key}`}
               className={activeView === key ? "active" : ""}
               onClick={() => onViewChange(key)}
               aria-current={activeView === key ? "page" : undefined}
@@ -105,6 +106,7 @@ export function AppShell({
           <div
             className={`route-status ${online ? "online" : "offline"}`}
             aria-label={t("route-aria")}
+            data-testid="platform-route"
           >
             {!nativeWindows && (
               <>
@@ -193,7 +195,7 @@ export function AppShell({
           </div>
         )}
 
-        <main className="page" id="main-content">
+        <main className="page" id="main-content" data-testid="active-page">
           {children}
         </main>
       </div>

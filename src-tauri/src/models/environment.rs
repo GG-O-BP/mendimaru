@@ -35,6 +35,7 @@ pub enum ContainerStatus {
 }
 
 impl ContainerStatus {
+    #[cfg(any(target_os = "linux", test))]
     pub fn from_runtime(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
             "created" => Self::Created,
@@ -49,10 +50,12 @@ impl ContainerStatus {
         }
     }
 
+    #[cfg(target_os = "linux")]
     pub const fn is_running(self) -> bool {
         matches!(self, Self::Running)
     }
 
+    #[cfg(target_os = "linux")]
     pub const fn exists(self) -> bool {
         !matches!(self, Self::NotFound)
     }

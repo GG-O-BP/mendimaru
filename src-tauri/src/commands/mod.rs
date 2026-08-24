@@ -8,9 +8,10 @@ use crate::models::{AppConfig, CommandError, CommandErrorCode};
 use tauri::AppHandle;
 
 pub(crate) use configuration::{get_config, redetect_config, save_config};
+pub(crate) use environment::get_environment_status;
+#[cfg(target_os = "linux")]
 pub(crate) use environment::{
-    begin_winboat_setup, complete_winboat_setup, get_environment_status, open_winboat,
-    start_winboat_windows,
+    begin_winboat_setup, complete_winboat_setup, open_winboat, start_winboat_windows,
 };
 pub(crate) use localization::{
     format_localized_bytes, format_localized_dates, format_localized_numbers, get_localization,

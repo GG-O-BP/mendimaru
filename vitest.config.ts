@@ -8,5 +8,7 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     clearMocks: true,
     pool: "threads",
+    // Avoid sporadic worker-start timeouts after a full Rust build on Windows.
+    maxWorkers: 2,
   },
 });

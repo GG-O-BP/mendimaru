@@ -32,8 +32,61 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
 
 jobs:
+  verify-windows:
+    name: Verify Windows release candidate
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run lint, formatting, builds, tests, and npm audit
+        run: npm run check
+
+      - name: Install pinned cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+
+      - name: Audit Rust dependency lockfile
+        run: cargo audit --file src-tauri/Cargo.lock
+
+      - name: Run actual Tauri, WebView2, IPC, Windows, and performance E2E
+        run: npm run test:e2e
+        env:
+          MENDIMARU_E2E_MAX_STARTUP_MS: 180000
+
+      - name: Upload native E2E diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-release-windows-native-e2e
+          path: artifacts/e2e
+          if-no-files-found: warn
+
   release:
     name: Create GitHub release
+    needs: verify-windows
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -236,8 +289,138 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build MSI and NSIS installers
-        run: npm run tauri -- build --bundles msi,nsis
+      - name: Import required Windows code-signing certificate
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          if (
+            [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE) -or
+            [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)
+          ) {
+            throw "WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD are required for releases."
+          }
+          $timestamp = $null
+          if (
+            -not [Uri]::TryCreate(
+              $env:WINDOWS_TIMESTAMP_URL,
+              [UriKind]::Absolute,
+              [ref]$timestamp
+            ) -or
+            $timestamp.Scheme -notin @("http", "https")
+          ) {
+            throw "Repository variable WINDOWS_TIMESTAMP_URL must be an absolute HTTP(S) timestamp URL."
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP "mendimaru-signing.pfx"
+          $configPath = Join-Path $env:RUNNER_TEMP "mendimaru-windows-signing.json"
+          [IO.File]::WriteAllBytes(
+            $pfxPath,
+            [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          )
+          $password = ConvertTo-SecureString `
+            -String $env:WINDOWS_CERTIFICATE_PASSWORD `
+            -AsPlainText -Force
+          $certificate = Import-PfxCertificate `
+            -FilePath $pfxPath `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -Password $password `
+            -Exportable:$false
+          if (-not $certificate.HasPrivateKey) {
+            throw "Imported Windows signing certificate has no private key."
+          }
+          if ($certificate.NotAfter -le [DateTime]::UtcNow.AddDays(7)) {
+            throw "Windows signing certificate is expired or expires within seven days."
+          }
+
+          @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $certificate.Thumbprint
+                digestAlgorithm = "sha256"
+                timestampUrl = $timestamp.AbsoluteUri
+              }
+            }
+          } | ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath $configPath -Encoding utf8
+
+          "TAURI_WINDOWS_SIGNING_CONFIG=$configPath" >> $env:GITHUB_ENV
+          "MENDIMARU_WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" >> $env:GITHUB_ENV
+          "MENDIMARU_WINDOWS_CERTIFICATE_PATH=$pfxPath" >> $env:GITHUB_ENV
+
+      - name: Build signed MSI and NSIS installers
+        run: npm run tauri -- build --bundles msi,nsis --config "$env:TAURI_WINDOWS_SIGNING_CONFIG"
+
+      - name: Verify Authenticode on application and installers
+        shell: pwsh
+        run: |
+          $artifacts = @(
+            Get-Item "src-tauri/target/release/mendimaru.exe" -ErrorAction Stop
+            Get-ChildItem "src-tauri/target/release/bundle/msi" -Filter "*.msi" -File
+            Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -File
+          )
+          if ($artifacts.Count -lt 3) {
+            throw "Expected the application executable plus MSI and NSIS installers."
+          }
+          foreach ($artifact in $artifacts) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $artifact.FullName
+            if ($signature.Status -ne [Management.Automation.SignatureStatus]::Valid) {
+              throw "Invalid Authenticode signature on $($artifact.FullName): $($signature.StatusMessage)"
+            }
+            if (
+              $signature.SignerCertificate.Thumbprint -ne
+              $env:MENDIMARU_WINDOWS_CERTIFICATE_THUMBPRINT
+            ) {
+              throw "Unexpected signing certificate on $($artifact.FullName)."
+            }
+            if ($null -eq $signature.TimeStamperCertificate) {
+              throw "Missing trusted timestamp on $($artifact.FullName)."
+            }
+          }
+
+      - name: Install, launch, and uninstall signed MSI in the ephemeral VM
+        shell: pwsh
+        env:
+          MENDIMARU_EPHEMERAL_WINDOWS_VM: mendimaru-github-hosted-ephemeral-vm
+        run: |
+          $installers = @(
+            Get-ChildItem `
+              "src-tauri/target/release/bundle/msi" `
+              -Filter "*.msi" -File -ErrorAction Stop
+          )
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one signed MSI installer."
+          }
+          ./scripts/e2e/windows-bundle-smoke.ps1 `
+            -InstallerKind msi `
+            -InstallerPath $installers[0].FullName
+
+      - name: Install, launch, and uninstall signed NSIS in the ephemeral VM
+        shell: pwsh
+        env:
+          MENDIMARU_EPHEMERAL_WINDOWS_VM: mendimaru-github-hosted-ephemeral-vm
+        run: |
+          $installers = @(
+            Get-ChildItem `
+              "src-tauri/target/release/bundle/nsis" `
+              -Filter "*.exe" -File -ErrorAction Stop
+          )
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one signed NSIS installer."
+          }
+          ./scripts/e2e/windows-bundle-smoke.ps1 `
+            -InstallerKind nsis `
+            -InstallerPath $installers[0].FullName
+
+      - name: Upload signed bundle smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-release-windows-bundle-smoke
+          path: artifacts/bundle-smoke
+          if-no-files-found: warn
 
       - name: Upload installers to the GitHub release
         env:
@@ -254,3 +437,23 @@ jobs:
           foreach ($installer in $installers) {
             gh release upload $env:RELEASE_TAG $installer.FullName `
               --repo $env:GITHUB_REPOSITORY --clobber
+
+      - name: Remove temporary Windows signing material
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:MENDIMARU_WINDOWS_CERTIFICATE_THUMBPRINT)) {
+            Remove-Item `
+              -LiteralPath "Cert:\CurrentUser\My\$env:MENDIMARU_WINDOWS_CERTIFICATE_THUMBPRINT" `
+              -Force -ErrorAction SilentlyContinue
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:MENDIMARU_WINDOWS_CERTIFICATE_PATH)) {
+            Remove-Item `
+              -LiteralPath $env:MENDIMARU_WINDOWS_CERTIFICATE_PATH `
+              -Force -ErrorAction SilentlyContinue
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:TAURI_WINDOWS_SIGNING_CONFIG)) {
+            Remove-Item `
+              -LiteralPath $env:TAURI_WINDOWS_SIGNING_CONFIG `
+              -Force -ErrorAction SilentlyContinue
+          }

@@ -30,6 +30,7 @@ export function InstalledVersionsSection({
         action={
           <button
             type="button"
+            data-testid="refresh-installed"
             className="icon-button"
             title={t("refresh-installed")}
             onClick={model.onRefresh}

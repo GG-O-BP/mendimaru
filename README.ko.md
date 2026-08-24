@@ -101,10 +101,12 @@ Windows에서는 시스템 및 사용자 표준 경로의 Microsoft Edge와 Chro
 | Studio Pro 설치 루트 | `C:\Program Files\Mendix` |
 | Studio Pro 실행 파일 | `C:\Program Files\Mendix\<version>\modeler\studiopro.exe` |
 | Studio Pro 제거 정보 | `C:\ProgramData\Mendix` |
-| 네이티브 기본 워크스페이스 | 존재하면 `%USERPROFILE%\Mendix`, 아니면 `%USERPROFILE%` |
+| 네이티브 기본 워크스페이스 | `%USERPROFILE%\Mendix` (없으면 다른 디렉터리를 지정하도록 안내) |
 | Linux WinBoat 공유 경로 | `\\host.lan\Data` |
 
 설치 파일은 설정한 워크스페이스의 `.mendimaru/installers`에 저장합니다. 네이티브 모드에서는 서명을 검증한 뒤 명령 셸 없이 Windows 권한 상승 API로 실행합니다. Linux 모드에서는 따옴표 영향을 받지 않는 UTF-16LE 인코딩 PowerShell 명령을 WinBoat RemoteApp에 전달합니다. 설치 프로세스가 성공하고 해당 버전의 `StudioPro.exe`가 탐지된 뒤에만 완료로 처리합니다.
+
+Marketplace 카탈로그 캐시는 최대 6시간 재사용하므로 일반 시작 시 백그라운드 브라우저를 다시 띄우지 않습니다. 즉시 갱신하려면 카탈로그 새로고침을 사용하면 됩니다.
 
 제거할 때도 Windows 제거 프로세스가 끝나고 해당 버전의 `StudioPro.exe`가 사라진 것을 확인한 뒤 설치된 버전 목록을 자동으로 갱신합니다.
 
@@ -129,10 +131,15 @@ npm run tauri dev
 
 ```bash
 npm run check
+npm run check:windows
 npm run tauri build
 ```
 
-`npm run test:e2e`는 OS 경계를 모킹한 Windows 네이티브 앱 전체 흐름을 실행합니다. 전체 Rust 테스트는 레지스트리 파싱, 경로 격리, 파일 무결성, Windows 인자 인코딩, UAC/종료 코드 실패와 설치부터 제거까지의 fixture 수명주기를 검증합니다. CI는 Windows와 Linux 모두에서 테스트하고 Windows MSI/NSIS 번들을 스모크 빌드합니다.
+`npm run test:ui:integration`은 OS 경계를 모킹한 빠른 React 흐름을 실행합니다. Windows의 `npm run test:e2e`는 테스트 전용 Cargo feature로 실제 앱을 `tauri dev`로 시작하고, 네이티브 WebView2 창을 임베디드 WebDriver로 조작합니다. 실제 IPC, 레지스트리 탐지, 프로젝트 스캔, 설정 저장, Edge 기반 Marketplace 갱신, CSP 차단, 잘못된 입력 거부와 성능 예산을 검증합니다. 설정과 캐시는 안전 마커가 있는 임시 디렉터리로 격리하고 실행 후 제거합니다. WebDriver feature·권한·전역 Tauri 브리지는 일반 개발 및 릴리스 빌드에 포함되지 않습니다.
+
+CI는 Windows와 Linux에서 프런트엔드/Rust 테스트와 npm/Cargo 잠금 파일 보안 감사를 실행하고, Windows에서 실제 네이티브 E2E를 수행합니다. 이후 표시된 일회성 Windows VM에서 MSI와 NSIS를 각각 빌드·설치·실행·제거합니다. 번들 설치 테스트는 일반 작업 PC에서 실행을 거부합니다.
+
+Windows 릴리스에는 Authenticode 서명이 필수입니다. 저장소 secret `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`와 저장소 변수 `WINDOWS_TIMESTAMP_URL`을 설정해야 합니다. 릴리스를 만들기 전에 전체 Windows 검사, Rust 감사와 실제 네이티브 E2E를 다시 통과해야 합니다. 이후 PFX를 임시로 가져와 앱과 두 설치 파일을 서명·검증하고, 표시된 일회성 VM에서 서명된 MSI/NSIS를 각각 설치·실행·제거한 결과까지 통과한 파일만 업로드합니다.
 
 Rust와 TypeScript가 공유하는 직렬화 enum 값은 `src/shared/contracts/enumValues.json`에서 관리합니다. TypeScript는 여기서 유니언 타입을 만들고, Rust 테스트는 계약 불일치를 차단합니다.
 
@@ -145,7 +152,7 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 ## 보안
 
-Windows 네이티브 명령은 경로를 명령 셸에 삽입하지 않습니다. 설치 파일, 설치된 Studio 실행 파일과 등록된 Mendix 제거 프로그램은 Mendix 또는 Siemens가 발행한 유효한 신뢰 Authenticode 서명이 있어야 하며 검증 전후 해시로 파일 교체도 탐지합니다. Windows Installer 제거는 제품 코드에 대한 `/x` 작업과 알려진 비대화형 플래그로 제한하고, 등록 제거 프로그램은 선택한 설치본에 속하면서 허용 목록의 플래그만 사용해야 합니다. UAC 취소나 실패 종료 코드는 성공으로 처리하지 않습니다.
+Windows 네이티브 명령은 경로를 명령 셸에 삽입하지 않습니다. 설치 파일, 설치된 Studio 실행 파일과 등록된 Mendix 제거 프로그램은 Mendix 또는 Siemens가 발행한 유효한 신뢰 Authenticode 서명이 있어야 합니다. 검증한 파일은 Windows가 실행을 시작할 때까지 쓰기·삭제 공유를 막은 상태로 열어 두므로 서명 검증과 실행 사이의 파일 교체 구간도 닫습니다. Windows Installer 제거는 제품 코드에 대한 `/x` 작업과 알려진 비대화형 플래그로 제한하고, 등록 제거 프로그램은 선택한 설치본에 속하면서 허용 목록의 플래그만 사용해야 합니다. UAC 취소나 실패 종료 코드는 성공으로 처리하지 않습니다.
 
 Linux에서는 Windows 사용자명과 암호를 앱 설정에 저장하지 않습니다. RemoteApp 실행 시 실행 중인 WinBoat 컨테이너에서 자격 증명을 읽어 FreeRDP 3의 표준 입력으로 전달합니다.
 

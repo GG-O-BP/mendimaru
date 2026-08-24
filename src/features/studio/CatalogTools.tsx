@@ -40,6 +40,7 @@ export function CatalogTools({
       </div>
       <button
         type="button"
+        data-testid="refresh-catalog"
         className="icon-button"
         title={t("refresh-catalog")}
         onClick={catalog.onRefresh}

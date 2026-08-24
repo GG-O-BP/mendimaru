@@ -102,10 +102,12 @@ Native discovery uses these default locations in addition to registry and Versio
 | Studio Pro installation root | `C:\Program Files\Mendix` |
 | Studio Pro executable | `C:\Program Files\Mendix\<version>\modeler\studiopro.exe` |
 | Studio Pro uninstall information | `C:\ProgramData\Mendix` |
-| Native default workspace | `%USERPROFILE%\Mendix` when present, otherwise `%USERPROFILE%` |
+| Native default workspace | `%USERPROFILE%\Mendix` (the app asks for another directory if it does not exist) |
 | Linux WinBoat shared path | `\\host.lan\Data` |
 
 Installers are stored in `.mendimaru/installers` under the configured workspace. In native mode, the installer is signature-checked and launched through the Windows elevation API without a command shell. In Linux mode, commands are sent to WinBoat RemoteApp as UTF-16LE-encoded PowerShell, avoiding quoting issues. Installation is complete only after the installer exits successfully and `StudioPro.exe` for that version is detected.
+
+The Marketplace catalog cache is reused for up to six hours so normal startup does not launch a background browser. Use the catalog refresh control to force an immediate update.
 
 Likewise, removal is complete only after the official Windows uninstaller exits and `StudioPro.exe` for that version disappears. The installed-version list is then refreshed automatically.
 
@@ -130,10 +132,15 @@ To validate the project and build an application bundle:
 
 ```bash
 npm run check
+npm run check:windows
 npm run tauri build
 ```
 
-`npm run test:e2e` runs the native Windows application-flow suite with mocked OS boundaries. The full Rust suite covers registry parsing, path containment, installer integrity, Windows argument quoting, UAC/exit-code failures, and a fixture-backed install-to-uninstall lifecycle. CI runs the frontend and Rust suites on both Windows and Linux and smoke-builds MSI and NSIS installers on Windows.
+`npm run test:ui:integration` runs the fast React flow with mocked OS boundaries. On Windows, `npm run test:e2e` starts the real application through `tauri dev` with a test-only Cargo feature, drives the native WebView2 window over an embedded WebDriver endpoint, and exercises real IPC, registry discovery, project scanning, settings persistence, Edge-backed Marketplace refresh, CSP enforcement, invalid-input rejection, and performance budgets. Its config and cache are restricted to a safety-marked temporary directory, which is removed after the run. The WebDriver feature, permissions, and global Tauri bridge are excluded from normal development and release builds.
+
+CI runs the frontend and Rust suites on Windows and Linux, audits both npm and Cargo lockfiles, runs the actual native E2E on Windows, and then builds, installs, launches, and uninstalls both MSI and NSIS packages on a marked ephemeral Windows VM. Bundle installation tests refuse to run on an ordinary workstation.
+
+Windows releases are required to be Authenticode-signed. Configure `WINDOWS_CERTIFICATE` and `WINDOWS_CERTIFICATE_PASSWORD` as repository secrets and `WINDOWS_TIMESTAMP_URL` as a repository variable. Before creating a release, the workflow repeats the complete Windows checks, Rust audit, and native E2E. It then imports the PFX temporarily, signs the application and both installers, verifies every signature, installs/launches/uninstalls both signed bundles on the marked ephemeral VM, and refuses to upload an unverified artifact.
 
 Serialized enum values shared by Rust and TypeScript are registered in `src/shared/contracts/enumValues.json`. TypeScript derives its union types from this registry, and a Rust test rejects contract drift.
 
@@ -146,7 +153,7 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 ## Security
 
-Native Windows commands never interpolate paths into a command shell. Installers, installed Studio executables, and registered Mendix uninstallers must have a valid trusted Authenticode signature whose publisher is Mendix or Siemens; files are hashed before and after verification to detect replacement. Windows Installer removal is limited to a product-code `/x` operation and known non-interactive flags, while registered uninstallers must belong to the selected installation and use an allowlisted flag set. UAC cancellation and non-success process exit codes leave the operation failed rather than reporting a false install or removal.
+Native Windows commands never interpolate paths into a command shell. Installers, installed Studio executables, and registered Mendix uninstallers must have a valid trusted Authenticode signature whose publisher is Mendix or Siemens. The verified file remains open with write/delete sharing denied until Windows starts it, closing the replacement window between signature checking and execution. Windows Installer removal is limited to a product-code `/x` operation and known non-interactive flags, while registered uninstallers must belong to the selected installation and use an allowlisted flag set. UAC cancellation and non-success process exit codes leave the operation failed rather than reporting a false install or removal.
 
 On Linux, Mendimaru does not store the Windows username or password in its app settings. When launching a RemoteApp, it reads credentials from the running WinBoat container and passes them to FreeRDP 3 through standard input, keeping the password out of process arguments and app logs.
 

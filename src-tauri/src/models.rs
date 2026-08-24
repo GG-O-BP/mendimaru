@@ -14,7 +14,9 @@ pub use errors::{CommandError, CommandErrorCode};
 pub use localization::{LocaleOption, LocalizationBundle, TextDirection};
 pub use marketplace::{DownloadableVersion, StudioVersionCatalog};
 pub use projects::MendixProject;
-pub use studio::{StudioInstallPhase, StudioInstallProgress, StudioVersion, WinApp};
+#[cfg(target_os = "linux")]
+pub use studio::WinApp;
+pub use studio::{StudioInstallPhase, StudioInstallProgress, StudioVersion};
 
 #[cfg(test)]
 mod tests {

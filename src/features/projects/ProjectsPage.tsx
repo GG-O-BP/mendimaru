@@ -55,7 +55,7 @@ export function ProjectsPage({
   );
 
   return (
-    <div className="projects-page">
+    <div className="projects-page" data-testid="projects-page">
       <PageTitle
         eyebrow={t("projects-eyebrow")}
         title={t("projects-title")}
@@ -238,6 +238,7 @@ function ProjectTools({
       </label>
       <button
         type="button"
+        data-testid="refresh-projects"
         className="icon-button"
         title={t("refresh-projects")}
         onClick={model.onRefresh}

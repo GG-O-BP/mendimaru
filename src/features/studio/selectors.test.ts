@@ -3,7 +3,13 @@ import type {
   DownloadableVersion,
   StudioVersionCatalog,
 } from "../../domain/types";
-import { catalogHasMore, filterCatalog, nextCatalogPage } from "./selectors";
+import {
+  CATALOG_CACHE_MAX_AGE_MS,
+  catalogCacheIsFresh,
+  catalogHasMore,
+  filterCatalog,
+  nextCatalogPage,
+} from "./selectors";
 
 function version(
   value: string,
@@ -59,6 +65,36 @@ describe("Studio catalog selectors", () => {
     expect(catalogHasMore(catalog)).toBe(true);
     expect(
       catalogHasMore({ ...catalog, versions: catalog.versions.slice(0, 9) }),
+    ).toBe(false);
+  });
+
+  it("reuses only a non-empty catalog fetched within six hours", () => {
+    const now = Date.parse("2026-08-24T06:00:00Z");
+    const catalog: StudioVersionCatalog = {
+      versions,
+      loadedPages: [1],
+      fetchedAt: new Date(now - CATALOG_CACHE_MAX_AGE_MS).toISOString(),
+    };
+
+    expect(catalogCacheIsFresh(catalog, now)).toBe(true);
+    expect(
+      catalogCacheIsFresh(
+        {
+          ...catalog,
+          fetchedAt: new Date(now - CATALOG_CACHE_MAX_AGE_MS - 1).toISOString(),
+        },
+        now,
+      ),
+    ).toBe(false);
+    expect(catalogCacheIsFresh({ ...catalog, versions: [] }, now)).toBe(false);
+    expect(
+      catalogCacheIsFresh({ ...catalog, fetchedAt: "not-a-date" }, now),
+    ).toBe(false);
+    expect(
+      catalogCacheIsFresh(
+        { ...catalog, fetchedAt: new Date(now + 1).toISOString() },
+        now,
+      ),
     ).toBe(false);
   });
 });

@@ -3,7 +3,12 @@ import { errorText } from "../../api/errors";
 import { tauriApi } from "../../api/tauri";
 import type { StudioVersionCatalog } from "../../domain/types";
 import type { VersionCatalogDependencies } from "./dependencies";
-import { catalogHasMore, filterCatalog, nextCatalogPage } from "./selectors";
+import {
+  catalogCacheIsFresh,
+  catalogHasMore,
+  filterCatalog,
+  nextCatalogPage,
+} from "./selectors";
 import {
   EMPTY_VERSION_SUPPORT_FILTERS,
   type VersionSupportFilter,
@@ -53,10 +58,11 @@ export function useVersionCatalog({ t }: VersionCatalogDependencies) {
     void tauriApi
       .getDownloadableVersionsCache()
       .then((cached) => {
-        if (active) setCatalog(cached);
+        if (!active) return;
+        setCatalog(cached);
+        if (!catalogCacheIsFresh(cached)) void fetchCatalogPage(1);
       })
-      .catch(() => undefined)
-      .finally(() => {
+      .catch(() => {
         if (active) void fetchCatalogPage(1);
       });
     return () => {

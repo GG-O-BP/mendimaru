@@ -102,10 +102,12 @@ Windows ではシステムおよびユーザーの標準場所にある Microsof
 | Studio Pro のインストールルート | `C:\Program Files\Mendix` |
 | Studio Pro の実行ファイル | `C:\Program Files\Mendix\<version>\modeler\studiopro.exe` |
 | Studio Pro のアンインストール情報 | `C:\ProgramData\Mendix` |
-| ネイティブの既定ワークスペース | 存在する場合は `%USERPROFILE%\Mendix`、それ以外は `%USERPROFILE%` |
+| ネイティブの既定ワークスペース | `%USERPROFILE%\Mendix`（存在しない場合は別のディレクトリを指定するよう案内） |
 | Linux WinBoat の共有パス | `\\host.lan\Data` |
 
 インストーラーは設定したワークスペース内の `.mendimaru/installers` に保存されます。ネイティブモードでは署名を検証し、コマンドシェルを使わず Windows の昇格 API で起動します。Linux モードでは UTF-16LE でエンコードした PowerShell コマンドを WinBoat RemoteApp に渡します。プロセスが正常終了し、対象バージョンの `StudioPro.exe` が検出されて初めて完了と判定します。
+
+Marketplace カタログのキャッシュは最大 6 時間再利用されるため、通常の起動時にバックグラウンドブラウザーを再起動しません。すぐに更新する場合はカタログの更新操作を使用してください。
 
 削除についても同様に、Windows のアンインストーラーが終了し、対象バージョンの `StudioPro.exe` がなくなったことを確認した後、インストール済みバージョンの一覧を自動的に更新します。
 
@@ -130,10 +132,15 @@ npm run tauri dev
 
 ```bash
 npm run check
+npm run check:windows
 npm run tauri build
 ```
 
-`npm run test:e2e` は OS 境界をモックした Windows ネイティブのアプリ全体フローを実行します。Rust の全テストではレジストリ解析、パス隔離、ファイル整合性、Windows 引数のエンコード、UAC／終了コードの失敗、インストールから削除までの fixture ライフサイクルを検証します。CI は Windows と Linux の両方でテストし、Windows の MSI／NSIS バンドルをスモークビルドします。
+`npm run test:ui:integration` は OS 境界をモックした高速な React フローを実行します。Windows の `npm run test:e2e` はテスト専用 Cargo feature で実際のアプリを `tauri dev` から起動し、ネイティブ WebView2 ウィンドウを組み込み WebDriver で操作します。実際の IPC、レジストリ検出、プロジェクト走査、設定保存、Edge を使う Marketplace 更新、CSP、無効入力の拒否、性能予算を検証します。設定とキャッシュは安全マーカー付き一時ディレクトリに隔離し、実行後に削除します。WebDriver feature・権限・グローバル Tauri ブリッジは通常の開発／リリースビルドには含まれません。
+
+CI は Windows と Linux でフロントエンド／Rust テストと npm／Cargo ロックファイル監査を行い、Windows で実ネイティブ E2E を実行します。その後、マーク付きの一時 Windows VM で MSI と NSIS をそれぞれビルド、インストール、起動、削除します。バンドルのインストールテストは通常のワークステーションでは実行を拒否します。
+
+Windows リリースには Authenticode 署名が必須です。リポジトリ secret `WINDOWS_CERTIFICATE`、`WINDOWS_CERTIFICATE_PASSWORD` と変数 `WINDOWS_TIMESTAMP_URL` を設定してください。リリース作成前に Windows の全チェック、Rust 監査、実ネイティブ E2E を再実行します。その後 PFX を一時インポートしてアプリと両インストーラーを署名・検証し、マーク付き一時 VM で署名済み MSI／NSIS のインストール・起動・削除まで通過した成果物だけをアップロードします。
 
 Rust と TypeScript で共有するシリアライズ済み enum 値は `src/shared/contracts/enumValues.json` で管理します。TypeScript はこのレジストリから union 型を導出し、Rust テストが契約のずれを検出します。
 
@@ -146,7 +153,7 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 ## セキュリティ
 
-Windows ネイティブのコマンドはパスをコマンドシェルへ挿入しません。インストーラー、インストール済みの Studio 実行ファイル、および登録済みの Mendix アンインストーラーには、Mendix または Siemens が発行した有効で信頼済みの Authenticode 署名が必要で、検証前後のハッシュによりファイル置換も検出します。Windows Installer による削除は製品コードへの `/x` 操作と既知の非対話フラグに限定し、登録アンインストーラーは選択したインストールに属し、許可リスト内のフラグだけを使用する必要があります。UAC のキャンセルや失敗終了コードを成功として扱いません。
+Windows ネイティブのコマンドはパスをコマンドシェルへ挿入しません。インストーラー、インストール済みの Studio 実行ファイル、および登録済みの Mendix アンインストーラーには、Mendix または Siemens が発行した有効で信頼済みの Authenticode 署名が必要です。検証済みファイルは Windows が起動するまで書き込み／削除共有を拒否したまま開いておき、署名検証と実行の間の置換も防ぎます。Windows Installer による削除は製品コードへの `/x` 操作と既知の非対話フラグに限定し、登録アンインストーラーは選択したインストールに属し、許可リスト内のフラグだけを使用する必要があります。UAC のキャンセルや失敗終了コードを成功として扱いません。
 
 Linux では Windows のユーザー名とパスワードをアプリ設定に保存しません。RemoteApp 起動時に実行中の WinBoat コンテナから認証情報を読み、FreeRDP 3 の標準入力へ渡します。
 
