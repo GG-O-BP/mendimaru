@@ -120,10 +120,12 @@ Windows에서는 시스템 및 사용자 표준 경로의 Microsoft Edge와 Chro
 | Studio Pro 설치 루트 | `C:\Program Files\Mendix` |
 | Studio Pro 실행 파일 | `C:\Program Files\Mendix\<version>\modeler\studiopro.exe` |
 | Studio Pro 제거 정보 | `C:\ProgramData\Mendix` |
-| 네이티브 기본 워크스페이스 | 존재하면 `%USERPROFILE%\Mendix`, 아니면 `%USERPROFILE%` |
+| 네이티브 기본 워크스페이스 | `%USERPROFILE%\Mendix` (없으면 다른 디렉터리를 지정하도록 안내) |
 | Linux WinBoat 공유 경로 | `\\host.lan\Data` |
 
 설치 파일은 설정한 워크스페이스의 `.mendimaru/installers`에 저장합니다. 네이티브 모드에서는 서명을 검증한 뒤 명령 셸 없이 Windows 권한 상승 API로 실행합니다. Linux 모드에서는 따옴표 영향을 받지 않는 UTF-16LE 인코딩 PowerShell 명령을 WinBoat RemoteApp에 전달합니다. 설치 프로세스가 성공하고 해당 버전의 `StudioPro.exe`가 탐지된 뒤에만 완료로 처리합니다.
+
+Marketplace 카탈로그 캐시는 최대 6시간 재사용하므로 일반 시작 시 백그라운드 브라우저를 다시 띄우지 않습니다. 즉시 갱신하려면 카탈로그 새로고침을 사용하면 됩니다.
 
 제거할 때도 Windows 제거 프로세스가 끝나고 해당 버전의 `StudioPro.exe`가 사라진 것을 확인한 뒤 설치된 버전 목록을 자동으로 갱신합니다.
 
@@ -168,10 +170,15 @@ npm run tauri dev
 npm run check:portable
 npm run test:browser
 npm run test:e2e
+npm run check:windows
 npm run tauri build
 ```
 
 Linux에서 `npm run test:e2e`는 고정 버전의 `tauri-driver`와 `WebKitWebDriver`를 통해 debug 실행 파일을 Vite 개발 URL에 연결합니다. 격리된 WinBoat/API/프로젝트 fixture로 실제 WebView, Tauri IPC, 온라인 앱 상태, 프레임을 샘플링한 제한된 경로·작업 중 애니메이션, 유휴 상태에서 지속 애니메이션이 없다는 점과 주요 화면 전환을 검증합니다. 드라이버 브리지는 `cargo install tauri-driver --version 2.0.6 --locked`로 설치하고 호스트에는 `WebKitWebDriver`도 있어야 합니다. `npm run test:app-flow`는 OS 경계를 모킹한 빠른 React 앱 흐름 테스트이고, `npm run test:browser`는 Mendimaru 데스크톱 셸이 아니라 Mendix Runtime 페이지를 테스트합니다. CI는 세 계층을 모두 통과시킨 뒤 Windows/Linux 테스트와 Windows MSI/NSIS 스모크 빌드를 수행합니다.
+
+Windows에서 `npm run test:e2e:windows`는 테스트 전용 Cargo feature로 실제 앱을 `tauri dev`에서 시작하고 네이티브 WebView2 창을 임베디드 WebDriver로 조작합니다. 실제 IPC, 레지스트리 탐지, 프로젝트 스캔, 설정 저장, Edge 기반 Marketplace 갱신, CSP 차단, 잘못된 입력 거부와 성능 예산을 검증합니다. 설정과 캐시는 안전 마커가 있는 임시 디렉터리에 격리하고 실행 후 제거합니다. WebDriver feature·권한·전역 Tauri 브리지는 일반 개발 및 릴리스 빌드에 포함되지 않습니다.
+
+CI는 npm과 Cargo 잠금 파일을 모두 감사하고 Windows 네이티브 E2E를 실행합니다. 이후 표시된 일회성 Windows VM에서 MSI와 NSIS를 각각 빌드·설치·실행·제거하며, 설치 수명주기 스크립트는 일반 워크스테이션에서 실행을 거부합니다. Windows 릴리스에는 저장소 secret `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`와 저장소 변수 `WINDOWS_TIMESTAMP_URL`이 추가로 필요합니다. 타임스탬프가 있는 Authenticode 서명과 수명주기 검증을 모두 통과한 앱과 설치 파일만 업로드합니다.
 
 실행 중인 실제 WinBoat에 대한 비파괴 RemoteApp 검증은 `npm run test:winboat-smoke`로 실행합니다. 인증된 세션 조회와 만료된 세션 거부를 검증합니다. Linux의 전체 `npm run check`는 실제 상태를 바꾸는 수명주기 검증을 더 이상 조용히 제외하지 않고 필수로 실행합니다. 설치되어 있지 않은 폐기 가능한 버전과 명시적인 변경 허용값을 지정해야 합니다.
 
@@ -196,7 +203,7 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 ## 보안
 
-Windows 네이티브 명령은 경로를 명령 셸에 삽입하지 않습니다. 설치 파일, 설치된 Studio 실행 파일과 등록된 Mendix 제거 프로그램은 Mendix 또는 Siemens가 발행한 유효한 신뢰 Authenticode 서명이 있어야 하며 검증 전후 해시로 파일 교체도 탐지합니다. Windows Installer 제거는 제품 코드에 대한 `/x` 작업과 알려진 비대화형 플래그로 제한하고, 등록 제거 프로그램은 선택한 설치본에 속하면서 허용 목록의 플래그만 사용해야 합니다. UAC 취소나 실패 종료 코드는 성공으로 처리하지 않습니다.
+Windows 네이티브 명령은 경로를 명령 셸에 삽입하지 않습니다. 설치 파일, 설치된 Studio 실행 파일과 등록된 Mendix 제거 프로그램은 Mendix 또는 Siemens가 발행한 유효한 신뢰 Authenticode 서명이 있어야 합니다. 검증한 실행 파일은 Windows가 시작할 때까지 쓰기·삭제 공유를 막은 상태로 열어 두므로 서명 검증과 실행 사이의 파일 교체 구간도 닫습니다. Windows Installer 제거는 제품 코드에 대한 `/x` 작업과 알려진 비대화형 플래그로 제한하고, 등록 제거 프로그램은 선택한 설치본에 속하면서 허용 목록의 플래그만 사용해야 합니다. UAC 취소나 실패 종료 코드는 성공으로 처리하지 않습니다.
 
 Linux에서는 Windows 사용자명과 암호를 앱 설정에 저장하지 않습니다. RemoteApp 실행 시 실행 중인 WinBoat 컨테이너에서 자격 증명을 읽어 FreeRDP 3의 표준 입력으로 전달합니다. FreeRDP는 앱 전용 TOFU 인증서 핀을 사용하고, 관리자 권한 작업은 Guest API와 RDP가 loopback에만 바인딩된 경우에만 허용합니다. 공유 작업 결과와 유지 중인 Studio 세션 제어 요청은 시도별 HMAC 키와 재전송 방지 sequence로 인증합니다.
 

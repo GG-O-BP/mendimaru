@@ -67,13 +67,12 @@ pub fn detect_config() -> Result<AppConfig, String> {
 }
 
 fn detect_windows_config() -> Result<AppConfig, String> {
+    #[cfg(not(feature = "e2e"))]
     let home = home_directory()?;
+    #[cfg(feature = "e2e")]
+    let default_workspace = crate::e2e::directory("workspace")?;
+    #[cfg(not(feature = "e2e"))]
     let default_workspace = home.join("Mendix");
-    let shared_directory = if default_workspace.is_dir() {
-        default_workspace
-    } else {
-        home
-    };
     let program_files = env::var_os("ProgramW6432")
         .or_else(|| env::var_os("ProgramFiles"))
         .map(PathBuf::from)
@@ -92,7 +91,7 @@ fn detect_windows_config() -> Result<AppConfig, String> {
         api_url: String::new(),
         rdp_host: String::new(),
         rdp_port: 0,
-        shared_directory: shared_directory.to_string_lossy().to_string(),
+        shared_directory: default_workspace.to_string_lossy().to_string(),
         windows_shared_directory: String::new(),
         freerdp_binary: String::new(),
         mendix_install_root: program_files.join("Mendix").to_string_lossy().to_string(),
@@ -100,6 +99,42 @@ fn detect_windows_config() -> Result<AppConfig, String> {
         windows_studio_paths: Vec::new(),
         startup_timeout_seconds: 180,
     })
+}
+
+pub(crate) fn migrate_legacy_windows_workspace(config: &mut AppConfig) -> bool {
+    if !crate::platform::is_windows_native() {
+        return false;
+    }
+    let Ok(home) = home_directory() else {
+        return false;
+    };
+    let Some(workspace) =
+        migrated_windows_workspace(Path::new(&config.shared_directory), &home, true)
+    else {
+        return false;
+    };
+    config.shared_directory = workspace.to_string_lossy().to_string();
+    true
+}
+
+fn migrated_windows_workspace(
+    configured: &Path,
+    home: &Path,
+    windows_native: bool,
+) -> Option<PathBuf> {
+    if !windows_native || normalized_path(configured) != normalized_path(home) {
+        return None;
+    }
+    Some(home.join("Mendix"))
+}
+
+fn normalized_path(path: &Path) -> String {
+    path.canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
 }
 
 pub fn path_exists_or_binary(path: &str) -> bool {
@@ -288,7 +323,10 @@ pub(super) fn home_string() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{inspect_host_port, parse_runtime_port_output, preferred_home_directory};
+    use super::{
+        inspect_host_port, migrated_windows_workspace, parse_runtime_port_output,
+        preferred_home_directory,
+    };
     use std::ffi::OsString;
     use std::path::PathBuf;
 
@@ -304,6 +342,21 @@ mod tests {
             preferred_home_directory(home, user_profile, false),
             Some(PathBuf::from("/home/dev"))
         );
+    }
+
+    #[test]
+    fn migrates_only_the_legacy_whole_home_windows_workspace() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let home = temporary.path();
+        assert_eq!(
+            migrated_windows_workspace(home, home, true),
+            Some(home.join("Mendix"))
+        );
+        assert_eq!(
+            migrated_windows_workspace(&home.join("Projects"), home, true),
+            None
+        );
+        assert_eq!(migrated_windows_workspace(home, home, false), None);
     }
 
     #[test]

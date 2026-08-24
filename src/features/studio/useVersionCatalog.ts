@@ -3,7 +3,12 @@ import { errorText } from "../../api/errors";
 import { tauriApi } from "../../api/tauri";
 import type { StudioVersionCatalog } from "../../domain/types";
 import type { VersionCatalogDependencies } from "./dependencies";
-import { catalogHasMore, filterCatalog, nextCatalogPage } from "./selectors";
+import {
+  catalogCacheIsFresh,
+  catalogHasMore,
+  filterCatalog,
+  nextCatalogPage,
+} from "./selectors";
 import {
   EMPTY_VERSION_SUPPORT_FILTERS,
   type VersionSupportFilter,
@@ -52,19 +57,21 @@ export function useVersionCatalog({ t }: VersionCatalogDependencies) {
   useEffect(() => {
     let active = true;
     let refresh: number | undefined;
+    const scheduleRefresh = () => {
+      if (!active) return;
+      refresh = window.setTimeout(
+        () => void fetchCatalogPage(1),
+        INITIAL_CATALOG_REFRESH_DELAY_MS,
+      );
+    };
     void tauriApi
       .getDownloadableVersionsCache()
       .then((cached) => {
-        if (active) setCatalog(cached);
-      })
-      .catch(() => undefined)
-      .finally(() => {
         if (!active) return;
-        refresh = window.setTimeout(
-          () => void fetchCatalogPage(1),
-          INITIAL_CATALOG_REFRESH_DELAY_MS,
-        );
-      });
+        setCatalog(cached);
+        if (!catalogCacheIsFresh(cached)) scheduleRefresh();
+      })
+      .catch(scheduleRefresh);
     return () => {
       active = false;
       if (refresh !== undefined) window.clearTimeout(refresh);

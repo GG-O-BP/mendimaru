@@ -8,6 +8,7 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     clearMocks: true,
     pool: "threads",
-    maxWorkers: "50%",
+    // Large native builds can starve concurrent Windows worker startup.
+    maxWorkers: 1,
   },
 });

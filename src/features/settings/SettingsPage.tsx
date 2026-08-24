@@ -55,7 +55,12 @@ export function SettingsPage({
 }) {
   const { config } = model;
   return (
-    <div className="settings-page">
+    <div
+      className="settings-page"
+      data-testid={
+        model.nativeWindows ? "settings-native-page" : "settings-winboat-page"
+      }
+    >
       <PageTitle
         eyebrow={t("settings-eyebrow")}
         title={t("settings-title")}
@@ -248,6 +253,7 @@ export function SettingsPage({
         </div>
         <PathInput
           id="shared-directory-input"
+          testId="workspace-path"
           label={
             model.nativeWindows
               ? t("settings-native-workspace-directory")
@@ -372,6 +378,7 @@ export function SettingsPage({
         </span>
         <button
           type="button"
+          data-testid="save-settings"
           className="button primary"
           onClick={model.onSave}
           disabled={!model.changed || model.isBusy("save-settings")}
@@ -390,6 +397,7 @@ export function SettingsPage({
 
 function PathInput({
   id,
+  testId,
   label,
   browseLabel,
   value,
@@ -397,6 +405,7 @@ function PathInput({
   onBrowse,
 }: {
   id?: string;
+  testId?: string;
   label: string;
   browseLabel: string;
   value: string;
@@ -404,7 +413,7 @@ function PathInput({
   onBrowse: () => void;
 }) {
   return (
-    <label className="simple-field path-field">
+    <label className="simple-field path-field" data-testid={testId}>
       <span>{label}</span>
       <div>
         <input

@@ -45,8 +45,12 @@ pub(crate) fn load_config_from(paths: &AppPaths) -> Result<AppConfig, String> {
     file.take(MAX_CONFIG_BYTES + 1)
         .read_to_string(&mut content)
         .map_err(|error| crate::tr!("error-config-read", error = error))?;
-    serde_json::from_str::<AppConfig>(&content)
-        .map_err(|error| crate::tr!("error-config-parse", error = error))
+    let mut config = serde_json::from_str::<AppConfig>(&content)
+        .map_err(|error| crate::tr!("error-config-parse", error = error))?;
+    if super::migrate_legacy_windows_workspace(&mut config) {
+        persist_config_from(paths, &config)?;
+    }
+    Ok(config)
 }
 
 pub fn persist_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {

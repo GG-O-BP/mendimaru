@@ -128,8 +128,8 @@ pub(super) fn launch_studio(
     let record = discovery::find(config, version)
         .ok_or_else(|| crate::tr!("error-studio-install-not-found", version = version))?;
     let request = prepare_launch_request(config, &record, project_mpr_path)?;
-    security::verify_mendix_executable(&request.executable)?;
-    let mut command = Command::new(&request.executable);
+    let verified_executable = security::verify_and_lock_mendix_executable(&request.executable)?;
+    let mut command = Command::new(verified_executable.path());
     if let Some(project) = request.project {
         command.arg(project);
     }
@@ -188,7 +188,7 @@ where
         installer_path,
         on_progress,
         InstallLifecycleHooks {
-            verify: security::verify_mendix_executable,
+            verify: verified_execution_path,
             run_elevated: |executable: PathBuf, arguments: Vec<String>| async move {
                 tokio::task::spawn_blocking(move || process::run_elevated(&executable, &arguments))
                     .await
@@ -201,7 +201,12 @@ where
     .await
 }
 
-async fn install_lifecycle<F, V, R, RFuture, D>(
+fn verified_execution_path(path: &Path) -> Result<(PathBuf, security::VerifiedExecutable), String> {
+    let verified = security::verify_and_lock_mendix_executable(path)?;
+    Ok((verified.path().to_path_buf(), verified))
+}
+
+async fn install_lifecycle<F, V, G, R, RFuture, D>(
     version: &str,
     installer_path: &Path,
     mut on_progress: F,
@@ -209,16 +214,15 @@ async fn install_lifecycle<F, V, R, RFuture, D>(
 ) -> Result<String, String>
 where
     F: FnMut(StudioInstallProgress),
-    V: FnOnce(&Path) -> Result<String, String>,
+    V: FnOnce(&Path) -> Result<(PathBuf, G), String>,
     R: FnOnce(PathBuf, Vec<String>) -> RFuture,
     RFuture: Future<Output = Result<u32, String>>,
     D: FnMut() -> Option<discovery::InstallationRecord>,
 {
     on_progress(progress(StudioInstallPhase::Staging, 0.0, false));
-    let _verified_digest = (hooks.verify)(installer_path)?;
+    let (executable, verified_executable) = (hooks.verify)(installer_path)?;
     on_progress(progress(StudioInstallPhase::Staging, 100.0, false));
 
-    let executable = installer_path.to_path_buf();
     let arguments = vec![
         "/SP-".to_string(),
         "/SILENT".to_string(),
@@ -228,6 +232,7 @@ where
     ];
     on_progress(progress(StudioInstallPhase::Installing, 5.0, true));
     let exit_code = (hooks.run_elevated)(executable, arguments).await?;
+    drop(verified_executable);
     if !SUCCESS_EXIT_CODES.contains(&exit_code) {
         return Err(crate::tr!(
             "error-script-installer-exit-code",
@@ -260,16 +265,19 @@ pub(super) async fn uninstall_studio(config: &AppConfig, version: &str) -> Resul
     let mut record = discovery::find(config, version)
         .ok_or_else(|| crate::tr!("error-studio-install-not-found", version = version))?;
     security::verify_mendix_executable(Path::new(&record.studio.executable_path))?;
-    secure_uninstall_executable(config, &mut record, || {
+    let verified_uninstaller = secure_uninstall_executable(config, &mut record, || {
         process::system_executable("msiexec.exe")
     })?;
     uninstall_lifecycle(
         record,
         process::studio_is_running,
-        |executable, arguments| async move {
-            tokio::task::spawn_blocking(move || process::run_elevated(&executable, &arguments))
-                .await
-                .map_err(|error| crate::tr!("error-native-process-join", error = error))?
+        move |executable, arguments| async move {
+            let result =
+                tokio::task::spawn_blocking(move || process::run_elevated(&executable, &arguments))
+                    .await
+                    .map_err(|error| crate::tr!("error-native-process-join", error = error))?;
+            drop(verified_uninstaller);
+            result
         },
         || discovery::find(config, version),
         UNINSTALL_TIMING,
@@ -281,7 +289,7 @@ fn secure_uninstall_executable<F>(
     config: &AppConfig,
     record: &mut discovery::InstallationRecord,
     resolve_msiexec: F,
-) -> Result<(), String>
+) -> Result<Option<security::VerifiedExecutable>, String>
 where
     F: FnOnce() -> Result<PathBuf, String>,
 {
@@ -309,7 +317,7 @@ where
             ));
         }
         uninstall.executable = executable;
-        return Ok(());
+        return Ok(None);
     }
 
     if uninstall.executable.components().count() == 1
@@ -321,7 +329,9 @@ where
             version = version
         ));
     }
-    security::verify_mendix_executable(&uninstall.executable).map(|_| ())
+    let verified = security::verify_and_lock_mendix_executable(&uninstall.executable)?;
+    uninstall.executable = verified.path().to_path_buf();
+    Ok(Some(verified))
 }
 
 fn valid_msiexec_uninstall_arguments(arguments: &[String]) -> bool {
@@ -808,6 +818,8 @@ mod tests {
         let install_invocations = Arc::clone(&invocations);
         let find_state = Arc::clone(&installed);
         let install_record = record.clone();
+        let verified_installer = temporary.path().join("canonical-installer.exe");
+        let expected_installer = verified_installer.clone();
         let mut phases = Vec::new();
 
         let installed_path = install_lifecycle(
@@ -817,7 +829,7 @@ mod tests {
             InstallLifecycleHooks {
                 verify: |path: &Path| {
                     assert_eq!(path, installer);
-                    Ok("verified-sha256".into())
+                    Ok((verified_installer, ()))
                 },
                 run_elevated: move |program: PathBuf, arguments: Vec<String>| async move {
                     install_invocations
@@ -883,7 +895,7 @@ mod tests {
 
         let invocations = invocations.lock().expect("invocations");
         assert_eq!(invocations.len(), 2);
-        assert_eq!(invocations[0].0, installer);
+        assert_eq!(invocations[0].0, expected_installer);
         assert!(invocations[0].1.contains(&"/SILENT".to_string()));
         assert_eq!(invocations[1].0, uninstaller);
         assert_eq!(invocations[1].1, ["/SILENT"]);
@@ -903,7 +915,7 @@ mod tests {
             &installer,
             |_| {},
             InstallLifecycleHooks {
-                verify: |_: &Path| Ok("verified-sha256".into()),
+                verify: |path: &Path| Ok((path.to_path_buf(), ())),
                 run_elevated: |_program: PathBuf, _arguments: Vec<String>| async {
                     Err("UAC cancelled".into())
                 },
@@ -937,7 +949,9 @@ mod tests {
             &installer,
             |_| {},
             InstallLifecycleHooks {
-                verify: |_: &Path| Err("invalid Authenticode signature".into()),
+                verify: |_: &Path| {
+                    Err::<(PathBuf, ()), String>("invalid Authenticode signature".into())
+                },
                 run_elevated: move |_program: PathBuf, _arguments: Vec<String>| async move {
                     elevation_state.store(true, Ordering::SeqCst);
                     Ok(0)
@@ -961,7 +975,7 @@ mod tests {
             &installer,
             |_| {},
             InstallLifecycleHooks {
-                verify: |_: &Path| Ok("verified-sha256".into()),
+                verify: |path: &Path| Ok((path.to_path_buf(), ())),
                 run_elevated: |_program: PathBuf, _arguments: Vec<String>| async { Ok(1603) },
                 find_installed: move || {
                     discovery_state.store(true, Ordering::SeqCst);

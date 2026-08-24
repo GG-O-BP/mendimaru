@@ -121,10 +121,12 @@ Windows ではシステムおよびユーザーの標準場所にある Microsof
 | Studio Pro のインストールルート | `C:\Program Files\Mendix` |
 | Studio Pro の実行ファイル | `C:\Program Files\Mendix\<version>\modeler\studiopro.exe` |
 | Studio Pro のアンインストール情報 | `C:\ProgramData\Mendix` |
-| ネイティブの既定ワークスペース | 存在する場合は `%USERPROFILE%\Mendix`、それ以外は `%USERPROFILE%` |
+| ネイティブの既定ワークスペース | `%USERPROFILE%\Mendix`（存在しない場合は別のディレクトリを指定するよう案内） |
 | Linux WinBoat の共有パス | `\\host.lan\Data` |
 
 インストーラーは設定したワークスペース内の `.mendimaru/installers` に保存されます。ネイティブモードでは署名を検証し、コマンドシェルを使わず Windows の昇格 API で起動します。Linux モードでは UTF-16LE でエンコードした PowerShell コマンドを WinBoat RemoteApp に渡します。プロセスが正常終了し、対象バージョンの `StudioPro.exe` が検出されて初めて完了と判定します。
+
+Marketplace カタログのキャッシュは最大 6 時間再利用されるため、通常の起動時にバックグラウンドブラウザーを再起動しません。すぐに更新する場合はカタログの更新操作を使用してください。
 
 削除についても同様に、Windows のアンインストーラーが終了し、対象バージョンの `StudioPro.exe` がなくなったことを確認した後、インストール済みバージョンの一覧を自動的に更新します。
 
@@ -167,10 +169,15 @@ npm run tauri dev
 npm run check:portable
 npm run test:browser
 npm run test:e2e
+npm run check:windows
 npm run tauri build
 ```
 
 Linux の `npm run test:e2e` は、固定バージョンの `tauri-driver` と `WebKitWebDriver` を使い、debug 実行ファイルを Vite development URL に接続します。隔離した WinBoat／API／project fixture により、実際の WebView、Tauri IPC、online application state、frame sampling を伴う route／busy-state motion、allowlist 外の idle animation がないこと、主要画面の navigation を検証します。driver bridge は `cargo install tauri-driver --version 2.0.6 --locked` でインストールし、host に `WebKitWebDriver` も必要です。`npm run test:app-flow` は OS 境界をモックした高速な React application-flow suite で、`npm run test:browser` は Mendimaru desktop shell ではなく Mendix Runtime page をテストします。CI は 3 層すべてを gate し、Windows／Linux のテストと Windows MSI／NSIS smoke build を実行します。
+
+Windows の `npm run test:e2e:windows` は、テスト専用 Cargo feature で実際のアプリを `tauri dev` から起動し、ネイティブ WebView2 ウィンドウを組み込み WebDriver で操作します。実際の IPC、registry discovery、project scan、settings persistence、Edge ベースの Marketplace refresh、CSP enforcement、hostile input rejection、performance budget を検証します。設定とキャッシュは safety marker 付き一時ディレクトリに隔離し、終了後に削除します。WebDriver feature、permission、global Tauri bridge は通常の development／release build には含まれません。
+
+CI は npm と Cargo の lockfile を監査し、Windows native E2E を実行します。その後、marker 付きの一時 Windows VM で MSI と NSIS をそれぞれ build、install、launch、uninstall します。installer lifecycle script は通常の workstation では実行を拒否します。Windows release には repository secret `WINDOWS_CERTIFICATE`、`WINDOWS_CERTIFICATE_PASSWORD` と repository variable `WINDOWS_TIMESTAMP_URL` が必要です。timestamp 付き Authenticode signature と lifecycle check をすべて通過したアプリと installer だけをアップロードします。
 
 online の実 WinBoat VM に対する非破壊 RemoteApp gate は `npm run test:winboat-smoke` で実行し、認証済み session query と stale-session rejection を検証します。Linux の完全な `npm run check` は、実際の状態を変更する lifecycle gate を黙って除外せず、必須で実行します。未インストールの disposable version と明示的な変更許可を指定してください。
 
@@ -195,7 +202,7 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 ## セキュリティ
 
-Windows ネイティブのコマンドはパスをコマンドシェルへ挿入しません。インストーラー、インストール済みの Studio 実行ファイル、および登録済みの Mendix アンインストーラーには、Mendix または Siemens が発行した有効で信頼済みの Authenticode 署名が必要で、検証前後のハッシュによりファイル置換も検出します。Windows Installer による削除は製品コードへの `/x` 操作と既知の非対話フラグに限定し、登録アンインストーラーは選択したインストールに属し、許可リスト内のフラグだけを使用する必要があります。UAC のキャンセルや失敗終了コードを成功として扱いません。
+Windows ネイティブのコマンドはパスをコマンドシェルへ挿入しません。インストーラー、インストール済みの Studio 実行ファイル、および登録済みの Mendix アンインストーラーには、Mendix または Siemens が発行した有効で信頼済みの Authenticode 署名が必要です。検証した実行ファイルは Windows が起動するまで書き込み／削除共有を拒否したまま開いておくため、署名検証と実行の間の置換も防ぎます。Windows Installer による削除は製品コードへの `/x` 操作と既知の非対話フラグに限定し、登録アンインストーラーは選択したインストールに属し、許可リスト内のフラグだけを使用する必要があります。UAC のキャンセルや失敗終了コードを成功として扱いません。
 
 Linux では Windows のユーザー名とパスワードをアプリ設定に保存しません。RemoteApp 起動時に実行中の WinBoat コンテナから認証情報を読み、FreeRDP 3 の標準入力へ渡します。FreeRDP はアプリ専用の TOFU 証明書ピンを使い、管理者権限の操作は Guest API と RDP がループバックだけにバインドされている場合に限定します。共有操作結果と保持中の Studio session-control request は、試行ごとの HMAC キーとリプレイ防止シーケンスで認証します。
 

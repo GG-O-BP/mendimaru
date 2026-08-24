@@ -1,7 +1,8 @@
+use crate::app_paths::AppPaths;
 use crate::models::StudioVersionCatalog;
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 const CACHE_FILE_NAME: &str = "studio-version-catalog.json";
 
@@ -17,10 +18,9 @@ pub fn load_cached_catalog(app: &AppHandle) -> Result<StudioVersionCatalog, Stri
         .map_err(|error| crate::tr!("error-version-cache-invalid", error = error))
 }
 fn cache_path(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_cache_dir()
-        .map(|directory| directory.join(CACHE_FILE_NAME))
-        .map_err(|error| crate::tr!("error-app-cache-path", error = error))
+    Ok(AppPaths::from_app(app)?
+        .cache_directory()
+        .join(CACHE_FILE_NAME))
 }
 
 pub(super) fn save_catalog(app: &AppHandle, catalog: &StudioVersionCatalog) -> Result<(), String> {

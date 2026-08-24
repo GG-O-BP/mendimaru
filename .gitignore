@@ -4,6 +4,7 @@
 /dist-ssr/
 /coverage/
 /.nyc_output/
+/artifacts/
 
 # Rust and Tauri generated output
 /src-tauri/target/

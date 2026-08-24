@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+#[cfg(not(feature = "e2e"))]
+use tauri::Manager;
 
 const APP_IDENTIFIER: &str = "com.ggobp.mendimaru";
 const CONFIG_DIRECTORY_OVERRIDE: &str = "MENDIMARU_CONFIG_DIR";
@@ -13,6 +15,16 @@ pub(crate) struct AppPaths {
 
 impl AppPaths {
     pub(crate) fn from_app(app: &AppHandle) -> Result<Self, String> {
+        #[cfg(feature = "e2e")]
+        {
+            let _ = app;
+            let root = crate::e2e::require_isolated_root()?;
+            Ok(Self {
+                config_directory: root.join("config"),
+                cache_directory: root.join("cache"),
+            })
+        }
+        #[cfg(not(feature = "e2e"))]
         Ok(Self {
             config_directory: app.path().app_config_dir().map_err(|error| {
                 format!("could not resolve the app configuration directory: {error}")

@@ -1,3 +1,6 @@
+// MSVC emits a localized informational line while creating the cdylib import library.
+#![cfg_attr(target_os = "windows", allow(linker_messages))]
+
 mod app_paths;
 mod application;
 mod browser;
@@ -7,6 +10,8 @@ mod commands;
 mod config;
 pub mod contracts;
 mod downloads;
+#[cfg(feature = "e2e")]
+mod e2e;
 mod i18n;
 mod marketplace;
 pub mod models;
@@ -25,8 +30,10 @@ use downloads::DownloadManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .setup(|app| {
+            #[cfg(feature = "e2e")]
+            crate::e2e::require_isolated_root().map_err(std::io::Error::other)?;
             i18n::initialize("system").map_err(std::io::Error::other)?;
             if let Ok(config) = config::load_config(app.handle()) {
                 i18n::set_language(&config.language_preference).map_err(std::io::Error::other)?;
@@ -35,7 +42,10 @@ pub fn run() {
             Ok(())
         })
         .manage(DownloadManager::default())
-        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_dialog::init());
+    #[cfg(feature = "e2e")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    let app = builder
         .invoke_handler(tauri::generate_handler![
             get_config,
             get_localization,

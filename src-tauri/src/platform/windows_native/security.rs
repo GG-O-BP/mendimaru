@@ -2,10 +2,28 @@ use super::process::hidden_command;
 use base64::Engine;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::fs::File;
-use std::io::{BufReader, Read};
-use std::path::Path;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom};
+use std::os::windows::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+pub(super) struct VerifiedExecutable {
+    path: PathBuf,
+    digest: String,
+    _file: File,
+}
+
+impl VerifiedExecutable {
+    pub(super) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(super) fn digest(&self) -> &str {
+        &self.digest
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,6 +38,10 @@ struct SignatureReport {
 }
 
 pub(super) fn verify_mendix_executable(path: &Path) -> Result<String, String> {
+    verify_and_lock_mendix_executable(path).map(|verified| verified.digest().to_string())
+}
+
+pub(super) fn verify_and_lock_mendix_executable(path: &Path) -> Result<VerifiedExecutable, String> {
     if !path.is_file()
         || !path
             .extension()
@@ -31,24 +53,36 @@ pub(super) fn verify_mendix_executable(path: &Path) -> Result<String, String> {
             path = path.display()
         ));
     }
-    let before = sha256(path)?;
-    let report = authenticode_report(path)?;
+    let canonical = canonical_display_path(path)?;
+    let mut file = open_locked_file(&canonical)?;
+    let before = sha256_file(&mut file)?;
+    let report = authenticode_report(&canonical)?;
     validate_signature(&report)?;
-    let after = sha256(path)?;
+    let after = sha256_file(&mut file)?;
     if before != after {
         return Err(crate::tr!("error-native-installer-changed"));
     }
-    Ok(before)
+    Ok(VerifiedExecutable {
+        path: canonical,
+        digest: before,
+        _file: file,
+    })
 }
 
+#[cfg(test)]
 fn sha256(path: &Path) -> Result<String, String> {
-    let file = File::open(path)
+    let mut file = File::open(path)
         .map_err(|error| crate::tr!("error-native-installer-read", error = error))?;
-    let mut reader = BufReader::new(file);
+    sha256_file(&mut file)
+}
+
+fn sha256_file(file: &mut File) -> Result<String, String> {
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| crate::tr!("error-native-installer-read", error = error))?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {
-        let count = reader
+        let count = file
             .read(&mut buffer)
             .map_err(|error| crate::tr!("error-native-installer-read", error = error))?;
         if count == 0 {
@@ -61,6 +95,28 @@ fn sha256(path: &Path) -> Result<String, String> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect())
+}
+
+fn open_locked_file(path: &Path) -> Result<File, String> {
+    OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(path)
+        .map_err(|error| crate::tr!("error-native-installer-read", error = error))
+}
+
+fn canonical_display_path(path: &Path) -> Result<PathBuf, String> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| crate::tr!("error-native-installer-read", error = error))?;
+    let value = canonical.to_string_lossy();
+    if let Some(unc) = value.strip_prefix(r"\\?\UNC\") {
+        return Ok(PathBuf::from(format!(r"\\{unc}")));
+    }
+    if let Some(local) = value.strip_prefix(r"\\?\") {
+        return Ok(PathBuf::from(local));
+    }
+    Ok(canonical)
 }
 
 fn authenticode_report(path: &Path) -> Result<SignatureReport, String> {
@@ -148,8 +204,10 @@ fn validate_signature(report: &SignatureReport) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{sha256, validate_signature, verify_mendix_executable, SignatureReport};
-    use std::fs;
+    use super::{
+        open_locked_file, sha256, validate_signature, verify_mendix_executable, SignatureReport,
+    };
+    use std::fs::{self, OpenOptions};
 
     #[test]
     fn calculates_a_stable_sha256_digest() {
@@ -160,6 +218,18 @@ mod tests {
             sha256(&path).expect("digest"),
             "8edde51f9bc00d3fff19237df43bc1c6d058839aa1469b3fbd0c5479c929825d"
         );
+    }
+
+    #[test]
+    fn locked_executable_cannot_be_opened_for_replacement() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let path = temporary.path().join("installer.exe");
+        fs::write(&path, b"fixture").expect("write fixture");
+
+        let locked = open_locked_file(&path).expect("lock fixture");
+        assert!(OpenOptions::new().write(true).open(&path).is_err());
+        drop(locked);
+        assert!(OpenOptions::new().write(true).open(&path).is_ok());
     }
 
     #[test]

@@ -36,7 +36,7 @@ describe("useVersionCatalog", () => {
     vi.useRealTimers();
   });
 
-  it("hydrates the cache immediately and defers the initial live refresh", async () => {
+  it("hydrates a stale cache immediately and defers the live refresh", async () => {
     const { result } = renderHook(() =>
       useVersionCatalog({ t: (key: string) => key }),
     );
@@ -56,6 +56,25 @@ describe("useVersionCatalog", () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(api.fetchDownloadableVersions).toHaveBeenCalledWith(1, false);
+  });
+
+  it("does not launch a background refresh for a fresh cache", async () => {
+    api.getDownloadableVersionsCache.mockResolvedValue({
+      ...cachedCatalog,
+      fetchedAt: new Date().toISOString(),
+    });
+
+    const { result } = renderHook(() =>
+      useVersionCatalog({ t: (key: string) => key }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(result.current.catalog.versions).toEqual(cachedCatalog.versions);
+    expect(api.fetchDownloadableVersions).not.toHaveBeenCalled();
   });
 
   it("cancels the deferred refresh when the consumer unmounts", async () => {

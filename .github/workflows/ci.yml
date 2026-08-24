@@ -105,9 +105,83 @@ jobs:
       - name: Run Rust clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-  windows-bundle:
-    name: Build Windows MSI and NSIS smoke artifacts
+      - name: Run Windows test-feature clippy
+        if: runner.os == 'Windows'
+        run: npm run lint:rust:all-features
+
+  security:
+    name: Dependency security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Audit npm dependency tree
+        run: npm audit --audit-level=high
+
+      - name: Install pinned cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+
+      - name: Audit Rust dependency lockfile
+        run: cargo audit --file src-tauri/Cargo.lock
+
+  windows-native-e2e:
+    name: Actual Windows Tauri dev E2E
     needs: test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run actual Tauri, WebView2, IPC, Windows, and performance E2E
+        run: npm run test:e2e:windows
+        env:
+          MENDIMARU_E2E_MAX_STARTUP_MS: 180000
+
+      - name: Upload native E2E diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-windows-native-e2e
+          path: artifacts/e2e
+          if-no-files-found: error
+
+  windows-bundle:
+    name: Build, install, launch, and uninstall Windows bundles
+    needs:
+      - security
+      - windows-native-e2e
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -143,6 +217,48 @@ jobs:
           if (-not (Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -File)) {
             throw "NSIS installer was not generated."
           }
+
+      - name: Install, launch, and uninstall MSI in the ephemeral VM
+        shell: pwsh
+        env:
+          MENDIMARU_EPHEMERAL_WINDOWS_VM: mendimaru-github-hosted-ephemeral-vm
+        run: |
+          $installers = @(
+            Get-ChildItem `
+              "src-tauri/target/release/bundle/msi" `
+              -Filter "*.msi" -File -ErrorAction Stop
+          )
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one MSI installer."
+          }
+          ./scripts/e2e/windows-bundle-smoke.ps1 `
+            -InstallerKind msi `
+            -InstallerPath $installers[0].FullName
+
+      - name: Install, launch, and uninstall NSIS in the ephemeral VM
+        shell: pwsh
+        env:
+          MENDIMARU_EPHEMERAL_WINDOWS_VM: mendimaru-github-hosted-ephemeral-vm
+        run: |
+          $installers = @(
+            Get-ChildItem `
+              "src-tauri/target/release/bundle/nsis" `
+              -Filter "*.exe" -File -ErrorAction Stop
+          )
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one NSIS installer."
+          }
+          ./scripts/e2e/windows-bundle-smoke.ps1 `
+            -InstallerKind nsis `
+            -InstallerPath $installers[0].FullName
+
+      - name: Upload bundle smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-windows-bundle-smoke
+          path: artifacts/bundle-smoke
+          if-no-files-found: warn
 
       - name: Upload Windows smoke artifacts
         uses: actions/upload-artifact@v7

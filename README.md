@@ -123,10 +123,12 @@ Native discovery uses these default locations in addition to registry and Versio
 | Studio Pro installation root | `C:\Program Files\Mendix` |
 | Studio Pro executable | `C:\Program Files\Mendix\<version>\modeler\studiopro.exe` |
 | Studio Pro uninstall information | `C:\ProgramData\Mendix` |
-| Native default workspace | `%USERPROFILE%\Mendix` when present, otherwise `%USERPROFILE%` |
+| Native default workspace | `%USERPROFILE%\Mendix` (the app asks for another directory if it does not exist) |
 | Linux WinBoat shared path | `\\host.lan\Data` |
 
 Installers are stored in `.mendimaru/installers` under the configured workspace. In native mode, the installer is signature-checked and launched through the Windows elevation API without a command shell. In Linux mode, commands are sent to WinBoat RemoteApp as UTF-16LE-encoded PowerShell, avoiding quoting issues. Installation is complete only after the installer exits successfully and `StudioPro.exe` for that version is detected.
+
+The Marketplace catalog cache is reused for up to six hours so normal startup does not launch a background browser. Use the catalog refresh control to force an immediate update.
 
 Likewise, removal is complete only after the official Windows uninstaller exits and `StudioPro.exe` for that version disappears. The installed-version list is then refreshed automatically.
 
@@ -173,10 +175,15 @@ To run the host-portable validation suite and build an application bundle:
 npm run check:portable
 npm run test:browser
 npm run test:e2e
+npm run check:windows
 npm run tauri build
 ```
 
 On Linux, `npm run test:e2e` launches the debug executable against the Vite development URL through pinned `tauri-driver` and `WebKitWebDriver`. It uses isolated WinBoat/API/project fixtures and verifies the real WebView, Tauri IPC, online application state, sampled bounded route and busy-state motion, the absence of continuous idle animation, and primary navigation. Install the driver bridge with `cargo install tauri-driver --version 2.0.6 --locked`; the host must also provide `WebKitWebDriver`. `npm run test:app-flow` retains the faster React application-flow suite with mocked OS boundaries, while `npm run test:browser` tests Mendix Runtime pages rather than the Mendimaru desktop shell. CI gates all three layers, runs the frontend and Rust suites on Windows and Linux, and smoke-builds MSI and NSIS installers on Windows.
+
+On Windows, `npm run test:e2e:windows` starts the real application through `tauri dev` with a test-only Cargo feature and drives the native WebView2 window through an embedded WebDriver endpoint. It exercises real IPC, registry discovery, project scanning, settings persistence, Edge-backed Marketplace refresh, CSP enforcement, hostile-input rejection, and performance budgets. Configuration and caches are restricted to a safety-marked temporary directory that is removed afterward. The WebDriver feature, permission, and global Tauri bridge are absent from normal development and release builds.
+
+CI audits both npm and Cargo lockfiles and runs the native Windows E2E. It then builds, installs, launches, and uninstalls MSI and NSIS packages on a marked ephemeral Windows VM; the installer lifecycle script refuses to run on an ordinary workstation. Windows releases additionally require `WINDOWS_CERTIFICATE` and `WINDOWS_CERTIFICATE_PASSWORD` repository secrets plus a `WINDOWS_TIMESTAMP_URL` repository variable. Only timestamped Authenticode-signed applications and installers that pass the lifecycle checks are uploaded.
 
 Run `npm run test:winboat-smoke` for the non-destructive RemoteApp gate against an online WinBoat VM. It verifies authenticated session queries and stale-session rejection. On Linux, the exhaustive `npm run check` command also requires the destructive lifecycle gate instead of silently excluding it. Supply an absent disposable version and explicit mutation permission:
 
@@ -201,7 +208,7 @@ cargo test marketplace::tests::live_ -- --ignored --nocapture
 
 ## Security
 
-Native Windows commands never interpolate paths into a command shell. Installers, installed Studio executables, and registered Mendix uninstallers must have a valid trusted Authenticode signature whose publisher is Mendix or Siemens; files are hashed before and after verification to detect replacement. Windows Installer removal is limited to a product-code `/x` operation and known non-interactive flags, while registered uninstallers must belong to the selected installation and use an allowlisted flag set. UAC cancellation and non-success process exit codes leave the operation failed rather than reporting a false install or removal.
+Native Windows commands never interpolate paths into a command shell. Installers, installed Studio executables, and registered Mendix uninstallers must have a valid trusted Authenticode signature whose publisher is Mendix or Siemens. A verified executable remains open with write/delete sharing denied until Windows starts it, closing the replacement window between signature verification and execution. Windows Installer removal is limited to a product-code `/x` operation and known non-interactive flags, while registered uninstallers must belong to the selected installation and use an allowlisted flag set. UAC cancellation and non-success process exit codes leave the operation failed rather than reporting a false install or removal.
 
 On Linux, Mendimaru does not store the Windows username or password in its app settings. When launching a RemoteApp, it reads credentials from the running WinBoat container and passes them to FreeRDP 3 through standard input, keeping the password out of process arguments and app logs. FreeRDP uses an app-scoped TOFU certificate pin, and privileged operations require loopback-only Guest API and RDP bindings. Shared operation results and retained Studio session-control requests are authenticated with per-attempt HMAC keys and replay-protected sequence numbers.
 

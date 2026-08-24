@@ -10,6 +10,7 @@ Before Windows starts an installer, Studio Pro, or an official uninstaller, Mend
 - no target or ancestor below that root is a junction, symbolic link, or other reparse point;
 - the file has a valid Authenticode status and an exact `CN` or `O` component for Mendix Technology B.V. or Siemens AG;
 - the SHA-256 value is stable before and after signature verification;
+- on native Windows, the verified executable remains open without write or delete sharing until process creation completes;
 - installers on Linux match both the host-validated cache digest and a fresh, unique guest staging copy.
 
 An installer is never reused merely because its length matches. Uninstall refuses to recurse over a version directory when trusted uninstall metadata is missing.

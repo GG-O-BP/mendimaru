@@ -4,6 +4,8 @@ import type {
 } from "../../domain/types";
 import type { VersionSupportFilters } from "./types";
 
+export const CATALOG_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1_000;
+
 export function filterCatalog(
   versions: DownloadableVersion[],
   search: string,
@@ -35,4 +37,15 @@ export function catalogHasMore(catalog: StudioVersionCatalog) {
     catalog.loadedPages.length > 0 &&
     catalog.versions.length >= catalog.loadedPages.length * 10
   );
+}
+
+export function catalogCacheIsFresh(
+  catalog: StudioVersionCatalog,
+  now = Date.now(),
+) {
+  if (catalog.versions.length === 0 || !catalog.fetchedAt) return false;
+  const fetchedAt = Date.parse(catalog.fetchedAt);
+  if (!Number.isFinite(fetchedAt)) return false;
+  const age = now - fetchedAt;
+  return age >= 0 && age <= CATALOG_CACHE_MAX_AGE_MS;
 }
