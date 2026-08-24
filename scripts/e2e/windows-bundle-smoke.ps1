@@ -279,7 +279,13 @@ function Get-MendimaruUninstallEntries {
     )
     foreach ($registryPath in $registryPaths) {
         Get-ItemProperty -Path $registryPath -ErrorAction SilentlyContinue |
-            Where-Object { $_.DisplayName -ieq 'mendimaru' }
+            Where-Object {
+                $displayName = $_.PSObject.Properties['DisplayName']
+                if ($null -eq $displayName) {
+                    return $false
+                }
+                return [string]$displayName.Value -ieq 'mendimaru'
+            }
     }
 }
 
@@ -362,11 +368,19 @@ function Wait-MendimaruEntry {
 function Resolve-MendimaruExecutable {
     param([Parameter(Mandatory = $true)]$Entry)
     $candidates = [Collections.Generic.List[string]]::new()
-    if (-not [string]::IsNullOrWhiteSpace($Entry.InstallLocation)) {
-        $candidates.Add((Join-Path $Entry.InstallLocation 'mendimaru.exe'))
+    $installLocation = $Entry.PSObject.Properties['InstallLocation']
+    if (
+        $null -ne $installLocation -and
+        -not [string]::IsNullOrWhiteSpace([string]$installLocation.Value)
+    ) {
+        $candidates.Add((Join-Path ([string]$installLocation.Value) 'mendimaru.exe'))
     }
-    if (-not [string]::IsNullOrWhiteSpace($Entry.DisplayIcon)) {
-        $iconPath = ($Entry.DisplayIcon -replace ',\d+$', '').Trim().Trim('"')
+    $displayIcon = $Entry.PSObject.Properties['DisplayIcon']
+    if (
+        $null -ne $displayIcon -and
+        -not [string]::IsNullOrWhiteSpace([string]$displayIcon.Value)
+    ) {
+        $iconPath = ([string]$displayIcon.Value -replace ',\d+$', '').Trim().Trim('"')
         $candidates.Add($iconPath)
     }
     $candidates.Add((Join-Path $env:ProgramFiles 'mendimaru\mendimaru.exe'))
