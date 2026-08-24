@@ -369,11 +369,14 @@ function Resolve-MendimaruExecutable {
     param([Parameter(Mandatory = $true)]$Entry)
     $candidates = [Collections.Generic.List[string]]::new()
     $installLocation = $Entry.PSObject.Properties['InstallLocation']
-    if (
-        $null -ne $installLocation -and
-        -not [string]::IsNullOrWhiteSpace([string]$installLocation.Value)
-    ) {
-        $candidates.Add((Join-Path ([string]$installLocation.Value) 'mendimaru.exe'))
+    $installRoot = if ($null -eq $installLocation) {
+        ''
+    }
+    else {
+        ([string]$installLocation.Value).Trim().Trim('"')
+    }
+    if (-not [string]::IsNullOrWhiteSpace($installRoot)) {
+        $candidates.Add((Join-Path $installRoot 'mendimaru.exe'))
     }
     $displayIcon = $Entry.PSObject.Properties['DisplayIcon']
     if (
