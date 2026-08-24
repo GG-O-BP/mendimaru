@@ -123,6 +123,7 @@ async function run() {
       earlyExit = { code, signal };
     });
 
+    client = new WebDriverClient(port);
     await waitUntil(
       async () => {
         if (earlyExit) {
@@ -133,16 +134,19 @@ async function run() {
         const response = await fetch(`http://127.0.0.1:${port}/status`).catch(
           () => undefined,
         );
-        return response?.ok;
+        if (!response?.ok) return false;
+
+        report.measurements.webdriverSessionAttempts =
+          (report.measurements.webdriverSessionAttempts ?? 0) + 1;
+        await client.createSession();
+        return true;
       },
       thresholds.startupMs,
-      "embedded WebDriver startup",
+      "embedded WebDriver session for the main Tauri window",
     );
     report.measurements.startupMs = rounded(performance.now() - started);
     assertThreshold("startupMs", report.measurements.startupMs);
 
-    client = new WebDriverClient(port);
-    await client.createSession();
     await waitUntil(
       () =>
         client.executeSync(
