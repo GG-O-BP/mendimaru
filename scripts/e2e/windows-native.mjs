@@ -15,6 +15,11 @@ import { cpus, platform, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
+import {
+  delay,
+  sameWindowsPath,
+  waitForWebDriverSession,
+} from "./windows-native-helpers.mjs";
 
 const ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
 const MARKER_NAME = ".mendimaru-e2e-root";
@@ -124,26 +129,16 @@ async function run() {
     });
 
     client = new WebDriverClient(port);
-    await waitUntil(
-      async () => {
-        if (earlyExit) {
-          throw new Error(
-            `tauri dev exited before WebDriver was ready (${JSON.stringify(earlyExit)})`,
-          );
-        }
-        const response = await fetch(`http://127.0.0.1:${port}/status`).catch(
-          () => undefined,
-        );
-        if (!response?.ok) return false;
-
+    await waitForWebDriverSession({
+      client,
+      statusUrl: `http://127.0.0.1:${port}/status`,
+      getEarlyExit: () => earlyExit,
+      timeoutMs: thresholds.startupMs,
+      onSessionAttempt: () => {
         report.measurements.webdriverSessionAttempts =
           (report.measurements.webdriverSessionAttempts ?? 0) + 1;
-        await client.createSession();
-        return true;
       },
-      thresholds.startupMs,
-      "embedded WebDriver session for the main Tauri window",
-    );
+    });
     report.measurements.startupMs = rounded(performance.now() - started);
     assertThreshold("startupMs", report.measurements.startupMs);
 
@@ -846,23 +841,8 @@ function numberEnvironment(name, fallback) {
   return parsed;
 }
 
-async function sameWindowsPath(left, right) {
-  const [canonicalLeft, canonicalRight] = await Promise.all([
-    realpath(left),
-    realpath(right),
-  ]);
-  return (
-    canonicalLeft.replaceAll("/", "\\").toLowerCase() ===
-    canonicalRight.replaceAll("/", "\\").toLowerCase()
-  );
-}
-
 function rounded(value) {
   return Math.round(value * 100) / 100;
-}
-
-function delay(milliseconds) {
-  return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 }
 
 await run();

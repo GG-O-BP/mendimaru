@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants as fsConstants, promises as fs } from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -28,15 +29,43 @@ const viteUrl = "http://localhost:1420/";
 const httpProbeTimeout = 2_000;
 const webdriverRequestTimeout = 30_000;
 const buildTimeout = 15 * 60_000;
+const artifactDirectory = path.join(repository, "artifacts", "e2e");
+const thresholds = {
+  startupMs: numberEnvironment("MENDIMARU_E2E_MAX_STARTUP_MS", 120_000),
+  environmentMs: numberEnvironment("MENDIMARU_E2E_MAX_ENVIRONMENT_MS", 5_000),
+  projectsMs: numberEnvironment("MENDIMARU_E2E_MAX_PROJECTS_MS", 10_000),
+  navigationMs: numberEnvironment("MENDIMARU_E2E_MAX_NAVIGATION_MS", 3_000),
+  privateMemoryBytes: numberEnvironment(
+    "MENDIMARU_E2E_MAX_PRIVATE_MEMORY_BYTES",
+    768 * 1024 * 1024,
+  ),
+  idleCpuPercent: numberEnvironment("MENDIMARU_E2E_MAX_IDLE_CPU_PERCENT", 10),
+};
 const processes = [];
 const servers = [];
 const serverSockets = new Map();
+const report = {
+  status: "running",
+  startedAt: new Date().toISOString(),
+  node: process.version,
+  platform: `${process.platform}-${process.arch}`,
+  thresholds,
+  measurements: {},
+  assertions: [],
+};
 let sessionId;
 let webdriverUrl;
 let temporary;
 let succeeded = false;
+let clockTicks;
 
 try {
+  await fs.mkdir(artifactDirectory, { recursive: true });
+  await Promise.all(
+    ["linux-tauri.json", "linux-tauri.png", "linux-tauri-failure.png"].map(
+      (name) => fs.rm(path.join(artifactDirectory, name), { force: true }),
+    ),
+  );
   assert.equal(
     process.platform,
     "linux",
@@ -70,6 +99,7 @@ try {
   const vite = startProcess("npm", ["run", "dev"], {
     cwd: repository,
     label: "Vite",
+    env: { ...process.env, VITE_MENDIMARU_E2E: "1" },
   });
   processes.push(vite);
   await waitForHttp(viteUrl, vite, 20_000);
@@ -99,6 +129,7 @@ try {
   processes.push(driver);
   await waitForWebDriver(webdriverUrl, driver, 20_000);
 
+  const startupStarted = performance.now();
   sessionId = await createSession(webdriverUrl, application);
   await waitFor(
     async () =>
@@ -109,6 +140,8 @@ try {
     30_000,
     "the Tauri application shell did not become ready",
   );
+  report.measurements.startupMs = rounded(performance.now() - startupStarted);
+  assertThreshold("startupMs", report.measurements.startupMs);
   await execute(`
     window.__MENDIMARU_E2E_ERRORS__ = [];
     window.addEventListener("error", (event) => {
@@ -145,6 +178,22 @@ try {
     await execute("return Boolean(window.__TAURI_INTERNALS__);"),
     true,
   );
+  const csp = await execute(
+    "return document.querySelector('meta[http-equiv=\"Content-Security-Policy\"]')?.content || '';",
+  );
+  report.cspMeta = csp;
+  recordAssertion(
+    csp.includes("object-src 'none'") && csp.includes("base-uri 'none'"),
+    "the real Linux WebView receives the restrictive development CSP",
+  );
+  const dataScriptBlocked = await executeAsync(`
+    const done = arguments[arguments.length - 1];
+    Promise.resolve(window.__MENDIMARU_CSP_PROBE__).then(done, () => done(false));
+  `);
+  recordAssertion(
+    dataScriptBlocked,
+    "the real Linux WebView blocks a data-script CSP probe",
+  );
 
   const capabilities = await executeAsync(`
     const done = arguments[arguments.length - 1];
@@ -156,6 +205,34 @@ try {
   assert.equal(capabilities.value.schemaVersion, "3.0.0");
   assert.equal(capabilities.value.manifest.hostPlatform, "linux");
   assert.equal(capabilities.value.manifest.backend, "linux-winboat");
+
+  const environmentTimed = await timed(() => invoke("get_environment_status"));
+  report.measurements.environmentMs = environmentTimed.elapsedMs;
+  assertThreshold("environmentMs", environmentTimed.elapsedMs);
+  recordAssertion(
+    environmentTimed.value.platform.kind === "linux-winboat" &&
+      environmentTimed.value.platform.requiresWinboat === true &&
+      environmentTimed.value.ready === true,
+    "the actual Linux backend reports a ready WinBoat environment",
+  );
+
+  const config = await invoke("get_config");
+  report.configSharedDirectory = config.sharedDirectory;
+  report.expectedSharedDirectory = fixture.shared;
+  recordAssertion(
+    await samePath(config.sharedDirectory, fixture.shared),
+    "the Linux E2E uses only its isolated shared workspace",
+  );
+
+  const projectsTimed = await timed(() => invoke("get_projects"));
+  report.measurements.projectScanMs = projectsTimed.elapsedMs;
+  assertThreshold("projectsMs", projectsTimed.elapsedMs);
+  recordAssertion(
+    projectsTimed.value.length === 1 &&
+      projectsTimed.value[0].name === "Orders" &&
+      projectsTimed.value[0].version === "11.12.2",
+    "the real Linux project scanner finds the isolated Orders fixture",
+  );
 
   await waitFor(
     async () =>
@@ -173,15 +250,8 @@ try {
   );
 
   const routeMotion = await execute(`
-    const marker = document.querySelector(".route-track i");
+    const marker = document.querySelector(".route-packet");
     if (!marker) return null;
-    // The production route animation is intentionally bounded and may have
-    // finished while native commands were populating the view. Restart the
-    // same CSS animation on the real marker so sampling never depends on host
-    // speed or the exact point at which WebDriver attached.
-    marker.style.animation = "none";
-    void marker.offsetWidth;
-    marker.style.animation = "";
     const style = getComputedStyle(marker);
     const animation = marker.getAnimations()[0];
     return {
@@ -192,7 +262,7 @@ try {
     };
   `);
   assert.equal(routeMotion?.animationName, "route-travel");
-  assert.equal(routeMotion?.iterationCount, "2");
+  assert.equal(routeMotion?.iterationCount, "infinite");
   assert.equal(routeMotion?.playState, "running");
   assert.equal(typeof routeMotion?.currentTime, "number");
 
@@ -200,7 +270,7 @@ try {
   for (let sample = 0; sample < 8; sample += 1) {
     routeFrames.push(
       await execute(`
-        const marker = document.querySelector(".route-status.online .route-track i");
+        const marker = document.querySelector(".route-status.online .route-packet");
         if (!marker) return null;
         const animation = marker.getAnimations()[0];
         const style = getComputedStyle(marker);
@@ -309,15 +379,7 @@ try {
     return true;
   `);
 
-  await waitFor(
-    async () =>
-      await execute(`
-        return document.getAnimations()
-          .every((animation) => animation.playState !== "running");
-      `),
-    7_000,
-    "the bounded route animation did not become idle",
-  );
+  await delay(1_100);
 
   const idleMotion = await execute(`
     const infiniteAnimations = document.getAnimations()
@@ -325,7 +387,7 @@ try {
       .map((animation) => ({
         animationName: getComputedStyle(animation.effect.target).animationName,
         isOnlineRoute: animation.effect.target.matches(
-          ".route-status.online .route-track i",
+          ".route-status.online .route-packet",
         ),
       }));
     return {
@@ -337,7 +399,7 @@ try {
           const allowlisted =
             name === "route-travel" &&
             target instanceof Element &&
-            target.matches(".route-status.online .route-track i");
+            target.matches(".route-status.online .route-packet");
           return animation.playState === "running" && !allowlisted;
         })
         .map((animation) => ({
@@ -346,17 +408,19 @@ try {
             : "",
           className: animation.effect?.target?.className ?? "",
         })),
-      routeMarkerPresent: Boolean(document.querySelector(".route-track i")),
+      routeMarkerPresent: Boolean(document.querySelector(".route-packet")),
     };
   `);
   assert.deepEqual(
     idleMotion,
     {
-      infiniteAnimations: [],
+      infiniteAnimations: [
+        { animationName: "route-travel", isOnlineRoute: true },
+      ],
       unexpectedRunningAnimations: [],
       routeMarkerPresent: true,
     },
-    "the idle native window must not retain continuous animations",
+    "the idle native window may retain only the live online-route indicator",
   );
 
   const installedRefresh = await command("POST", "/element", {
@@ -391,10 +455,33 @@ try {
     "the installed-version busy animation did not stop after refresh",
   );
 
-  await assertView("Control+2", "Projects", "Orders");
-  await assertView("Control+3", "Operation center", "11.12.2");
-  await assertView("Control+4", "Settings", "Environment diagnostics");
-  await assertView("Control+1", "Studio Pro", "11.12.2");
+  for (const [name, shortcut, heading, expectedText] of [
+    ["projectsNavigationMs", "Control+2", "Projects", "Orders"],
+    ["operationsNavigationMs", "Control+3", "Operation center", "11.12.2"],
+    [
+      "settingsNavigationMs",
+      "Control+4",
+      "Settings",
+      "Environment diagnostics",
+    ],
+    ["studioNavigationMs", "Control+1", "Studio Pro", "11.12.2"],
+  ]) {
+    const elapsedMs = await assertView(shortcut, heading, expectedText);
+    report.measurements[name] = elapsedMs;
+    assertThreshold("navigationMs", elapsedMs);
+  }
+
+  for (const [commandName, payload] of [
+    ["launch_studio_pro", { version: "11.12.2; calc.exe" }],
+    ["uninstall_studio_pro", { version: "../11.12.2" }],
+    ["open_folder", { path: path.join(temporary, "missing") }],
+  ]) {
+    const result = await invokeResult(commandName, payload);
+    recordAssertion(
+      !result.ok,
+      `${commandName} rejects hostile or missing input on Linux`,
+    );
+  }
 
   await delay(1_750);
   assert.deepEqual(
@@ -403,8 +490,43 @@ try {
     "the real WebView reported an error during the application flow",
   );
 
+  const applicationPid = await findApplicationProcess(
+    application,
+    fixture.xdgConfig,
+  );
+  const idleStarted = performance.now();
+  const beforeIdle = await linuxProcessSnapshot(applicationPid);
+  await delay(10_000);
+  const afterIdle = await linuxProcessSnapshot(applicationPid);
+  const idleSeconds = (performance.now() - idleStarted) / 1_000;
+  const idleCpuPercent =
+    (Math.max(0, afterIdle.cpuSeconds - beforeIdle.cpuSeconds) /
+      (idleSeconds * os.cpus().length)) *
+    100;
+  report.measurements.processId = applicationPid;
+  report.measurements.processCount = afterIdle.processCount;
+  report.measurements.privateMemoryBytes = afterIdle.privateMemoryBytes;
+  report.measurements.workingSetBytes = afterIdle.workingSetBytes;
+  report.measurements.idleCpuPercent = rounded(idleCpuPercent);
+  recordAssertion(
+    afterIdle.privateMemoryBytes <= thresholds.privateMemoryBytes,
+    `Linux private memory stays below ${thresholds.privateMemoryBytes} bytes`,
+  );
+  recordAssertion(
+    idleCpuPercent <= thresholds.idleCpuPercent,
+    `normalized Linux idle CPU stays below ${thresholds.idleCpuPercent}%`,
+  );
+
+  const screenshot = await command("GET", "/screenshot");
+  await fs.writeFile(
+    path.join(artifactDirectory, "linux-tauri.png"),
+    Buffer.from(screenshot, "base64"),
+  );
+  report.status = "passed";
   succeeded = true;
 } catch (error) {
+  report.status = "failed";
+  report.error = error instanceof Error ? error.stack : String(error);
   await retainFailureScreenshot();
   throw error;
 } finally {
@@ -420,15 +542,21 @@ try {
   } else if (temporary) {
     process.stderr.write(`Tauri E2E evidence retained at ${temporary}\n`);
   }
+  report.finishedAt = new Date().toISOString();
+  await fs.writeFile(
+    path.join(artifactDirectory, "linux-tauri.json"),
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
 }
 
 if (succeeded) {
   process.stdout.write(
-    "Tauri E2E: real WebKit window passed (dev URL, IPC contract, sampled bounded route/busy motion, idle rendering, four-view navigation)\n",
+    `Tauri E2E: real WebKit window passed (functional, security, and performance; ${report.assertions.length} explicit parity assertions)\n`,
   );
 }
 
 async function assertView(shortcut, heading, expectedText) {
+  const started = performance.now();
   const selector = `button[aria-keyshortcuts="${shortcut}"]`;
   const element = await command("POST", "/element", {
     using: "css selector",
@@ -452,6 +580,7 @@ async function assertView(shortcut, heading, expectedText) {
     await command("GET", `/element/${elementId}/attribute/aria-current`),
     "page",
   );
+  return rounded(performance.now() - started);
 }
 
 async function createSession(baseUrl, binary) {
@@ -484,6 +613,28 @@ async function executeAsync(script, args = []) {
   return command("POST", "/execute/async", { args, script });
 }
 
+async function invokeResult(commandName, payload = {}) {
+  return executeAsync(
+    `
+      const done = arguments[arguments.length - 1];
+      window.__TAURI_INTERNALS__.invoke(arguments[0], arguments[1]).then(
+        (value) => done({ ok: true, value }),
+        (error) => done({
+          ok: false,
+          error: typeof error === "string" ? error : JSON.stringify(error),
+        }),
+      );
+    `,
+    [commandName, payload],
+  );
+}
+
+async function invoke(commandName, payload = {}) {
+  const result = await invokeResult(commandName, payload);
+  if (!result.ok) throw new Error(`${commandName} failed: ${result.error}`);
+  return result.value;
+}
+
 async function webdriverRequest(
   method,
   endpoint,
@@ -498,7 +649,11 @@ async function webdriverRequest(
     signal: globalThis.AbortSignal.timeout(timeout),
   });
   const envelope = await response.json();
-  if (!response.ok || envelope.value?.error) {
+  const webdriverError =
+    envelope.value?.error &&
+    envelope.value?.ok === undefined &&
+    typeof envelope.value?.message === "string";
+  if (!response.ok || webdriverError) {
     throw new Error(
       `WebDriver ${method} ${endpoint} failed: ${JSON.stringify(envelope.value)}`,
     );
@@ -716,7 +871,7 @@ async function createFixture(root) {
     { mode: 0o600 },
   );
 
-  return { bin, chrome, xdgCache, xdgConfig };
+  return { bin, chrome, shared, xdgCache, xdgConfig };
 }
 
 function installedCacheSourceIdentity(config) {
@@ -999,6 +1154,165 @@ async function executable(file) {
   }
 }
 
+async function samePath(left, right) {
+  const [canonicalLeft, canonicalRight] = await Promise.all([
+    fs.realpath(left),
+    fs.realpath(right),
+  ]);
+  return canonicalLeft === canonicalRight;
+}
+
+async function timed(action) {
+  const started = performance.now();
+  const value = await action();
+  return { value, elapsedMs: rounded(performance.now() - started) };
+}
+
+function recordAssertion(condition, message) {
+  assert.ok(condition, message);
+  report.assertions.push(message);
+}
+
+function assertThreshold(name, value) {
+  const threshold = thresholds[name];
+  recordAssertion(value <= threshold, `${name} ${value} ms <= ${threshold} ms`);
+}
+
+function numberEnvironment(name, fallback) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive number`);
+  }
+  return parsed;
+}
+
+function rounded(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function linuxClockTicks() {
+  clockTicks ??= Number(
+    execFileSync("getconf", ["CLK_TCK"], { encoding: "utf8" }).trim(),
+  );
+  assert.ok(Number.isFinite(clockTicks) && clockTicks > 0);
+  return clockTicks;
+}
+
+async function findApplicationProcess(binary, expectedConfigHome) {
+  const expectedBinary = await fs.realpath(binary);
+  const expectedEnvironment = `XDG_CONFIG_HOME=${expectedConfigHome}`;
+  const matches = [];
+  for (const entry of await fs.readdir("/proc", { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^[1-9][0-9]*$/.test(entry.name)) continue;
+    const pid = Number(entry.name);
+    const executablePath = await fs
+      .realpath(`/proc/${pid}/exe`)
+      .catch(() => undefined);
+    if (executablePath !== expectedBinary) continue;
+    const environment = await fs
+      .readFile(`/proc/${pid}/environ`)
+      .catch(() => undefined);
+    if (
+      environment &&
+      environment.toString("utf8").split("\0").includes(expectedEnvironment)
+    ) {
+      matches.push(pid);
+    }
+  }
+  assert.equal(
+    matches.length,
+    1,
+    `expected one isolated Mendimaru process, found ${matches.join(", ") || "none"}`,
+  );
+  return matches[0];
+}
+
+async function linuxProcessSnapshot(rootPid) {
+  const records = [];
+  for (const entry of await fs.readdir("/proc", { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^[1-9][0-9]*$/.test(entry.name)) continue;
+    const pid = Number(entry.name);
+    const stat = await fs
+      .readFile(`/proc/${pid}/stat`, "utf8")
+      .catch(() => undefined);
+    if (!stat) continue;
+    const closingParenthesis = stat.lastIndexOf(")");
+    if (closingParenthesis < 0) continue;
+    const fields = stat
+      .slice(closingParenthesis + 2)
+      .trim()
+      .split(/\s+/);
+    if (fields.length < 22) continue;
+    records.push({
+      pid,
+      parentPid: Number(fields[1]),
+      cpuTicks: Number(fields[11]) + Number(fields[12]),
+    });
+  }
+
+  const processIds = new Set([rootPid]);
+  let added;
+  do {
+    added = false;
+    for (const record of records) {
+      if (processIds.has(record.parentPid) && !processIds.has(record.pid)) {
+        processIds.add(record.pid);
+        added = true;
+      }
+    }
+  } while (added);
+
+  let cpuTicks = 0;
+  let privateMemoryBytes = 0;
+  let workingSetBytes = 0;
+  let sampled = 0;
+  for (const pid of processIds) {
+    const record = records.find((candidate) => candidate.pid === pid);
+    if (!record) continue;
+    const memory = await linuxProcessMemory(pid);
+    if (!memory) continue;
+    cpuTicks += record.cpuTicks;
+    privateMemoryBytes += memory.privateMemoryBytes;
+    workingSetBytes += memory.workingSetBytes;
+    sampled += 1;
+  }
+  assert.ok(
+    sampled > 0,
+    `could not sample process tree rooted at PID ${rootPid}`,
+  );
+  return {
+    cpuSeconds: cpuTicks / linuxClockTicks(),
+    privateMemoryBytes,
+    workingSetBytes,
+    processCount: sampled,
+  };
+}
+
+async function linuxProcessMemory(pid) {
+  const status = await fs
+    .readFile(`/proc/${pid}/status`, "utf8")
+    .catch(() => undefined);
+  if (!status) return undefined;
+  const workingSetBytes = kilobytesFromProcStatus(status, "VmRSS");
+  const smaps = await fs
+    .readFile(`/proc/${pid}/smaps_rollup`, "utf8")
+    .catch(() => undefined);
+  const privateMemoryBytes = smaps
+    ? ["Private_Clean", "Private_Dirty", "Private_Hugetlb"].reduce(
+        (total, key) => total + kilobytesFromProcStatus(smaps, key),
+        0,
+      )
+    : workingSetBytes;
+  return { privateMemoryBytes, workingSetBytes };
+}
+
+function kilobytesFromProcStatus(content, key) {
+  const match = content.match(new RegExp(`^${key}:\\s+([0-9]+)\\s+kB$`, "m"));
+  return match ? Number(match[1]) * 1024 : 0;
+}
+
 async function retainFailureScreenshot() {
   if (!temporary) return;
   if (sessionId) {
@@ -1006,6 +1320,10 @@ async function retainFailureScreenshot() {
       const screenshot = await command("GET", "/screenshot");
       await fs.writeFile(
         path.join(temporary, "tauri-e2e-failure.png"),
+        Buffer.from(screenshot, "base64"),
+      );
+      await fs.writeFile(
+        path.join(artifactDirectory, "linux-tauri-failure.png"),
         Buffer.from(screenshot, "base64"),
       );
     } catch {

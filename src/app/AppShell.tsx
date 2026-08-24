@@ -117,7 +117,9 @@ export function AppShell({
                   <span>{t("route-linux")}</span>
                 </span>
                 <span className="route-track" aria-hidden="true">
-                  {online && <i />}
+                  {online && (
+                    <i className="route-packet" data-testid="route-packet" />
+                  )}
                 </span>
               </>
             )}

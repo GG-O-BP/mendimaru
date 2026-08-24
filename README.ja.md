@@ -169,15 +169,18 @@ npm run tauri dev
 npm run check:portable
 npm run test:browser
 npm run test:e2e
+npm run test:e2e:coverage
 npm run check:windows
 npm run tauri build
 ```
 
-Linux の `npm run test:e2e` は、固定バージョンの `tauri-driver` と `WebKitWebDriver` を使い、debug 実行ファイルを Vite development URL に接続します。隔離した WinBoat／API／project fixture により、実際の WebView、Tauri IPC、online application state、frame sampling を伴う route／busy-state motion、allowlist 外の idle animation がないこと、主要画面の navigation を検証します。driver bridge は `cargo install tauri-driver --version 2.0.6 --locked` でインストールし、host に `WebKitWebDriver` も必要です。`npm run test:app-flow` は OS 境界をモックした高速な React application-flow suite で、`npm run test:browser` は Mendimaru desktop shell ではなく Mendix Runtime page をテストします。CI は 3 層すべてを gate し、Windows／Linux のテストと Windows MSI／NSIS smoke build を実行します。
+Linux の `npm run test:e2e` は、固定バージョンの `tauri-driver` と `WebKitWebDriver` を使い、debug 実行ファイルを Vite development URL に接続します。隔離した WinBoat／API／project fixture により、実際の WebView、Tauri IPC、online application state、project discovery、CSP enforcement、hostile-input rejection、frame sampling を伴う持続的な online-route motion と busy 中だけの motion、allowlist 外の idle animation がないこと、主要画面の navigation、および startup／IPC／navigation／private-memory／idle-CPU budget を検証します。driver bridge は `cargo install tauri-driver --version 2.0.6 --locked` でインストールし、host に `WebKitWebDriver` も必要です。`npm run test:app-flow` は OS 境界をモックした高速な React application-flow suite で、`npm run test:browser` は Mendimaru desktop shell ではなく Mendix Runtime page をテストします。CI は 3 層を gate し、Linux E2E の測定値と screenshot を保存します。motion の完全な一覧と変更規則は [Motion contract](docs/motion-contract.md) に記載されています。
+
+`npm run test:e2e:coverage` は、リポジトリ内の E2E coverage model を検証します。Linux と Windows は実 desktop の core functional／security／performance gate では同等ですが、**platform 全体ではまだ同等ではありません**。hosted Linux CI には実 WinBoat lifecycle、MSI／NSIS に対応する AUR／package の install-launch-uninstall lifecycle、live Marketplace refresh がありません。生成される report は `artifacts/e2e/e2e-coverage.json` です。
 
 Windows の `npm run test:e2e:windows` は、テスト専用 Cargo feature で実際のアプリを `tauri dev` から起動し、ネイティブ WebView2 ウィンドウを組み込み WebDriver で操作します。実際の IPC、registry discovery、project scan、settings persistence、Edge ベースの Marketplace refresh、CSP enforcement、hostile input rejection、performance budget を検証します。設定とキャッシュは safety marker 付き一時ディレクトリに隔離し、終了後に削除します。WebDriver feature、permission、global Tauri bridge は通常の development／release build には含まれません。
 
-CI は npm と Cargo の lockfile を監査し、Windows native E2E を実行します。その後、marker 付きの一時 Windows VM で MSI と NSIS をそれぞれ build、install、launch、uninstall します。installer lifecycle script は通常の workstation では実行を拒否します。Windows release には repository secret `WINDOWS_CERTIFICATE`、`WINDOWS_CERTIFICATE_PASSWORD` と repository variable `WINDOWS_TIMESTAMP_URL` が必要です。timestamp 付き Authenticode signature と lifecycle check をすべて通過したアプリと installer だけをアップロードします。
+CI は npm と Cargo の lockfile を監査し、Windows native E2E を実行します。その後、marker 付きの一時 Windows VM で MSI と NSIS をそれぞれ build、install、launch、uninstall します。installer lifecycle script は通常の workstation では実行を拒否します。`WINDOWS_CERTIFICATE`、`WINDOWS_CERTIFICATE_PASSWORD`、`WINDOWS_TIMESTAMP_URL` がすべて設定されている場合は、全 Windows artifact を署名・timestamp 処理し、Authenticode を検証してから upload します。3 項目がすべて未設定の場合は同じ lifecycle check を通過した installer を公開し、GitHub Release 本文と `WINDOWS-BUILDS-UNSIGNED.txt` asset に未署名であることを明示します。一部だけ設定された不完全な signing configuration は release を失敗させます。
 
 online の実 WinBoat VM に対する非破壊 RemoteApp gate は `npm run test:winboat-smoke` で実行し、認証済み session query と stale-session rejection を検証します。Linux の完全な `npm run check` は、実際の状態を変更する lifecycle gate を黙って除外せず、必須で実行します。未インストールの disposable version と明示的な変更許可を指定してください。
 

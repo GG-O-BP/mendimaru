@@ -14,7 +14,9 @@ param(
     [double]$MaxIdleCpuPercent = 10.0,
 
     [ValidateRange(5, 180)]
-    [int]$IdleSettleTimeoutSeconds = 60
+    [int]$IdleSettleTimeoutSeconds = 60,
+
+    [switch]$HelpersOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -279,14 +281,17 @@ function Get-MendimaruUninstallEntries {
     )
     foreach ($registryPath in $registryPaths) {
         Get-ItemProperty -Path $registryPath -ErrorAction SilentlyContinue |
-            Where-Object {
-                $displayName = $_.PSObject.Properties['DisplayName']
-                if ($null -eq $displayName) {
-                    return $false
-                }
-                return [string]$displayName.Value -ieq 'mendimaru'
-            }
+            Where-Object { Test-MendimaruUninstallEntry -Entry $_ }
     }
+}
+
+function Test-MendimaruUninstallEntry {
+    param([Parameter(Mandatory = $true)]$Entry)
+    $displayName = $Entry.PSObject.Properties['DisplayName']
+    if ($null -eq $displayName) {
+        return $false
+    }
+    return [string]$displayName.Value -ieq 'mendimaru'
 }
 
 function Get-ProcessTreeSnapshot {
@@ -416,4 +421,6 @@ function Test-PathWithin {
     )
 }
 
-Invoke-BundleSmoke
+if (-not $HelpersOnly) {
+    Invoke-BundleSmoke
+}

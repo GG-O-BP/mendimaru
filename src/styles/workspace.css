@@ -44,6 +44,8 @@
 }
 
 .route-track {
+  --route-travel-distance: clamp(18px, 4vw, 58px);
+
   position: relative;
   display: block;
   width: clamp(28px, 5vw, 74px);
@@ -53,6 +55,10 @@
     #a8b7b4 0 5px,
     transparent 5px 9px
   );
+}
+
+:root[dir="rtl"] .route-track {
+  --route-travel-distance: clamp(-58px, -4vw, -18px);
 }
 
 .route-track::before,
@@ -81,7 +87,7 @@
   border-color: var(--cyan-dark);
 }
 
-.route-track i {
+.route-packet {
   position: absolute;
   z-index: 1;
   top: -2px;
@@ -93,8 +99,8 @@
   box-shadow: 0 0 0 2px var(--cyan);
 }
 
-.route-status.online .route-track i {
-  animation: route-travel 2.6s ease-in-out 2;
+.route-status.online .route-packet {
+  animation: route-travel 2.6s ease-in-out infinite;
 }
 
 @keyframes route-travel {
@@ -108,7 +114,7 @@
   }
   100% {
     opacity: 0;
-    transform: translateX(clamp(18px, 4vw, 58px));
+    transform: translateX(var(--route-travel-distance));
   }
 }
 

@@ -170,15 +170,18 @@ npm run tauri dev
 npm run check:portable
 npm run test:browser
 npm run test:e2e
+npm run test:e2e:coverage
 npm run check:windows
 npm run tauri build
 ```
 
-Linux에서 `npm run test:e2e`는 고정 버전의 `tauri-driver`와 `WebKitWebDriver`를 통해 debug 실행 파일을 Vite 개발 URL에 연결합니다. 격리된 WinBoat/API/프로젝트 fixture로 실제 WebView, Tauri IPC, 온라인 앱 상태, 프레임을 샘플링한 제한된 경로·작업 중 애니메이션, 유휴 상태에서 지속 애니메이션이 없다는 점과 주요 화면 전환을 검증합니다. 드라이버 브리지는 `cargo install tauri-driver --version 2.0.6 --locked`로 설치하고 호스트에는 `WebKitWebDriver`도 있어야 합니다. `npm run test:app-flow`는 OS 경계를 모킹한 빠른 React 앱 흐름 테스트이고, `npm run test:browser`는 Mendimaru 데스크톱 셸이 아니라 Mendix Runtime 페이지를 테스트합니다. CI는 세 계층을 모두 통과시킨 뒤 Windows/Linux 테스트와 Windows MSI/NSIS 스모크 빌드를 수행합니다.
+Linux에서 `npm run test:e2e`는 고정 버전의 `tauri-driver`와 `WebKitWebDriver`를 통해 debug 실행 파일을 Vite 개발 URL에 연결합니다. 격리된 WinBoat/API/프로젝트 fixture로 실제 WebView, Tauri IPC, 온라인 앱 상태, 프로젝트 탐지, CSP 차단, 악성 입력 거부, 프레임을 샘플링한 지속적인 온라인 경로·작업 중에만 동작하는 애니메이션, 허용 목록에 없는 유휴 애니메이션이 없다는 점, 주요 화면 전환과 시작/IPC/화면 전환/private memory/유휴 CPU 예산을 검증합니다. 드라이버 브리지는 `cargo install tauri-driver --version 2.0.6 --locked`로 설치하고 호스트에는 `WebKitWebDriver`도 있어야 합니다. `npm run test:app-flow`는 OS 경계를 모킹한 빠른 React 앱 흐름 테스트이고, `npm run test:browser`는 Mendimaru 데스크톱 셸이 아니라 Mendix Runtime 페이지를 테스트합니다. CI는 세 계층을 통과시키고 Linux E2E 측정값과 screenshot을 보존합니다. 전체 애니메이션 목록과 변경 규칙은 [애니메이션 계약](docs/motion-contract.md)에 기록되어 있습니다.
+
+`npm run test:e2e:coverage`는 저장소의 E2E 범위 모델을 검증합니다. Linux와 Windows는 실제 데스크톱의 핵심 기능·보안·성능 게이트에서는 동등하지만 **플랫폼 전체 수준은 아직 동일하지 않습니다**. 호스팅 Linux CI에는 실제 WinBoat 수명주기, MSI/NSIS에 대응하는 AUR/패키지 설치·실행·제거 수명주기, 실제 Marketplace 갱신이 없습니다. 생성된 보고서는 `artifacts/e2e/e2e-coverage.json`입니다.
 
 Windows에서 `npm run test:e2e:windows`는 테스트 전용 Cargo feature로 실제 앱을 `tauri dev`에서 시작하고 네이티브 WebView2 창을 임베디드 WebDriver로 조작합니다. 실제 IPC, 레지스트리 탐지, 프로젝트 스캔, 설정 저장, Edge 기반 Marketplace 갱신, CSP 차단, 잘못된 입력 거부와 성능 예산을 검증합니다. 설정과 캐시는 안전 마커가 있는 임시 디렉터리에 격리하고 실행 후 제거합니다. WebDriver feature·권한·전역 Tauri 브리지는 일반 개발 및 릴리스 빌드에 포함되지 않습니다.
 
-CI는 npm과 Cargo 잠금 파일을 모두 감사하고 Windows 네이티브 E2E를 실행합니다. 이후 표시된 일회성 Windows VM에서 MSI와 NSIS를 각각 빌드·설치·실행·제거하며, 설치 수명주기 스크립트는 일반 워크스테이션에서 실행을 거부합니다. Windows 릴리스에는 저장소 secret `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`와 저장소 변수 `WINDOWS_TIMESTAMP_URL`이 추가로 필요합니다. 타임스탬프가 있는 Authenticode 서명과 수명주기 검증을 모두 통과한 앱과 설치 파일만 업로드합니다.
+CI는 npm과 Cargo 잠금 파일을 모두 감사하고 Windows 네이티브 E2E를 실행합니다. 이후 표시된 일회성 Windows VM에서 MSI와 NSIS를 각각 빌드·설치·실행·제거하며, 설치 수명주기 스크립트는 일반 워크스테이션에서 실행을 거부합니다. `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`, `WINDOWS_TIMESTAMP_URL`을 모두 설정하면 모든 Windows 산출물을 서명·타임스탬프 처리하고 Authenticode를 검증한 뒤 업로드합니다. 세 항목을 모두 설정하지 않은 경우에는 동일한 수명주기 검증을 통과한 설치 파일을 배포하되 GitHub Release 본문과 `WINDOWS-BUILDS-UNSIGNED.txt` 자산에 미서명 상태를 명확히 표시합니다. 일부 항목만 설정된 불완전한 서명 구성은 릴리스를 실패시킵니다.
 
 실행 중인 실제 WinBoat에 대한 비파괴 RemoteApp 검증은 `npm run test:winboat-smoke`로 실행합니다. 인증된 세션 조회와 만료된 세션 거부를 검증합니다. Linux의 전체 `npm run check`는 실제 상태를 바꾸는 수명주기 검증을 더 이상 조용히 제외하지 않고 필수로 실행합니다. 설치되어 있지 않은 폐기 가능한 버전과 명시적인 변경 허용값을 지정해야 합니다.
 

@@ -13,7 +13,7 @@ const localization: LocalizationBundle = {
   numbers: [],
 };
 
-function shell(online: boolean) {
+function shell(online: boolean, nativeWindows = false) {
   return (
     <AppShell
       t={createTranslate(localization)}
@@ -23,7 +23,7 @@ function shell(online: boolean) {
       warning={null}
       languageChanging={false}
       winBoatControl={{
-        kind: "open",
+        kind: nativeWindows ? "native" : "open",
         label: "Open WinBoat",
         busy: false,
         onAction: vi.fn(),
@@ -42,14 +42,25 @@ describe("AppShell route status", () => {
     const view = render(shell(false));
     const route = view.container.querySelector(".route-status");
     expect(route).toHaveClass("offline");
-    expect(route?.querySelector(".route-track i")).not.toBeInTheDocument();
+    expect(route?.querySelector(".route-packet")).not.toBeInTheDocument();
 
     view.rerender(shell(true));
     expect(route).toHaveClass("online");
-    expect(route?.querySelector(".route-track i")).toBeInTheDocument();
+    expect(route?.querySelector(".route-packet")).toBeInTheDocument();
 
     view.rerender(shell(false));
     expect(route).toHaveClass("offline");
-    expect(route?.querySelector(".route-track i")).not.toBeInTheDocument();
+    expect(route?.querySelector(".route-packet")).not.toBeInTheDocument();
+  });
+
+  it("never renders Linux route motion for the native Windows header", () => {
+    const view = render(shell(true, true));
+    expect(view.container.querySelector(".route-status")).toHaveClass("online");
+    expect(
+      view.container.querySelector(".route-track"),
+    ).not.toBeInTheDocument();
+    expect(
+      view.container.querySelector(".route-packet"),
+    ).not.toBeInTheDocument();
   });
 });

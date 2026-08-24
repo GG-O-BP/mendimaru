@@ -65,6 +65,7 @@ jobs:
       - name: Run lint, formatting, builds, tests, and npm audit
         run: |
           npm run check:portable
+          npm run test:e2e:windows:powershell
           npm run lint:rust:all-features
           npm run test:security
 
@@ -292,19 +293,59 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Import required Windows code-signing certificate
+      - name: Configure optional Windows code signing
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
         run: |
-          if (
-            [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE) -or
-            [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)
-          ) {
-            throw "WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD are required for releases."
+          $hasCertificate = -not [string]::IsNullOrWhiteSpace(
+            $env:WINDOWS_CERTIFICATE
+          )
+          $hasPassword = -not [string]::IsNullOrWhiteSpace(
+            $env:WINDOWS_CERTIFICATE_PASSWORD
+          )
+          $hasTimestamp = -not [string]::IsNullOrWhiteSpace(
+            $env:WINDOWS_TIMESTAMP_URL
+          )
+          $configuredCount = @(
+            @(
+              $hasCertificate
+              $hasPassword
+              $hasTimestamp
+            ) | Where-Object { $_ }
+          ).Count
+
+          if ($configuredCount -eq 0) {
+            "WINDOWS_SIGNING_ENABLED=false" >> $env:GITHUB_ENV
+            $noticePath = Join-Path `
+              $env:RUNNER_TEMP `
+              "WINDOWS-BUILDS-UNSIGNED.txt"
+            @"
+          Mendimaru $env:RELEASE_TAG Windows build notice
+
+          The MSI and NSIS installers in this release are not Authenticode
+          signed. Windows SmartScreen may display an unknown-publisher warning.
+
+          These artifacts were built by the repository's GitHub Actions release
+          workflow and passed the isolated install, native-window launch,
+          performance, and uninstall lifecycle checks.
+          "@ | Set-Content -LiteralPath $noticePath -Encoding utf8
+            "WINDOWS_UNSIGNED_NOTICE_PATH=$noticePath" >> $env:GITHUB_ENV
+            Write-Warning "Publishing explicitly marked unsigned Windows installers."
+            exit 0
           }
+
+          if ($configuredCount -ne 3) {
+            throw @"
+          Windows signing is only partially configured. Set all of
+          WINDOWS_CERTIFICATE, WINDOWS_CERTIFICATE_PASSWORD, and
+          WINDOWS_TIMESTAMP_URL, or remove all three to publish explicitly
+          marked unsigned installers.
+          "@
+          }
+
           $timestamp = $null
           if (
             -not [Uri]::TryCreate(
@@ -319,6 +360,7 @@ jobs:
 
           $pfxPath = Join-Path $env:RUNNER_TEMP "mendimaru-signing.pfx"
           $configPath = Join-Path $env:RUNNER_TEMP "mendimaru-windows-signing.json"
+          "WINDOWS_SIGNING_ENABLED=true" >> $env:GITHUB_ENV
           "TAURI_WINDOWS_SIGNING_CONFIG=$configPath" >> $env:GITHUB_ENV
           "MENDIMARU_WINDOWS_CERTIFICATE_PATH=$pfxPath" >> $env:GITHUB_ENV
           [IO.File]::WriteAllBytes(
@@ -359,10 +401,22 @@ jobs:
           } | ConvertTo-Json -Depth 5 |
             Set-Content -LiteralPath $configPath -Encoding utf8
 
-      - name: Build signed MSI and NSIS installers
-        run: npm run tauri -- build --bundles msi,nsis --config "$env:TAURI_WINDOWS_SIGNING_CONFIG"
+      - name: Build MSI and NSIS installers
+        shell: pwsh
+        run: |
+          if ($env:WINDOWS_SIGNING_ENABLED -eq "true") {
+            npm run tauri -- build --bundles msi,nsis `
+              --config "$env:TAURI_WINDOWS_SIGNING_CONFIG"
+          }
+          else {
+            npm run tauri -- build --bundles msi,nsis
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tauri Windows bundle build failed with exit code $LASTEXITCODE."
+          }
 
       - name: Verify Authenticode on application and installers
+        if: env.WINDOWS_SIGNING_ENABLED == 'true'
         shell: pwsh
         run: |
           $artifacts = @(
@@ -389,7 +443,7 @@ jobs:
             }
           }
 
-      - name: Install, launch, and uninstall signed MSI in the ephemeral VM
+      - name: Install, launch, and uninstall MSI in the ephemeral VM
         shell: pwsh
         env:
           MENDIMARU_EPHEMERAL_WINDOWS_VM: mendimaru-github-hosted-ephemeral-vm
@@ -400,13 +454,13 @@ jobs:
               -Filter "*.msi" -File -ErrorAction Stop
           )
           if ($installers.Count -ne 1) {
-            throw "Expected exactly one signed MSI installer."
+            throw "Expected exactly one MSI installer."
           }
           ./scripts/e2e/windows-bundle-smoke.ps1 `
             -InstallerKind msi `
             -InstallerPath $installers[0].FullName
 
-      - name: Install, launch, and uninstall signed NSIS in the ephemeral VM
+      - name: Install, launch, and uninstall NSIS in the ephemeral VM
         shell: pwsh
         env:
           MENDIMARU_EPHEMERAL_WINDOWS_VM: mendimaru-github-hosted-ephemeral-vm
@@ -417,13 +471,13 @@ jobs:
               -Filter "*.exe" -File -ErrorAction Stop
           )
           if ($installers.Count -ne 1) {
-            throw "Expected exactly one signed NSIS installer."
+            throw "Expected exactly one NSIS installer."
           }
           ./scripts/e2e/windows-bundle-smoke.ps1 `
             -InstallerKind nsis `
             -InstallerPath $installers[0].FullName
 
-      - name: Upload signed bundle smoke diagnostics
+      - name: Upload bundle smoke diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -446,6 +500,58 @@ jobs:
           foreach ($installer in $installers) {
             gh release upload $env:RELEASE_TAG $installer.FullName `
               --repo $env:GITHUB_REPOSITORY --clobber
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload $($installer.Name) to the release."
+            }
+          }
+
+          if ($env:WINDOWS_SIGNING_ENABLED -eq "false") {
+            gh release upload `
+              $env:RELEASE_TAG `
+              $env:WINDOWS_UNSIGNED_NOTICE_PATH `
+              --repo $env:GITHUB_REPOSITORY `
+              --clobber
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload the unsigned-build notice."
+            }
+
+            $marker = "<!-- mendimaru-unsigned-windows-builds -->"
+            $body = (
+              gh release view `
+                $env:RELEASE_TAG `
+                --repo $env:GITHUB_REPOSITORY `
+                --json body `
+                --jq .body |
+                Out-String
+            ).TrimEnd()
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to read the current GitHub release notes."
+            }
+            if (-not $body.Contains($marker)) {
+              $notesPath = Join-Path `
+                $env:RUNNER_TEMP `
+                "mendimaru-release-notes.md"
+              $warning = @"
+          $marker
+          ## Windows installer signing notice
+
+          The MSI and NSIS installers attached to this release are **not
+          Authenticode signed**. Windows SmartScreen may show an
+          unknown-publisher warning. The installers were built by this
+          repository's GitHub Actions workflow and passed the isolated
+          install, launch, performance, and uninstall lifecycle checks.
+          "@
+              "$body`n`n$warning" |
+                Set-Content -LiteralPath $notesPath -Encoding utf8
+              gh release edit `
+                $env:RELEASE_TAG `
+                --repo $env:GITHUB_REPOSITORY `
+                --notes-file $notesPath
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to add the unsigned-build warning to the release."
+              }
+            }
+          }
 
       - name: Remove temporary Windows signing material
         if: always()

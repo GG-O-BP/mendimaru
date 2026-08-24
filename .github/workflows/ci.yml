@@ -81,6 +81,9 @@ jobs:
       - name: Run frontend unit and mocked app-flow tests
         run: npm run test:frontend
 
+      - name: Verify the animation lifecycle contract
+        run: npm run test:motion
+
       - name: Run strict Playwright browser E2E
         if: runner.os == 'Linux'
         run: npm run test:browser
@@ -91,12 +94,20 @@ jobs:
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
         run: xvfb-run --auto-servernum npm run test:e2e
 
+      - name: Verify Linux and Windows E2E coverage levels
+        if: runner.os == 'Linux'
+        run: npm run test:e2e:coverage
+
       - name: Upload Tauri WebKit E2E failure evidence
-        if: failure() && runner.os == 'Linux'
+        if: always() && runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
-          name: tauri-webkit-e2e-failure
-          path: /tmp/mendimaru-tauri-e2e-*
+          name: mendimaru-linux-e2e
+          path: |
+            artifacts/e2e/linux-tauri.json
+            artifacts/e2e/linux-tauri*.png
+            artifacts/e2e/e2e-coverage.json
+            /tmp/mendimaru-tauri-e2e-*
           if-no-files-found: ignore
 
       - name: Run Rust tests
@@ -108,6 +119,10 @@ jobs:
       - name: Run Windows test-feature clippy
         if: runner.os == 'Windows'
         run: npm run lint:rust:all-features
+
+      - name: Test Windows bundle smoke helpers
+        if: runner.os == 'Windows'
+        run: npm run test:e2e:windows:powershell
 
   security:
     name: Dependency security audit
