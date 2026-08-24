@@ -47,6 +47,48 @@ Assert-True `
     }))) `
     -Message 'An unrelated uninstall entry must be ignored.'
 
+$rootCreatedAt = [DateTimeOffset]::UtcNow
+$processRecords = @(
+    [PSCustomObject]@{
+        ProcessId = 400
+        ParentProcessId = 10
+        CreationDate = $rootCreatedAt
+    }
+    [PSCustomObject]@{
+        ProcessId = 401
+        ParentProcessId = 400
+        CreationDate = $rootCreatedAt.AddMilliseconds(10)
+    }
+    [PSCustomObject]@{
+        ProcessId = 402
+        ParentProcessId = 401
+        CreationDate = $rootCreatedAt.AddMilliseconds(20)
+    }
+    [PSCustomObject]@{
+        ProcessId = 410
+        ParentProcessId = 400
+        CreationDate = $rootCreatedAt.AddMinutes(-10)
+    }
+    [PSCustomObject]@{
+        ProcessId = 411
+        ParentProcessId = 410
+        CreationDate = $rootCreatedAt.AddMinutes(-9)
+    }
+    [PSCustomObject]@{
+        ProcessId = 420
+        ParentProcessId = 10
+        CreationDate = $rootCreatedAt.AddMilliseconds(30)
+    }
+)
+$selectedProcessIds = @(
+    Get-ProcessTreeRecords -Records $processRecords -RootProcessId 400 |
+        ForEach-Object { [int]$_.ProcessId }
+)
+Assert-Equal `
+    -Actual ($selectedProcessIds -join ',') `
+    -Expected '400,401,402' `
+    -Message 'A reused root PID must not adopt older orphaned processes or their descendants.'
+
 $temporary = Join-Path ([IO.Path]::GetTempPath()) "mendimaru-bundle-helper-$([Guid]::NewGuid().ToString('N'))"
 $originalProgramFiles = $env:ProgramFiles
 $originalLocalAppData = $env:LOCALAPPDATA

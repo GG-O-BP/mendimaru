@@ -298,28 +298,16 @@ function Get-ProcessTreeSnapshot {
     param([Parameter(Mandatory = $true)][int]$RootProcessId)
 
     $records = @(Get-CimInstance Win32_Process)
-    $processIds = [Collections.Generic.HashSet[int]]::new()
-    $pending = [Collections.Generic.Queue[int]]::new()
-    $processIds.Add($RootProcessId) | Out-Null
-    $pending.Enqueue($RootProcessId)
-    while ($pending.Count -gt 0) {
-        $parentId = $pending.Dequeue()
-        foreach ($record in $records) {
-            $candidateId = [int]$record.ProcessId
-            if (
-                [int]$record.ParentProcessId -eq $parentId -and
-                $processIds.Add($candidateId)
-            ) {
-                $pending.Enqueue($candidateId)
-            }
-        }
-    }
+    $treeRecords = @(Get-ProcessTreeRecords `
+        -Records $records `
+        -RootProcessId $RootProcessId)
 
     $cpuSeconds = 0.0
     $privateMemoryBytes = [long]0
     $workingSetBytes = [long]0
     $sampled = 0
-    foreach ($processId in $processIds) {
+    foreach ($record in $treeRecords) {
+        $processId = [int]$record.ProcessId
         try {
             $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
             if ($null -eq $process) {
@@ -346,6 +334,45 @@ function Get-ProcessTreeSnapshot {
         WorkingSetBytes = $workingSetBytes
         ProcessCount = $sampled
     }
+}
+
+function Get-ProcessTreeRecords {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Records,
+        [Parameter(Mandatory = $true)][int]$RootProcessId
+    )
+
+    $rootRecords = @(
+        $Records | Where-Object { [int]$_.ProcessId -eq $RootProcessId }
+    )
+    if ($rootRecords.Count -ne 1) {
+        throw "Expected one live process record for root PID $RootProcessId; found $($rootRecords.Count)."
+    }
+
+    $processIds = [Collections.Generic.HashSet[int]]::new()
+    $selected = [Collections.Generic.List[object]]::new()
+    $pending = [Collections.Generic.Queue[object]]::new()
+    $processIds.Add($RootProcessId) | Out-Null
+    $selected.Add($rootRecords[0])
+    $pending.Enqueue($rootRecords[0])
+    while ($pending.Count -gt 0) {
+        $parent = $pending.Dequeue()
+        $parentId = [int]$parent.ProcessId
+        $parentCreatedAt = [DateTimeOffset]$parent.CreationDate
+        foreach ($record in $records) {
+            $candidateId = [int]$record.ProcessId
+            if (
+                [int]$record.ParentProcessId -eq $parentId -and
+                [DateTimeOffset]$record.CreationDate -ge $parentCreatedAt -and
+                $processIds.Add($candidateId)
+            ) {
+                $selected.Add($record)
+                $pending.Enqueue($record)
+            }
+        }
+    }
+
+    return $selected
 }
 
 function Wait-MendimaruEntry {
