@@ -1,5 +1,6 @@
 use super::reason::{localize_operation_state, localize_windows_reason};
 use super::report::{parse_install_report, WindowsOperationReport, WindowsOperationState};
+use crate::process::{CancellationToken, CommandFailureKind};
 use crate::winboat::remote_app::RemoteAppProcess;
 use crate::winboat::security::{
     authenticate_report, OperationSecurity, ReportSequenceTracker, MAX_REPORT_BYTES,
@@ -20,6 +21,12 @@ pub(super) struct WindowsOperationWaitError {
     pub(super) retryable: bool,
     pub(super) user_retryable: bool,
     pub(super) exit_code: Option<i32>,
+    pub(super) failure_kind: Option<CommandFailureKind>,
+}
+
+pub(super) struct WindowsOperationContinuation<'a> {
+    pub(super) previous_report: Option<&'a crate::winboat::security::AuthenticatedPayload>,
+    pub(super) cancellation: Option<&'a CancellationToken>,
 }
 
 pub(super) async fn wait_for_windows_operation<F>(
@@ -28,6 +35,7 @@ pub(super) async fn wait_for_windows_operation<F>(
     remote_app: &mut RemoteAppProcess,
     timeout_seconds: u64,
     operation: &str,
+    cancellation: Option<&CancellationToken>,
     on_report: &mut F,
 ) -> Result<WindowsOperationWaitOutcome, WindowsOperationWaitError>
 where
@@ -39,7 +47,10 @@ where
         remote_app,
         timeout_seconds,
         operation,
-        None,
+        WindowsOperationContinuation {
+            previous_report: None,
+            cancellation,
+        },
         on_report,
     )
     .await
@@ -51,7 +62,7 @@ pub(super) async fn wait_for_windows_operation_after<F>(
     remote_app: &mut RemoteAppProcess,
     timeout_seconds: u64,
     operation: &str,
-    previous_report: Option<&crate::winboat::security::AuthenticatedPayload>,
+    continuation: WindowsOperationContinuation<'_>,
     on_report: &mut F,
 ) -> Result<WindowsOperationWaitOutcome, WindowsOperationWaitError>
 where
@@ -65,17 +76,31 @@ where
     let mut last_report_timestamp = None;
     let mut last_report_changed_at = None;
     let mut last_report_had_percentage = false;
-    let mut report_sequence = previous_report
+    let mut report_sequence = continuation
+        .previous_report
         .map(ReportSequenceTracker::after)
         .unwrap_or_default();
 
     loop {
+        if continuation
+            .cancellation
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Err(WindowsOperationWaitError {
+                message: "the Windows operation was cancelled".to_string(),
+                retryable: false,
+                user_retryable: true,
+                exit_code: None,
+                failure_kind: Some(CommandFailureKind::Cancelled),
+            });
+        }
         if remote_app.certificate_failed() {
             return Err(WindowsOperationWaitError {
                 message: crate::tr!("error-freerdp-certificate-mismatch"),
                 retryable: false,
                 user_retryable: false,
                 exit_code: None,
+                failure_kind: None,
             });
         }
         match tokio::fs::symlink_metadata(report_path).await {
@@ -149,6 +174,7 @@ where
                         retryable: false,
                         user_retryable: false,
                         exit_code: None,
+                        failure_kind: None,
                     });
                 }
             }
@@ -164,6 +190,7 @@ where
                 retryable: false,
                 user_retryable: false,
                 exit_code: None,
+                failure_kind: Some(CommandFailureKind::Timeout),
             });
         }
 
@@ -188,6 +215,7 @@ where
                         retryable: false,
                         user_retryable: false,
                         exit_code: None,
+                        failure_kind: None,
                     }),
                     None => Err(WindowsOperationWaitError {
                         message: crate::tr!(
@@ -198,6 +226,7 @@ where
                         retryable: true,
                         user_retryable: true,
                         exit_code: None,
+                        failure_kind: None,
                     }),
                 };
             }
@@ -221,6 +250,7 @@ fn report_authentication_error(operation: &str, reason: &str) -> WindowsOperatio
         retryable: false,
         user_retryable: false,
         exit_code: None,
+        failure_kind: None,
     }
 }
 
@@ -255,6 +285,7 @@ fn failed_operation(report: &WindowsOperationReport, operation: &str) -> Windows
         retryable: false,
         user_retryable: true,
         exit_code: report.exit_code,
+        failure_kind: None,
     }
 }
 

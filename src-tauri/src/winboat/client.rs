@@ -1,5 +1,5 @@
-use super::container::{guest_is_online, http_client};
-use crate::config::resolved_api_url;
+use super::container::{guest_is_online_at, http_client};
+use crate::config::runtime_host_port_async;
 use crate::models::{AppConfig, StudioVersion, WinApp};
 use regex::Regex;
 use std::collections::BTreeMap;
@@ -8,11 +8,15 @@ use std::time::Duration;
 const GUEST_REQUEST_TIMEOUT_SECONDS: u64 = 30;
 
 pub async fn installed_versions(config: &AppConfig) -> Result<Vec<StudioVersion>, String> {
-    if !guest_is_online(config).await {
+    let api_url = runtime_host_port_async(config, 7148, "tcp")
+        .await
+        .map_err(|error| crate::tr!("error-windows-apps-fetch", error = error))?
+        .map(|port| format!("http://127.0.0.1:{port}"))
+        .unwrap_or_else(|| config.api_url.clone());
+    if !guest_is_online_at(&api_url).await {
         return Err(crate::tr!("error-guest-offline"));
     }
     let client = http_client(Duration::from_secs(GUEST_REQUEST_TIMEOUT_SECONDS))?;
-    let api_url = resolved_api_url(config);
     let response = client
         .get(format!("{api_url}/apps"))
         .send()

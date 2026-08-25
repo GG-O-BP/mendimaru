@@ -64,6 +64,9 @@ const REASON_KEYS: Record<string, MessageKey> = {
   invalid_request: "operation-reason-invalid-request",
   precondition_failed: "operation-reason-precondition-failed",
   operation_failed: "operation-reason-operation-failed",
+  external_process_timeout: "operation-reason-external-process-timeout",
+  external_process_cancelled: "operation-reason-external-process-cancelled",
+  external_process_interrupted: "operation-reason-external-process-interrupted",
 };
 
 export interface OperationsPageModel {

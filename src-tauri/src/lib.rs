@@ -18,6 +18,7 @@ pub mod models;
 mod operations;
 pub mod platform;
 mod portable_runtime;
+pub mod process;
 mod project_launches;
 mod projects;
 mod settings;
@@ -82,6 +83,8 @@ pub fn run() {
             clear_operation_history,
             open_operation_logs,
             open_folder,
+            #[cfg(all(feature = "e2e", target_os = "windows"))]
+            e2e::e2e_bounded_process_cleanup,
         ])
         .build(tauri::generate_context!())
         .expect("error while building mendimaru");

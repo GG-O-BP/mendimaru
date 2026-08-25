@@ -9,6 +9,8 @@ use crate::models::{
     EnvironmentDiagnosticId, EnvironmentDiagnosticStatus, EnvironmentStatus, StudioInstallPhase,
     StudioInstallProgress, StudioVersion,
 };
+use crate::process::{CancellationToken, CommandFailure, CommandFailureKind, CommandPolicy};
+use std::fmt;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -16,7 +18,69 @@ use std::time::Duration;
 
 const INSTALL_VERIFICATION_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 const UNINSTALL_VERIFICATION_TIMEOUT: Duration = Duration::from_secs(3 * 60);
+const INSTALLER_PROCESS_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+const UNINSTALLER_PROCESS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const INSTALL_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+const INSTALLER_PROCESS_POLICY: CommandPolicy = CommandPolicy::new(INSTALLER_PROCESS_TIMEOUT, 0);
+const UNINSTALLER_PROCESS_POLICY: CommandPolicy =
+    CommandPolicy::new(UNINSTALLER_PROCESS_TIMEOUT, 0);
 const SUCCESS_EXIT_CODES: [u32; 3] = [0, 1641, 3010];
+
+#[derive(Debug)]
+pub(super) struct NativeOperationFailure {
+    pub(super) message: String,
+    pub(super) failure_kind: Option<CommandFailureKind>,
+}
+
+impl NativeOperationFailure {
+    fn message(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            failure_kind: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.message.is_empty()
+    }
+}
+
+impl From<String> for NativeOperationFailure {
+    fn from(message: String) -> Self {
+        Self::message(message)
+    }
+}
+
+impl From<&str> for NativeOperationFailure {
+    fn from(message: &str) -> Self {
+        Self::message(message)
+    }
+}
+
+impl From<CommandFailure> for NativeOperationFailure {
+    fn from(error: CommandFailure) -> Self {
+        let failure_kind = Some(error.kind());
+        Self {
+            message: error.to_string(),
+            failure_kind,
+        }
+    }
+}
+
+impl fmt::Display for NativeOperationFailure {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for NativeOperationFailure {}
+
+impl PartialEq<&str> for NativeOperationFailure {
+    fn eq(&self, other: &&str) -> bool {
+        self.message == *other
+    }
+}
 
 #[derive(Clone, Copy)]
 struct LifecycleTiming {
@@ -75,6 +139,7 @@ pub(super) fn environment_status(config: &AppConfig) -> EnvironmentStatus {
                 observed: None,
                 action: (!shared_directory_available)
                     .then_some(EnvironmentDiagnosticAction::OpenSettings),
+                error_code: None,
             },
             EnvironmentDiagnostic {
                 id: EnvironmentDiagnosticId::MarketplaceBrowser,
@@ -85,6 +150,7 @@ pub(super) fn environment_status(config: &AppConfig) -> EnvironmentStatus {
                 },
                 observed: None,
                 action: (!browser_available).then_some(EnvironmentDiagnosticAction::Redetect),
+                error_code: None,
             },
         ],
     }
@@ -170,31 +236,74 @@ pub(super) async fn install_studio<F>(
     config: &AppConfig,
     version: &str,
     installer_path: &Path,
+    cancellation: CancellationToken,
     on_progress: F,
-) -> Result<String, String>
+) -> Result<String, NativeOperationFailure>
 where
     F: FnMut(StudioInstallProgress) + Send,
 {
     ensure_supported()?;
     super::validate_version(version)?;
-    if let Some(record) = discovery::find(config, version) {
-        let executable = Path::new(&record.studio.executable_path);
-        if process::studio_is_running(executable)? {
-            return Err(crate::tr!("error-native-studio-running"));
+    ensure_not_cancelled(&cancellation)?;
+    let discovery_config = config.clone();
+    let discovery_version = version.to_string();
+    let existing =
+        tokio::task::spawn_blocking(move || discovery::find(&discovery_config, &discovery_version))
+            .await
+            .map_err(|error| crate::tr!("error-native-process-join", error = error))?;
+    if let Some(record) = existing {
+        let executable = PathBuf::from(record.studio.executable_path);
+        let running = tokio::task::spawn_blocking(move || process::studio_is_running(&executable))
+            .await
+            .map_err(|error| crate::tr!("error-native-process-join", error = error))??;
+        if running {
+            return Err(crate::tr!("error-native-studio-running").into());
         }
     }
+    ensure_not_cancelled(&cancellation)?;
+    let installer = installer_path.to_path_buf();
+    let verified = tokio::task::spawn_blocking(move || verified_execution_path(&installer))
+        .await
+        .map_err(|error| crate::tr!("error-native-process-join", error = error))??;
+    let runner_cancellation = cancellation.clone();
+    let installed_config = config.clone();
+    let installed_version = version.to_string();
     install_lifecycle(
         version,
         installer_path,
+        cancellation,
         on_progress,
         InstallLifecycleHooks {
-            verify: verified_execution_path,
+            verify: move |_: &Path| Ok(verified),
             run_elevated: |executable: PathBuf, arguments: Vec<String>| async move {
-                tokio::task::spawn_blocking(move || process::run_elevated(&executable, &arguments))
-                    .await
-                    .map_err(|error| crate::tr!("error-native-process-join", error = error))?
+                tokio::task::spawn_blocking(move || {
+                    process::run_elevated(
+                        &executable,
+                        &arguments,
+                        INSTALLER_PROCESS_POLICY,
+                        &runner_cancellation,
+                        "Studio Pro installer",
+                    )
+                })
+                .await
+                .map_err(|error| {
+                    NativeOperationFailure::from(crate::tr!(
+                        "error-native-process-join",
+                        error = error
+                    ))
+                })?
+                .map_err(NativeOperationFailure::from)
             },
-            find_installed: || discovery::find(config, version),
+            find_installed: move || {
+                let config = installed_config.clone();
+                let version = installed_version.clone();
+                async move {
+                    tokio::task::spawn_blocking(move || discovery::find(&config, &version))
+                        .await
+                        .ok()
+                        .flatten()
+                }
+            },
             timing: INSTALL_TIMING,
         },
     )
@@ -206,21 +315,26 @@ fn verified_execution_path(path: &Path) -> Result<(PathBuf, security::VerifiedEx
     Ok((verified.path().to_path_buf(), verified))
 }
 
-async fn install_lifecycle<F, V, G, R, RFuture, D>(
+async fn install_lifecycle<F, V, G, R, RFuture, D, DFuture>(
     version: &str,
     installer_path: &Path,
+    cancellation: CancellationToken,
     mut on_progress: F,
     mut hooks: InstallLifecycleHooks<V, R, D>,
-) -> Result<String, String>
+) -> Result<String, NativeOperationFailure>
 where
     F: FnMut(StudioInstallProgress),
     V: FnOnce(&Path) -> Result<(PathBuf, G), String>,
     R: FnOnce(PathBuf, Vec<String>) -> RFuture,
-    RFuture: Future<Output = Result<u32, String>>,
-    D: FnMut() -> Option<discovery::InstallationRecord>,
+    RFuture: Future<Output = Result<u32, NativeOperationFailure>>,
+    D: FnMut() -> DFuture,
+    DFuture: Future<Output = Option<discovery::InstallationRecord>>,
 {
+    ensure_not_cancelled(&cancellation)?;
     on_progress(progress(StudioInstallPhase::Staging, 0.0, false));
-    let (executable, verified_executable) = (hooks.verify)(installer_path)?;
+    let (executable, verified_executable) =
+        (hooks.verify)(installer_path).map_err(NativeOperationFailure::from)?;
+    ensure_not_cancelled(&cancellation)?;
     on_progress(progress(StudioInstallPhase::Staging, 100.0, false));
 
     let arguments = vec![
@@ -231,20 +345,29 @@ where
         "/NORESTART".to_string(),
     ];
     on_progress(progress(StudioInstallPhase::Installing, 5.0, true));
-    let exit_code = (hooks.run_elevated)(executable, arguments).await?;
+    let exit_code = wait_for_installer(
+        (hooks.run_elevated)(executable, arguments),
+        INSTALLER_PROCESS_TIMEOUT,
+        INSTALL_HEARTBEAT_INTERVAL,
+        &mut on_progress,
+    )
+    .await?;
     drop(verified_executable);
+    ensure_not_cancelled(&cancellation)?;
     if !SUCCESS_EXIT_CODES.contains(&exit_code) {
-        return Err(crate::tr!(
+        return Err(NativeOperationFailure::from(crate::tr!(
             "error-script-installer-exit-code",
             code = exit_code
-        ));
+        )));
     }
     on_progress(progress(StudioInstallPhase::Finalizing, 100.0, false));
+    ensure_not_cancelled(&cancellation)?;
     on_progress(progress(StudioInstallPhase::Verifying, 0.0, false));
 
     let started = tokio::time::Instant::now();
     loop {
-        if let Some(record) = (hooks.find_installed)() {
+        ensure_not_cancelled(&cancellation)?;
+        if let Some(record) = (hooks.find_installed)().await {
             on_progress(progress(StudioInstallPhase::Verifying, 100.0, false));
             return Ok(record.studio.executable_path);
         }
@@ -253,33 +376,112 @@ where
         }
         tokio::time::sleep(hooks.timing.poll_interval).await;
     }
-    Err(crate::tr!(
+    Err(NativeOperationFailure::from(crate::tr!(
         "error-script-studio-not-created",
         version = version
-    ))
+    )))
 }
 
-pub(super) async fn uninstall_studio(config: &AppConfig, version: &str) -> Result<(), String> {
+async fn wait_for_installer<F, P>(
+    future: F,
+    expected_runtime: Duration,
+    heartbeat_interval: Duration,
+    on_progress: &mut P,
+) -> Result<u32, NativeOperationFailure>
+where
+    F: Future<Output = Result<u32, NativeOperationFailure>>,
+    P: FnMut(StudioInstallProgress),
+{
+    let started = tokio::time::Instant::now();
+    let heartbeat_interval = heartbeat_interval.max(Duration::from_millis(1));
+    let first_heartbeat = tokio::time::Instant::now() + heartbeat_interval;
+    let mut heartbeat = tokio::time::interval_at(first_heartbeat, heartbeat_interval);
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    tokio::pin!(future);
+    loop {
+        tokio::select! {
+            result = &mut future => return result,
+            _ = heartbeat.tick() => {
+                let expected_seconds = expected_runtime.as_secs_f64().max(1.0);
+                let elapsed_ratio = (started.elapsed().as_secs_f64() / expected_seconds).min(1.0);
+                let percentage = (5.0 + elapsed_ratio * 85.0).min(90.0);
+                on_progress(progress(StudioInstallPhase::Installing, percentage, true));
+            }
+        }
+    }
+}
+
+fn ensure_not_cancelled(cancellation: &CancellationToken) -> Result<(), NativeOperationFailure> {
+    if cancellation.is_cancelled() {
+        Err(NativeOperationFailure {
+            message: "the Studio Pro installation was cancelled".to_string(),
+            failure_kind: Some(CommandFailureKind::Cancelled),
+        })
+    } else {
+        Ok(())
+    }
+}
+
+pub(super) async fn uninstall_studio(
+    config: &AppConfig,
+    version: &str,
+) -> Result<(), NativeOperationFailure> {
     ensure_supported()?;
     super::validate_version(version)?;
-    let mut record = discovery::find(config, version)
-        .ok_or_else(|| crate::tr!("error-studio-install-not-found", version = version))?;
-    security::verify_mendix_executable(Path::new(&record.studio.executable_path))?;
-    let verified_uninstaller = secure_uninstall_executable(config, &mut record, || {
-        process::system_executable("msiexec.exe")
-    })?;
+    let inspection_config = config.clone();
+    let inspection_version = version.to_string();
+    let (record, verified_uninstaller, running) = tokio::task::spawn_blocking(move || {
+        let mut record =
+            discovery::find(&inspection_config, &inspection_version).ok_or_else(|| {
+                crate::tr!(
+                    "error-studio-install-not-found",
+                    version = inspection_version
+                )
+            })?;
+        security::verify_mendix_executable(Path::new(&record.studio.executable_path))?;
+        let verified_uninstaller =
+            secure_uninstall_executable(&inspection_config, &mut record, || {
+                process::system_executable("msiexec.exe")
+            })?;
+        let running = process::studio_is_running(Path::new(&record.studio.executable_path))?;
+        Ok::<_, String>((record, verified_uninstaller, running))
+    })
+    .await
+    .map_err(|error| crate::tr!("error-native-process-join", error = error))??;
+    let cancellation = CancellationToken::default();
+    let installed_config = config.clone();
+    let installed_version = version.to_string();
     uninstall_lifecycle(
         record,
-        process::studio_is_running,
+        move |_| Ok(running),
         move |executable, arguments| async move {
-            let result =
-                tokio::task::spawn_blocking(move || process::run_elevated(&executable, &arguments))
-                    .await
-                    .map_err(|error| crate::tr!("error-native-process-join", error = error))?;
+            let result = tokio::task::spawn_blocking(move || {
+                process::run_elevated(
+                    &executable,
+                    &arguments,
+                    UNINSTALLER_PROCESS_POLICY,
+                    &cancellation,
+                    "Studio Pro uninstaller",
+                )
+            })
+            .await
+            .map_err(|error| {
+                NativeOperationFailure::from(crate::tr!("error-native-process-join", error = error))
+            })?
+            .map_err(NativeOperationFailure::from);
             drop(verified_uninstaller);
             result
         },
-        || discovery::find(config, version),
+        move || {
+            let config = installed_config.clone();
+            let version = installed_version.clone();
+            async move {
+                tokio::task::spawn_blocking(move || discovery::find(&config, &version))
+                    .await
+                    .ok()
+                    .flatten()
+            }
+        },
         UNINSTALL_TIMING,
     )
     .await
@@ -441,40 +643,41 @@ fn normalized_windows_path(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
-async fn uninstall_lifecycle<I, R, RFuture, D>(
+async fn uninstall_lifecycle<I, R, RFuture, D, DFuture>(
     record: discovery::InstallationRecord,
     is_running: I,
     run_elevated: R,
     mut find_installed: D,
     timing: LifecycleTiming,
-) -> Result<(), String>
+) -> Result<(), NativeOperationFailure>
 where
     I: FnOnce(&Path) -> Result<bool, String>,
     R: FnOnce(PathBuf, Vec<String>) -> RFuture,
-    RFuture: Future<Output = Result<u32, String>>,
-    D: FnMut() -> Option<discovery::InstallationRecord>,
+    RFuture: Future<Output = Result<u32, NativeOperationFailure>>,
+    D: FnMut() -> DFuture,
+    DFuture: Future<Output = Option<discovery::InstallationRecord>>,
 {
     let executable_path = PathBuf::from(&record.studio.executable_path);
-    if is_running(&executable_path)? {
-        return Err(crate::tr!("error-native-studio-running"));
+    if is_running(&executable_path).map_err(NativeOperationFailure::from)? {
+        return Err(crate::tr!("error-native-studio-running").into());
     }
     let uninstall = record.uninstall.ok_or_else(|| {
-        crate::tr!(
+        NativeOperationFailure::from(crate::tr!(
             "error-native-uninstaller-metadata",
             version = record.studio.version
-        )
+        ))
     })?;
     let exit_code = run_elevated(uninstall.executable, uninstall.arguments).await?;
     if !SUCCESS_EXIT_CODES.contains(&exit_code) {
-        return Err(crate::tr!(
+        return Err(NativeOperationFailure::from(crate::tr!(
             "error-script-uninstaller-exit-code",
             code = exit_code
-        ));
+        )));
     }
 
     let started = tokio::time::Instant::now();
     loop {
-        if !executable_path.is_file() && find_installed().is_none() {
+        if !executable_path.is_file() && find_installed().await.is_none() {
             return Ok(());
         }
         if started.elapsed() >= timing.timeout {
@@ -482,10 +685,10 @@ where
         }
         tokio::time::sleep(timing.poll_interval).await;
     }
-    Err(crate::tr!(
+    Err(NativeOperationFailure::from(crate::tr!(
         "error-script-uninstall-still-exists",
         path = executable_path.display()
-    ))
+    )))
 }
 
 pub(super) fn open_folder(path: &str) -> Result<(), String> {
@@ -550,12 +753,13 @@ mod tests {
     use super::{
         environment_status, install_lifecycle, prepare_launch_request, secure_uninstall_executable,
         uninstall_lifecycle, valid_mendix_uninstaller_arguments, valid_mendix_uninstaller_path,
-        valid_msiexec_uninstall_arguments, validated_project_path, InstallLifecycleHooks,
-        LifecycleTiming, StudioLaunchRequest,
+        valid_msiexec_uninstall_arguments, validated_project_path, wait_for_installer,
+        InstallLifecycleHooks, LifecycleTiming, NativeOperationFailure, StudioLaunchRequest,
     };
     use crate::models::{
         AppConfig, ContainerRuntime, HostPlatform, StudioInstallPhase, StudioVersion,
     };
+    use crate::process::{CancellationToken, CommandFailureKind};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -581,6 +785,12 @@ mod tests {
             windows_studio_paths: Vec::new(),
             startup_timeout_seconds: 180,
         }
+    }
+
+    fn unexpected_discovery(
+        message: &'static str,
+    ) -> std::future::Ready<Option<InstallationRecord>> {
+        panic!("{message}")
     }
 
     #[test]
@@ -825,6 +1035,7 @@ mod tests {
         let installed_path = install_lifecycle(
             "11.12.2",
             &installer,
+            CancellationToken::default(),
             |progress| phases.push(progress.phase),
             InstallLifecycleHooks {
                 verify: |path: &Path| {
@@ -840,9 +1051,11 @@ mod tests {
                     Ok(0)
                 },
                 find_installed: move || {
-                    find_state
-                        .load(Ordering::SeqCst)
-                        .then(|| install_record.clone())
+                    std::future::ready(
+                        find_state
+                            .load(Ordering::SeqCst)
+                            .then(|| install_record.clone()),
+                    )
                 },
                 timing,
             },
@@ -884,9 +1097,11 @@ mod tests {
                 Ok(3010)
             },
             move || {
-                find_state
-                    .load(Ordering::SeqCst)
-                    .then(|| uninstall_record.clone())
+                std::future::ready(
+                    find_state
+                        .load(Ordering::SeqCst)
+                        .then(|| uninstall_record.clone()),
+                )
             },
             timing,
         )
@@ -913,6 +1128,7 @@ mod tests {
         let error = install_lifecycle(
             "11.12.2",
             &installer,
+            CancellationToken::default(),
             |_| {},
             InstallLifecycleHooks {
                 verify: |path: &Path| Ok((path.to_path_buf(), ())),
@@ -921,7 +1137,7 @@ mod tests {
                 },
                 find_installed: move || {
                     discovery_state.store(true, Ordering::SeqCst);
-                    None
+                    std::future::ready(None)
                 },
                 timing: LifecycleTiming {
                     timeout: Duration::ZERO,
@@ -937,6 +1153,85 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_install_preserves_timeout_and_user_cancellation_kinds() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let installer = temporary.path().join("Mendix-11.12.2-Setup.exe");
+        fs::write(&installer, b"installer fixture").expect("installer fixture");
+
+        let timeout = install_lifecycle(
+            "11.12.2",
+            &installer,
+            CancellationToken::default(),
+            |_| {},
+            InstallLifecycleHooks {
+                verify: |path: &Path| Ok((path.to_path_buf(), ())),
+                run_elevated: |_program: PathBuf, _arguments: Vec<String>| async {
+                    Err(NativeOperationFailure {
+                        message: "fake elevated process timed out".into(),
+                        failure_kind: Some(CommandFailureKind::Timeout),
+                    })
+                },
+                find_installed: || unexpected_discovery("discovery must not run after timeout"),
+                timing: LifecycleTiming {
+                    timeout: Duration::ZERO,
+                    poll_interval: Duration::ZERO,
+                },
+            },
+        )
+        .await
+        .expect_err("timeout must fail");
+        assert_eq!(timeout.failure_kind, Some(CommandFailureKind::Timeout));
+
+        let cancellation = CancellationToken::default();
+        cancellation.cancel();
+        let cancelled = install_lifecycle(
+            "11.12.2",
+            &installer,
+            cancellation,
+            |_| {},
+            InstallLifecycleHooks {
+                verify: |_: &Path| -> Result<(PathBuf, ()), String> {
+                    panic!("cancelled lifecycle must not verify")
+                },
+                run_elevated: |_program: PathBuf, _arguments: Vec<String>| async { Ok(0) },
+                find_installed: || unexpected_discovery("cancelled lifecycle must not discover"),
+                timing: LifecycleTiming {
+                    timeout: Duration::ZERO,
+                    poll_interval: Duration::ZERO,
+                },
+            },
+        )
+        .await
+        .expect_err("cancellation must fail");
+        assert_eq!(cancelled.failure_kind, Some(CommandFailureKind::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn long_native_install_emits_estimated_heartbeats() {
+        let mut progress = Vec::new();
+        let exit_code = wait_for_installer(
+            async {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                Ok(1641)
+            },
+            Duration::from_millis(100),
+            Duration::from_millis(5),
+            &mut |update| progress.push(update),
+        )
+        .await
+        .expect("installer finishes with reboot success");
+
+        assert_eq!(exit_code, 1641);
+        assert!(progress.len() >= 2);
+        assert!(progress
+            .iter()
+            .all(|update| { update.phase == StudioInstallPhase::Installing && update.estimated }));
+        assert!(progress.windows(2).all(|pair| {
+            pair[0].percentage.unwrap_or_default() <= pair[1].percentage.unwrap_or_default()
+        }));
+    }
+
+    #[tokio::test]
     async fn native_install_rejects_signature_and_exit_code_failures_before_discovery() {
         let temporary = tempfile::tempdir().expect("temp dir");
         let installer = temporary.path().join("Mendix-11.12.2-Setup.exe");
@@ -947,6 +1242,7 @@ mod tests {
         let signature_error = install_lifecycle(
             "11.12.2",
             &installer,
+            CancellationToken::default(),
             |_| {},
             InstallLifecycleHooks {
                 verify: |_: &Path| {
@@ -956,7 +1252,9 @@ mod tests {
                     elevation_state.store(true, Ordering::SeqCst);
                     Ok(0)
                 },
-                find_installed: || panic!("discovery must not run after signature failure"),
+                find_installed: || {
+                    unexpected_discovery("discovery must not run after signature failure")
+                },
                 timing: LifecycleTiming {
                     timeout: Duration::ZERO,
                     poll_interval: Duration::ZERO,
@@ -973,13 +1271,14 @@ mod tests {
         let exit_error = install_lifecycle(
             "11.12.2",
             &installer,
+            CancellationToken::default(),
             |_| {},
             InstallLifecycleHooks {
                 verify: |path: &Path| Ok((path.to_path_buf(), ())),
                 run_elevated: |_program: PathBuf, _arguments: Vec<String>| async { Ok(1603) },
                 find_installed: move || {
                     discovery_state.store(true, Ordering::SeqCst);
-                    None
+                    std::future::ready(None)
                 },
                 timing: LifecycleTiming {
                     timeout: Duration::ZERO,
@@ -1025,7 +1324,7 @@ mod tests {
                 elevation_state.store(true, Ordering::SeqCst);
                 Ok(0)
             },
-            || panic!("discovery must not run while Studio Pro is running"),
+            || unexpected_discovery("discovery must not run while Studio Pro is running"),
             LifecycleTiming {
                 timeout: Duration::ZERO,
                 poll_interval: Duration::ZERO,
@@ -1047,7 +1346,7 @@ mod tests {
             unmanaged,
             |_| Ok(false),
             |_program, _arguments| async { Ok(0) },
-            || panic!("discovery must not run without uninstall metadata"),
+            || unexpected_discovery("discovery must not run without uninstall metadata"),
             LifecycleTiming {
                 timeout: Duration::ZERO,
                 poll_interval: Duration::ZERO,

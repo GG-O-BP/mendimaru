@@ -929,7 +929,7 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
     let started = stdout_json(&started_output);
     assert_complete_envelope(&started, "runtime.start");
     assert_eq!(started["data"]["build"]["cacheHit"], true);
-    assert_eq!(started["data"]["runtime"]["schemaVersion"], "3.0.0");
+    assert_eq!(started["data"]["runtime"]["schemaVersion"], "4.0.0");
     assert_eq!(started["data"]["runtime"]["mode"], "portable");
     assert_eq!(started["data"]["runtime"]["runtimeVersion"], "11.12.2");
     assert_eq!(started["data"]["runtime"]["state"], "ready");
@@ -1915,7 +1915,7 @@ fn windows_native_rejects_winboat_runtime_mode_without_reading_compose() {
 }
 
 fn assert_complete_envelope(document: &Value, command: &str) {
-    assert_eq!(document["schemaVersion"], "3.0.0");
+    assert_eq!(document["schemaVersion"], "4.0.0");
     assert_eq!(document["command"], command);
     assert!(document["ok"].is_boolean());
     assert!(document["platform"].is_string());

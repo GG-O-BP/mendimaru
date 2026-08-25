@@ -4,6 +4,7 @@ use crate::contracts::{
     CONTRACT_SCHEMA_VERSION,
 };
 use crate::models::{AppConfig, StudioVersion};
+use crate::process::{self, CommandPolicy};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -257,7 +258,8 @@ fn run_script(studios: &[StudioVersion], mode: SessionMode) -> Result<Vec<u8>, S
         SessionMode::Reconnect(identity) => ("reconnect", Some(identity)),
         SessionMode::Stop(identity) => ("stop", Some(identity)),
     };
-    let output = hidden_command("powershell.exe")
+    let mut command = hidden_command("powershell.exe");
+    command
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -281,9 +283,14 @@ fn run_script(studios: &[StudioVersion], mode: SessionMode) -> Result<Vec<u8>, S
                 .to_string(),
         )
         .env("MENDIMARU_KNOWN_STUDIOS", BASE64_STANDARD.encode(known))
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| format!("could not inspect Studio Pro sessions: {error}"))?;
+        .stdin(Stdio::null());
+    let output = process::output_sync(
+        command,
+        CommandPolicy::STATUS,
+        None,
+        "Studio Pro session inspection",
+    )
+    .map_err(|error| format!("could not inspect Studio Pro sessions: {error}"))?;
     if !output.status.success() {
         return Err(localize_script_error(&output.stderr));
     }

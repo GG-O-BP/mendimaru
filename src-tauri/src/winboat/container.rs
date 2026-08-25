@@ -1,28 +1,38 @@
 use crate::config::{
-    compose_file_is_valid, compose_shared_directory, path_exists_or_binary, resolved_api_url,
-    resolved_rdp_port, resolved_winboat_executable,
+    compose_file_is_valid, compose_shared_directory, path_exists_or_binary,
+    resolved_winboat_executable, runtime_host_port_async,
 };
 use crate::models::{
     AppConfig, ContainerRuntime, ContainerStatus, EnvironmentDiagnostic,
-    EnvironmentDiagnosticAction, EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
-    EnvironmentStatus,
+    EnvironmentDiagnosticAction, EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId,
+    EnvironmentDiagnosticStatus, EnvironmentStatus,
 };
+use crate::process::{self, CommandFailure, CommandFailureKind, CommandOutput, CommandPolicy};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::net::{IpAddr, TcpStream, ToSocketAddrs};
 use std::path::Path;
-use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command as StdCommand, Stdio};
+use std::time::Duration;
+use tokio::process::Command;
 
 pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     let winboat_available = resolved_winboat_executable(config).is_some();
     let compose_available = Path::new(&config.compose_file).is_file();
     let compose_valid = compose_available && compose_file_is_valid(&config.compose_file);
-    let runtime = probe_container_runtime(config.container_runtime.as_str());
-    let freerdp = probe_tool(&config.freerdp_binary, &["/version"]);
-    let browser = crate::marketplace::browser_executable()
-        .map(|executable| probe_tool(&executable, &["--version"]))
-        .unwrap_or_default();
+    let browser_executable = crate::marketplace::browser_executable();
+    let browser_probe = async {
+        match browser_executable.as_deref() {
+            Some(executable) => probe_tool(executable, &["--version"]).await,
+            None => ToolProbe::default(),
+        }
+    };
+    let (runtime, freerdp, browser, inspection) = tokio::join!(
+        probe_container_runtime(config.container_runtime.as_str()),
+        probe_tool(&config.freerdp_binary, &["/version"]),
+        browser_probe,
+        inspect_container(config),
+    );
     #[cfg(target_os = "linux")]
     let browser_sandbox_available = if browser.usable {
         crate::marketplace::browser_sandbox_available().await
@@ -32,7 +42,6 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     #[cfg(not(target_os = "linux"))]
     let browser_sandbox_available = browser.usable;
     let shared_directory_available = Path::new(&config.shared_directory).is_dir();
-    let inspection = inspect_container(config);
     let compose_shared = compose_shared_directory(&config.compose_file);
     let current_shared = if inspection.status.exists() {
         inspection.shared_directory.as_deref()
@@ -44,10 +53,44 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
             .is_some_and(|current| paths_refer_to_same_location(current, &config.shared_directory));
     let container_status = inspection.status;
     let winboat_initialized = compose_available && container_status.exists();
-    let guest_online =
-        winboat_initialized && container_status.is_running() && guest_is_online(config).await;
-    let rdp_reachable = container_status.is_running()
-        && tcp_endpoint_reachable(&config.rdp_host, resolved_rdp_port(config));
+    let mut guest_online = false;
+    let mut guest_error_code = None;
+    let mut rdp_reachable = false;
+    let mut rdp_error_code = None;
+    if winboat_initialized && container_status.is_running() {
+        let (api_port, rdp_port) = tokio::join!(
+            runtime_host_port_async(config, 7148, "tcp"),
+            runtime_host_port_async(config, 3389, "tcp"),
+        );
+        let api_url = match api_port {
+            Ok(Some(port)) => format!("http://127.0.0.1:{port}"),
+            Ok(None) => config.api_url.clone(),
+            Err(error) => {
+                guest_error_code = Some(environment_error_code(error.kind()));
+                config.api_url.clone()
+            }
+        };
+        let rdp_port = match rdp_port {
+            Ok(Some(port)) => port,
+            Ok(None) => config.rdp_port,
+            Err(error) => {
+                rdp_error_code = Some(environment_error_code(error.kind()));
+                config.rdp_port
+            }
+        };
+        let rdp_host = config.rdp_host.clone();
+        let (guest_probe, rdp_probe) = tokio::join!(
+            guest_is_online_at(&api_url),
+            tokio::task::spawn_blocking(move || tcp_endpoint_reachable(&rdp_host, rdp_port)),
+        );
+        guest_online = guest_probe && guest_error_code.is_none();
+        match rdp_probe {
+            Ok(reachable) => rdp_reachable = reachable && rdp_error_code.is_none(),
+            Err(_) => {
+                rdp_error_code = Some(EnvironmentDiagnosticErrorCode::ExternalProcessInterrupted);
+            }
+        }
+    }
     let state = LinuxDiagnosticState {
         winboat_available,
         compose_available,
@@ -57,8 +100,11 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
         shared_directory_available,
         shared_mount_matches,
         container_status,
+        container_error_code: inspection.error_code,
         guest_online,
+        guest_error_code,
         rdp_reachable,
+        rdp_error_code,
         browser,
         browser_sandbox_available,
     };
@@ -87,6 +133,7 @@ struct ToolProbe {
     available: bool,
     usable: bool,
     version: Option<String>,
+    error_code: Option<EnvironmentDiagnosticErrorCode>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,8 +146,11 @@ struct LinuxDiagnosticState {
     shared_directory_available: bool,
     shared_mount_matches: bool,
     container_status: ContainerStatus,
+    container_error_code: Option<EnvironmentDiagnosticErrorCode>,
     guest_online: bool,
+    guest_error_code: Option<EnvironmentDiagnosticErrorCode>,
     rdp_reachable: bool,
+    rdp_error_code: Option<EnvironmentDiagnosticErrorCode>,
     browser: ToolProbe,
     browser_sandbox_available: bool,
 }
@@ -137,6 +187,7 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
             },
             None,
             (!state.winboat_available).then_some(Redetect),
+            None,
         ),
         diagnostic(
             Compose,
@@ -158,6 +209,7 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
             } else {
                 Redetect
             }),
+            None,
         ),
         diagnostic(
             ContainerRuntime,
@@ -168,6 +220,7 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
             },
             observed_tool(&state.runtime),
             (!state.runtime.usable).then_some(OpenSettings),
+            state.runtime.error_code,
         ),
         diagnostic(
             Freerdp,
@@ -178,6 +231,7 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
             },
             observed_tool(&state.freerdp),
             (!state.freerdp.usable).then_some(Redetect),
+            state.freerdp.error_code,
         ),
         diagnostic(
             SharedDirectory,
@@ -188,6 +242,7 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
             },
             None,
             (!state.shared_directory_available).then_some(OpenSettings),
+            None,
         ),
         diagnostic(
             SharedMount,
@@ -200,6 +255,7 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
             },
             None,
             (!state.shared_mount_matches).then_some(OpenSettings),
+            None,
         ),
         diagnostic(
             Container,
@@ -215,6 +271,7 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
             },
             Some(container_status_name(state.container_status).to_string()),
             (!state.container_status.is_running()).then_some(StartWinboat),
+            state.container_error_code,
         ),
         diagnostic(
             GuestApi,
@@ -231,6 +288,7 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
             } else {
                 StartWinboat
             }),
+            state.guest_error_code,
         ),
         diagnostic(
             Rdp,
@@ -247,6 +305,7 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
             } else {
                 StartWinboat
             }),
+            state.rdp_error_code,
         ),
         diagnostic(
             MarketplaceBrowser,
@@ -259,6 +318,7 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
             },
             observed_browser(&state.browser, state.browser_sandbox_available),
             (!state.browser.usable || !state.browser_sandbox_available).then_some(Redetect),
+            state.browser.error_code,
         ),
     ]
 }
@@ -291,32 +351,47 @@ fn diagnostic(
     status: EnvironmentDiagnosticStatus,
     observed: Option<String>,
     action: Option<EnvironmentDiagnosticAction>,
+    error_code: Option<EnvironmentDiagnosticErrorCode>,
 ) -> EnvironmentDiagnostic {
     EnvironmentDiagnostic {
         id,
         status,
         observed,
         action,
+        error_code,
     }
 }
 
-fn probe_container_runtime(executable: &str) -> ToolProbe {
+async fn probe_container_runtime(executable: &str) -> ToolProbe {
     if !path_exists_or_binary(executable) {
         return ToolProbe::default();
     }
-    probe_tool(executable, &["info", "--format", "{{.ServerVersion}}"])
+    probe_tool(executable, &["info", "--format", "{{.ServerVersion}}"]).await
 }
 
-fn probe_tool(executable: &str, arguments: &[&str]) -> ToolProbe {
+async fn probe_tool(executable: &str, arguments: &[&str]) -> ToolProbe {
+    probe_tool_with_policy(executable, arguments, CommandPolicy::PROBE).await
+}
+
+async fn probe_tool_with_policy(
+    executable: &str,
+    arguments: &[&str],
+    policy: CommandPolicy,
+) -> ToolProbe {
     if !path_exists_or_binary(executable) {
         return ToolProbe::default();
     }
-    let Some(output) = command_output_with_timeout(executable, arguments, Duration::from_secs(2))
-    else {
-        return ToolProbe {
-            available: true,
-            ..ToolProbe::default()
-        };
+    let mut command = Command::new(executable);
+    command.args(arguments);
+    let output = match process::output(command, policy, None, "environment probe").await {
+        Ok(output) => output,
+        Err(error) => {
+            return ToolProbe {
+                available: true,
+                error_code: Some(environment_error_code(error.kind())),
+                ..ToolProbe::default()
+            };
+        }
     };
     let raw = if output.stdout.is_empty() {
         &output.stderr
@@ -331,32 +406,17 @@ fn probe_tool(executable: &str, arguments: &[&str]) -> ToolProbe {
             .success()
             .then(|| extract_version(raw))
             .flatten(),
+        error_code: None,
     }
 }
 
-fn command_output_with_timeout(
-    executable: &str,
-    arguments: &[&str],
-    timeout: Duration,
-) -> Option<Output> {
-    let mut child = Command::new(executable)
-        .args(arguments)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
-    let started = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => return child.wait_with_output().ok(),
-            Ok(None) if started.elapsed() < timeout => {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Ok(None) | Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
+const fn environment_error_code(kind: CommandFailureKind) -> EnvironmentDiagnosticErrorCode {
+    match kind {
+        CommandFailureKind::Spawn => EnvironmentDiagnosticErrorCode::ExternalProcessSpawnFailed,
+        CommandFailureKind::Timeout => EnvironmentDiagnosticErrorCode::ExternalProcessTimeout,
+        CommandFailureKind::Cancelled => EnvironmentDiagnosticErrorCode::ExternalProcessCancelled,
+        CommandFailureKind::Wait | CommandFailureKind::Cleanup => {
+            EnvironmentDiagnosticErrorCode::ExternalProcessInterrupted
         }
     }
 }
@@ -413,22 +473,22 @@ pub async fn start_container(config: &AppConfig) -> Result<ContainerStatus, Stri
             path = &config.compose_file
         ));
     }
-    let status = inspect_container_status(config);
+    let status = inspect_container_status(config).await;
     if status.is_running() {
         return Ok(status);
     }
 
     if status.exists() {
-        let output = Command::new(config.container_runtime.as_str())
-            .arg("start")
-            .arg(&config.container_name)
-            .output()
+        let mut command = Command::new(config.container_runtime.as_str());
+        command.arg("start").arg(&config.container_name);
+        let output = process::output(command, lifecycle_policy(config), None, "container start")
+            .await
             .map_err(|error| crate::tr!("error-container-start", error = error))?;
         ensure_success(output, &crate::tr!("operation-container-start"))?;
     } else {
         compose_up(config, false).await?;
     }
-    Ok(inspect_container_status(config))
+    Ok(inspect_container_status(config).await)
 }
 
 pub async fn recreate_container(config: &AppConfig) -> Result<(), String> {
@@ -438,7 +498,7 @@ pub async fn recreate_container(config: &AppConfig) -> Result<(), String> {
 pub fn open_winboat(config: &AppConfig) -> Result<(), String> {
     let executable = resolved_winboat_executable(config)
         .ok_or_else(|| crate::tr!("error-winboat-executable-not-found"))?;
-    Command::new(executable)
+    StdCommand::new(executable)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -448,13 +508,28 @@ pub fn open_winboat(config: &AppConfig) -> Result<(), String> {
 }
 
 async fn compose_up(config: &AppConfig, force_recreate: bool) -> Result<(), String> {
+    compose_up_with_policy(
+        config,
+        force_recreate,
+        config.container_runtime.as_str(),
+        lifecycle_policy(config),
+    )
+    .await
+}
+
+pub(crate) async fn compose_up_with_policy(
+    config: &AppConfig,
+    force_recreate: bool,
+    runtime: &str,
+    policy: CommandPolicy,
+) -> Result<(), String> {
     let mut command;
     if config.container_runtime == ContainerRuntime::Podman
         && path_exists_or_binary("podman-compose")
     {
         command = Command::new("podman-compose");
     } else {
-        command = Command::new(config.container_runtime.as_str());
+        command = Command::new(runtime);
         command.arg("compose");
     }
     command
@@ -465,10 +540,17 @@ async fn compose_up(config: &AppConfig, force_recreate: bool) -> Result<(), Stri
     if force_recreate {
         command.arg("--force-recreate");
     }
-    let output = command
-        .output()
+    let output = process::output(command, policy, None, "Compose apply")
+        .await
         .map_err(|error| crate::tr!("error-compose-run", error = error))?;
     ensure_success(output, &crate::tr!("operation-compose-apply"))
+}
+
+fn lifecycle_policy(config: &AppConfig) -> CommandPolicy {
+    CommandPolicy::new(
+        Duration::from_secs(config.startup_timeout_seconds.clamp(1, 900)),
+        256 * 1024,
+    )
 }
 
 pub(super) async fn ensure_guest_online(config: &AppConfig) -> Result<(), String> {
@@ -490,14 +572,14 @@ pub(super) async fn ensure_guest_online(config: &AppConfig) -> Result<(), String
     ))
 }
 
-pub(super) fn ensure_private_operation_transport(config: &AppConfig) -> Result<(), String> {
+pub(super) async fn ensure_private_operation_transport(config: &AppConfig) -> Result<(), String> {
     if !is_loopback_host(&config.rdp_host) {
         return Err(crate::tr!(
             "error-winboat-transport-public",
             endpoint = &config.rdp_host
         ));
     }
-    let api_url = reqwest::Url::parse(&resolved_api_url(config))
+    let api_url = reqwest::Url::parse(&config.api_url)
         .map_err(|error| crate::tr!("error-winboat-transport-inspect", error = error))?;
     if !api_url.host_str().is_some_and(is_loopback_host) {
         return Err(crate::tr!(
@@ -506,7 +588,7 @@ pub(super) fn ensure_private_operation_transport(config: &AppConfig) -> Result<(
         ));
     }
 
-    let inspection = runtime_inspection(config)?;
+    let inspection = runtime_inspection(config).await?;
     for guest_port in ["3389/tcp", "7148/tcp"] {
         let bindings = inspection
             .network_settings
@@ -531,10 +613,19 @@ pub(super) fn ensure_private_operation_transport(config: &AppConfig) -> Result<(
 }
 
 pub async fn guest_is_online(config: &AppConfig) -> bool {
+    let api_url = runtime_host_port_async(config, 7148, "tcp")
+        .await
+        .ok()
+        .flatten()
+        .map(|port| format!("http://127.0.0.1:{port}"))
+        .unwrap_or_else(|| config.api_url.clone());
+    guest_is_online_at(&api_url).await
+}
+
+pub(super) async fn guest_is_online_at(api_url: &str) -> bool {
     let Ok(client) = http_client(Duration::from_secs(2)) else {
         return false;
     };
-    let api_url = resolved_api_url(config);
     client
         .get(format!("{api_url}/health"))
         .send()
@@ -550,14 +641,15 @@ pub(super) fn http_client(timeout: Duration) -> Result<reqwest::Client, String> 
         .map_err(|error| crate::tr!("error-http-client-create", error = error))
 }
 
-pub(crate) fn inspect_container_status(config: &AppConfig) -> ContainerStatus {
-    inspect_container(config).status
+pub(crate) async fn inspect_container_status(config: &AppConfig) -> ContainerStatus {
+    inspect_container(config).await.status
 }
 
 #[derive(Debug)]
 struct ContainerInspection {
     status: ContainerStatus,
     shared_directory: Option<String>,
+    error_code: Option<EnvironmentDiagnosticErrorCode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -572,6 +664,7 @@ impl ContainerInspection {
         Self {
             status: ContainerStatus::NotFound,
             shared_directory: None,
+            error_code: None,
         }
     }
 
@@ -579,6 +672,15 @@ impl ContainerInspection {
         Self {
             status: ContainerStatus::Unknown,
             shared_directory: None,
+            error_code: None,
+        }
+    }
+
+    fn failed(error: &CommandFailure) -> Self {
+        Self {
+            status: ContainerStatus::Unknown,
+            shared_directory: None,
+            error_code: Some(environment_error_code(error.kind())),
         }
     }
 }
@@ -620,24 +722,25 @@ struct RuntimeContainerMount {
     destination: String,
 }
 
-fn inspect_container(config: &AppConfig) -> ContainerInspection {
-    let output = Command::new(config.container_runtime.as_str())
-        .arg("inspect")
-        .arg(&config.container_name)
-        .output();
+async fn inspect_container(config: &AppConfig) -> ContainerInspection {
+    let mut command = Command::new(config.container_runtime.as_str());
+    command.arg("inspect").arg(&config.container_name);
+    let output =
+        process::output(command, CommandPolicy::STATUS, None, "container inspection").await;
     match output {
         Ok(output) if output.status.success() => {
             parse_container_inspection(&output.stdout).unwrap_or_else(ContainerInspection::unknown)
         }
-        _ => ContainerInspection::not_found(),
+        Ok(_) => ContainerInspection::not_found(),
+        Err(error) => ContainerInspection::failed(&error),
     }
 }
 
-fn runtime_inspection(config: &AppConfig) -> Result<RuntimeContainerInspection, String> {
-    let output = Command::new(config.container_runtime.as_str())
-        .arg("inspect")
-        .arg(&config.container_name)
-        .output()
+async fn runtime_inspection(config: &AppConfig) -> Result<RuntimeContainerInspection, String> {
+    let mut command = Command::new(config.container_runtime.as_str());
+    command.arg("inspect").arg(&config.container_name);
+    let output = process::output(command, CommandPolicy::STATUS, None, "container inspection")
+        .await
         .map_err(|error| crate::tr!("error-winboat-transport-inspect", error = error))?;
     if !output.status.success() {
         return Err(crate::tr!(
@@ -657,11 +760,11 @@ fn runtime_inspection(config: &AppConfig) -> Result<RuntimeContainerInspection, 
         })
 }
 
-pub(crate) fn runtime_host_binding(
+pub(crate) async fn runtime_host_binding(
     config: &AppConfig,
     guest_port: u16,
 ) -> Result<RuntimeHostBinding, String> {
-    let inspection = runtime_inspection(config)?;
+    let inspection = runtime_inspection(config).await?;
     if !ContainerStatus::from_runtime(&inspection.state.status).is_running() {
         return Err("the WinBoat container is not running".to_string());
     }
@@ -699,8 +802,8 @@ pub(crate) fn runtime_host_binding(
     })
 }
 
-pub(crate) fn storage_mount_identity(config: &AppConfig) -> Result<Vec<String>, String> {
-    let inspection = runtime_inspection(config)?;
+pub(crate) async fn storage_mount_identity(config: &AppConfig) -> Result<Vec<String>, String> {
+    let inspection = runtime_inspection(config).await?;
     let mut sources = inspection
         .mounts
         .into_iter()
@@ -726,14 +829,19 @@ fn parse_container_inspection(output: &[u8]) -> Option<ContainerInspection> {
     Some(ContainerInspection {
         status: ContainerStatus::from_runtime(&container.state.status),
         shared_directory,
+        error_code: None,
     })
 }
 
-fn ensure_success(output: Output, operation: &str) -> Result<(), String> {
+fn ensure_success(output: CommandOutput, operation: &str) -> Result<(), String> {
     if output.status.success() {
         return Ok(());
     }
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let mut stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let captured_truncated = output.stdout_truncated || output.stderr_truncated;
+    if captured_truncated {
+        stderr.push_str(" [output truncated]");
+    }
     if stderr.is_empty() {
         Err(crate::tr!(
             "error-operation-status",
@@ -770,12 +878,15 @@ fn is_loopback_host(value: &str) -> bool {
 mod tests {
     use super::{
         build_linux_diagnostics, environment_status, extract_version, is_loopback_host,
-        parse_container_inspection, LinuxDiagnosticState, RuntimeContainerInspection, ToolProbe,
+        parse_container_inspection, probe_tool_with_policy, LinuxDiagnosticState,
+        RuntimeContainerInspection, ToolProbe,
     };
     use crate::models::{
-        ContainerStatus, EnvironmentDiagnosticAction, EnvironmentDiagnosticId,
-        EnvironmentDiagnosticStatus,
+        ContainerStatus, EnvironmentDiagnosticAction, EnvironmentDiagnosticErrorCode,
+        EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
     };
+    use crate::process::CommandPolicy;
+    use std::time::Duration;
 
     #[test]
     fn parses_status_and_active_shared_mount_from_runtime_inspection() {
@@ -815,21 +926,27 @@ mod tests {
                 available: true,
                 usable: true,
                 version: Some("29.7.2".to_string()),
+                error_code: None,
             },
             freerdp: ToolProbe {
                 available: true,
                 usable: true,
                 version: Some("3.30.0".to_string()),
+                error_code: None,
             },
             shared_directory_available: true,
             shared_mount_matches: true,
             container_status: ContainerStatus::Running,
+            container_error_code: None,
             guest_online: true,
+            guest_error_code: None,
             rdp_reachable: true,
+            rdp_error_code: None,
             browser: ToolProbe {
                 available: true,
                 usable: true,
                 version: Some("151.0.7922.137".to_string()),
+                error_code: None,
             },
             browser_sandbox_available: true,
         }
@@ -930,6 +1047,48 @@ mod tests {
             Some("3.30.0".to_string())
         );
         assert_eq!(extract_version(b"password=secret"), None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn timed_out_probe_has_a_stable_diagnostic_error_code() {
+        use std::os::unix::fs::PermissionsExt;
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let executable = temporary.path().join("fake-docker");
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\ntrap '' TERM\nwhile :; do sleep 1; done\n",
+        )
+        .expect("write probe fixture");
+        let mut permissions = std::fs::metadata(&executable)
+            .expect("probe fixture metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&executable, permissions).expect("make fixture executable");
+
+        let probe = probe_tool_with_policy(
+            executable.to_str().expect("fixture path"),
+            &["info"],
+            CommandPolicy::new(Duration::from_millis(100), 1024),
+        )
+        .await;
+
+        assert!(probe.available);
+        assert!(!probe.usable);
+        assert_eq!(
+            probe.error_code,
+            Some(EnvironmentDiagnosticErrorCode::ExternalProcessTimeout)
+        );
+        let mut state = healthy_state();
+        state.runtime = probe;
+        let diagnostic = build_linux_diagnostics(&state)
+            .into_iter()
+            .find(|diagnostic| diagnostic.id == EnvironmentDiagnosticId::ContainerRuntime)
+            .expect("runtime diagnostic");
+        assert_eq!(
+            diagnostic.error_code,
+            Some(EnvironmentDiagnosticErrorCode::ExternalProcessTimeout)
+        );
     }
 
     #[test]

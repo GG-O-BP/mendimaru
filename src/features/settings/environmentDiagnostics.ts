@@ -1,6 +1,7 @@
 import type {
   EnvironmentDiagnostic,
   EnvironmentDiagnosticAction,
+  EnvironmentDiagnosticErrorCode,
   EnvironmentDiagnosticId,
 } from "../../domain/types";
 import type { MessageKey, Translate } from "../../i18n";
@@ -68,6 +69,13 @@ const ACTION_MESSAGES: Record<EnvironmentDiagnosticAction, MessageKey> = {
   "open-settings": "diagnostic-action-open-settings",
 };
 
+const ERROR_MESSAGES: Record<EnvironmentDiagnosticErrorCode, MessageKey> = {
+  "external-process-spawn-failed": "diagnostic-process-spawn-failed",
+  "external-process-timeout": "diagnostic-process-timeout",
+  "external-process-cancelled": "diagnostic-process-cancelled",
+  "external-process-interrupted": "diagnostic-process-interrupted",
+};
+
 export function diagnosticText(
   diagnostic: EnvironmentDiagnostic,
   t: Translate,
@@ -80,7 +88,9 @@ export function diagnosticText(
         ? diagnostic.observed
           ? t("diagnostic-detected", { value: diagnostic.observed })
           : t("diagnostic-check-passed")
-        : t(messages.recovery),
+        : diagnostic.errorCode
+          ? t(ERROR_MESSAGES[diagnostic.errorCode])
+          : t(messages.recovery),
     status: t(`diagnostic-status-${diagnostic.status}`),
     action: diagnostic.action ? t(ACTION_MESSAGES[diagnostic.action]) : null,
   };

@@ -172,7 +172,14 @@ export function InstallationProgress({
       </div>
       <b className="progress-percentage">{progressLabel}</b>
       {isInstalling &&
-        ["connecting", "downloading"].includes(progress.state) && (
+        [
+          "connecting",
+          "downloading",
+          "staging",
+          "installing",
+          "finalizing",
+          "verifying",
+        ].includes(progress.state) && (
           <button type="button" onClick={onCancel}>
             {t("action-cancel")}
           </button>

@@ -3,6 +3,7 @@ import { tauriApi } from "../../api/tauri";
 import type { AppConfig, EnvironmentStatus } from "../../domain/types";
 import type { WinBoatControlDependencies } from "./dependencies";
 import { deriveEnvironmentPresentation } from "./environmentState";
+import type { EnvironmentRefreshOptions } from "./useEnvironmentStatus";
 
 export interface SetupCompletion {
   sequence: number;
@@ -11,7 +12,7 @@ export interface SetupCompletion {
 
 interface UseWinBoatControlOptions extends WinBoatControlDependencies {
   status: EnvironmentStatus | null;
-  refreshStatus: () => Promise<void>;
+  refreshStatus: (options?: EnvironmentRefreshOptions) => Promise<void>;
   applyConfig: (config: AppConfig) => void;
   updateConfigPair: (update: (config: AppConfig) => AppConfig) => void;
 }
@@ -64,7 +65,7 @@ export function useWinBoatControl({
           t("toast-winboat-setup-opened"),
           t("toast-winboat-setup-opened-detail"),
         );
-        await refreshStatus();
+        await refreshStatus({ sourceChanged: true });
       }),
     [notify, refreshStatus, runAction, t, updateConfigPair],
   );
@@ -92,7 +93,7 @@ export function useWinBoatControl({
             ? t("toast-winboat-setup-complete-reconnected")
             : undefined,
         );
-        await refreshStatus();
+        await refreshStatus({ sourceChanged: true });
       }).finally(() => {
         setupCompletionScheduled.current = false;
       });

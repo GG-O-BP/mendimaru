@@ -6,6 +6,7 @@ use crate::contracts::{
     UiFindRequest, UiTree, UiWaitRequest, CONTRACT_SCHEMA_VERSION,
 };
 use crate::models::{AppConfig, StudioInstallProgress, StudioVersion};
+use crate::process::CancellationToken;
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
@@ -32,6 +33,7 @@ pub trait StudioBackend: BackendIdentity {
         _operation_id: &'a str,
         _installer_path: &'a Path,
         _expected_sha256: &'a str,
+        _cancellation: CancellationToken,
         _on_progress: ProgressCallback<'a>,
     ) -> BackendFuture<'a, String> {
         unsupported(self.backend_id(), CapabilityId::StudioInstall)
@@ -439,6 +441,7 @@ impl StudioBackend for LinuxWinboatBackend<'_> {
         operation_id: &'a str,
         installer_path: &'a Path,
         expected_sha256: &'a str,
+        cancellation: CancellationToken,
         on_progress: ProgressCallback<'a>,
     ) -> BackendFuture<'a, String> {
         Box::pin(async move {
@@ -469,6 +472,7 @@ impl StudioBackend for LinuxWinboatBackend<'_> {
                 operation_id,
                 &windows_installer_path,
                 expected_sha256,
+                cancellation,
                 on_progress,
             )
             .await
@@ -651,6 +655,20 @@ fn winboat_operation_error(
     error: crate::winboat::WindowsOperationFailure,
 ) -> BackendError {
     let mut backend_error = BackendError::operation(backend, capability, error.message);
+    backend_error.code = match error.failure_kind {
+        Some(crate::process::CommandFailureKind::Timeout) => {
+            crate::contracts::BackendErrorCode::ExternalProcessTimeout
+        }
+        Some(crate::process::CommandFailureKind::Cancelled) => {
+            crate::contracts::BackendErrorCode::ExternalProcessCancelled
+        }
+        Some(
+            crate::process::CommandFailureKind::Wait | crate::process::CommandFailureKind::Cleanup,
+        ) => crate::contracts::BackendErrorCode::ExternalProcessInterrupted,
+        Some(crate::process::CommandFailureKind::Spawn) | None => {
+            crate::contracts::BackendErrorCode::OperationFailed
+        }
+    };
     backend_error.retryable = error.retryable;
     backend_error.diagnostic_ref = error
         .exit_code
@@ -674,10 +692,17 @@ impl BackendIdentity for WindowsNativeBackend<'_> {
 #[cfg(target_os = "windows")]
 impl StudioBackend for WindowsNativeBackend<'_> {
     fn detect(&self) -> BackendFuture<'_, Vec<StudioVersion>> {
+        let config = self.config.clone();
+        let backend = self.backend_id();
         Box::pin(async move {
-            super::windows_native::installed_versions(self.config).map_err(|error| {
-                BackendError::operation(self.backend_id(), CapabilityId::StudioDetect, error)
-            })
+            tokio::task::spawn_blocking(move || super::windows_native::installed_versions(&config))
+                .await
+                .map_err(|error| {
+                    native_blocking_join_error(backend, CapabilityId::StudioDetect, error)
+                })?
+                .map_err(|error| {
+                    BackendError::operation(backend, CapabilityId::StudioDetect, error)
+                })
         })
     }
 
@@ -687,14 +712,21 @@ impl StudioBackend for WindowsNativeBackend<'_> {
         _operation_id: &'a str,
         installer_path: &'a Path,
         _expected_sha256: &'a str,
+        cancellation: CancellationToken,
         on_progress: ProgressCallback<'a>,
     ) -> BackendFuture<'a, String> {
         Box::pin(async move {
-            super::windows_native::install_studio(self.config, version, installer_path, on_progress)
-                .await
-                .map_err(|error| {
-                    retryable_operation_error(self.backend_id(), CapabilityId::StudioInstall, error)
-                })
+            super::windows_native::install_studio(
+                self.config,
+                version,
+                installer_path,
+                cancellation,
+                on_progress,
+            )
+            .await
+            .map_err(|error| {
+                native_operation_error(self.backend_id(), CapabilityId::StudioInstall, error)
+            })
         })
     }
 
@@ -703,11 +735,7 @@ impl StudioBackend for WindowsNativeBackend<'_> {
             super::windows_native::uninstall_studio(self.config, version)
                 .await
                 .map_err(|error| {
-                    retryable_operation_error(
-                        self.backend_id(),
-                        CapabilityId::StudioUninstall,
-                        error,
-                    )
+                    native_operation_error(self.backend_id(), CapabilityId::StudioUninstall, error)
                 })
         })
     }
@@ -718,20 +746,32 @@ impl StudioBackend for WindowsNativeBackend<'_> {
         _operation_id: &'a str,
         project_mpr_path: Option<&'a str>,
     ) -> BackendFuture<'a, ()> {
+        let config = self.config.clone();
+        let version = version.to_string();
+        let project_mpr_path = project_mpr_path.map(ToString::to_string);
+        let backend = self.backend_id();
         Box::pin(async move {
-            super::windows_native::launch_studio(self.config, version, project_mpr_path).map_err(
-                |error| {
-                    retryable_operation_error(self.backend_id(), CapabilityId::StudioStart, error)
-                },
-            )
+            tokio::task::spawn_blocking(move || {
+                super::windows_native::launch_studio(&config, &version, project_mpr_path.as_deref())
+            })
+            .await
+            .map_err(|error| native_blocking_join_error(backend, CapabilityId::StudioStart, error))?
+            .map_err(|error| retryable_operation_error(backend, CapabilityId::StudioStart, error))
         })
     }
 
     fn sessions(&self) -> BackendFuture<'_, Vec<StudioSessionStatus>> {
+        let config = self.config.clone();
+        let backend = self.backend_id();
         Box::pin(async move {
-            super::windows_native::studio_sessions(self.config).map_err(|error| {
-                retryable_operation_error(self.backend_id(), CapabilityId::StudioStatus, error)
-            })
+            tokio::task::spawn_blocking(move || super::windows_native::studio_sessions(&config))
+                .await
+                .map_err(|error| {
+                    native_blocking_join_error(backend, CapabilityId::StudioStatus, error)
+                })?
+                .map_err(|error| {
+                    retryable_operation_error(backend, CapabilityId::StudioStatus, error)
+                })
         })
     }
 
@@ -752,20 +792,32 @@ impl StudioBackend for WindowsNativeBackend<'_> {
     }
 
     fn reconnect<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, ()> {
+        let config = self.config.clone();
+        let session_id = session_id.to_string();
+        let backend = self.backend_id();
         Box::pin(async move {
-            super::windows_native::reconnect_studio_session(self.config, session_id).map_err(
-                |error| {
-                    retryable_operation_error(self.backend_id(), CapabilityId::StudioStatus, error)
-                },
-            )
+            tokio::task::spawn_blocking(move || {
+                super::windows_native::reconnect_studio_session(&config, &session_id)
+            })
+            .await
+            .map_err(|error| {
+                native_blocking_join_error(backend, CapabilityId::StudioStatus, error)
+            })?
+            .map_err(|error| retryable_operation_error(backend, CapabilityId::StudioStatus, error))
         })
     }
 
     fn stop<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, ()> {
+        let config = self.config.clone();
+        let session_id = session_id.to_string();
+        let backend = self.backend_id();
         Box::pin(async move {
-            super::windows_native::stop_studio_session(self.config, session_id).map_err(|error| {
-                retryable_operation_error(self.backend_id(), CapabilityId::StudioStop, error)
+            tokio::task::spawn_blocking(move || {
+                super::windows_native::stop_studio_session(&config, &session_id)
             })
+            .await
+            .map_err(|error| native_blocking_join_error(backend, CapabilityId::StudioStop, error))?
+            .map_err(|error| retryable_operation_error(backend, CapabilityId::StudioStop, error))
         })
     }
 }
@@ -820,6 +872,46 @@ impl UiAutomationBackend for WindowsNativeBackend<'_> {}
 impl BrowserBackend for WindowsNativeBackend<'_> {}
 #[cfg(target_os = "windows")]
 impl PlatformBackend for WindowsNativeBackend<'_> {}
+
+#[cfg(target_os = "windows")]
+fn native_operation_error(
+    backend: BackendId,
+    capability: CapabilityId,
+    failure: super::windows_native::NativeOperationFailure,
+) -> BackendError {
+    let mut error = BackendError::operation(backend, capability, failure.message);
+    error.code = match failure.failure_kind {
+        Some(crate::process::CommandFailureKind::Timeout) => {
+            crate::contracts::BackendErrorCode::ExternalProcessTimeout
+        }
+        Some(crate::process::CommandFailureKind::Cancelled) => {
+            crate::contracts::BackendErrorCode::ExternalProcessCancelled
+        }
+        Some(
+            crate::process::CommandFailureKind::Wait | crate::process::CommandFailureKind::Cleanup,
+        ) => crate::contracts::BackendErrorCode::ExternalProcessInterrupted,
+        Some(crate::process::CommandFailureKind::Spawn) | None => {
+            crate::contracts::BackendErrorCode::OperationFailed
+        }
+    };
+    error.retryable = true;
+    error
+}
+
+#[cfg(target_os = "windows")]
+fn native_blocking_join_error(
+    backend: BackendId,
+    capability: CapabilityId,
+    error: tokio::task::JoinError,
+) -> BackendError {
+    let mut backend_error = BackendError::operation(
+        backend,
+        capability,
+        crate::tr!("error-native-process-join", error = error),
+    );
+    backend_error.retryable = true;
+    backend_error
+}
 
 #[cfg(target_os = "windows")]
 fn retryable_operation_error(

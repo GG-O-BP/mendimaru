@@ -775,7 +775,7 @@ fn session_keeper_dispatch(arguments: &[OsString]) -> i32 {
     }
     let successful = response.ok;
     let serialized = serde_json::to_vec(&response).unwrap_or_else(|_| {
-        br#"{"ok":false,"error":{"schemaVersion":"3.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
+        br#"{"ok":false,"error":{"schemaVersion":"4.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
     });
     let written = std::io::stdout()
         .write_all(&serialized)
@@ -1794,6 +1794,11 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
         CommandErrorCode::BackendMismatch => BackendErrorCode::BackendMismatch,
         CommandErrorCode::InvalidRequest => BackendErrorCode::InvalidRequest,
         CommandErrorCode::PreconditionFailed => BackendErrorCode::PreconditionFailed,
+        CommandErrorCode::ExternalProcessTimeout => BackendErrorCode::ExternalProcessTimeout,
+        CommandErrorCode::ExternalProcessCancelled => BackendErrorCode::ExternalProcessCancelled,
+        CommandErrorCode::ExternalProcessInterrupted => {
+            BackendErrorCode::ExternalProcessInterrupted
+        }
         CommandErrorCode::ToolchainUnavailable => BackendErrorCode::ToolchainUnavailable,
         CommandErrorCode::RuntimeVersionUnsupported => BackendErrorCode::RuntimeVersionUnsupported,
         CommandErrorCode::ConsistencyFailed => BackendErrorCode::ConsistencyFailed,
@@ -1831,6 +1836,9 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
             CommandErrorCode::DownloadCancelled
                 | CommandErrorCode::InstallFailed
                 | CommandErrorCode::OperationFailed
+                | CommandErrorCode::ExternalProcessTimeout
+                | CommandErrorCode::ExternalProcessCancelled
+                | CommandErrorCode::ExternalProcessInterrupted
         ),
         diagnostic_ref: None,
     }
@@ -1861,6 +1869,13 @@ fn safe_error_message(code: BackendErrorCode) -> &'static str {
         BackendErrorCode::InvalidRequest => "the command request is invalid",
         BackendErrorCode::PreconditionFailed => "a required precondition was not satisfied",
         BackendErrorCode::OperationFailed => "the command could not be completed",
+        BackendErrorCode::ExternalProcessTimeout => {
+            "an external process did not finish before its deadline"
+        }
+        BackendErrorCode::ExternalProcessCancelled => "an external process was cancelled",
+        BackendErrorCode::ExternalProcessInterrupted => {
+            "an external process was interrupted during cleanup"
+        }
         BackendErrorCode::ToolchainUnavailable => {
             "the exact-version runtime toolchain is unavailable"
         }
@@ -1902,6 +1917,9 @@ fn exit_code(error: &BackendError) -> i32 {
         | BackendErrorCode::RuntimeVersionUnsupported => EXIT_BACKEND_UNAVAILABLE,
         BackendErrorCode::PreconditionFailed
         | BackendErrorCode::OperationFailed
+        | BackendErrorCode::ExternalProcessTimeout
+        | BackendErrorCode::ExternalProcessCancelled
+        | BackendErrorCode::ExternalProcessInterrupted
         | BackendErrorCode::ToolchainUnavailable
         | BackendErrorCode::ConsistencyFailed
         | BackendErrorCode::RuntimeBuildFailed

@@ -116,12 +116,15 @@ export type EnvironmentDiagnosticStatus =
   keyof typeof enumValues.environmentDiagnosticStatus;
 export type EnvironmentDiagnosticAction =
   keyof typeof enumValues.environmentDiagnosticAction;
+export type EnvironmentDiagnosticErrorCode =
+  keyof typeof enumValues.environmentDiagnosticErrorCode;
 
 export interface EnvironmentDiagnostic {
   id: EnvironmentDiagnosticId;
   status: EnvironmentDiagnosticStatus;
   observed?: string;
   action?: EnvironmentDiagnosticAction;
+  errorCode?: EnvironmentDiagnosticErrorCode;
 }
 
 export type DownloadState = keyof typeof enumValues.downloadState;

@@ -1,12 +1,19 @@
+use crate::process::{
+    CancellationToken, CommandFailure, CommandFailureKind, CommandPolicy, WindowsJob,
+};
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_CANCELLED};
+use std::time::{Duration, Instant};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, GetLastError, ERROR_CANCELLED, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows_sys::Win32::System::Threading::{
-    GetExitCodeProcess, WaitForSingleObject, CREATE_NO_WINDOW, INFINITE,
+    GetExitCodeProcess, GetProcessId, OpenProcess, TerminateProcess, WaitForSingleObject,
+    CREATE_NO_WINDOW, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
 };
 use windows_sys::Win32::UI::Shell::{
     ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS,
@@ -36,11 +43,18 @@ pub(super) fn hidden_command(program: impl AsRef<OsStr>) -> Command {
     command
 }
 
-pub(super) fn run_elevated(executable: &Path, arguments: &[String]) -> Result<u32, String> {
+pub(super) fn run_elevated(
+    executable: &Path,
+    arguments: &[String],
+    policy: CommandPolicy,
+    cancellation: &CancellationToken,
+    operation: &str,
+) -> Result<u32, CommandFailure> {
     if executable.components().count() > 1 && !executable.is_file() {
-        return Err(crate::tr!(
-            "error-native-operation-executable",
-            path = executable.display()
+        return Err(CommandFailure::new(
+            CommandFailureKind::Spawn,
+            operation,
+            None,
         ));
     }
     let verb = wide("runas");
@@ -73,33 +87,277 @@ pub(super) fn run_elevated(executable: &Path, arguments: &[String]) -> Result<u3
     if launched == 0 {
         let code = unsafe { GetLastError() };
         if code == ERROR_CANCELLED {
-            return Err(crate::tr!("error-native-elevation-cancelled"));
+            return Err(CommandFailure::new(
+                CommandFailureKind::Cancelled,
+                operation,
+                None,
+            ));
         }
-        return Err(crate::tr!("error-native-elevation-start", code = code));
+        return Err(CommandFailure::new(
+            CommandFailureKind::Spawn,
+            operation,
+            Some(std::io::Error::from_raw_os_error(code as i32)),
+        ));
     }
     if info.hProcess.is_null() {
-        return Err(crate::tr!("error-native-process-handle"));
+        return Err(CommandFailure::new(
+            CommandFailureKind::Wait,
+            operation,
+            None,
+        ));
     }
 
-    let wait_result = unsafe { WaitForSingleObject(info.hProcess, INFINITE) };
-    if wait_result != 0 {
-        unsafe {
-            CloseHandle(info.hProcess);
+    let handle = ProcessHandle(info.hProcess);
+    let process_id = unsafe { GetProcessId(handle.0) };
+    let job = WindowsJob::attach(handle.0).ok();
+    wait_for_process(
+        handle.0,
+        process_id,
+        job.as_ref(),
+        policy,
+        cancellation,
+        operation,
+    )
+}
+
+fn wait_for_process(
+    handle: windows_sys::Win32::Foundation::HANDLE,
+    process_id: u32,
+    job: Option<&WindowsJob>,
+    policy: CommandPolicy,
+    cancellation: &CancellationToken,
+    operation: &str,
+) -> Result<u32, CommandFailure> {
+    let started = Instant::now();
+    loop {
+        let kind = if cancellation.is_cancelled() {
+            Some(CommandFailureKind::Cancelled)
+        } else if started.elapsed() >= policy.timeout {
+            Some(CommandFailureKind::Timeout)
+        } else {
+            None
+        };
+        if let Some(kind) = kind {
+            let cleanup = terminate_process_tree(
+                handle,
+                process_id,
+                job,
+                policy.termination_grace.max(Duration::from_secs(1)),
+            )
+            .err();
+            return Err(CommandFailure::new(kind, operation, cleanup));
         }
-        return Err(crate::tr!("error-native-process-wait", code = wait_result));
+
+        let remaining = policy.timeout.saturating_sub(started.elapsed());
+        let wait_result = unsafe {
+            WaitForSingleObject(
+                handle,
+                duration_milliseconds(remaining.min(Duration::from_millis(250))),
+            )
+        };
+        if wait_result == WAIT_OBJECT_0 {
+            break;
+        }
+        if wait_result != WAIT_TIMEOUT {
+            let wait_error = std::io::Error::last_os_error();
+            let cleanup = terminate_process_tree(
+                handle,
+                process_id,
+                job,
+                policy.termination_grace.max(Duration::from_secs(1)),
+            )
+            .err()
+            .unwrap_or(wait_error);
+            return Err(CommandFailure::new(
+                CommandFailureKind::Wait,
+                operation,
+                Some(cleanup),
+            ));
+        }
     }
+
+    if let Some(job) = job {
+        loop {
+            let active = job.active_processes().map_err(|error| {
+                let cleanup = terminate_process_tree(
+                    handle,
+                    process_id,
+                    Some(job),
+                    policy.termination_grace.max(Duration::from_secs(1)),
+                )
+                .err()
+                .unwrap_or(error);
+                CommandFailure::new(CommandFailureKind::Wait, operation, Some(cleanup))
+            })?;
+            if active == 0 {
+                break;
+            }
+            let kind = if cancellation.is_cancelled() {
+                Some(CommandFailureKind::Cancelled)
+            } else if started.elapsed() >= policy.timeout {
+                Some(CommandFailureKind::Timeout)
+            } else {
+                None
+            };
+            if let Some(kind) = kind {
+                let cleanup = terminate_process_tree(
+                    handle,
+                    process_id,
+                    Some(job),
+                    policy.termination_grace.max(Duration::from_secs(1)),
+                )
+                .err();
+                return Err(CommandFailure::new(kind, operation, cleanup));
+            }
+            std::thread::sleep(
+                policy
+                    .timeout
+                    .saturating_sub(started.elapsed())
+                    .min(Duration::from_millis(50)),
+            );
+        }
+    } else {
+        terminate_descendants(
+            process_id,
+            policy.termination_grace.max(Duration::from_secs(1)),
+        );
+    }
+
     let mut exit_code = 0_u32;
-    let read = unsafe { GetExitCodeProcess(info.hProcess, &mut exit_code) };
-    unsafe {
-        CloseHandle(info.hProcess);
-    }
+    let read = unsafe { GetExitCodeProcess(handle, &mut exit_code) };
     if read == 0 {
-        return Err(crate::tr!(
-            "error-native-process-exit-code",
-            code = unsafe { GetLastError() }
+        return Err(CommandFailure::new(
+            CommandFailureKind::Wait,
+            operation,
+            Some(std::io::Error::last_os_error()),
         ));
     }
     Ok(exit_code)
+}
+
+struct ProcessHandle(windows_sys::Win32::Foundation::HANDLE);
+
+impl Drop for ProcessHandle {
+    fn drop(&mut self) {
+        unsafe {
+            CloseHandle(self.0);
+        }
+    }
+}
+
+fn duration_milliseconds(duration: Duration) -> u32 {
+    duration.as_millis().clamp(1, u32::MAX as u128) as u32
+}
+
+fn terminate_process_tree(
+    root_handle: windows_sys::Win32::Foundation::HANDLE,
+    root_pid: u32,
+    job: Option<&WindowsJob>,
+    wait: Duration,
+) -> std::io::Result<()> {
+    if let Some(job) = job {
+        job.terminate();
+    } else {
+        if unsafe { TerminateProcess(root_handle, 1) } == 0 {
+            let error = std::io::Error::last_os_error();
+            if unsafe { WaitForSingleObject(root_handle, 0) } != WAIT_OBJECT_0 {
+                return Err(error);
+            }
+        }
+        terminate_descendants(root_pid, wait);
+    }
+    let result = unsafe { WaitForSingleObject(root_handle, duration_milliseconds(wait)) };
+    if result == WAIT_OBJECT_0 {
+        if let Some(job) = job {
+            wait_for_empty_job(job, wait)
+        } else {
+            Ok(())
+        }
+    } else if result == WAIT_TIMEOUT {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "the elevated process did not terminate before the cleanup deadline",
+        ))
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+fn wait_for_empty_job(job: &WindowsJob, wait: Duration) -> std::io::Result<()> {
+    let deadline = Instant::now() + wait;
+    loop {
+        if job.active_processes()? == 0 {
+            return Ok(());
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "the elevated process tree did not terminate before the cleanup deadline",
+            ));
+        }
+        std::thread::sleep(remaining.min(Duration::from_millis(10)));
+    }
+}
+
+fn terminate_descendants(root_pid: u32, wait: Duration) {
+    use std::collections::{BTreeMap, BTreeSet};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return;
+    }
+    let snapshot = ProcessHandle(snapshot);
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..PROCESSENTRY32W::default()
+    };
+    let mut parents = BTreeMap::new();
+    let mut available = unsafe { Process32FirstW(snapshot.0, &mut entry) } != 0;
+    while available {
+        parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+        available = unsafe { Process32NextW(snapshot.0, &mut entry) } != 0;
+    }
+
+    let mut descendants = BTreeSet::from([root_pid]);
+    loop {
+        let before = descendants.len();
+        for (&pid, &parent) in &parents {
+            if descendants.contains(&parent) {
+                descendants.insert(pid);
+            }
+        }
+        if descendants.len() == before {
+            break;
+        }
+    }
+    descendants.remove(&root_pid);
+    let handles = descendants
+        .into_iter()
+        .filter_map(|pid| {
+            let handle = unsafe { OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, pid) };
+            (!handle.is_null()).then_some(ProcessHandle(handle))
+        })
+        .collect::<Vec<_>>();
+    for handle in &handles {
+        unsafe {
+            TerminateProcess(handle.0, 1);
+        }
+    }
+    let deadline = Instant::now() + wait;
+    for handle in &handles {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        unsafe {
+            WaitForSingleObject(handle.0, duration_milliseconds(remaining));
+        }
+    }
 }
 
 pub(super) fn studio_is_running(executable: &Path) -> Result<bool, String> {
@@ -111,7 +369,8 @@ $running = @(Get-CimInstance Win32_Process -Filter "Name = 'studiopro.exe'" -Err
 })
 [Console]::Out.Write(($running.Count -gt 0).ToString())
 "#;
-    let output = hidden_command("powershell.exe")
+    let mut command = hidden_command("powershell.exe");
+    command
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -120,9 +379,14 @@ $running = @(Get-CimInstance Win32_Process -Filter "Name = 'studiopro.exe'" -Err
             SCRIPT,
         ])
         .env("MENDIMARU_PROCESS_PATH", executable)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| crate::tr!("error-native-process-inspect", error = error))?;
+        .stdin(Stdio::null());
+    let output = crate::process::output_sync(
+        command,
+        CommandPolicy::STATUS,
+        None,
+        "Studio Pro process inspection",
+    )
+    .map_err(|error| crate::tr!("error-native-process-inspect", error = error))?;
     if !output.status.success() {
         return Err(crate::tr!(
             "error-native-process-inspect",
@@ -173,7 +437,13 @@ pub(super) fn quote_windows_argument(argument: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{hidden_command, quote_windows_argument, run_elevated, system_executable};
+    use super::{
+        hidden_command, quote_windows_argument, run_elevated, system_executable, wait_for_process,
+    };
+    use crate::process::{CancellationToken, CommandFailureKind, CommandPolicy, WindowsJob};
+    use std::os::windows::io::AsRawHandle;
+    use std::process::{Child, Stdio};
+    use std::time::Duration;
 
     #[test]
     fn quotes_windows_arguments_without_shell_interpretation() {
@@ -193,7 +463,109 @@ mod tests {
     fn refuses_a_missing_elevated_executable_before_showing_uac() {
         let temporary = tempfile::tempdir().expect("temp dir");
         let missing = temporary.path().join("missing-installer.exe");
-        assert!(run_elevated(&missing, &[]).is_err());
+        let failure = run_elevated(
+            &missing,
+            &[],
+            CommandPolicy::new(Duration::from_secs(1), 0),
+            &CancellationToken::default(),
+            "missing installer fixture",
+        )
+        .expect_err("missing elevated executable is rejected");
+        assert_eq!(failure.kind(), CommandFailureKind::Spawn);
+    }
+
+    #[test]
+    fn fake_elevated_process_has_bounded_timeout_and_cleanup() {
+        let mut child = fixture_process("while ($true) { Start-Sleep -Milliseconds 100 }");
+        let handle = child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+        let job = WindowsJob::attach(handle).ok();
+        let failure = wait_for_process(
+            handle,
+            child.id(),
+            job.as_ref(),
+            CommandPolicy::new(Duration::from_millis(100), 0),
+            &CancellationToken::default(),
+            "fake elevated timeout",
+        )
+        .expect_err("fake elevated process times out");
+
+        assert_eq!(failure.kind(), CommandFailureKind::Timeout);
+        if let Some(job) = &job {
+            assert_eq!(job.active_processes().expect("query timeout job"), 0);
+        }
+        child.wait().expect("timed out fixture is reaped");
+    }
+
+    #[test]
+    fn fake_elevated_process_observes_user_cancellation() {
+        let mut child = fixture_process("while ($true) { Start-Sleep -Milliseconds 100 }");
+        let handle = child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+        let job = WindowsJob::attach(handle).ok();
+        let cancellation = CancellationToken::default();
+        let trigger = cancellation.clone();
+        let cancellation_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            trigger.cancel();
+        });
+        let failure = wait_for_process(
+            handle,
+            child.id(),
+            job.as_ref(),
+            CommandPolicy::new(Duration::from_secs(5), 0),
+            &cancellation,
+            "fake elevated cancellation",
+        )
+        .expect_err("fake elevated process is cancelled");
+
+        cancellation_thread
+            .join()
+            .expect("cancellation thread joins");
+        assert_eq!(failure.kind(), CommandFailureKind::Cancelled);
+        if let Some(job) = &job {
+            assert_eq!(job.active_processes().expect("query cancelled job"), 0);
+        }
+        child.wait().expect("cancelled fixture is reaped");
+    }
+
+    #[test]
+    fn fake_elevated_process_preserves_success_and_reboot_exit_codes() {
+        for exit_code in [0_u32, 1641, 3010] {
+            let mut child = fixture_process(&format!("exit {exit_code}"));
+            let handle = child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+            let job = WindowsJob::attach(handle).ok();
+            let actual = wait_for_process(
+                handle,
+                child.id(),
+                job.as_ref(),
+                CommandPolicy::new(Duration::from_secs(5), 0),
+                &CancellationToken::default(),
+                "fake elevated success",
+            )
+            .expect("fake elevated process exits");
+
+            assert_eq!(actual, exit_code);
+            if let Some(job) = &job {
+                assert_eq!(job.active_processes().expect("query successful job"), 0);
+            }
+            child.wait().expect("successful fixture is reaped");
+        }
+    }
+
+    fn fixture_process(script: &str) -> Child {
+        let mut command = hidden_command("powershell.exe");
+        command
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                script,
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start fake elevated process")
     }
 
     #[test]

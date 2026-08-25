@@ -32,6 +32,10 @@ const SKIP_LIVE_STUDIO = process.env.MENDIMARU_E2E_SKIP_LIVE_STUDIO === "1";
 const thresholds = {
   startupMs: numberEnvironment("MENDIMARU_E2E_MAX_STARTUP_MS", 120_000),
   environmentMs: numberEnvironment("MENDIMARU_E2E_MAX_ENVIRONMENT_MS", 5_000),
+  boundedProcessMs: numberEnvironment(
+    "MENDIMARU_E2E_MAX_BOUNDED_PROCESS_MS",
+    10_000,
+  ),
   installedMs: numberEnvironment("MENDIMARU_E2E_MAX_INSTALLED_MS", 20_000),
   projectsMs: numberEnvironment("MENDIMARU_E2E_MAX_PROJECTS_MS", 10_000),
   marketplaceMs: numberEnvironment("MENDIMARU_E2E_MAX_MARKETPLACE_MS", 120_000),
@@ -190,6 +194,27 @@ async function run() {
         "return !document.querySelector('.host-node') && !document.querySelector('.winboat-control > button');",
       ),
       "the native UI contains no Linux route or WinBoat control",
+    );
+
+    const boundedProcessTimed = await timed(() =>
+      client.invoke("e2e_bounded_process_cleanup"),
+    );
+    report.measurements.boundedProcessMs = boundedProcessTimed.elapsedMs;
+    assertThreshold("boundedProcessMs", boundedProcessTimed.elapsedMs);
+    const boundedProcess = boundedProcessTimed.value;
+    recordAssertion(
+      boundedProcess.failureKind === "cancelled" &&
+        boundedProcess.processIds.length === 2,
+      "the native runner reports exact cancellation for a stalled child tree",
+    );
+    await waitUntil(
+      () => boundedProcess.processIds.every((pid) => !processExists(pid)),
+      5_000,
+      `bounded Windows process cleanup (${boundedProcess.processIds.join(", ")})`,
+    );
+    recordAssertion(
+      true,
+      "the native runner reaps both the stalled root and its descendant",
     );
 
     const config = await client.invoke("get_config");
@@ -791,6 +816,17 @@ function terminateProcessTree(pid) {
     });
   } catch {
     // The dev process may already have exited after the WebDriver session closed.
+  }
+}
+
+function processExists(pid) {
+  assert.ok(Number.isInteger(pid) && pid > 0);
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === "ESRCH") return false;
+    throw error;
   }
 }
 

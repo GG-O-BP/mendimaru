@@ -373,6 +373,7 @@ async fn execute(
             timeout_seconds: SESSION_OPERATION_TIMEOUT_SECONDS,
             operation: &operation,
             keep_remote_app_alive,
+            cancellation: None,
         },
         |_| {},
     )
@@ -752,6 +753,7 @@ fn failure(message: impl Into<String>) -> WindowsOperationFailure {
         message: message.into(),
         exit_code: None,
         retryable: false,
+        failure_kind: None,
     }
 }
 

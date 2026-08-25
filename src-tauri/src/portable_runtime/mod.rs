@@ -1046,6 +1046,15 @@ fn safe_runtime_error_message(code: BackendErrorCode) -> &'static str {
         BackendErrorCode::InvalidRequest => "the runtime request is invalid",
         BackendErrorCode::PreconditionFailed => "a runtime precondition was not satisfied",
         BackendErrorCode::OperationFailed => "the runtime operation could not be completed",
+        BackendErrorCode::ExternalProcessTimeout => {
+            "an external runtime process did not finish before its deadline"
+        }
+        BackendErrorCode::ExternalProcessCancelled => {
+            "an external runtime process was cancelled"
+        }
+        BackendErrorCode::ExternalProcessInterrupted => {
+            "an external runtime process was interrupted during cleanup"
+        }
     }
 }
 

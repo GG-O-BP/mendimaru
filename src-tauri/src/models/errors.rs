@@ -12,6 +12,9 @@ pub enum CommandErrorCode {
     InvalidRequest,
     PreconditionFailed,
     OperationFailed,
+    ExternalProcessTimeout,
+    ExternalProcessCancelled,
+    ExternalProcessInterrupted,
     ToolchainUnavailable,
     RuntimeVersionUnsupported,
     ConsistencyFailed,
@@ -55,6 +58,13 @@ impl From<BackendError> for CommandError {
             BackendErrorCode::InvalidRequest => CommandErrorCode::InvalidRequest,
             BackendErrorCode::PreconditionFailed => CommandErrorCode::PreconditionFailed,
             BackendErrorCode::OperationFailed => CommandErrorCode::OperationFailed,
+            BackendErrorCode::ExternalProcessTimeout => CommandErrorCode::ExternalProcessTimeout,
+            BackendErrorCode::ExternalProcessCancelled => {
+                CommandErrorCode::ExternalProcessCancelled
+            }
+            BackendErrorCode::ExternalProcessInterrupted => {
+                CommandErrorCode::ExternalProcessInterrupted
+            }
             BackendErrorCode::ToolchainUnavailable => CommandErrorCode::ToolchainUnavailable,
             BackendErrorCode::RuntimeVersionUnsupported => {
                 CommandErrorCode::RuntimeVersionUnsupported

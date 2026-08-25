@@ -12,8 +12,8 @@ pub use config::{AppConfig, ContainerRuntime, SettingsSaveResult};
 pub use download::{DownloadProgress, DownloadState};
 pub use environment::{
     environment_diagnostic_report, ContainerStatus, EnvironmentDiagnostic,
-    EnvironmentDiagnosticAction, EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
-    EnvironmentStatus, HostPlatform, PlatformCapabilities,
+    EnvironmentDiagnosticAction, EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId,
+    EnvironmentDiagnosticStatus, EnvironmentStatus, HostPlatform, PlatformCapabilities,
 };
 pub use errors::{CommandError, CommandErrorCode};
 pub use localization::{LocaleOption, LocalizationBundle, TextDirection};
@@ -30,8 +30,9 @@ pub use studio::{
 mod tests {
     use super::{
         CommandError, CommandErrorCode, ContainerRuntime, ContainerStatus, DownloadState,
-        EnvironmentDiagnosticAction, EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
-        HostPlatform, OperationKind, OperationStage, OperationState, TextDirection,
+        EnvironmentDiagnosticAction, EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId,
+        EnvironmentDiagnosticStatus, HostPlatform, OperationKind, OperationStage, OperationState,
+        TextDirection,
     };
     use std::collections::BTreeSet;
 
@@ -130,6 +131,15 @@ mod tests {
             ],
         );
         assert_registry(
+            "environmentDiagnosticErrorCode",
+            [
+                EnvironmentDiagnosticErrorCode::ExternalProcessSpawnFailed,
+                EnvironmentDiagnosticErrorCode::ExternalProcessTimeout,
+                EnvironmentDiagnosticErrorCode::ExternalProcessCancelled,
+                EnvironmentDiagnosticErrorCode::ExternalProcessInterrupted,
+            ],
+        );
+        assert_registry(
             "downloadState",
             [
                 DownloadState::Starting,
@@ -205,6 +215,9 @@ mod tests {
                 CommandErrorCode::InvalidRequest,
                 CommandErrorCode::PreconditionFailed,
                 CommandErrorCode::OperationFailed,
+                CommandErrorCode::ExternalProcessTimeout,
+                CommandErrorCode::ExternalProcessCancelled,
+                CommandErrorCode::ExternalProcessInterrupted,
                 CommandErrorCode::ToolchainUnavailable,
                 CommandErrorCode::RuntimeVersionUnsupported,
                 CommandErrorCode::ConsistencyFailed,

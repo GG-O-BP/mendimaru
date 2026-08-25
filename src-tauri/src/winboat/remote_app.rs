@@ -1,6 +1,6 @@
 use super::security::{secure_powershell_launcher, OperationSecurity};
-use crate::config::resolved_rdp_port;
 use crate::models::AppConfig;
+use crate::process::{self, CommandPolicy};
 use crate::projects::linux_path_to_windows_share;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use sha2::{Digest, Sha256};
@@ -70,13 +70,19 @@ impl Drop for RemoteAppProcess {
 }
 
 fn container_credentials(config: &AppConfig) -> Result<(String, String), String> {
-    let output = Command::new(config.container_runtime.as_str())
+    let mut command = Command::new(config.container_runtime.as_str());
+    command
         .arg("inspect")
         .arg("--format")
         .arg("{{range .Config.Env}}{{println .}}{{end}}")
-        .arg(&config.container_name)
-        .output()
-        .map_err(|error| crate::tr!("error-windows-credentials-inspect", error = error))?;
+        .arg(&config.container_name);
+    let output = process::output_sync(
+        command,
+        CommandPolicy::STATUS,
+        None,
+        "container credential inspection",
+    )
+    .map_err(|error| crate::tr!("error-windows-credentials-inspect", error = error))?;
     if !output.status.success() {
         return Err(crate::tr!("error-windows-account-missing"));
     }
@@ -159,7 +165,7 @@ fn spawn_remote_app(
         format!("/u:{username}"),
         format!("/p:{password}"),
         format!("/v:{}", config.rdp_host),
-        format!("/port:{}", resolved_rdp_port(config)),
+        format!("/port:{}", config.rdp_port),
         certificate_policy,
         "/log-level:WARN".to_string(),
         "+clipboard".to_string(),
@@ -231,11 +237,9 @@ fn read_diagnostics_at(file: &File, bytes: &mut [u8]) -> std::io::Result<usize> 
 }
 
 fn certificate_policy(config: &AppConfig, trust_store: &Path) -> Result<String, String> {
-    let pin = trust_store.join("freerdp/server").join(format!(
-        "{}_{}.pem",
-        config.rdp_host,
-        resolved_rdp_port(config)
-    ));
+    let pin = trust_store
+        .join("freerdp/server")
+        .join(format!("{}_{}.pem", config.rdp_host, config.rdp_port));
     match std::fs::read(&pin) {
         Ok(pem) => fingerprint_policy_from_pem(&pem),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

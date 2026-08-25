@@ -8,8 +8,9 @@ use crate::contracts::{
 use crate::downloads::{DownloadManager, InstallError};
 use crate::models::{
     AppConfig, CommandError, CommandErrorCode, DownloadProgress, DownloadState,
-    EnvironmentDiagnosticAction, EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
-    EnvironmentStatus, OperationKind, OperationRecord, OperationStage, StudioVersion,
+    EnvironmentDiagnosticAction, EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId,
+    EnvironmentDiagnosticStatus, EnvironmentStatus, OperationKind, OperationRecord, OperationStage,
+    StudioVersion,
 };
 use crate::operations::{OperationTracker, SessionActionGuard};
 use serde::Serialize;
@@ -59,6 +60,8 @@ pub(crate) struct SafeEnvironmentCheck {
     pub status: EnvironmentDiagnosticStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<EnvironmentDiagnosticAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<EnvironmentDiagnosticErrorCode>,
 }
 
 impl From<&EnvironmentStatus> for SafeEnvironmentStatus {
@@ -73,6 +76,7 @@ impl From<&EnvironmentStatus> for SafeEnvironmentStatus {
                     id: diagnostic.id,
                     status: diagnostic.status,
                     action: diagnostic.action,
+                    error_code: diagnostic.error_code,
                 })
                 .collect(),
         }
@@ -602,7 +606,12 @@ where
         }
         Err(error) => {
             let command_error = install_error(error);
-            let _ = tracker.fail(&command_error);
+            if command_error.code == CommandErrorCode::ExternalProcessCancelled {
+                let _ = tracker
+                    .cancel_with_code("external_process_cancelled", "external_process_cancelled");
+            } else {
+                let _ = tracker.fail(&command_error);
+            }
             return Err(command_error);
         }
     }
@@ -851,10 +860,15 @@ mod tests {
     use super::{
         ensure_no_connected_remote_app_version, ensure_version_not_installed,
         exact_project_launch_path, launch_project, operation, project, projects,
+        SafeEnvironmentStatus,
     };
     use crate::app_paths::AppPaths;
     use crate::contracts::CapabilityId;
-    use crate::models::{AppConfig, CommandErrorCode, ContainerRuntime, StudioVersion};
+    use crate::models::{
+        AppConfig, CommandErrorCode, ContainerRuntime, ContainerStatus, EnvironmentDiagnostic,
+        EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
+        EnvironmentStatus, HostPlatform, PlatformCapabilities, StudioVersion,
+    };
     use crate::operations::OperationTracker;
     use std::fs;
 
@@ -877,6 +891,44 @@ mod tests {
             windows_studio_paths: Vec::new(),
             startup_timeout_seconds: 1,
         }
+    }
+
+    #[test]
+    fn headless_environment_status_preserves_process_codes_without_observed_details() {
+        let status = EnvironmentStatus {
+            platform: PlatformCapabilities {
+                kind: HostPlatform::LinuxWinboat,
+                architecture: "x86_64".into(),
+                requires_winboat: true,
+                supports_studio_management: true,
+                supports_installation: true,
+                supports_uninstallation: true,
+                supports_projects: true,
+            },
+            ready: false,
+            winboat_available: true,
+            winboat_initialized: true,
+            setup_pending: false,
+            compose_available: true,
+            runtime_available: false,
+            freerdp_available: true,
+            shared_directory_available: true,
+            shared_mount_matches: true,
+            container_status: ContainerStatus::Unknown,
+            guest_online: false,
+            diagnostics: vec![EnvironmentDiagnostic {
+                id: EnvironmentDiagnosticId::ContainerRuntime,
+                status: EnvironmentDiagnosticStatus::Failure,
+                observed: Some("private runtime output".into()),
+                action: None,
+                error_code: Some(EnvironmentDiagnosticErrorCode::ExternalProcessTimeout),
+            }],
+        };
+
+        let serialized = serde_json::to_string(&SafeEnvironmentStatus::from(&status))
+            .expect("headless environment status serializes");
+        assert!(serialized.contains("\"errorCode\":\"external-process-timeout\""));
+        assert!(!serialized.contains("private runtime output"));
     }
 
     #[test]
