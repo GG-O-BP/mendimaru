@@ -93,8 +93,7 @@ jobs:
         shell: bash
         run: |
           chrome_path="$(
-            node --input-type=module -e \
-              "import { chromium } from '@playwright/test'; process.stdout.write(chromium.executablePath())"
+            command -v google-chrome-stable || command -v google-chrome
           )"
           test -x "$chrome_path"
           MENDIMARU_CHROME_PATH="$chrome_path" \

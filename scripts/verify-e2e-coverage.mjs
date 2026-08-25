@@ -28,6 +28,7 @@ const marketplaceSandboxGate =
   hasAll(ci, [
     "Run sandboxed Marketplace Chromium security gate",
     "live_linux_marketplace_browser_security_gate",
+    "command -v google-chrome-stable",
     'MENDIMARU_CHROME_PATH="$chrome_path"',
   ]) &&
   hasAll(marketplaceSession, [
