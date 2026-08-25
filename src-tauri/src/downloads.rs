@@ -1,8 +1,10 @@
 use crate::marketplace;
 mod cache;
 mod progress;
+pub(crate) mod storage;
 pub(crate) use progress::DOWNLOAD_EVENT;
 
+use crate::app_paths::AppPaths;
 use crate::contracts::BackendError;
 use crate::models::{AppConfig, DownloadState};
 use cache::{CacheInspection, RemoteMetadata};
@@ -13,10 +15,14 @@ use progress::{
     STAGING_PROGRESS_START,
 };
 use reqwest::header::{ETAG, LAST_MODIFIED};
-use std::path::Path;
+use reqwest::{redirect, Url};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
+
+pub(crate) const MAX_INSTALLER_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const MAX_DOWNLOAD_REDIRECTS: usize = 5;
+const MENDIX_ARTIFACT_HOST: &str = "artifacts.rnd.mendix.com";
 
 #[derive(Default)]
 pub struct DownloadManager {
@@ -77,6 +83,7 @@ impl Drop for DownloadGuard<'_> {
 }
 
 pub async fn download_and_launch(
+    paths: &AppPaths,
     config: &AppConfig,
     manager: &DownloadManager,
     version: String,
@@ -99,6 +106,11 @@ pub async fn download_and_launch(
         &mut on_progress,
     );
     let download_url = marketplace::installer_url(&version).await?;
+    let installer_cache = cache::InstallerCache::open(paths, &version)
+        .map_err(|error| crate::tr!("error-installer-directory-create", error = error))?;
+    let installer_path = installer_cache
+        .installer_path()
+        .map_err(|error| crate::tr!("error-installer-directory-create", error = error))?;
     emit_progress(
         DownloadProgressUpdate {
             version: &version,
@@ -111,15 +123,6 @@ pub async fn download_and_launch(
         },
         &mut on_progress,
     );
-    let installer_directory = Path::new(&config.shared_directory).join(".mendimaru/installers");
-    tokio::fs::create_dir_all(&installer_directory)
-        .await
-        .map_err(|error| crate::tr!("error-installer-directory-create", error = error))?;
-    let installer_path = installer_directory.join(format!(
-        "Mendix-{}-Setup.exe",
-        safe_version_filename(&version)
-    ));
-
     let cached_installer = if force_redownload {
         emit_progress(
             DownloadProgressUpdate {
@@ -135,7 +138,7 @@ pub async fn download_and_launch(
         );
         None
     } else {
-        match cache::inspect(&installer_path, &version, &download_url).await {
+        match cache::inspect(&installer_cache, &version, &download_url).await {
             CacheInspection::Missing => None,
             CacheInspection::Valid(metadata) => Some((metadata.size, metadata.sha256)),
             CacheInspection::Invalid(error) => {
@@ -151,7 +154,7 @@ pub async fn download_and_launch(
                     },
                     &mut on_progress,
                 );
-                cache::discard(&installer_path)
+                cache::discard(&installer_cache)
                     .await
                     .map_err(|error| crate::tr!("error-installer-cache-remove", error = error))?;
                 None
@@ -178,7 +181,7 @@ pub async fn download_and_launch(
             manager,
             &version,
             &download_url,
-            &installer_path,
+            &installer_cache,
             &mut on_progress,
         )
         .await?;
@@ -215,7 +218,7 @@ pub async fn download_and_launch(
             // This directory is an application-owned cache. Only discard a
             // payload that failed trust/integrity verification; UAC cancellation
             // and installer failures retain the already verified download.
-            let _ = cache::discard(&installer_path).await;
+            let _ = cache::discard(&installer_cache).await;
             return Err(error.into());
         }
     }
@@ -252,7 +255,7 @@ async fn download_file<F>(
     manager: &DownloadManager,
     version: &str,
     url: &str,
-    destination: &Path,
+    destination: &cache::InstallerCache,
     on_operation_progress: &mut F,
 ) -> Result<String, InstallError>
 where
@@ -263,6 +266,7 @@ where
         version,
         url,
         destination,
+        DownloadPolicy::production(),
         |state, downloaded_bytes, total_bytes, percentage, message| {
             emit_progress(
                 DownloadProgressUpdate {
@@ -285,13 +289,13 @@ async fn download_file_with_progress<F>(
     manager: &DownloadManager,
     version: &str,
     url: &str,
-    destination: &Path,
+    destination: &cache::InstallerCache,
+    policy: DownloadPolicy,
     mut on_progress: F,
 ) -> Result<String, InstallError>
 where
     F: FnMut(DownloadState, u64, Option<u64>, Option<f64>, String),
 {
-    let partial = cache::partial_path(destination);
     on_progress(
         DownloadState::Connecting,
         0,
@@ -299,14 +303,18 @@ where
         Some(DOWNLOAD_PROGRESS_START),
         crate::tr!("progress-connecting"),
     );
+    let parsed_url = Url::parse(url).map_err(|_| crate::tr!("error-download-source-untrusted"))?;
+    policy.validate(&parsed_url)?;
+    let redirect_policy = policy.redirect_policy();
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(60 * 60))
         .user_agent(download_user_agent())
+        .redirect(redirect_policy)
         .build()
         .map_err(|error| crate::tr!("error-download-client-create", error = error))?;
     let response = client
-        .get(url)
+        .get(parsed_url)
         .header("Referer", "https://marketplace.mendix.com/")
         .header("Accept", "application/octet-stream,*/*")
         .send()
@@ -315,6 +323,13 @@ where
         .error_for_status()
         .map_err(|error| crate::tr!("error-download-server", error = error))?;
     let total = response.content_length();
+    if total.is_some_and(|size| size > policy.maximum_bytes) {
+        return Err(crate::tr!(
+            "error-installer-download-too-large",
+            limit = policy.maximum_bytes
+        )
+        .into());
+    }
     let remote_metadata = RemoteMetadata {
         content_length: total,
         etag: response
@@ -329,15 +344,13 @@ where
             .map(str::to_string),
     };
     let mut stream = response.bytes_stream();
-    let mut file = tokio::fs::File::create(&partial)
-        .await
+    let mut partial = destination
+        .create_payload()
         .map_err(|error| crate::tr!("error-temp-installer-create", error = error))?;
     let mut downloaded = 0_u64;
 
     while let Some(chunk) = stream.next().await {
         if manager.cancelled.load(Ordering::SeqCst) {
-            drop(file);
-            let _ = tokio::fs::remove_file(&partial).await;
             on_progress(
                 DownloadState::Cancelled,
                 downloaded,
@@ -352,15 +365,24 @@ where
         let bytes = match chunk {
             Ok(bytes) => bytes,
             Err(error) => {
-                drop(file);
-                let _ = tokio::fs::remove_file(&partial).await;
                 return Err(crate::tr!("error-download-data-read", error = error).into());
             }
         };
-        file.write_all(&bytes)
+        let next_size = downloaded
+            .checked_add(bytes.len() as u64)
+            .filter(|size| *size <= policy.maximum_bytes)
+            .ok_or_else(|| {
+                InstallError::Other(crate::tr!(
+                    "error-installer-download-too-large",
+                    limit = policy.maximum_bytes
+                ))
+            })?;
+        partial
+            .file_mut()
+            .write_all(&bytes)
             .await
             .map_err(|error| crate::tr!("error-installer-write", error = error))?;
-        downloaded += bytes.len() as u64;
+        downloaded = next_size;
         on_progress(
             DownloadState::Downloading,
             downloaded,
@@ -369,22 +391,24 @@ where
             crate::tr!("progress-downloading"),
         );
     }
-    file.flush()
+    partial
+        .file_mut()
+        .flush()
         .await
         .map_err(|error| crate::tr!("error-installer-flush", error = error))?;
-    file.sync_all()
+    partial
+        .file_mut()
+        .sync_all()
         .await
         .map_err(|error| crate::tr!("error-installer-flush", error = error))?;
-    drop(file);
-    let validated = match cache::validate_download(&partial, total).await {
+    let validated = match cache::validate_temporary_download(&mut partial, total).await {
         Ok(validated) => validated,
         Err(error) => {
-            let _ = tokio::fs::remove_file(&partial).await;
-            return Err(crate::tr!("error-installer-download-invalid", reason = error).into());
+            return Err(crate::tr!("error-installer-download-invalid", reason = error).into())
         }
     };
     let metadata = cache::metadata_for_download(version, url, &validated, remote_metadata);
-    cache::commit(&partial, destination, &metadata)
+    cache::commit(destination, &mut partial, &metadata)
         .await
         .map_err(|error| crate::tr!("error-installer-finalize", error = error))?;
     on_progress(
@@ -397,13 +421,72 @@ where
     Ok(validated.sha256)
 }
 
-fn safe_version_filename(version: &str) -> String {
-    version
-        .chars()
-        .filter(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
+#[derive(Clone)]
+struct DownloadPolicy {
+    scheme: &'static str,
+    host: &'static str,
+    port: u16,
+    maximum_bytes: u64,
+    maximum_redirects: usize,
+}
+
+impl DownloadPolicy {
+    fn production() -> Self {
+        Self {
+            scheme: "https",
+            host: MENDIX_ARTIFACT_HOST,
+            port: 443,
+            maximum_bytes: MAX_INSTALLER_BYTES,
+            maximum_redirects: MAX_DOWNLOAD_REDIRECTS,
+        }
+    }
+
+    fn validate(&self, url: &Url) -> Result<(), InstallError> {
+        if url.scheme() != self.scheme
+            || !url
+                .host_str()
+                .is_some_and(|host| host.eq_ignore_ascii_case(self.host))
+            || url.port_or_known_default() != Some(self.port)
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return Err(crate::tr!("error-download-source-untrusted").into());
+        }
+        Ok(())
+    }
+
+    fn redirect_policy(&self) -> redirect::Policy {
+        let policy = self.clone();
+        redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() > policy.maximum_redirects {
+                return attempt.error("the installer redirect limit was exceeded");
+            }
+            if policy.validate(attempt.url()).is_err() {
+                return attempt.error("the installer redirect target is not trusted");
+            }
+            attempt.follow()
         })
-        .collect()
+    }
+
+    #[cfg(test)]
+    fn fixture(url: &str, maximum_bytes: u64) -> Self {
+        let url = Url::parse(url).expect("fixture URL");
+        Self {
+            scheme: if url.scheme() == "https" {
+                "https"
+            } else {
+                "http"
+            },
+            host: if url.host_str() == Some("localhost") {
+                "localhost"
+            } else {
+                "127.0.0.1"
+            },
+            port: url.port_or_known_default().expect("fixture port"),
+            maximum_bytes,
+            maximum_redirects: MAX_DOWNLOAD_REDIRECTS,
+        }
+    }
 }
 
 fn download_user_agent() -> String {
@@ -425,12 +508,12 @@ fn download_user_agent() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        cache, download_file_with_progress, download_user_agent, safe_version_filename,
-        DownloadManager, InstallError,
+        cache, download_file_with_progress, download_user_agent, AppPaths, DownloadManager,
+        DownloadPolicy, InstallError,
     };
     use crate::models::DownloadState;
     use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
     use std::path::Path;
     use std::thread::JoinHandle;
 
@@ -445,35 +528,106 @@ mod tests {
         }
     }
 
+    fn read_request(stream: &mut TcpStream) {
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .expect("set fixture timeout");
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 2048];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            let read = stream.read(&mut buffer).expect("read fixture request");
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+        }
+        assert!(request.starts_with(b"GET "));
+    }
+
+    fn write_fixed_response(stream: &mut TcpStream, body: &[u8], declared_length: usize) {
+        if write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {declared_length}\r\nETag: \"fixture-etag\"\r\nConnection: close\r\n\r\n"
+        )
+        .is_ok()
+        {
+            let _ = stream.write_all(body);
+            let _ = stream.flush();
+        }
+    }
+
     fn serve_once(body: Vec<u8>, declared_length: Option<usize>) -> FixtureServer {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
         let address = listener.local_addr().expect("fixture server address");
         let handle = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept fixture request");
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                .expect("set fixture timeout");
-            let mut request = Vec::new();
-            let mut buffer = [0_u8; 2048];
-            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
-                let read = stream.read(&mut buffer).expect("read fixture request");
-                if read == 0 {
-                    break;
-                }
-                request.extend_from_slice(&buffer[..read]);
-            }
-            assert!(request.starts_with(b"GET "));
+            read_request(&mut stream);
             let length = declared_length.unwrap_or(body.len());
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {length}\r\nETag: \"fixture-etag\"\r\nConnection: close\r\n\r\n"
-            )
-            .expect("write fixture response headers");
-            stream.write_all(&body).expect("write fixture body");
-            stream.flush().expect("flush fixture response");
+            write_fixed_response(&mut stream, &body, length);
         });
         FixtureServer {
             url: format!("http://{address}/Mendix-11.12.2-Setup.exe"),
+            handle,
+        }
+    }
+
+    fn serve_chunked(body: Vec<u8>) -> FixtureServer {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+        let address = listener.local_addr().expect("fixture server address");
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept fixture request");
+            read_request(&mut stream);
+            if write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+            )
+            .is_err()
+            {
+                return;
+            }
+            for chunk in body.chunks(16 * 1024) {
+                if write!(stream, "{:x}\r\n", chunk.len()).is_err()
+                    || stream.write_all(chunk).is_err()
+                    || stream.write_all(b"\r\n").is_err()
+                {
+                    return;
+                }
+            }
+            let _ = stream.write_all(b"0\r\n\r\n");
+            let _ = stream.flush();
+        });
+        FixtureServer {
+            url: format!("http://{address}/chunked"),
+            handle,
+        }
+    }
+
+    fn serve_redirect(body: Vec<u8>, allowed_target: bool) -> FixtureServer {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture server");
+        let address = listener.local_addr().expect("fixture server address");
+        let handle = std::thread::spawn(move || {
+            let (mut first, _) = listener.accept().expect("accept redirect request");
+            read_request(&mut first);
+            let location = if allowed_target {
+                "/Mendix-11.12.2-Setup.exe".to_string()
+            } else {
+                format!("http://localhost:{}/untrusted.exe", address.port())
+            };
+            write!(
+                first,
+                "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .expect("write redirect response");
+            first.flush().expect("flush redirect response");
+            drop(first);
+            if allowed_target {
+                let (mut second, _) = listener.accept().expect("accept redirected request");
+                read_request(&mut second);
+                write_fixed_response(&mut second, &body, body.len());
+            }
+        });
+        FixtureServer {
+            url: format!("http://{address}/redirect"),
             handle,
         }
     }
@@ -489,7 +643,8 @@ mod tests {
 
     async fn run_fixture_download(
         url: &str,
-        destination: &Path,
+        destination: &cache::InstallerCache,
+        maximum_bytes: u64,
         states: &mut Vec<DownloadState>,
     ) -> Result<(), InstallError> {
         download_file_with_progress(
@@ -497,15 +652,99 @@ mod tests {
             "11.12.2",
             url,
             destination,
+            DownloadPolicy::fixture(url, maximum_bytes),
             |state, _, _, _, _| states.push(state),
         )
         .await
         .map(|_| ())
     }
 
+    fn assert_no_temporary_files(directory: &Path) {
+        let temporary_names = std::fs::read_dir(directory)
+            .expect("read cache directory")
+            .map(|entry| {
+                entry
+                    .expect("cache entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .filter(|name| name.starts_with("mendimaru-"))
+            .collect::<Vec<_>>();
+        assert!(
+            temporary_names.is_empty(),
+            "temporary cache files remain: {temporary_names:?}"
+        );
+    }
+
     #[test]
-    fn installer_cache_filename_rejects_path_characters() {
-        assert_eq!(safe_version_filename(r"11.12.2/..\\evil"), "11.12.2..evil");
+    fn production_url_policy_allows_only_exact_https_artifact_origins() {
+        let policy = DownloadPolicy::production();
+        assert!(policy
+            .validate(
+                &reqwest::Url::parse(
+                    "https://artifacts.rnd.mendix.com/path/installer.exe?token=fixture"
+                )
+                .expect("allowed URL")
+            )
+            .is_ok());
+        for url in [
+            "http://artifacts.rnd.mendix.com/installer.exe",
+            "https://evil.artifacts.rnd.mendix.com/installer.exe",
+            "https://artifacts.rnd.mendix.com.evil.test/installer.exe",
+            "https://artifacts.rnd.mendix.com:444/installer.exe",
+            "https://user@artifacts.rnd.mendix.com/installer.exe",
+        ] {
+            assert!(
+                policy
+                    .validate(&reqwest::Url::parse(url).expect("test URL"))
+                    .is_err(),
+                "unexpectedly trusted {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn cache_names_reject_path_traversal_even_without_the_public_validator() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        assert!(
+            cache::InstallerCache::open_for_tests(temporary.path(), r"11.12.2/../../evil").is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn legacy_shared_partial_symlink_is_ignored_by_the_private_cache() {
+        use std::os::unix::fs::symlink;
+        use tokio::io::AsyncWriteExt;
+
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let shared_cache = temporary.path().join("shared/.mendimaru/installers");
+        std::fs::create_dir_all(&shared_cache).expect("legacy shared cache");
+        let sentinel = temporary.path().join("sentinel");
+        std::fs::write(&sentinel, b"unchanged").expect("sentinel");
+        let legacy_partial = shared_cache.join("Mendix-11.12.2-Setup.exe.download");
+        symlink(&sentinel, &legacy_partial).expect("legacy partial symlink");
+        let paths = AppPaths::for_tests(
+            temporary.path().join("config"),
+            temporary.path().join("private-cache"),
+        );
+        let destination =
+            cache::InstallerCache::open(&paths, "11.12.2").expect("host-private installer cache");
+        let mut partial = destination.create_payload().expect("private payload");
+
+        partial
+            .file_mut()
+            .write_all(b"private bytes")
+            .await
+            .expect("write private payload");
+
+        assert!(partial.path().starts_with(paths.cache_directory()));
+        assert_eq!(
+            std::fs::read(&sentinel).expect("read sentinel"),
+            b"unchanged"
+        );
+        assert!(legacy_partial.is_symlink());
     }
 
     #[test]
@@ -538,12 +777,13 @@ mod tests {
     #[tokio::test]
     async fn http_download_becomes_a_reusable_verified_cache() {
         let temporary = tempfile::tempdir().expect("temporary directory");
-        let destination = temporary.path().join("Mendix-11.12.2-Setup.exe");
+        let destination = cache::InstallerCache::open_for_tests(temporary.path(), "11.12.2")
+            .expect("installer cache");
         let server = serve_once(pe_fixture(), None);
         let url = server.url.clone();
         let mut states = Vec::new();
 
-        run_fixture_download(&url, &destination, &mut states)
+        run_fixture_download(&url, &destination, u64::MAX, &mut states)
             .await
             .expect("download valid fixture");
         server.finish();
@@ -555,54 +795,155 @@ mod tests {
             cache::inspect(&destination, "11.12.2", &url).await,
             cache::CacheInspection::Valid(_)
         ));
-        assert!(!cache::partial_path(&destination).exists());
+        assert_no_temporary_files(temporary.path());
+    }
+
+    #[tokio::test]
+    async fn same_origin_redirect_is_followed_and_untrusted_host_redirect_is_blocked() {
+        let allowed_root = tempfile::tempdir().expect("allowed cache directory");
+        let allowed_cache = cache::InstallerCache::open_for_tests(allowed_root.path(), "11.12.2")
+            .expect("allowed installer cache");
+        let allowed = serve_redirect(pe_fixture(), true);
+        let allowed_url = allowed.url.clone();
+        run_fixture_download(&allowed_url, &allowed_cache, u64::MAX, &mut Vec::new())
+            .await
+            .expect("same-origin redirect");
+        allowed.finish();
+        assert!(matches!(
+            cache::inspect(&allowed_cache, "11.12.2", &allowed_url).await,
+            cache::CacheInspection::Valid(_)
+        ));
+
+        let blocked_root = tempfile::tempdir().expect("blocked cache directory");
+        let blocked_cache = cache::InstallerCache::open_for_tests(blocked_root.path(), "11.12.2")
+            .expect("blocked installer cache");
+        let blocked = serve_redirect(pe_fixture(), false);
+        let blocked_url = blocked.url.clone();
+        let result =
+            run_fixture_download(&blocked_url, &blocked_cache, u64::MAX, &mut Vec::new()).await;
+        blocked.finish();
+        assert!(matches!(result, Err(InstallError::Other(_))));
+        assert!(!blocked_cache
+            .installer_path()
+            .expect("installer path")
+            .exists());
+        assert_no_temporary_files(blocked_root.path());
     }
 
     #[tokio::test]
     async fn http_error_payload_never_replaces_the_installer_cache() {
         let temporary = tempfile::tempdir().expect("temporary directory");
-        let destination = temporary.path().join("Mendix-11.12.2-Setup.exe");
+        let destination = cache::InstallerCache::open_for_tests(temporary.path(), "11.12.2")
+            .expect("installer cache");
         let server = serve_once(vec![b'X'; 1024 * 1024 + 4096], None);
         let url = server.url.clone();
         let mut states = Vec::new();
 
-        let result = run_fixture_download(&url, &destination, &mut states).await;
+        let result = run_fixture_download(&url, &destination, u64::MAX, &mut states).await;
         server.finish();
 
         assert!(matches!(result, Err(InstallError::Other(_))));
-        assert!(!destination.exists());
-        assert!(!cache::metadata_path(&destination).exists());
-        assert!(!cache::partial_path(&destination).exists());
+        assert!(!destination
+            .installer_path()
+            .expect("installer path")
+            .exists());
+        assert!(!destination.metadata_path().expect("metadata path").exists());
+        assert_no_temporary_files(temporary.path());
         assert!(!states.contains(&DownloadState::Downloaded));
     }
 
     #[tokio::test]
     async fn truncated_http_response_never_becomes_a_cache_entry() {
         let temporary = tempfile::tempdir().expect("temporary directory");
-        let destination = temporary.path().join("Mendix-11.12.2-Setup.exe");
+        let destination = cache::InstallerCache::open_for_tests(temporary.path(), "11.12.2")
+            .expect("installer cache");
         let payload = pe_fixture();
         let server = serve_once(payload.clone(), Some(payload.len() + 8192));
         let url = server.url.clone();
         let mut states = Vec::new();
 
-        let result = run_fixture_download(&url, &destination, &mut states).await;
+        let result = run_fixture_download(&url, &destination, u64::MAX, &mut states).await;
         server.finish();
 
         assert!(matches!(result, Err(InstallError::Other(_))));
-        assert!(!destination.exists());
-        assert!(!cache::metadata_path(&destination).exists());
-        assert!(!cache::partial_path(&destination).exists());
+        assert!(!destination
+            .installer_path()
+            .expect("installer path")
+            .exists());
+        assert_no_temporary_files(temporary.path());
         assert!(!states.contains(&DownloadState::Downloaded));
+    }
+
+    #[tokio::test]
+    async fn oversized_content_length_is_rejected_before_a_payload_is_created() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let destination = cache::InstallerCache::open_for_tests(temporary.path(), "11.12.2")
+            .expect("installer cache");
+        let maximum = 64 * 1024_u64;
+        let server = serve_once(vec![0_u8; 1], Some(maximum as usize + 1));
+        let url = server.url.clone();
+
+        let result = run_fixture_download(&url, &destination, maximum, &mut Vec::new()).await;
+        server.finish();
+
+        assert!(matches!(result, Err(InstallError::Other(_))));
+        assert!(!destination
+            .installer_path()
+            .expect("installer path")
+            .exists());
+        assert_no_temporary_files(temporary.path());
+    }
+
+    #[tokio::test]
+    async fn chunked_response_is_stopped_at_the_streaming_size_limit() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let destination = cache::InstallerCache::open_for_tests(temporary.path(), "11.12.2")
+            .expect("installer cache");
+        let maximum = 64 * 1024_u64;
+        let server = serve_chunked(vec![0x5a; maximum as usize + 1]);
+        let url = server.url.clone();
+
+        let result = run_fixture_download(&url, &destination, maximum, &mut Vec::new()).await;
+        server.finish();
+
+        assert!(matches!(result, Err(InstallError::Other(_))));
+        assert!(!destination
+            .installer_path()
+            .expect("installer path")
+            .exists());
+        assert_no_temporary_files(temporary.path());
+    }
+
+    #[tokio::test]
+    async fn payload_exactly_at_the_streaming_limit_is_accepted() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let destination = cache::InstallerCache::open_for_tests(temporary.path(), "11.12.2")
+            .expect("installer cache");
+        let payload = pe_fixture();
+        let maximum = payload.len() as u64;
+        let server = serve_chunked(payload);
+        let url = server.url.clone();
+
+        run_fixture_download(&url, &destination, maximum, &mut Vec::new())
+            .await
+            .expect("boundary-sized payload");
+        server.finish();
+        assert!(matches!(
+            cache::inspect(&destination, "11.12.2", &url).await,
+            cache::CacheInspection::Valid(_)
+        ));
+        assert_no_temporary_files(temporary.path());
     }
 
     #[tokio::test]
     async fn cancelled_forced_download_preserves_the_previous_verified_cache() {
         let temporary = tempfile::tempdir().expect("temporary directory");
-        let destination = temporary.path().join("Mendix-11.12.2-Setup.exe");
+        let destination = cache::InstallerCache::open_for_tests(temporary.path(), "11.12.2")
+            .expect("installer cache");
         let original_server = serve_once(pe_fixture(), None);
         let original_url = original_server.url.clone();
         let mut original_states = Vec::new();
-        run_fixture_download(&original_url, &destination, &mut original_states)
+        run_fixture_download(&original_url, &destination, u64::MAX, &mut original_states)
             .await
             .expect("download original fixture");
         original_server.finish();
@@ -617,6 +958,7 @@ mod tests {
             "11.12.2",
             &replacement_server.url,
             &destination,
+            DownloadPolicy::fixture(&replacement_server.url, u64::MAX),
             |_, _, _, _, _| {},
         )
         .await;
@@ -627,6 +969,66 @@ mod tests {
             cache::inspect(&destination, "11.12.2", &original_url).await,
             cache::CacheInspection::Valid(_)
         ));
-        assert!(!cache::partial_path(&destination).exists());
+        assert_no_temporary_files(temporary.path());
+    }
+
+    #[tokio::test]
+    async fn failed_forced_download_preserves_the_previous_verified_cache() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let destination = cache::InstallerCache::open_for_tests(temporary.path(), "11.12.2")
+            .expect("installer cache");
+        let original = serve_once(pe_fixture(), None);
+        let original_url = original.url.clone();
+        run_fixture_download(&original_url, &destination, u64::MAX, &mut Vec::new())
+            .await
+            .expect("original download");
+        original.finish();
+
+        let invalid = serve_once(vec![b'X'; 1024 * 1024 + 4096], None);
+        let invalid_url = invalid.url.clone();
+        assert!(
+            run_fixture_download(&invalid_url, &destination, u64::MAX, &mut Vec::new())
+                .await
+                .is_err()
+        );
+        invalid.finish();
+
+        assert!(matches!(
+            cache::inspect(&destination, "11.12.2", &original_url).await,
+            cache::CacheInspection::Valid(_)
+        ));
+        assert_no_temporary_files(temporary.path());
+    }
+
+    #[tokio::test]
+    async fn successful_forced_download_atomically_replaces_the_previous_cache() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let destination = cache::InstallerCache::open_for_tests(temporary.path(), "11.12.2")
+            .expect("installer cache");
+        let original = serve_once(pe_fixture(), None);
+        let original_url = original.url.clone();
+        run_fixture_download(&original_url, &destination, u64::MAX, &mut Vec::new())
+            .await
+            .expect("original download");
+        original.finish();
+
+        let mut replacement_payload = pe_fixture();
+        replacement_payload[4096] = 0xa5;
+        let replacement = serve_once(replacement_payload, None);
+        let replacement_url = replacement.url.clone();
+        run_fixture_download(&replacement_url, &destination, u64::MAX, &mut Vec::new())
+            .await
+            .expect("replacement download");
+        replacement.finish();
+
+        assert!(matches!(
+            cache::inspect(&destination, "11.12.2", &replacement_url).await,
+            cache::CacheInspection::Valid(_)
+        ));
+        assert_eq!(
+            cache::inspect(&destination, "11.12.2", &original_url).await,
+            cache::CacheInspection::Invalid(cache::CacheValidationError::SourceMismatch)
+        );
+        assert_no_temporary_files(temporary.path());
     }
 }

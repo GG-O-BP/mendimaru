@@ -109,7 +109,7 @@ Mendimaru uses Chromium to read the data grid on the [Mendix Marketplace Studio 
 - Studio Pro 11 and later use the official `Mendix-<version>-Setup.exe` artifact.
 - For Studio Pro 10 and earlier, Mendimaru extracts `Build <number>` from the version details page and uses `Mendix-<version>.<build>-Setup.exe`.
 - You only need to select a version from the list; there is no need to enter a URL or build number.
-- A completed installer is reused only after its recorded source, expected size, Windows PE structure, and SHA-256 all validate. Invalid legacy or modified caches are removed and downloaded again.
+- A completed installer is kept in the host-private application cache and reused only after its recorded source, expected size, Windows PE structure, and SHA-256 all validate. Legacy installers in the shared workspace are not migrated or trusted. Downloads use create-new CSPRNG temporary names, accept only the exact HTTPS Mendix artifact origin across every redirect, and enforce a 2 GiB limit from both `Content-Length` and streamed bytes.
 - Each uninstalled catalog version provides a force-redownload action for recovering from an installer failure without reusing the existing cache.
 
 On Windows, Microsoft Edge and Chrome are detected in their standard per-machine and per-user locations. On Linux, browser detection checks `MENDIMARU_CHROME_PATH`, `google-chrome-stable`, `google-chrome`, `chromium`, and `chromium-browser`.
@@ -126,7 +126,7 @@ Native discovery uses these default locations in addition to registry and Versio
 | Native default workspace | `%USERPROFILE%\Mendix` (the app asks for another directory if it does not exist) |
 | Linux WinBoat shared path | `\\host.lan\Data` |
 
-Installers are stored in `.mendimaru/installers` under the configured workspace. In native mode, the installer is signature-checked and launched through the Windows elevation API without a command shell. In Linux mode, commands are sent to WinBoat RemoteApp as UTF-16LE-encoded PowerShell, avoiding quoting issues. Installation is complete only after the installer exits successfully and `StudioPro.exe` for that version is detected.
+Installers are stored outside the configured workspace in the host-private application cache. In native mode, the installer is signature-checked and launched through the Windows elevation API without a command shell. In Linux mode, a verified cache descriptor is copied into a fresh create-new file under `.mendimaru/installers` only for the duration of the WinBoat installation; Windows verifies the pinned SHA-256 and Authenticode signature, makes its own private staging copy, and the host staging file is then removed. Commands are sent to WinBoat RemoteApp as UTF-16LE-encoded PowerShell, avoiding quoting issues. Installation is complete only after the installer exits successfully and `StudioPro.exe` for that version is detected.
 
 The Marketplace catalog cache is reused for up to six hours so normal startup does not launch a background browser. Use the catalog refresh control to force an immediate update.
 
@@ -138,7 +138,7 @@ In Linux WinBoat mode, the Studio Pro launch button remains disabled until the W
 
 ## Linux shared workspace
 
-The Linux shared directory is connected to the `<host path>:/shared` mount in the WinBoat Compose file. The project list scans only this directory and excludes generated and cache directories such as `.git`, `node_modules`, `deployment`, `.mendix-cache`, and `.mendimaru`.
+The Linux shared directory is connected to the `<host path>:/shared` mount in the WinBoat Compose file. It is treated as an untrusted transport, not as installer storage. The project list scans only this directory and excludes generated and cache directories such as `.git`, `node_modules`, `deployment`, `.mendix-cache`, and `.mendimaru`.
 
 When the shared directory changes, Mendimaru backs up the existing Compose file as `*.mendimaru.bak`. If you choose to apply the change immediately in Settings, Mendimaru recreates the WinBoat container while preserving the `/storage` virtual disk and installed Windows apps.
 
@@ -196,7 +196,7 @@ MENDIMARU_E2E_VERSION=11.13.0 \
 npm run check
 ```
 
-Use `npm run test:winboat-e2e` with the same environment variables to run only the lifecycle. The exact disposable version must have an official installer in the shared cache. The lifecycle refuses a preinstalled target and verifies absent → installed → real Studio window → running-removal rejection → graceful close → uninstalled, including progress ordering, exact process identity, unchanged pre-existing installations and installer cache, stale/repeated action rejection, and no leaked processes or unexpected RemoteApp/PowerShell windows. Both live gates use isolated Xvfb and require `xvfb-run`, `xfwm4`, and `wmctrl`; on Arch Linux, `xvfb-run` is provided by `xorg-server-xvfb`. Other host platforms report the WinBoat lifecycle as not applicable. Because hosted CI has no live WinBoat VM, it runs the portable component gates rather than claiming this local live result.
+Use `npm run test:winboat-e2e` with the same environment variables to run only the lifecycle. The exact disposable version must have an official installer in the host-private application cache, normally created by an earlier Mendimaru download. The lifecycle refuses a preinstalled target and verifies absent → installed → real Studio window → running-removal rejection → graceful close → uninstalled, including progress ordering, exact process identity, unchanged pre-existing installations and private installer cache, removal of the unique shared staging file, stale/repeated action rejection, and no leaked processes or unexpected RemoteApp/PowerShell windows. Both live gates use isolated Xvfb and require `xvfb-run`, `xfwm4`, and `wmctrl`; on Arch Linux, `xvfb-run` is provided by `xorg-server-xvfb`. Other host platforms report the WinBoat lifecycle as not applicable. Because hosted CI has no live WinBoat VM, it runs the portable component gates rather than claiming this local live result.
 
 The full Rust suite covers registry parsing, path containment, installer integrity, Windows argument quoting, UAC/exit-code failures, and a fixture-backed install-to-uninstall lifecycle.
 

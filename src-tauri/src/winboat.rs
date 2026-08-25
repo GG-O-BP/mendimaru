@@ -7,6 +7,7 @@ pub(crate) mod runtime;
 mod scripts;
 mod security;
 mod sessions;
+mod staging;
 mod studio;
 mod version_cache;
 
@@ -22,6 +23,7 @@ pub(crate) use sessions::{
     close_all_registered_clients, registered_client_sessions, stop_registered_client,
 };
 pub(crate) use sessions::{list as studio_sessions, reconnect as reconnect_studio_session};
+pub(crate) use staging::stage_installer;
 pub use studio::{install_studio, launch_studio, launch_uninstaller, open_linux_folder};
 
 pub(crate) fn seed_installed_versions_cache(config: &AppConfig, versions: &[StudioVersion]) {
@@ -52,10 +54,11 @@ mod tests {
         installed_versions, launch_studio, launch_studio_script, launch_uninstaller,
         localize_windows_reason, parse_install_report, parse_studio_versions,
         powershell_encoded_arguments, reparse_probe_script, secure_powershell_launcher,
-        security_probe_script, uninstall_script, OperationSecurity, FREERDP_CERTIFICATE_POLICY,
-        HEADLESS_CONSOLE_HOST, POWERSHELL_EXECUTABLE,
+        security_probe_script, stage_installer, uninstall_script, OperationSecurity,
+        FREERDP_CERTIFICATE_POLICY, HEADLESS_CONSOLE_HOST, POWERSHELL_EXECUTABLE,
     };
     use crate::{
+        app_paths::AppPaths,
         config,
         models::{AppConfig, WinApp},
         platform::validate_version,
@@ -93,6 +96,14 @@ mod tests {
             digest.update(&buffer[..count]);
         }
         format!("{:x}", digest.finalize())
+    }
+
+    fn private_installer_path(version: &str) -> PathBuf {
+        AppPaths::discover_for_cli()
+            .expect("resolve the host-private app cache")
+            .cache_directory()
+            .join("installers")
+            .join(format!("Mendix-{version}-Setup.exe"))
     }
 
     fn random_test_id(prefix: &str) -> String {
@@ -466,9 +477,7 @@ mod tests {
             .to_ascii_lowercase()
             .contains("publisher"));
 
-        let installer = Path::new(&config.shared_directory)
-            .join(".mendimaru/installers")
-            .join(format!("Mendix-{version}-Setup.exe"));
+        let installer = private_installer_path(&version);
         assert!(installer.is_file(), "missing live installer fixture");
         let trusted_digest = file_sha256(&installer);
         let tampered = fixture_directory.join("same-length-tampered.exe");
@@ -609,21 +618,25 @@ mod tests {
     #[ignore = "installs Studio Pro in the live WinBoat VM"]
     fn live_e2e_install_studio() {
         let (config, version) = live_e2e_context();
-        let installer_path = Path::new(&config.shared_directory)
-            .join(".mendimaru/installers")
-            .join(format!("Mendix-{version}-Setup.exe"));
+        let installer_path = private_installer_path(&version);
         assert!(
             installer_path.is_file(),
-            "cached installer does not exist: {}",
+            "private cached installer does not exist: {}",
             installer_path.display()
         );
-        let windows_installer_path = linux_path_to_windows_share(
+        let expected_sha256 = file_sha256(&installer_path);
+        let staged_installer = tauri::async_runtime::block_on(stage_installer(
             Path::new(&config.shared_directory),
             &installer_path,
+            &expected_sha256,
+        ))
+        .expect("stage the private installer into the shared transport");
+        let windows_installer_path = linux_path_to_windows_share(
+            Path::new(&config.shared_directory),
+            staged_installer.path(),
             &config.windows_shared_directory,
         )
-        .expect("the cached installer path must map to the Windows share");
-        let expected_sha256 = file_sha256(&installer_path);
+        .expect("the staged installer path must map to the Windows share");
 
         let executable_path = tauri::async_runtime::block_on(install_studio(
             &config,
@@ -641,6 +654,9 @@ mod tests {
             },
         ))
         .expect("Studio Pro installation must succeed");
+        let staged_path = staged_installer.path().to_path_buf();
+        drop(staged_installer);
+        assert!(!staged_path.exists(), "host staging file leaked");
         assert!(
             executable_path
                 .to_ascii_lowercase()

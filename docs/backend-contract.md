@@ -215,7 +215,7 @@ and verifies that reconnect and close both reject a stale PID/start-time pair.
 On Linux, `npm run check` appends the destructive full adapter lifecycle so the
 live Studio Pro boundary is not silently excluded from the exhaustive local
 gate. It requires a disposable, currently absent WinBoat test version with an
-official installer already in the shared cache:
+official installer already in the host-private application cache:
 
 ```bash
 MENDIMARU_E2E_ALLOW_MUTATION=1 \
@@ -233,7 +233,8 @@ detection, observes a real Studio window, rejects removal while running, closes
 the exact authenticated process through its existing RemoteApp connection,
 uninstalls it officially, and verifies that it remains absent under repeated and
 post-delete operations. It also verifies that pre-existing installations and the
-installer cache are unchanged. Both live gates run FreeRDP under Xvfb and an
+private installer cache are unchanged and that the temporary shared installer
+staging file is removed. Both live gates run FreeRDP under Xvfb and an
 isolated window manager, failing on leaked child processes or any unexpected
 RAIL/PowerShell window. The host must provide `xvfb-run`, `xfwm4`, and `wmctrl`;
 Arch Linux provides `xvfb-run` in `xorg-server-xvfb`.

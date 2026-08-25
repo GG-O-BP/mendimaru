@@ -223,6 +223,13 @@ try {
     await samePath(config.sharedDirectory, fixture.shared),
     "the Linux E2E uses only its isolated shared workspace",
   );
+  const legacySentinel = await fs.readFile(fixture.legacySentinel, "utf8");
+  const legacyPartial = await fs.lstat(fixture.legacyPartial);
+  recordAssertion(
+    legacySentinel === "host sentinel remains unchanged\n" &&
+      legacyPartial.isSymbolicLink(),
+    "the real app ignores a legacy shared-cache partial symlink without changing its host sentinel",
+  );
 
   const projectsTimed = await timed(() => invoke("get_projects"));
   report.measurements.projectScanMs = projectsTimed.elapsedMs;
@@ -678,6 +685,17 @@ async function createFixture(root) {
       recursive: true,
     }),
   ]);
+  const legacySharedCache = path.join(shared, ".mendimaru", "installers");
+  const legacySentinel = path.join(root, "host-sentinel.txt");
+  const legacyPartial = path.join(
+    legacySharedCache,
+    "Mendix-11.13.0-Setup.exe.download",
+  );
+  await fs.mkdir(legacySharedCache, { mode: 0o700, recursive: true });
+  await fs.writeFile(legacySentinel, "host sentinel remains unchanged\n", {
+    mode: 0o600,
+  });
+  await fs.symlink(legacySentinel, legacyPartial);
 
   const api = http.createServer(async (request, response) => {
     response.setHeader("content-type", "application/json");
@@ -871,7 +889,15 @@ async function createFixture(root) {
     { mode: 0o600 },
   );
 
-  return { bin, chrome, shared, xdgCache, xdgConfig };
+  return {
+    bin,
+    chrome,
+    legacyPartial,
+    legacySentinel,
+    shared,
+    xdgCache,
+    xdgConfig,
+  };
 }
 
 function installedCacheSourceIdentity(config) {

@@ -33,6 +33,7 @@ const linux = {
     'VITE_MENDIMARU_E2E: "1"',
     "window.__MENDIMARU_CSP_PROBE__",
     '"11.12.2; calc.exe"',
+    "legacy shared-cache partial symlink",
     '"../11.12.2"',
     "expectedSharedDirectory",
   ]),
@@ -127,7 +128,8 @@ if (runReport) {
     security:
       executed("restrictive development CSP") &&
       executed("blocks a data-script CSP probe") &&
-      executed("rejects hostile or missing input"),
+      executed("rejects hostile or missing input") &&
+      executed("legacy shared-cache partial symlink"),
     performance:
       executed("startupMs") &&
       executed("environmentMs") &&
