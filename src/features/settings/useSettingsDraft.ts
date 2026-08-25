@@ -177,39 +177,62 @@ export function useSettingsDraft({
   const saveSettings = useCallback(() => {
     if (settings.status !== "ready") return;
     const draft = settings.draft;
-    const execute = () =>
-      runAction("save-settings", async () => {
-        const applyWinBoatMount = Boolean(
-          applyMountNow && environmentStatus?.platform.requiresWinboat,
-        );
-        const result = await tauriApi.saveConfig(draft, applyWinBoatMount);
-        applyConfig(result.config);
-        notify(
-          "success",
-          result.containerRecreated
-            ? t("toast-settings-applied")
-            : t("toast-settings-saved"),
-          result.mountChanged && !result.containerRecreated
-            ? t("toast-mount-deferred")
-            : undefined,
-        );
-        await refreshStatus({ sourceChanged: true });
-      });
+    const applyWinBoatMount = Boolean(
+      applyMountNow && environmentStatus?.platform.requiresWinboat,
+    );
+    const persist = async (composeRevision?: string) => {
+      const result = await tauriApi.saveConfig(
+        draft,
+        applyWinBoatMount,
+        composeRevision,
+      );
+      applyConfig(result.config);
+      notify(
+        "success",
+        result.containerRecreated
+          ? t("toast-settings-applied")
+          : t("toast-settings-saved"),
+        result.mountChanged && !result.containerRecreated
+          ? t("toast-mount-deferred")
+          : undefined,
+      );
+      await refreshStatus({ sourceChanged: true });
+    };
+    const execute = (composeRevision?: string) =>
+      runAction("save-settings", () => persist(composeRevision));
 
-    if (
-      applyMountNow &&
-      environmentStatus?.platform.requiresWinboat &&
-      environmentStatus.containerStatus === "running"
-    ) {
+    void runAction("save-settings", async () => {
+      const preview = await tauriApi.previewSettingsSave(
+        draft,
+        applyWinBoatMount,
+      );
+      if (!preview) {
+        await persist();
+        return;
+      }
+      if (!preview.mountChanged) {
+        await persist(preview.composeRevision);
+        return;
+      }
+      const current =
+        preview.currentSharedDirectory ?? t("mount-preview-not-mounted");
+      const scope = preview.containerWillRecreate
+        ? t("mount-preview-service-scope", { service: preview.serviceName })
+        : t("mount-preview-deferred");
       requestConfirmation({
-        title: t("confirm-apply-mount-title"),
-        description: t("confirm-apply-mount-description"),
-        confirmLabel: t("action-save-reconnect"),
-        action: execute,
+        title: t("confirm-mount-change-title"),
+        description: t("confirm-mount-change-preview", {
+          service: preview.serviceName,
+          current,
+          next: preview.nextSharedDirectory,
+          scope,
+        }),
+        confirmLabel: preview.containerWillRecreate
+          ? t("action-save-reconnect")
+          : t("action-save-settings"),
+        action: () => execute(preview.composeRevision),
       });
-    } else {
-      void execute();
-    }
+    });
   }, [
     applyConfig,
     applyMountNow,

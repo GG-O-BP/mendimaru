@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
   openWinBoat: vi.fn(),
   beginWinBoatSetup: vi.fn(),
   completeWinBoatSetup: vi.fn(),
+  previewSettingsSave: vi.fn(),
   saveConfig: vi.fn(),
   redetectConfig: vi.fn(),
 }));
@@ -64,7 +65,8 @@ const status: EnvironmentStatus = {
   diagnostics: [],
 };
 
-const t: Translate = (key) => key;
+const t: Translate = (key, values) =>
+  values ? `${key}:${Object.values(values).join(",")}` : key;
 const wrapper = ({ children }: PropsWithChildren) => (
   <StrictMode>{children}</StrictMode>
 );
@@ -144,6 +146,65 @@ describe("useEnvironment initialization", () => {
     expect(notify).toHaveBeenCalledWith(
       "success",
       "toast-diagnostic-report-exported",
+    );
+  });
+
+  it("previews the exact Compose service, mount diff, and recreate scope before saving", async () => {
+    const requestConfirmation = vi.fn();
+    api.previewSettingsSave.mockResolvedValue({
+      serviceName: "windows-vm",
+      currentSharedDirectory: "${HOME}/Mendix",
+      nextSharedDirectory: "/home/dev/NewMendix",
+      mountChanged: true,
+      containerWillRecreate: true,
+      composeRevision: "sha256-preview",
+    });
+    api.saveConfig.mockImplementation(async (nextConfig: AppConfig) => ({
+      config: nextConfig,
+      mountChanged: true,
+      containerRecreated: true,
+    }));
+    const { result } = renderHook(
+      () =>
+        useEnvironment({
+          t,
+          notify: vi.fn(),
+          requestConfirmation,
+          runAction: async (_key, action) => action(),
+          isBusy: () => false,
+          onWarning: vi.fn(),
+        }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      result.current.setDraftConfig({
+        ...config,
+        sharedDirectory: "/home/dev/NewMendix",
+      });
+    });
+    await waitFor(() =>
+      expect(result.current.draftConfig?.sharedDirectory).toBe(
+        "/home/dev/NewMendix",
+      ),
+    );
+    act(() => result.current.saveSettings());
+
+    await waitFor(() => expect(requestConfirmation).toHaveBeenCalledOnce());
+    const confirmation = requestConfirmation.mock.calls[0]?.[0];
+    expect(confirmation.title).toBe("confirm-mount-change-title");
+    expect(confirmation.description).toContain("windows-vm");
+    expect(confirmation.description).toContain("${HOME}/Mendix");
+    expect(confirmation.description).toContain("/home/dev/NewMendix");
+    expect(confirmation.description).toContain("mount-preview-service-scope");
+    expect(api.saveConfig).not.toHaveBeenCalled();
+
+    await act(() => confirmation.action());
+    expect(api.saveConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ sharedDirectory: "/home/dev/NewMendix" }),
+      true,
+      "sha256-preview",
     );
   });
 });

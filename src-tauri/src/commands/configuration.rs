@@ -1,5 +1,5 @@
 use super::{load_command_config, CommandResult};
-use crate::models::{AppConfig, SettingsSaveResult};
+use crate::models::{AppConfig, SettingsSavePreview, SettingsSaveResult};
 use tauri::AppHandle;
 
 #[tauri::command]
@@ -31,10 +31,19 @@ pub(crate) fn redetect_config(app: AppHandle) -> CommandResult<AppConfig> {
 }
 
 #[tauri::command]
+pub(crate) fn preview_settings_save(
+    config: AppConfig,
+    apply_mount: bool,
+) -> CommandResult<Option<SettingsSavePreview>> {
+    crate::settings::preview_settings_save(config, apply_mount)
+}
+
+#[tauri::command]
 pub(crate) async fn save_config(
     app: AppHandle,
     config: AppConfig,
     apply_mount: bool,
+    compose_revision: Option<String>,
 ) -> CommandResult<SettingsSaveResult> {
-    Ok(crate::settings::save_settings(&app, config, apply_mount).await?)
+    crate::settings::save_settings(&app, config, apply_mount, compose_revision).await
 }

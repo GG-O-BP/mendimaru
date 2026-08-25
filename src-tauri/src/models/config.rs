@@ -62,3 +62,14 @@ pub struct SettingsSaveResult {
     pub mount_changed: bool,
     pub container_recreated: bool,
 }
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsSavePreview {
+    pub service_name: String,
+    pub current_shared_directory: Option<String>,
+    pub next_shared_directory: String,
+    pub mount_changed: bool,
+    pub container_will_recreate: bool,
+    pub compose_revision: String,
+}

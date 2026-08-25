@@ -284,6 +284,15 @@ export interface SettingsSaveResult {
   containerRecreated: boolean;
 }
 
+export interface SettingsSavePreview {
+  serviceName: string;
+  currentSharedDirectory?: string;
+  nextSharedDirectory: string;
+  mountChanged: boolean;
+  containerWillRecreate: boolean;
+  composeRevision: string;
+}
+
 export type ToastKind = "success" | "error" | "info";
 
 export interface ToastMessage {

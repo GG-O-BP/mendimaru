@@ -1,13 +1,114 @@
 use crate::models::AppConfig;
 use serde_yaml::Value;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct FileSnapshot {
     path: PathBuf,
     content: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ComposeErrorKind {
+    NotWinboat,
+    Ambiguous,
+    RevisionConflict,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ComposeError {
+    kind: ComposeErrorKind,
+    message: String,
+}
+
+impl ComposeError {
+    pub(crate) fn kind(&self) -> ComposeErrorKind {
+        self.kind
+    }
+
+    fn new(kind: ComposeErrorKind, message: String) -> Self {
+        Self { kind, message }
+    }
+}
+
+impl std::fmt::Display for ComposeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl From<String> for ComposeError {
+    fn from(message: String) -> Self {
+        Self {
+            kind: ComposeErrorKind::Other,
+            message,
+        }
+    }
+}
+
+impl From<ComposeError> for String {
+    fn from(error: ComposeError) -> Self {
+        error.message
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct SharedMountPlan {
+    compose: Value,
+    snapshot: FileSnapshot,
+    service_name: String,
+    current_source: Option<String>,
+    next_source: String,
+    revision: String,
+    mount_changed: bool,
+}
+
+impl SharedMountPlan {
+    pub(crate) fn service_name(&self) -> &str {
+        &self.service_name
+    }
+
+    pub(crate) fn current_source(&self) -> Option<&str> {
+        self.current_source.as_deref()
+    }
+
+    pub(crate) fn next_source(&self) -> &str {
+        &self.next_source
+    }
+
+    pub(crate) fn revision(&self) -> &str {
+        &self.revision
+    }
+
+    pub(crate) const fn mount_changed(&self) -> bool {
+        self.mount_changed
+    }
+
+    pub(crate) fn apply_detection(&self, config: &mut AppConfig) {
+        let requested_shared_directory = config.shared_directory.clone();
+        if let Some(service) = service_value_named(&self.compose, &self.service_name) {
+            apply_service_detection(config, service);
+        }
+        config.shared_directory = requested_shared_directory;
+    }
+}
+
+impl FileSnapshot {
+    fn revision(&self) -> Option<String> {
+        self.content.as_deref().map(revision_for)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct AppliedSharedMount {
+    pub(crate) changed: bool,
+    pub(crate) service_name: String,
+    pub(crate) original: FileSnapshot,
+    pub(crate) applied_revision: String,
 }
 
 const LOOPBACK_IPV4: &str = "127.0.0.1";
@@ -23,20 +124,17 @@ pub(crate) struct RuntimePortMapping {
 
 pub fn compose_shared_directory(compose_file: &str) -> Option<String> {
     let compose = read_compose(Path::new(compose_file)).ok()?;
-    let volumes = service_value(&compose)?.get("volumes")?.as_sequence()?;
-    volumes.iter().find_map(|volume| {
-        volume
-            .as_str()
-            .and_then(shared_mount_source)
-            .map(expand_compose_source)
-    })
+    let service_name = winboat_service_name(&compose).ok()?;
+    let service = service_value_named(&compose, &service_name)?;
+    shared_mount_source_from_service(service)
+        .ok()?
+        .map(|source| expand_compose_source(&source))
 }
 
 pub fn compose_file_is_valid(compose_file: &str) -> bool {
     read_compose(Path::new(compose_file))
         .ok()
-        .and_then(|compose| service_value(&compose).cloned())
-        .is_some_and(|service| service.is_mapping())
+        .is_some_and(|compose| winboat_service_name(&compose).is_ok())
 }
 
 pub(super) fn read_compose(path: &Path) -> Result<Value, String> {
@@ -63,29 +161,34 @@ pub(super) fn read_compose(path: &Path) -> Result<Value, String> {
     serde_yaml::from_str(&content).map_err(|error| crate::tr!("error-compose-parse", error = error))
 }
 
-fn write_compose(path: &Path, compose: &Value) -> Result<(), String> {
+fn write_compose(path: &Path, compose: &Value, expected_revision: &str) -> Result<(), String> {
     let serialized = serde_yaml::to_string(compose)
         .map_err(|error| crate::tr!("error-compose-serialize", error = error))?;
     let temporary_path = path.with_extension("yml.mendimaru.tmp");
-    atomic_replace(path, &temporary_path, serialized.as_bytes())
+    atomic_replace(
+        path,
+        &temporary_path,
+        serialized.as_bytes(),
+        Some(expected_revision),
+    )
 }
 
 pub(super) fn apply_compose_detection(config: &mut AppConfig, compose: &Value) {
-    let Some(service) = service_value(compose) else {
+    let Ok(service_name) = winboat_service_name(compose) else {
         return;
     };
+    let Some(service) = service_value_named(compose, &service_name) else {
+        return;
+    };
+    apply_service_detection(config, service);
+}
+
+fn apply_service_detection(config: &mut AppConfig, service: &Value) {
     if let Some(name) = service.get("container_name").and_then(Value::as_str) {
         config.container_name = name.to_string();
     }
-    if let Some(volumes) = service.get("volumes").and_then(Value::as_sequence) {
-        if let Some(shared) = volumes.iter().find_map(|volume| {
-            volume
-                .as_str()
-                .and_then(shared_mount_source)
-                .map(ToString::to_string)
-        }) {
-            config.shared_directory = expand_compose_source(&shared);
-        }
+    if let Ok(Some(shared)) = shared_mount_source_from_service(service) {
+        config.shared_directory = expand_compose_source(&shared);
     }
     if let Some(ports) = service.get("ports").and_then(Value::as_sequence) {
         if let Some(port) = host_port_for_guest(ports, 7148) {
@@ -109,7 +212,8 @@ pub(crate) fn runtime_port_mapping(
     guest_port: u16,
 ) -> Result<Option<RuntimePortMapping>, String> {
     let compose = read_compose(compose_path)?;
-    let ports = service_value(&compose)
+    let service_name = winboat_service_name(&compose).map_err(String::from)?;
+    let ports = service_value_named(&compose, &service_name)
         .and_then(|service| service.get("ports"))
         .and_then(Value::as_sequence);
     let Some(ports) = ports else {
@@ -136,8 +240,16 @@ pub(crate) fn ensure_runtime_port_mapping(
     if !(1024..=u16::MAX).contains(&guest_port) {
         return Err("the Mendix Runtime guest port must be from 1024 through 65535".to_string());
     }
-    let mut compose = read_compose(compose_path)?;
-    let service = service_value_mut(&mut compose)
+    let snapshot = snapshot_file(compose_path)?;
+    let revision = snapshot.revision().ok_or_else(|| {
+        crate::tr!(
+            "error-compose-file-not-found",
+            path = compose_path.display()
+        )
+    })?;
+    let mut compose = parse_snapshot(&snapshot)?;
+    let service_name = winboat_service_name(&compose).map_err(String::from)?;
+    let service = service_value_named_mut(&mut compose, &service_name)
         .ok_or_else(|| crate::tr!("error-compose-windows-service-missing"))?;
     let mapping = service
         .as_mapping_mut()
@@ -196,7 +308,7 @@ pub(crate) fn ensure_runtime_port_mapping(
             "the WinBoat /storage volume changed while adding Runtime forwarding".to_string(),
         );
     }
-    write_compose(compose_path, &compose)?;
+    write_compose(compose_path, &compose, &revision)?;
     Ok(true)
 }
 
@@ -271,18 +383,31 @@ fn yaml_u16(value: &Value) -> Option<u16> {
 fn storage_mounts(volumes: &[Value]) -> Vec<Value> {
     volumes
         .iter()
-        .filter(|volume| {
-            volume
-                .as_str()
-                .is_some_and(|raw| volume_target(raw) == Some("/storage"))
-                || volume
-                    .as_mapping()
-                    .and_then(|mapping| mapping.get(Value::String("target".to_string())))
-                    .and_then(Value::as_str)
-                    == Some("/storage")
-        })
+        .filter(|volume| volume_target_value(volume) == Some("/storage"))
         .cloned()
         .collect()
+}
+
+fn volume_target_value(volume: &Value) -> Option<&str> {
+    volume.as_str().and_then(volume_target).or_else(|| {
+        volume
+            .as_mapping()
+            .and_then(|mapping| mapping.get(Value::String("target".to_string())))
+            .and_then(Value::as_str)
+    })
+}
+
+fn volume_source_value(volume: &Value) -> Option<&str> {
+    if let Some(raw) = volume.as_str() {
+        return match volume_target(raw)? {
+            "/shared" => shared_mount_source(raw),
+            _ => raw.split_once(':').map(|(source, _)| source),
+        };
+    }
+    volume
+        .as_mapping()
+        .and_then(|mapping| mapping.get(Value::String("source".to_string())))
+        .and_then(Value::as_str)
 }
 
 fn volume_target(volume: &str) -> Option<&str> {
@@ -310,46 +435,132 @@ fn shared_mount_source(volume: &str) -> Option<&str> {
     Some(&volume[..marker_index])
 }
 
-pub(crate) fn update_shared_mount(
+fn shared_mount_source_from_service(service: &Value) -> Result<Option<String>, ComposeError> {
+    let Some(volumes) = service.get("volumes") else {
+        return Ok(None);
+    };
+    let volumes = volumes.as_sequence().ok_or_else(|| {
+        ComposeError::new(
+            ComposeErrorKind::Other,
+            crate::tr!("error-compose-volumes-invalid"),
+        )
+    })?;
+    let shared = volumes
+        .iter()
+        .filter(|volume| volume_target_value(volume) == Some("/shared"))
+        .collect::<Vec<_>>();
+    match shared.as_slice() {
+        [] => Ok(None),
+        [volume] => volume_source_value(volume)
+            .map(|source| Some(source.to_string()))
+            .ok_or_else(|| {
+                ComposeError::new(
+                    ComposeErrorKind::Other,
+                    crate::tr!("error-compose-volumes-invalid"),
+                )
+            }),
+        _ => Err(ComposeError::new(
+            ComposeErrorKind::Other,
+            crate::tr!("error-compose-shared-mount-ambiguous"),
+        )),
+    }
+}
+
+pub(crate) fn plan_shared_mount(
     compose_path: &Path,
     shared_directory: &str,
-) -> Result<bool, String> {
-    let mut compose = read_compose(compose_path)?;
-    let current = service_value(&compose)
-        .and_then(|service| service.get("volumes"))
-        .and_then(Value::as_sequence)
-        .and_then(|volumes| {
-            volumes.iter().find_map(|volume| {
-                volume
-                    .as_str()
-                    .and_then(shared_mount_source)
-                    .map(ToString::to_string)
-            })
+) -> Result<SharedMountPlan, ComposeError> {
+    let snapshot = snapshot_file(compose_path).map_err(ComposeError::from)?;
+    let revision = snapshot.revision().ok_or_else(|| {
+        ComposeError::new(
+            ComposeErrorKind::Other,
+            crate::tr!(
+                "error-compose-file-not-found",
+                path = compose_path.display()
+            ),
+        )
+    })?;
+    let compose = parse_snapshot(&snapshot).map_err(ComposeError::from)?;
+    let service_name = winboat_service_name(&compose)?;
+    let service = service_value_named(&compose, &service_name).ok_or_else(|| {
+        ComposeError::new(
+            ComposeErrorKind::Other,
+            crate::tr!("error-compose-windows-service-missing"),
+        )
+    })?;
+    let current_source = shared_mount_source_from_service(service)?;
+    let mount_changed = current_source
+        .as_deref()
+        .map(expand_compose_source)
+        .as_deref()
+        != Some(shared_directory);
+
+    Ok(SharedMountPlan {
+        compose,
+        snapshot,
+        service_name,
+        current_source,
+        next_source: shared_directory.to_string(),
+        revision,
+        mount_changed,
+    })
+}
+
+pub(crate) fn verify_plan_revision(
+    plan: &SharedMountPlan,
+    expected_revision: &str,
+) -> Result<(), ComposeError> {
+    if plan.revision == expected_revision {
+        Ok(())
+    } else {
+        Err(revision_conflict())
+    }
+}
+
+pub(crate) fn apply_shared_mount(
+    mut plan: SharedMountPlan,
+) -> Result<AppliedSharedMount, ComposeError> {
+    if !plan.mount_changed {
+        verify_current_revision(&plan.snapshot.path, &plan.revision)?;
+        return Ok(AppliedSharedMount {
+            changed: false,
+            service_name: plan.service_name,
+            original: plan.snapshot,
+            applied_revision: plan.revision,
         });
-    if current.as_deref().map(expand_compose_source).as_deref() == Some(shared_directory) {
-        return Ok(false);
     }
 
-    let backup_path = compose_path.with_extension("yml.mendimaru.bak");
+    let backup_path = plan.snapshot.path.with_extension("yml.mendimaru.bak");
     match fs::symlink_metadata(&backup_path) {
         Ok(metadata) if !metadata.is_file() || metadata.file_type().is_symlink() => {
-            return Err(crate::tr!(
+            return Err(ComposeError::from(crate::tr!(
                 "error-compose-backup",
                 error = "the Compose backup file is unsafe"
-            ));
+            )));
         }
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            create_backup(compose_path, &backup_path)?;
+            verify_current_revision(&plan.snapshot.path, &plan.revision)?;
+            create_backup(&plan.snapshot, &backup_path).map_err(ComposeError::from)?;
         }
-        Err(error) => return Err(crate::tr!("error-compose-backup", error = error)),
+        Err(error) => {
+            return Err(ComposeError::from(crate::tr!(
+                "error-compose-backup",
+                error = error
+            )))
+        }
     }
 
-    let service = service_value_mut(&mut compose)
-        .ok_or_else(|| crate::tr!("error-compose-windows-service-missing"))?;
+    let service =
+        service_value_named_mut(&mut plan.compose, &plan.service_name).ok_or_else(|| {
+            ComposeError::new(
+                ComposeErrorKind::Other,
+                crate::tr!("error-compose-windows-service-missing"),
+            )
+        })?;
     let mapping = service
         .as_mapping_mut()
-        .ok_or_else(|| crate::tr!("error-compose-windows-service-invalid"))?;
+        .ok_or_else(|| ComposeError::from(crate::tr!("error-compose-windows-service-invalid")))?;
     let volumes_key = Value::String("volumes".to_string());
     if !mapping.contains_key(&volumes_key) {
         mapping.insert(volumes_key.clone(), Value::Sequence(Vec::new()));
@@ -357,19 +568,88 @@ pub(crate) fn update_shared_mount(
     let volumes = mapping
         .get_mut(&volumes_key)
         .and_then(Value::as_sequence_mut)
-        .ok_or_else(|| crate::tr!("error-compose-volumes-invalid"))?;
-    let replacement = Value::String(format!("{shared_directory}:/shared"));
+        .ok_or_else(|| ComposeError::from(crate::tr!("error-compose-volumes-invalid")))?;
+    let storage_before = storage_mounts(volumes);
     if let Some(existing) = volumes
         .iter_mut()
-        .find(|volume| volume.as_str().and_then(shared_mount_source).is_some())
+        .find(|volume| volume_target_value(volume) == Some("/shared"))
     {
-        *existing = replacement;
+        replace_shared_mount_source(existing, &plan.next_source)?;
     } else {
-        volumes.push(replacement);
+        volumes.push(Value::String(format!("{}:/shared", plan.next_source)));
+    }
+    let storage_after = storage_mounts(volumes);
+    if storage_after != storage_before {
+        return Err(ComposeError::from(
+            "the WinBoat /storage volume changed while updating /shared".to_string(),
+        ));
     }
 
-    write_compose(compose_path, &compose)?;
-    Ok(true)
+    let serialized = serde_yaml::to_string(&plan.compose).map_err(|error| {
+        ComposeError::from(crate::tr!("error-compose-serialize", error = error))
+    })?;
+    let applied_revision = revision_for(serialized.as_bytes());
+    let temporary_path = plan.snapshot.path.with_extension("yml.mendimaru.tmp");
+    atomic_replace(
+        &plan.snapshot.path,
+        &temporary_path,
+        serialized.as_bytes(),
+        Some(&plan.revision),
+    )
+    .map_err(compose_write_error)?;
+
+    Ok(AppliedSharedMount {
+        changed: true,
+        service_name: plan.service_name,
+        original: plan.snapshot,
+        applied_revision,
+    })
+}
+
+fn replace_shared_mount_source(
+    volume: &mut Value,
+    shared_directory: &str,
+) -> Result<(), ComposeError> {
+    if let Some(raw) = volume.as_str() {
+        let marker = ":/shared";
+        let marker_index = raw
+            .rfind(marker)
+            .ok_or_else(|| ComposeError::from(crate::tr!("error-compose-volumes-invalid")))?;
+        let suffix = &raw[marker_index + marker.len()..];
+        *volume = Value::String(format!("{shared_directory}{marker}{suffix}"));
+        return Ok(());
+    }
+    let mapping = volume
+        .as_mapping_mut()
+        .ok_or_else(|| ComposeError::from(crate::tr!("error-compose-volumes-invalid")))?;
+    mapping.insert(
+        Value::String("source".to_string()),
+        Value::String(shared_directory.to_string()),
+    );
+    Ok(())
+}
+
+fn compose_write_error(message: String) -> ComposeError {
+    if message == crate::tr!("error-compose-revision-conflict") {
+        revision_conflict()
+    } else {
+        ComposeError::from(message)
+    }
+}
+
+fn revision_conflict() -> ComposeError {
+    ComposeError::new(
+        ComposeErrorKind::RevisionConflict,
+        crate::tr!("error-compose-revision-conflict"),
+    )
+}
+
+#[cfg(test)]
+fn update_shared_mount(compose_path: &Path, shared_directory: &str) -> Result<bool, String> {
+    let plan = plan_shared_mount(compose_path, shared_directory).map_err(String::from)?;
+    apply_shared_mount(plan)
+        .map(|applied| applied.changed)
+        .map_err(String::from)
 }
 
 pub(crate) fn snapshot_file(path: &Path) -> Result<FileSnapshot, String> {
@@ -393,6 +673,12 @@ pub(crate) fn snapshot_file(path: &Path) -> Result<FileSnapshot, String> {
                 .take(MAX_COMPOSE_BYTES + 1)
                 .read_to_end(&mut content)
                 .map_err(|error| crate::tr!("error-compose-read", error = error))?;
+            if content.len() as u64 > MAX_COMPOSE_BYTES {
+                return Err(crate::tr!(
+                    "error-compose-read",
+                    error = "the Compose file exceeds the safe size limit"
+                ));
+            }
             Some(content)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -404,11 +690,49 @@ pub(crate) fn snapshot_file(path: &Path) -> Result<FileSnapshot, String> {
     })
 }
 
+fn parse_snapshot(snapshot: &FileSnapshot) -> Result<Value, String> {
+    let content = snapshot.content.as_deref().ok_or_else(|| {
+        crate::tr!(
+            "error-compose-file-not-found",
+            path = snapshot.path.display()
+        )
+    })?;
+    serde_yaml::from_slice(content)
+        .map_err(|error| crate::tr!("error-compose-parse", error = error))
+}
+
+fn revision_for(content: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(content))
+}
+
+fn verify_current_revision(path: &Path, expected_revision: &str) -> Result<(), ComposeError> {
+    let current = snapshot_file(path).map_err(ComposeError::from)?;
+    if current.revision().as_deref() == Some(expected_revision) {
+        Ok(())
+    } else {
+        Err(revision_conflict())
+    }
+}
+
 pub(crate) fn restore_file(snapshot: &FileSnapshot) -> Result<(), String> {
+    restore_file_with_revision(snapshot, None)
+}
+
+pub(crate) fn restore_file_if_revision(
+    snapshot: &FileSnapshot,
+    expected_revision: &str,
+) -> Result<(), String> {
+    restore_file_with_revision(snapshot, Some(expected_revision))
+}
+
+fn restore_file_with_revision(
+    snapshot: &FileSnapshot,
+    expected_revision: Option<&str>,
+) -> Result<(), String> {
     match &snapshot.content {
         Some(content) => {
             let temporary_path = snapshot.path.with_extension("yml.mendimaru.restore.tmp");
-            atomic_replace(&snapshot.path, &temporary_path, content)
+            atomic_replace(&snapshot.path, &temporary_path, content, expected_revision)
         }
         None if snapshot.path.exists() => fs::remove_file(&snapshot.path)
             .map_err(|error| crate::tr!("error-compose-save", error = error)),
@@ -416,8 +740,8 @@ pub(crate) fn restore_file(snapshot: &FileSnapshot) -> Result<(), String> {
     }
 }
 
-fn create_backup(source: &Path, backup: &Path) -> Result<(), String> {
-    let source_metadata = fs::symlink_metadata(source)
+fn create_backup(snapshot: &FileSnapshot, backup: &Path) -> Result<(), String> {
+    let source_metadata = fs::symlink_metadata(&snapshot.path)
         .map_err(|error| crate::tr!("error-compose-backup", error = error))?;
     if !source_metadata.is_file() || source_metadata.file_type().is_symlink() {
         return Err(crate::tr!(
@@ -425,8 +749,12 @@ fn create_backup(source: &Path, backup: &Path) -> Result<(), String> {
             error = "the Compose file must be a regular file"
         ));
     }
-    let mut source_file = fs::File::open(source)
-        .map_err(|error| crate::tr!("error-compose-backup", error = error))?;
+    let content = snapshot.content.as_deref().ok_or_else(|| {
+        crate::tr!(
+            "error-compose-file-not-found",
+            path = snapshot.path.display()
+        )
+    })?;
     let mut options = fs::OpenOptions::new();
     options.create_new(true).write(true);
     #[cfg(unix)]
@@ -437,9 +765,9 @@ fn create_backup(source: &Path, backup: &Path) -> Result<(), String> {
     let mut backup_file = options
         .open(backup)
         .map_err(|error| crate::tr!("error-compose-backup", error = error))?;
-    let result = std::io::copy(&mut source_file, &mut backup_file)
+    let result = backup_file
+        .write_all(content)
         .and_then(|_| backup_file.sync_all())
-        .map(|_| ())
         .map_err(|error| crate::tr!("error-compose-backup", error = error));
     if result.is_err() {
         let _ = fs::remove_file(backup);
@@ -447,7 +775,12 @@ fn create_backup(source: &Path, backup: &Path) -> Result<(), String> {
     result
 }
 
-fn atomic_replace(path: &Path, temporary_path: &Path, content: &[u8]) -> Result<(), String> {
+fn atomic_replace(
+    path: &Path,
+    temporary_path: &Path,
+    content: &[u8],
+    expected_revision: Option<&str>,
+) -> Result<(), String> {
     let result = (|| {
         let target_metadata = fs::symlink_metadata(path)
             .map_err(|error| crate::tr!("error-compose-save", error = error))?;
@@ -481,6 +814,9 @@ fn atomic_replace(path: &Path, temporary_path: &Path, content: &[u8]) -> Result<
             .write_all(content)
             .and_then(|_| temporary.sync_all())
             .map_err(|error| crate::tr!("error-compose-save", error = error))?;
+        if let Some(expected_revision) = expected_revision {
+            verify_current_revision(path, expected_revision).map_err(String::from)?;
+        }
         replace_file(temporary_path, path)
             .map_err(|error| crate::tr!("error-compose-save", error = error))
     })();
@@ -526,29 +862,170 @@ fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
     }
 }
 
-fn service_value(compose: &Value) -> Option<&Value> {
-    let services = compose.get("services")?.as_mapping()?;
-    services
-        .get(Value::String("windows".to_string()))
-        .or_else(|| services.values().next())
+fn winboat_service_name(compose: &Value) -> Result<String, ComposeError> {
+    let services = compose
+        .get("services")
+        .and_then(Value::as_mapping)
+        .ok_or_else(|| {
+            ComposeError::new(
+                ComposeErrorKind::NotWinboat,
+                crate::tr!("error-compose-not-winboat"),
+            )
+        })?;
+    let candidates = services
+        .iter()
+        .filter_map(|(name, service)| {
+            let name = name.as_str()?;
+            is_winboat_service(service).then(|| name.to_string())
+        })
+        .collect::<Vec<_>>();
+    match candidates.as_slice() {
+        [name] => Ok(name.clone()),
+        [] => Err(ComposeError::new(
+            ComposeErrorKind::NotWinboat,
+            crate::tr!("error-compose-not-winboat"),
+        )),
+        _ => Err(ComposeError::new(
+            ComposeErrorKind::Ambiguous,
+            crate::tr!("error-compose-ambiguous", count = candidates.len()),
+        )),
+    }
 }
 
-fn service_value_mut(compose: &mut Value) -> Option<&mut Value> {
-    let services = compose.get_mut("services")?.as_mapping_mut()?;
-    let windows_key = Value::String("windows".to_string());
-    if services.contains_key(&windows_key) {
-        services.get_mut(&windows_key)
-    } else {
-        let first_key = services.keys().next()?.clone();
-        services.get_mut(&first_key)
+fn is_winboat_service(service: &Value) -> bool {
+    let Some(mapping) = service.as_mapping() else {
+        return false;
+    };
+    let image_is_windows = mapping
+        .get(Value::String("image".to_string()))
+        .and_then(Value::as_str)
+        .is_some_and(is_dockur_windows_image);
+    let volumes = mapping
+        .get(Value::String("volumes".to_string()))
+        .and_then(Value::as_sequence);
+    let has_storage = volumes.is_some_and(|volumes| {
+        volumes
+            .iter()
+            .any(|volume| volume_target_value(volume) == Some("/storage"))
+    });
+    let container_is_winboat = mapping
+        .get(Value::String("container_name".to_string()))
+        .and_then(Value::as_str)
+        .is_some_and(|name| name.eq_ignore_ascii_case("winboat"));
+    let ports = mapping
+        .get(Value::String("ports".to_string()))
+        .and_then(Value::as_sequence);
+    let has_winboat_ports =
+        ports.is_some_and(|ports| has_guest_port(ports, 7148) && has_guest_port(ports, 3389));
+    let has_winboat_label = mapping
+        .get(Value::String("labels".to_string()))
+        .is_some_and(value_mentions_winboat);
+    let has_winboat_environment = mapping
+        .get(Value::String("environment".to_string()))
+        .is_some_and(environment_exposes_guest_api);
+
+    image_is_windows
+        && has_storage
+        && (container_is_winboat
+            || has_winboat_ports
+            || has_winboat_label
+            || has_winboat_environment)
+}
+
+fn is_dockur_windows_image(image: &str) -> bool {
+    let repository = image
+        .trim()
+        .split('@')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let repository = match repository.rsplit_once('/') {
+        Some((prefix, name)) => {
+            let name = name.split(':').next().unwrap_or_default();
+            format!("{prefix}/{name}")
+        }
+        None => repository.split(':').next().unwrap_or_default().to_string(),
+    };
+    repository == "dockur/windows" || repository.ends_with("/dockur/windows")
+}
+
+fn has_guest_port(ports: &[Value], guest_port: u16) -> bool {
+    ports
+        .iter()
+        .filter_map(parse_port_mapping)
+        .any(|mapping| mapping.guest_port == guest_port)
+}
+
+fn value_mentions_winboat(value: &Value) -> bool {
+    match value {
+        Value::String(value) => value.to_ascii_lowercase().contains("winboat"),
+        Value::Sequence(values) => values.iter().any(value_mentions_winboat),
+        Value::Mapping(values) => values
+            .iter()
+            .any(|(key, value)| value_mentions_winboat(key) || value_mentions_winboat(value)),
+        _ => false,
     }
+}
+
+fn environment_exposes_guest_api(environment: &Value) -> bool {
+    if let Some(mapping) = environment.as_mapping() {
+        return mapping.iter().any(|(key, value)| {
+            key.as_str().is_some_and(|key| key == "USER_PORTS") && scalar_contains_port(value, 7148)
+        });
+    }
+    environment.as_sequence().is_some_and(|values| {
+        values.iter().any(|value| {
+            value.as_str().is_some_and(|entry| {
+                entry.split_once('=').is_some_and(|(key, value)| {
+                    key == "USER_PORTS" && text_contains_port(value, 7148)
+                })
+            })
+        })
+    })
+}
+
+fn scalar_contains_port(value: &Value, port: u16) -> bool {
+    value
+        .as_str()
+        .is_some_and(|value| text_contains_port(value, port))
+        || value.as_u64() == Some(u64::from(port))
+}
+
+fn text_contains_port(value: &str, port: u16) -> bool {
+    value
+        .split(|character: char| !character.is_ascii_digit())
+        .any(|part| part.parse::<u16>().ok() == Some(port))
+}
+
+pub(crate) fn winboat_compose_service_name(path: &Path) -> Result<String, String> {
+    let compose = read_compose(path)?;
+    winboat_service_name(&compose).map_err(String::from)
+}
+
+fn service_value_named<'a>(compose: &'a Value, service_name: &str) -> Option<&'a Value> {
+    compose
+        .get("services")?
+        .as_mapping()?
+        .get(Value::String(service_name.to_string()))
+}
+
+fn service_value_named_mut<'a>(
+    compose: &'a mut Value,
+    service_name: &str,
+) -> Option<&'a mut Value> {
+    compose
+        .get_mut("services")?
+        .as_mapping_mut()?
+        .get_mut(Value::String(service_name.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        compose_file_is_valid, ensure_runtime_port_mapping, host_port_for_guest, restore_file,
+        apply_shared_mount, compose_file_is_valid, ensure_runtime_port_mapping,
+        host_port_for_guest, plan_shared_mount, restore_file, restore_file_if_revision,
         runtime_port_mapping, shared_mount_source, snapshot_file, update_shared_mount,
+        ComposeErrorKind,
     };
     use serde_yaml::Value;
     use std::fs;
@@ -592,7 +1069,7 @@ mod tests {
         let compose = temporary.path().join("docker-compose.yml");
         fs::write(
             &compose,
-            "services:\n  windows:\n    image: test\n    volumes:\n      - winboat-data:/storage\n      - /workspace:/shared\n    ports:\n      - 127.0.0.1:47280:7148\n      - 0.0.0.0:8080:8080\nvolumes:\n  winboat-data: {}\n",
+            "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - winboat-data:/storage\n      - /workspace:/shared\n    ports:\n      - 127.0.0.1:47280:7148\n      - 0.0.0.0:8080:8080\nvolumes:\n  winboat-data: {}\n",
         )
         .expect("write compose");
 
@@ -616,7 +1093,7 @@ mod tests {
         let compose = temporary.path().join("docker-compose.yml");
         fs::write(
             &compose,
-            "services:\n  windows:\n    image: test\n    network_mode: host\n    volumes:\n      - data:/storage\n",
+            "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    network_mode: host\n    volumes:\n      - data:/storage\n",
         )
         .expect("write compose");
         assert!(ensure_runtime_port_mapping(&compose, 8080)
@@ -625,12 +1102,10 @@ mod tests {
 
         fs::write(
             &compose,
-            "services:\n  windows:\n    image: test\n    volumes:\n      - /workspace:/shared\n",
+            "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - /workspace:/shared\n",
         )
         .expect("write compose");
-        assert!(ensure_runtime_port_mapping(&compose, 8080)
-            .expect_err("missing storage rejected")
-            .contains("/storage"));
+        assert!(ensure_runtime_port_mapping(&compose, 8080).is_err());
     }
 
     #[test]
@@ -639,7 +1114,7 @@ mod tests {
         let compose = temporary.path().join("docker-compose.yml");
         fs::write(
             &compose,
-            "services:\n  windows:\n    image: test\n    volumes:\n      - /old:/shared\n      - data:/storage\n",
+            "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - /old:/shared\n      - data:/storage\n",
         )
         .expect("write compose");
         assert!(update_shared_mount(&compose, "/new/workspace").expect("update mount"));
@@ -655,7 +1130,7 @@ mod tests {
         let compose = temporary.path().join("docker-compose.yml");
         fs::write(
             &compose,
-            "services:\n  windows:\n    image: test\n    volumes:\n      - ${HOME}:/shared\n",
+            "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - ${HOME}:/shared\n      - data:/storage\n",
         )
         .expect("write compose");
         assert!(
@@ -681,7 +1156,7 @@ mod tests {
     fn distinguishes_valid_compose_from_yaml_without_a_service() {
         let temporary = tempfile::tempdir().expect("temp dir");
         let compose = temporary.path().join("docker-compose.yml");
-        fs::write(&compose, "services:\n  windows:\n    image: test\n")
+        fs::write(&compose, "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - data:/storage\n")
             .expect("write valid compose");
         assert!(compose_file_is_valid(&compose.to_string_lossy()));
 
@@ -692,6 +1167,164 @@ mod tests {
         assert!(!compose_file_is_valid(&compose.to_string_lossy()));
     }
 
+    #[test]
+    fn identifies_official_docker_and_podman_compose_fixtures() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("compose.yml");
+        for fixture in [
+            "name: winboat\nservices:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    environment:\n      USER_PORTS: '7148,7147'\n    ports:\n      - 127.0.0.1:47280-47289:7148\n      - 127.0.0.1:47300-47309:3389/tcp\n    volumes:\n      - data:/storage\n      - ${HOME}:/shared\n",
+            "name: winboat\nservices:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    environment:\n      - USER_PORTS=7148,7147\n    ports:\n      - target: 7148\n        host_ip: 127.0.0.1\n      - target: 3389\n        protocol: tcp\n    volumes:\n      - type: volume\n        source: data\n        target: /storage\n      - type: bind\n        source: ${HOME}\n        target: /shared\n",
+        ] {
+            fs::write(&compose, fixture).expect("write official fixture");
+            assert!(compose_file_is_valid(&compose.to_string_lossy()));
+            let plan = plan_shared_mount(&compose, "/new").expect("WinBoat plan");
+            assert_eq!(plan.service_name(), "windows");
+        }
+    }
+
+    #[test]
+    fn rejects_name_only_and_first_service_fallbacks_with_typed_errors() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("compose.yml");
+        for fixture in [
+            "services:\n  windows:\n    image: nginx:latest\n    volumes:\n      - data:/storage\n",
+            "services:\n  app:\n    image: postgres:18\n    volumes:\n      - data:/var/lib/postgresql/data\n",
+        ] {
+            fs::write(&compose, fixture).expect("write ordinary Compose");
+            assert!(!compose_file_is_valid(&compose.to_string_lossy()));
+            assert_eq!(
+                plan_shared_mount(&compose, "/new")
+                    .expect_err("ordinary Compose rejected")
+                    .kind(),
+                ComposeErrorKind::NotWinboat
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_multiple_strong_candidates_as_ambiguous() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("compose.yml");
+        fs::write(
+            &compose,
+            "services:\n  primary:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - primary:/storage\n  secondary:\n    image: ghcr.io/dockur/windows:6.03\n    labels:\n      io.winboat.managed: 'true'\n    volumes:\n      - secondary:/storage\n",
+        )
+        .expect("write ambiguous Compose");
+
+        assert!(!compose_file_is_valid(&compose.to_string_lossy()));
+        assert_eq!(
+            plan_shared_mount(&compose, "/new")
+                .expect_err("ambiguous Compose rejected")
+                .kind(),
+            ComposeErrorKind::Ambiguous
+        );
+    }
+
+    #[test]
+    fn updates_only_the_identified_service_and_preserves_long_mount_semantics() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("compose.yml");
+        fs::write(
+            &compose,
+            "services:\n  database:\n    image: postgres:18\n    environment:\n      KEEP: sidecar\n  winboat-vm:\n    image: ghcr.io/dockur/windows:6.03\n    labels:\n      io.winboat.managed: 'true'\n    environment:\n      KEEP: windows\n    networks: [vmnet]\n    volumes:\n      - type: bind\n        source: ${HOME}/old\n        target: /shared\n        read_only: true\n      - type: volume\n        source: winboat-data\n        target: /storage\n      - cache:/cache:ro\nnetworks:\n  vmnet: {}\nvolumes:\n  winboat-data: {}\n  cache: {}\n",
+        )
+        .expect("write multi-service Compose");
+        let before: Value =
+            serde_yaml::from_str(&fs::read_to_string(&compose).expect("read original Compose"))
+                .expect("parse original Compose");
+
+        let plan = plan_shared_mount(&compose, "/new/workspace").expect("mount plan");
+        assert_eq!(plan.service_name(), "winboat-vm");
+        assert_eq!(plan.current_source(), Some("${HOME}/old"));
+        let applied = apply_shared_mount(plan).expect("apply mount");
+        assert!(applied.changed);
+
+        let after: Value =
+            serde_yaml::from_str(&fs::read_to_string(&compose).expect("read updated Compose"))
+                .expect("parse updated Compose");
+        assert_eq!(
+            before["services"]["database"],
+            after["services"]["database"]
+        );
+        assert_eq!(
+            before["services"]["winboat-vm"]["environment"],
+            after["services"]["winboat-vm"]["environment"]
+        );
+        assert_eq!(
+            before["services"]["winboat-vm"]["networks"],
+            after["services"]["winboat-vm"]["networks"]
+        );
+        let volumes = after["services"]["winboat-vm"]["volumes"]
+            .as_sequence()
+            .expect("updated volumes");
+        let shared = volumes
+            .iter()
+            .find(|volume| super::volume_target_value(volume) == Some("/shared"))
+            .expect("shared mount");
+        assert_eq!(shared["source"].as_str(), Some("/new/workspace"));
+        assert_eq!(shared["read_only"].as_bool(), Some(true));
+        let storage_before = super::storage_mounts(
+            before["services"]["winboat-vm"]["volumes"]
+                .as_sequence()
+                .expect("original volumes"),
+        );
+        assert_eq!(super::storage_mounts(volumes), storage_before);
+    }
+
+    #[test]
+    fn preserves_short_mount_flags_when_replacing_only_the_source() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("compose.yml");
+        fs::write(
+            &compose,
+            "services:\n  vm:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - /old:/shared:ro\n      - data:/storage\n",
+        )
+        .expect("write short mount fixture");
+
+        assert!(update_shared_mount(&compose, "/new").expect("update mount"));
+        assert!(fs::read_to_string(compose)
+            .expect("read Compose")
+            .contains("/new:/shared:ro"));
+    }
+
+    #[test]
+    fn concurrent_edit_conflict_preserves_the_external_content() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("compose.yml");
+        let original = "services:\n  vm:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - /old:/shared\n      - data:/storage\n";
+        fs::write(&compose, original).expect("write original Compose");
+        let plan = plan_shared_mount(&compose, "/new").expect("mount plan");
+        let external = format!("{original}# external edit\n");
+        fs::write(&compose, &external).expect("inject concurrent edit");
+
+        let error = apply_shared_mount(plan).expect_err("conflict rejected");
+        assert_eq!(error.kind(), ComposeErrorKind::RevisionConflict);
+        assert_eq!(
+            fs::read_to_string(compose).expect("read conflict"),
+            external
+        );
+    }
+
+    #[test]
+    fn guarded_rollback_does_not_overwrite_a_later_external_edit() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("compose.yml");
+        fs::write(
+            &compose,
+            "services:\n  vm:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - /old:/shared\n      - data:/storage\n",
+        )
+        .expect("write original Compose");
+        let applied = apply_shared_mount(plan_shared_mount(&compose, "/new").expect("mount plan"))
+            .expect("apply mount");
+        fs::write(&compose, "external edit after apply\n").expect("external edit");
+
+        assert!(restore_file_if_revision(&applied.original, &applied.applied_revision).is_err());
+        assert_eq!(
+            fs::read_to_string(compose).expect("read external edit"),
+            "external edit after apply\n"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn rejects_symlinked_and_oversized_compose_files() {
@@ -699,7 +1332,7 @@ mod tests {
         let temporary = tempfile::tempdir().expect("temp dir");
         let target = temporary.path().join("target.yml");
         let compose = temporary.path().join("docker-compose.yml");
-        fs::write(&target, "services:\n  windows:\n    image: test\n").expect("target compose");
+        fs::write(&target, "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - data:/storage\n").expect("target compose");
         symlink(&target, &compose).expect("compose symlink");
         assert!(!compose_file_is_valid(&compose.to_string_lossy()));
         assert!(snapshot_file(&compose).is_err());
@@ -720,7 +1353,7 @@ mod tests {
         let victim = temporary.path().join("victim");
         fs::write(
             &compose,
-            "services:\n  windows:\n    volumes:\n      - /old:/shared\n",
+            "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - /old:/shared\n      - data:/storage\n",
         )
         .expect("compose");
         fs::write(&victim, "unchanged").expect("victim");

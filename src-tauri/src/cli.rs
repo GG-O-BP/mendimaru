@@ -1819,6 +1819,10 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
         CommandErrorCode::RuntimeComposeRecoveryFailed => {
             BackendErrorCode::RuntimeComposeRecoveryFailed
         }
+        CommandErrorCode::ComposeNotWinboat | CommandErrorCode::ComposeAmbiguous => {
+            BackendErrorCode::InvalidRequest
+        }
+        CommandErrorCode::ComposeRevisionConflict => BackendErrorCode::ConsistencyFailed,
         CommandErrorCode::ConfigLoadFailed
         | CommandErrorCode::DownloadCancelled
         | CommandErrorCode::InstallFailed
@@ -1839,6 +1843,7 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
                 | CommandErrorCode::ExternalProcessTimeout
                 | CommandErrorCode::ExternalProcessCancelled
                 | CommandErrorCode::ExternalProcessInterrupted
+                | CommandErrorCode::ComposeRevisionConflict
         ),
         diagnostic_ref: None,
     }

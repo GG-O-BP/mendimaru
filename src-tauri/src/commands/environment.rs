@@ -94,7 +94,9 @@ pub(crate) async fn complete_winboat_setup(app: AppHandle) -> CommandResult<Sett
     detected.mendix_data_root = preferred.mendix_data_root;
     detected.startup_timeout_seconds = preferred.startup_timeout_seconds;
 
-    Ok(crate::settings::save_settings(&app, detected, true).await?)
+    let revision = crate::settings::preview_settings_save(detected.clone(), true)?
+        .map(|preview| preview.compose_revision);
+    crate::settings::save_settings(&app, detected, true, revision).await
 }
 
 fn require_winboat() -> CommandResult<()> {

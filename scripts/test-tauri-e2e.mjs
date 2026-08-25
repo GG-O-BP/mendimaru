@@ -560,6 +560,129 @@ try {
     );
   }
 
+  const currentConfig = await invoke("get_config");
+  const ordinaryCompose = path.join(temporary, "ordinary-compose.yml");
+  await fs.writeFile(
+    ordinaryCompose,
+    "services:\n  windows:\n    image: nginx:latest\n    volumes:\n      - site:/usr/share/nginx/html\n  database:\n    image: postgres:18\n",
+  );
+  const ordinaryHash = createHash("sha256")
+    .update(await fs.readFile(ordinaryCompose))
+    .digest("hex");
+  const composeCallsBeforeRejection = await countComposeCalls(
+    fixture.runtimeCalls,
+  );
+  const rejectedSave = await invokeResult("save_config", {
+    config: { ...currentConfig, composeFile: ordinaryCompose },
+    applyMount: true,
+    composeRevision: null,
+  });
+  recordAssertion(
+    !rejectedSave.ok && rejectedSave.error.includes("compose_not_winboat"),
+    "Settings rejects a non-WinBoat Compose with a structured error",
+  );
+  assert.equal(
+    createHash("sha256")
+      .update(await fs.readFile(ordinaryCompose))
+      .digest("hex"),
+    ordinaryHash,
+    "a rejected Settings save must not modify the selected Compose file",
+  );
+  assert.equal(
+    await countComposeCalls(fixture.runtimeCalls),
+    composeCallsBeforeRejection,
+    "a rejected Settings save must not recreate any container",
+  );
+  assert.equal(
+    (await invoke("get_config")).composeFile,
+    fixture.compose,
+    "a rejected Settings save must not persist the untrusted Compose path",
+  );
+
+  const nextShared = path.join(temporary, "shared-next");
+  await fs.mkdir(nextShared, { mode: 0o700 });
+  const nextConfig = { ...currentConfig, sharedDirectory: nextShared };
+  const preview = await invoke("preview_settings_save", {
+    config: nextConfig,
+    applyMount: true,
+  });
+  assert.deepEqual(
+    {
+      serviceName: preview.serviceName,
+      currentSharedDirectory: preview.currentSharedDirectory,
+      nextSharedDirectory: preview.nextSharedDirectory,
+      mountChanged: preview.mountChanged,
+      containerWillRecreate: preview.containerWillRecreate,
+    },
+    {
+      serviceName: "windows",
+      currentSharedDirectory: fixture.shared,
+      nextSharedDirectory: nextShared,
+      mountChanged: true,
+      containerWillRecreate: true,
+    },
+    "Settings preview identifies the exact service, mount diff, and recreate scope",
+  );
+  const managedComposeHash = createHash("sha256")
+    .update(await fs.readFile(fixture.compose))
+    .digest("hex");
+  await fs.writeFile(fixture.runtimeFailFlag, "fail\n");
+  const failedApply = await invokeResult("save_config", {
+    config: nextConfig,
+    applyMount: true,
+    composeRevision: preview.composeRevision,
+  });
+  await fs.rm(fixture.runtimeFailFlag, { force: true });
+  recordAssertion(
+    !failedApply.ok,
+    "a failed service recreate is reported to Settings",
+  );
+  assert.equal(
+    createHash("sha256")
+      .update(await fs.readFile(fixture.compose))
+      .digest("hex"),
+    managedComposeHash,
+    "a failed recreate restores the exact Compose bytes",
+  );
+  assert.equal(
+    (await invoke("get_config")).sharedDirectory,
+    fixture.shared,
+    "a failed recreate restores the previous persisted config",
+  );
+  assert.equal(
+    (await invoke("get_environment_status")).sharedMountMatches,
+    true,
+    "a failed recreate leaves the previous container mount fixture intact",
+  );
+  const recoveredPreview = await invoke("preview_settings_save", {
+    config: nextConfig,
+    applyMount: true,
+  });
+  const composeCallsBeforeApply = await countComposeCalls(fixture.runtimeCalls);
+  const saved = await invoke("save_config", {
+    config: nextConfig,
+    applyMount: true,
+    composeRevision: recoveredPreview.composeRevision,
+  });
+  assert.equal(saved.mountChanged, true);
+  assert.equal(saved.containerRecreated, true);
+  const composeCalls = await readComposeCalls(fixture.runtimeCalls);
+  assert.equal(composeCalls.length, composeCallsBeforeApply + 1);
+  assert.deepEqual(
+    composeCalls.at(-1).slice(-2),
+    ["--force-recreate", "windows"],
+    "the live Settings apply limits force-recreate to the identified service",
+  );
+  const updatedCompose = await fs.readFile(fixture.compose, "utf8");
+  assert(updatedCompose.includes(`${nextShared}:/shared`));
+  assert(updatedCompose.includes("mendimaru-e2e-storage:/storage"));
+  const updatedEnvironment = await invoke("get_environment_status");
+  assert.equal(
+    updatedEnvironment.sharedMountMatches,
+    true,
+    "environment status reflects the applied shared mount",
+  );
+
   await delay(1_750);
   assert.deepEqual(
     await execute("return window.__MENDIMARU_E2E_ERRORS__;"),
@@ -813,18 +936,27 @@ async function createFixture(root) {
       },
     },
   ];
+  const compose = path.join(root, "compose.yml");
+  const activeShared = path.join(root, "active-shared.txt");
+  const runtimeCalls = path.join(root, "runtime-calls.jsonl");
+  const runtimeFailFlag = path.join(root, "runtime-fail.flag");
+  await fs.writeFile(activeShared, shared);
   const runtimeHangFlag = path.join(root, "runtime-hang.flag");
   const runtimeHangPids = path.join(root, "runtime-hang.pids");
   const docker = path.join(bin, "docker");
   await writeExecutable(
     docker,
     `#!${process.execPath}
-const { appendFileSync, existsSync } = require("node:fs");
+const { appendFileSync, existsSync, readFileSync, writeFileSync } = require("node:fs");
 const { spawn } = require("node:child_process");
 const args = process.argv.slice(2);
 const inspect = ${JSON.stringify(inspectPayload)};
+const activeShared = ${JSON.stringify(activeShared)};
+const runtimeCalls = ${JSON.stringify(runtimeCalls)};
+const failFlag = ${JSON.stringify(runtimeFailFlag)};
 const hangFlag = ${JSON.stringify(runtimeHangFlag)};
 const hangPids = ${JSON.stringify(runtimeHangPids)};
+appendFileSync(runtimeCalls, JSON.stringify(args) + "\\n");
 if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
   const descendant = spawn(
     process.execPath,
@@ -842,7 +974,19 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
   if (port) { console.log("127.0.0.1:" + port); process.exit(0); }
   process.exit(1);
 } else if (args[0] === "inspect") {
-  console.log(JSON.stringify(inspect));
+  const current = structuredClone(inspect);
+  current[0].Mounts.find((mount) => mount.Destination === "/shared").Source = readFileSync(activeShared, "utf8");
+  console.log(JSON.stringify(current));
+  process.exit(0);
+} else if (args[0] === "compose") {
+  if (existsSync(failFlag)) {
+    console.error("injected Compose failure");
+    process.exit(1);
+  }
+  const composePath = args[args.indexOf("-f") + 1];
+  const content = readFileSync(composePath, "utf8");
+  const sharedMount = content.match(/^\\s*-\\s*["']?(.+?):\\/shared(?::[^"'\\s]+)?["']?\\s*$/m);
+  if (sharedMount) writeFileSync(activeShared, sharedMount[1]);
   process.exit(0);
 } else {
   process.exit(1);
@@ -862,10 +1006,9 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
   const winboat = path.join(bin, "winboat");
   await writeExecutable(winboat, `#!${process.execPath}\nprocess.exit(0);\n`);
 
-  const compose = path.join(root, "compose.yml");
   await fs.writeFile(
     compose,
-    `services:\n  windows:\n    image: mendimaru-e2e-fixture\n    container_name: MendimaruTauriE2E\n    volumes:\n      - ${JSON.stringify(`${shared}:/shared`)}\n      - mendimaru-e2e-storage:/storage\n    ports:\n      - 127.0.0.1:${apiPort}:7148\n      - 127.0.0.1:${rdpPort}:3389\nvolumes:\n  mendimaru-e2e-storage: {}\n`,
+    `services:\n  windows:\n    image: ghcr.io/dockur/windows:e2e-fixture\n    container_name: MendimaruTauriE2E\n    volumes:\n      - ${JSON.stringify(`${shared}:/shared`)}\n      - mendimaru-e2e-storage:/storage\n    ports:\n      - 127.0.0.1:${apiPort}:7148\n      - 127.0.0.1:${rdpPort}:3389\nvolumes:\n  mendimaru-e2e-storage: {}\n`,
   );
   await fs.writeFile(path.join(shared, "Orders", "Orders.mpr"), "fixture\n");
   await fs.writeFile(
@@ -993,10 +1136,13 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
   return {
     bin,
     chrome,
+    compose,
     legacyPartial,
     legacySentinel,
     runtimeHangFlag,
     runtimeHangPids,
+    runtimeCalls,
+    runtimeFailFlag,
     shared,
     xdgCache,
     xdgConfig,
@@ -1018,6 +1164,23 @@ function installedCacheSourceIdentity(config) {
     hash.update(Buffer.from([0]));
   }
   return hash.digest("hex");
+}
+
+async function readComposeCalls(file) {
+  const content = await fs.readFile(file, "utf8").catch((error) => {
+    if (error?.code === "ENOENT") return "";
+    throw error;
+  });
+  return content
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((arguments_) => arguments_[0] === "compose");
+}
+
+async function countComposeCalls(file) {
+  return (await readComposeCalls(file)).length;
 }
 
 async function writeExecutable(file, content) {

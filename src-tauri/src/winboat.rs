@@ -15,7 +15,8 @@ use crate::models::{AppConfig, StudioVersion};
 
 pub use client::installed_versions;
 pub use container::{
-    environment_status, guest_is_online, open_winboat, recreate_container, start_container,
+    environment_status, guest_is_online, open_winboat, recreate_compose_service,
+    recreate_container, start_container,
 };
 pub(crate) use operation::WindowsOperationFailure;
 pub(crate) use sessions::stop as stop_studio_session;

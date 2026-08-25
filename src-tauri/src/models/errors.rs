@@ -29,6 +29,9 @@ pub enum CommandErrorCode {
     RuntimeFirewallBlocked,
     RuntimeNotListening,
     RuntimeComposeRecoveryFailed,
+    ComposeNotWinboat,
+    ComposeAmbiguous,
+    ComposeRevisionConflict,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -1294,6 +1294,7 @@ mod tests {
             let result = super::super::container::compose_up_with_policy(
                 &config,
                 force_recreate,
+                "windows",
                 runtime.to_str().expect("runtime path"),
                 CommandPolicy::new(Duration::from_millis(100), 1024),
             )

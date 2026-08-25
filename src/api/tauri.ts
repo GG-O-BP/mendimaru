@@ -11,6 +11,7 @@ import type {
   LocalizationBundle,
   MendixProject,
   OperationRecord,
+  SettingsSavePreview,
   SettingsSaveResult,
   StudioSessionStatus,
   StudioVersion,
@@ -25,6 +26,7 @@ const commands = {
   formatLocalizedNumbers: "format_localized_numbers",
   formatLocalizedBytes: "format_localized_bytes",
   redetectConfig: "redetect_config",
+  previewSettingsSave: "preview_settings_save",
   saveConfig: "save_config",
   getCapabilities: "get_capabilities",
   getEnvironmentStatus: "get_environment_status",
@@ -67,8 +69,21 @@ export const tauriApi = {
   formatBytes: (values: number[]) =>
     invoke<string[]>(commands.formatLocalizedBytes, { values }),
   redetectConfig: () => invoke<AppConfig>(commands.redetectConfig),
-  saveConfig: (config: AppConfig, applyMount: boolean) =>
-    invoke<SettingsSaveResult>(commands.saveConfig, { config, applyMount }),
+  previewSettingsSave: (config: AppConfig, applyMount: boolean) =>
+    invoke<SettingsSavePreview | null>(commands.previewSettingsSave, {
+      config,
+      applyMount,
+    }),
+  saveConfig: (
+    config: AppConfig,
+    applyMount: boolean,
+    composeRevision?: string,
+  ) =>
+    invoke<SettingsSaveResult>(commands.saveConfig, {
+      config,
+      applyMount,
+      composeRevision: composeRevision ?? null,
+    }),
   getCapabilities: (backend?: BackendId) =>
     invoke<CapabilitySnapshot>(commands.getCapabilities, {
       backend: backend ?? null,

@@ -1,6 +1,6 @@
 use crate::config::{
     compose_file_is_valid, compose_shared_directory, path_exists_or_binary,
-    resolved_winboat_executable, runtime_host_port_async,
+    resolved_winboat_executable, runtime_host_port_async, winboat_compose_service_name,
 };
 use crate::models::{
     AppConfig, ContainerRuntime, ContainerStatus, EnvironmentDiagnostic,
@@ -492,7 +492,15 @@ pub async fn start_container(config: &AppConfig) -> Result<ContainerStatus, Stri
 }
 
 pub async fn recreate_container(config: &AppConfig) -> Result<(), String> {
-    compose_up(config, true).await
+    let service_name = winboat_compose_service_name(Path::new(&config.compose_file))?;
+    recreate_compose_service(config, &service_name).await
+}
+
+pub async fn recreate_compose_service(
+    config: &AppConfig,
+    service_name: &str,
+) -> Result<(), String> {
+    compose_up_service(config, true, service_name).await
 }
 
 pub fn open_winboat(config: &AppConfig) -> Result<(), String> {
@@ -508,9 +516,19 @@ pub fn open_winboat(config: &AppConfig) -> Result<(), String> {
 }
 
 async fn compose_up(config: &AppConfig, force_recreate: bool) -> Result<(), String> {
+    let service_name = winboat_compose_service_name(Path::new(&config.compose_file))?;
+    compose_up_service(config, force_recreate, &service_name).await
+}
+
+async fn compose_up_service(
+    config: &AppConfig,
+    force_recreate: bool,
+    service_name: &str,
+) -> Result<(), String> {
     compose_up_with_policy(
         config,
         force_recreate,
+        service_name,
         config.container_runtime.as_str(),
         lifecycle_policy(config),
     )
@@ -520,6 +538,7 @@ async fn compose_up(config: &AppConfig, force_recreate: bool) -> Result<(), Stri
 pub(crate) async fn compose_up_with_policy(
     config: &AppConfig,
     force_recreate: bool,
+    service_name: &str,
     runtime: &str,
     policy: CommandPolicy,
 ) -> Result<(), String> {
@@ -540,6 +559,7 @@ pub(crate) async fn compose_up_with_policy(
     if force_recreate {
         command.arg("--force-recreate");
     }
+    command.arg(service_name);
     let output = process::output(command, policy, None, "Compose apply")
         .await
         .map_err(|error| crate::tr!("error-compose-run", error = error))?;
@@ -877,13 +897,13 @@ fn is_loopback_host(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_linux_diagnostics, environment_status, extract_version, is_loopback_host,
-        parse_container_inspection, probe_tool_with_policy, LinuxDiagnosticState,
+        build_linux_diagnostics, compose_up_with_policy, environment_status, extract_version,
+        is_loopback_host, parse_container_inspection, probe_tool_with_policy, LinuxDiagnosticState,
         RuntimeContainerInspection, ToolProbe,
     };
     use crate::models::{
-        ContainerStatus, EnvironmentDiagnosticAction, EnvironmentDiagnosticErrorCode,
-        EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
+        AppConfig, ContainerRuntime, ContainerStatus, EnvironmentDiagnosticAction,
+        EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
     };
     use crate::process::CommandPolicy;
     use std::time::Duration;
@@ -1088,6 +1108,73 @@ mod tests {
         assert_eq!(
             diagnostic.error_code,
             Some(EnvironmentDiagnosticErrorCode::ExternalProcessTimeout)
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn force_recreate_command_targets_only_the_identified_service() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let runtime = temporary.path().join("fake-docker");
+        let captured = temporary.path().join("arguments");
+        let compose = temporary.path().join("compose.yml");
+        std::fs::write(&compose, "services: {}\n").expect("Compose fixture");
+        std::fs::write(
+            &runtime,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{}\"\n",
+                captured.display()
+            ),
+        )
+        .expect("runtime fixture");
+        let mut permissions = std::fs::metadata(&runtime)
+            .expect("runtime metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&runtime, permissions).expect("executable runtime");
+        let config = AppConfig {
+            language_preference: "system".into(),
+            winboat_setup_pending: false,
+            winboat_executable: "winboat".into(),
+            compose_file: compose.to_string_lossy().to_string(),
+            container_runtime: ContainerRuntime::Docker,
+            container_name: "WinBoat".into(),
+            api_url: "http://127.0.0.1:47280".into(),
+            rdp_host: "127.0.0.1".into(),
+            rdp_port: 47300,
+            shared_directory: temporary.path().to_string_lossy().to_string(),
+            windows_shared_directory: r"\\host.lan\Data".into(),
+            freerdp_binary: "xfreerdp3".into(),
+            mendix_install_root: r"C:\Program Files\Mendix".into(),
+            mendix_data_root: r"C:\ProgramData\Mendix".into(),
+            windows_studio_paths: Vec::new(),
+            startup_timeout_seconds: 180,
+        };
+
+        compose_up_with_policy(
+            &config,
+            true,
+            "winboat-vm",
+            runtime.to_str().expect("runtime path"),
+            CommandPolicy::new(Duration::from_secs(1), 1024),
+        )
+        .await
+        .expect("Compose command succeeds");
+
+        let arguments = std::fs::read_to_string(captured).expect("captured arguments");
+        assert_eq!(
+            arguments.lines().collect::<Vec<_>>(),
+            [
+                "compose",
+                "-f",
+                compose.to_str().expect("Compose path"),
+                "up",
+                "-d",
+                "--force-recreate",
+                "winboat-vm",
+            ]
         );
     }
 
