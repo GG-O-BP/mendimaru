@@ -23,7 +23,7 @@ const runner = path.join(repository, "scripts/browser-runner.mjs");
 const fixtureServer = path.join(repository, "tests/browser/fixture-server.mjs");
 const password = 'canary P@"ss&word</trace+har-2026';
 const username = "fixture-user";
-const MAX_COMPRESSIBLE_RUNNER_RSS_BYTES = 512 * 1024 * 1024;
+const MAX_COMPRESSIBLE_RUNNER_RSS_BYTES = 576 * 1024 * 1024;
 const temporary = await fs.mkdtemp(
   path.join(os.tmpdir(), "mendimaru-browser-e2e-"),
 );

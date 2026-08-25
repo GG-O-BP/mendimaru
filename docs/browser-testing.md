@@ -223,7 +223,7 @@ console/network policy behavior, optional video/HAR, unavailable Chromium
 diagnostics, failure evidence, and whole-artifact secret scanning. A malicious
 local target also produces a small, highly compressible trace with a member
 over the uncompressed limit; the test verifies pre-extraction rejection, a
-512 MiB runner RSS budget, and a successful next run. The Rust CLI E2E launches
+576 MiB runner RSS budget, and a successful next run. The Rust CLI E2E launches
 the compiled executable and runs that exact smoke suite through both a real
 Portable supervisor URL and a WinBoat loopback adapter URL. It also verifies
 exit/stream semantics and Runtime readiness rejection, re-queries artifacts,
