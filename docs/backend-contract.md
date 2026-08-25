@@ -139,6 +139,10 @@ descriptors. The optional Runtime `runtimeVersion` is carried into a browser
 manifest when the adapter can establish it. See
 [`browser-testing.md`](browser-testing.md).
 
+Version `4.0.0` adds stable external-process timeout, cancellation, and
+interruption error codes so callers can distinguish bounded process failures
+without parsing localized messages.
+
 `RuntimeStatus` is the shared successful lifecycle payload on Linux and
 Windows. Version `2.0.0` adds the backend identity and an explicit `httpReady`
 gate. WinBoat sessions may also expose optional host/guest ports, linked Studio
@@ -166,12 +170,13 @@ launcher details remain private. See
 
 ## Compatibility and versioning
 
-The current schema version is `3.0.0` and follows semantic versioning. Version
+The current schema version is `4.0.0` and follows semantic versioning. Version
 2 added multi-mode capability discovery, explicit Runtime backend/readiness,
 WinBoat Run Locally status fields, and its distinct failure codes. Version 3
 adds the first supported browser-test contract and optional Runtime version
-metadata. It is a major version because `runtimeVersion` is a new serialized
-field and the previously unsupported browser result now has a complete shape:
+metadata. Version 4 adds external-process failure enum values. These are major
+versions because they add serialized fields or enum values and, for version 3,
+give the previously unsupported browser result a complete shape:
 
 - Patch: documentation or validation corrections that do not change accepted
   data or meaning.

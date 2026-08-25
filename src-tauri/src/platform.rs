@@ -12,6 +12,7 @@ use crate::models::{
     EnvironmentDiagnosticId, EnvironmentDiagnosticStatus, EnvironmentStatus, HostPlatform,
     PlatformCapabilities, StudioInstallProgress, StudioVersion,
 };
+use crate::process::CancellationToken;
 use regex::Regex;
 use std::path::Path;
 
@@ -94,6 +95,7 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
             observed: None,
             action: (!Path::new(&config.shared_directory).is_dir())
                 .then_some(EnvironmentDiagnosticAction::OpenSettings),
+            error_code: None,
         }],
     }
 }
@@ -244,6 +246,7 @@ pub async fn install_studio<F>(
     operation_id: &str,
     installer_path: &Path,
     expected_sha256: &str,
+    cancellation: CancellationToken,
     on_progress: F,
 ) -> BackendResult<String>
 where
@@ -256,6 +259,7 @@ where
             operation_id,
             installer_path,
             expected_sha256,
+            cancellation,
             &mut on_progress,
         )
         .await
@@ -532,6 +536,7 @@ mod tests {
             &format!("install-{version}-{nonce}"),
             &installer_path,
             &expected_sha256,
+            crate::process::CancellationToken::default(),
             |update| {
                 eprintln!(
                     "lifecycle install: phase={:?} percentage={:?} estimated={}",

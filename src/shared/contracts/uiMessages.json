@@ -267,6 +267,10 @@
   "diagnostic-status-failure": true,
   "diagnostic-detected": true,
   "diagnostic-check-passed": true,
+  "diagnostic-process-spawn-failed": true,
+  "diagnostic-process-timeout": true,
+  "diagnostic-process-cancelled": true,
+  "diagnostic-process-interrupted": true,
   "diagnostic-winboat-title": true,
   "diagnostic-winboat-recovery": true,
   "diagnostic-compose-title": true,
@@ -351,5 +355,8 @@
   "operation-reason-invalid-request": true,
   "operation-reason-precondition-failed": true,
   "operation-reason-operation-failed": true,
+  "operation-reason-external-process-timeout": true,
+  "operation-reason-external-process-cancelled": true,
+  "operation-reason-external-process-interrupted": true,
   "operation-reason-unknown": true
 }

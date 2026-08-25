@@ -14,7 +14,7 @@
     "capabilitySnapshot"
   ],
   "properties": {
-    "schemaVersion": { "const": "3.0.0" },
+    "schemaVersion": { "const": "4.0.0" },
     "command": {
       "enum": [
         "capabilities",

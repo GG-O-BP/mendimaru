@@ -1,5 +1,6 @@
 use super::process::hidden_command;
 use crate::models::{AppConfig, StudioVersion};
+use crate::process::{self, CommandPolicy};
 use regex::Regex;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -425,7 +426,8 @@ fn version_from_path(path: &Path) -> Option<String> {
 }
 
 fn product_version(executable: &Path) -> Option<String> {
-    let output = hidden_command("powershell.exe")
+    let mut command = hidden_command("powershell.exe");
+    command
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -435,9 +437,14 @@ fn product_version(executable: &Path) -> Option<String> {
         ])
         .env("MENDIMARU_VERSION_PATH", executable)
         .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
+        .stderr(Stdio::null());
+    let output = process::output_sync(
+        command,
+        CommandPolicy::PROBE,
+        None,
+        "Studio Pro version inspection",
+    )
+    .ok()?;
     output
         .status
         .success()

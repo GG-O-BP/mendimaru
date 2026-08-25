@@ -53,6 +53,117 @@ pub(crate) fn directory(name: &str) -> Result<PathBuf, String> {
     Ok(require_isolated_root()?.join(name))
 }
 
+#[cfg(target_os = "windows")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BoundedProcessCleanupResult {
+    failure_kind: &'static str,
+    process_ids: Vec<u32>,
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub(crate) async fn e2e_bounded_process_cleanup() -> Result<BoundedProcessCleanupResult, String> {
+    use crate::process::{self, CancellationToken, CommandFailureKind, CommandPolicy};
+    use std::time::Duration;
+    use tokio::process::Command;
+
+    const SCRIPT: &str = r#"
+$child = Start-Process -FilePath $env:MENDIMARU_E2E_CHILD -ArgumentList @("-t", "127.0.0.1") -WindowStyle Hidden -PassThru
+[IO.File]::WriteAllText($env:MENDIMARU_E2E_PID_FILE, "$PID`n$($child.Id)`n", [Text.Encoding]::ASCII)
+while ($true) { Start-Sleep -Milliseconds 100 }
+"#;
+
+    let root = require_isolated_root()?;
+    let pid_file = root.join("bounded-process.pids");
+    match tokio::fs::remove_file(&pid_file).await {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("failed to reset the e2e PID fixture: {error}")),
+    }
+    let system_root = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .ok_or_else(|| "SystemRoot is unavailable for the Windows e2e fixture".to_string())?;
+    let powershell = system_root.join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    let child = system_root.join(r"System32\ping.exe");
+    if !powershell.is_file() || !child.is_file() {
+        return Err("the protected Windows e2e process fixtures are unavailable".to_string());
+    }
+
+    let mut command = Command::new(powershell);
+    command
+        .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            SCRIPT,
+        ])
+        .env("MENDIMARU_E2E_CHILD", child)
+        .env("MENDIMARU_E2E_PID_FILE", &pid_file);
+    let cancellation = CancellationToken::default();
+    let trigger = cancellation.clone();
+    let observed_pid_file = pid_file.clone();
+    let observe_and_cancel = async move {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match tokio::fs::metadata(&observed_pid_file).await {
+                Ok(metadata) if metadata.is_file() && metadata.len() > 0 => {
+                    trigger.cancel();
+                    return Ok::<(), String>(());
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!("failed to inspect the e2e PID fixture: {error}"))
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err("the Windows e2e child did not publish its process IDs".to_string());
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    let (result, observed) = tokio::join!(
+        process::output(
+            command,
+            CommandPolicy::new(Duration::from_secs(10), 1024),
+            Some(&cancellation),
+            "Windows e2e process cancellation",
+        ),
+        observe_and_cancel,
+    );
+    observed?;
+    let failure = match result {
+        Ok(_) => return Err("the Windows e2e process unexpectedly completed".to_string()),
+        Err(failure) => failure,
+    };
+    if failure.kind() != CommandFailureKind::Cancelled {
+        return Err(format!(
+            "the Windows e2e process ended as {:?} instead of cancellation",
+            failure.kind()
+        ));
+    }
+    let process_ids = tokio::fs::read_to_string(&pid_file)
+        .await
+        .map_err(|error| format!("failed to read the e2e PID fixture: {error}"))?
+        .lines()
+        .map(|line| {
+            line.parse::<u32>()
+                .map_err(|_| "the Windows e2e PID fixture is invalid".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if process_ids.len() != 2 || process_ids.contains(&0) {
+        return Err("the Windows e2e fixture did not create one root and one child".to_string());
+    }
+    let _ = tokio::fs::remove_file(pid_file).await;
+    Ok(BoundedProcessCleanupResult {
+        failure_kind: "cancelled",
+        process_ids,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::directory;

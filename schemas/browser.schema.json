@@ -18,7 +18,7 @@
         "downloadPolicy"
       ],
       "properties": {
-        "schemaVersion": { "const": "3.0.0" },
+        "schemaVersion": { "const": "4.0.0" },
         "runnerVersion": { "const": "1.0.0" },
         "ready": { "type": "boolean" },
         "nodeVersion": {
@@ -146,7 +146,7 @@
         "artifacts"
       ],
       "properties": {
-        "schemaVersion": { "const": "3.0.0" },
+        "schemaVersion": { "const": "4.0.0" },
         "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
         "outcome": { "$ref": "#/$defs/outcome" },
         "passed": { "type": "integer", "minimum": 0 },
@@ -195,7 +195,7 @@
         "artifacts"
       ],
       "properties": {
-        "schemaVersion": { "const": "3.0.0" },
+        "schemaVersion": { "const": "4.0.0" },
         "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
         "createdAt": { "type": "string", "format": "date-time" },
         "hostPlatform": {

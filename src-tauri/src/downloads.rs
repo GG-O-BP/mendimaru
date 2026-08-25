@@ -7,6 +7,7 @@ pub(crate) use progress::DOWNLOAD_EVENT;
 use crate::app_paths::AppPaths;
 use crate::contracts::BackendError;
 use crate::models::{AppConfig, DownloadState};
+use crate::process::CancellationToken;
 use cache::{CacheInspection, RemoteMetadata};
 use futures_util::StreamExt;
 use progress::{
@@ -27,7 +28,7 @@ const MENDIX_ARTIFACT_HOST: &str = "artifacts.rnd.mendix.com";
 #[derive(Default)]
 pub struct DownloadManager {
     busy: AtomicBool,
-    cancelled: AtomicBool,
+    cancellation: CancellationToken,
     cancellable: AtomicBool,
 }
 
@@ -53,7 +54,7 @@ impl From<BackendError> for InstallError {
 impl DownloadManager {
     pub fn cancel(&self) -> bool {
         if self.busy.load(Ordering::SeqCst) && self.cancellable.load(Ordering::SeqCst) {
-            self.cancelled.store(true, Ordering::SeqCst);
+            self.cancellation.cancel();
             true
         } else {
             false
@@ -64,7 +65,7 @@ impl DownloadManager {
         self.busy
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .map_err(|_| crate::tr!("error-download-busy"))?;
-        self.cancelled.store(false, Ordering::SeqCst);
+        self.cancellation.reset();
         self.cancellable.store(false, Ordering::SeqCst);
         Ok(DownloadGuard { manager: self })
     }
@@ -77,7 +78,7 @@ struct DownloadGuard<'a> {
 impl Drop for DownloadGuard<'_> {
     fn drop(&mut self) {
         self.manager.busy.store(false, Ordering::SeqCst);
-        self.manager.cancelled.store(false, Ordering::SeqCst);
+        self.manager.cancellation.reset();
         self.manager.cancellable.store(false, Ordering::SeqCst);
     }
 }
@@ -189,7 +190,7 @@ pub async fn download_and_launch(
         sha256
     };
 
-    if manager.cancelled.load(Ordering::SeqCst) {
+    if manager.cancellation.is_cancelled() {
         return Err(InstallError::Cancelled(crate::tr!(
             "error-download-cancelled"
         )));
@@ -222,15 +223,19 @@ pub async fn download_and_launch(
             return Err(error.into());
         }
     }
-    crate::platform::install_studio(
+    manager.cancellable.store(true, Ordering::SeqCst);
+    let installation = crate::platform::install_studio(
         config,
         &version,
         operation_id,
         &installer_path,
         &installer_sha256,
+        manager.cancellation.clone(),
         |progress| emit_install_progress(&version, progress, &mut on_progress),
     )
-    .await?;
+    .await;
+    manager.cancellable.store(false, Ordering::SeqCst);
+    installation?;
     emit_progress(
         DownloadProgressUpdate {
             version: &version,
@@ -350,7 +355,7 @@ where
     let mut downloaded = 0_u64;
 
     while let Some(chunk) = stream.next().await {
-        if manager.cancelled.load(Ordering::SeqCst) {
+        if manager.cancellation.is_cancelled() {
             on_progress(
                 DownloadState::Cancelled,
                 downloaded,
@@ -951,9 +956,7 @@ mod tests {
 
         let replacement_server = serve_once(pe_fixture(), None);
         let manager = DownloadManager::default();
-        manager
-            .cancelled
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        manager.cancellation.cancel();
         let result = download_file_with_progress(
             &manager,
             "11.12.2",

@@ -202,7 +202,7 @@ try {
       .catch((error) => done({ ok: false, error: String(error) }));
   `);
   assert.equal(capabilities.ok, true, capabilities.error);
-  assert.equal(capabilities.value.schemaVersion, "3.0.0");
+  assert.equal(capabilities.value.schemaVersion, "4.0.0");
   assert.equal(capabilities.value.manifest.hostPlatform, "linux");
   assert.equal(capabilities.value.manifest.backend, "linux-winboat");
 
@@ -215,6 +215,76 @@ try {
       environmentTimed.value.ready === true,
     "the actual Linux backend reports a ready WinBoat environment",
   );
+
+  await fs.rm(fixture.runtimeHangPids, { force: true });
+  await fs.writeFile(fixture.runtimeHangFlag, "hang\n", { mode: 0o600 });
+  await execute(`
+    window.__MENDIMARU_HANGING_ENVIRONMENT__ = window.__TAURI_INTERNALS__
+      .invoke("get_environment_status");
+    return true;
+  `);
+  await delay(150);
+  const responsiveTimed = await timed(() =>
+    execute("return document.querySelector('main h1')?.textContent;"),
+  );
+  recordAssertion(
+    typeof responsiveTimed.value === "string" &&
+      responsiveTimed.elapsedMs <= thresholds.navigationMs,
+    "the WebView stays responsive while the runtime fixture is hung",
+  );
+  const hangingEnvironmentTimed = await timed(() =>
+    executeAsync(`
+      const done = arguments[arguments.length - 1];
+      Promise.resolve(window.__MENDIMARU_HANGING_ENVIRONMENT__).then(
+        (value) => done({ ok: true, value }),
+        (error) => done({ ok: false, error: String(error) }),
+      );
+    `),
+  );
+  report.measurements.hangingEnvironmentMs = hangingEnvironmentTimed.elapsedMs;
+  recordAssertion(
+    hangingEnvironmentTimed.value.ok === true &&
+      hangingEnvironmentTimed.value.value.ready === false &&
+      hangingEnvironmentTimed.value.value.diagnostics.some(
+        (diagnostic) => diagnostic.errorCode === "external-process-timeout",
+      ),
+    "the hanging runtime reaches a bounded failure with a stable timeout code",
+  );
+  recordAssertion(
+    hangingEnvironmentTimed.elapsedMs <= 7_000,
+    `hanging environment status ${hangingEnvironmentTimed.elapsedMs} ms <= 7000 ms`,
+  );
+  await fs.rm(fixture.runtimeHangFlag, { force: true });
+  const fixturePids = [
+    ...new Set(
+      (await fs.readFile(fixture.runtimeHangPids, "utf8"))
+        .trim()
+        .split(/\s+/)
+        .map(Number)
+        .filter((pid) => Number.isInteger(pid) && pid > 0),
+    ),
+  ];
+  await waitFor(
+    async () => fixturePids.every((pid) => !linuxProcessExists(pid)),
+    5_000,
+    `bounded runtime descendants survived: ${fixturePids.join(", ")}`,
+  );
+  recordAssertion(
+    fixturePids.length >= 2,
+    "the hang fixture exercised and cleaned a descendant process tree",
+  );
+  const recoveredEnvironment = await timed(() =>
+    invoke("get_environment_status"),
+  );
+  report.measurements.recoveredEnvironmentMs = recoveredEnvironment.elapsedMs;
+  recordAssertion(
+    recoveredEnvironment.value.ready === true &&
+      recoveredEnvironment.value.diagnostics.every(
+        (diagnostic) => diagnostic.errorCode === undefined,
+      ),
+    "the next environment refresh recovers after the runtime returns",
+  );
+  assertThreshold("environmentMs", recoveredEnvironment.elapsedMs);
 
   const config = await invoke("get_config");
   report.configSharedDirectory = config.sharedDirectory;
@@ -743,10 +813,41 @@ async function createFixture(root) {
       },
     },
   ];
+  const runtimeHangFlag = path.join(root, "runtime-hang.flag");
+  const runtimeHangPids = path.join(root, "runtime-hang.pids");
   const docker = path.join(bin, "docker");
   await writeExecutable(
     docker,
-    `#!${process.execPath}\nconst args = process.argv.slice(2);\nconst inspect = ${JSON.stringify(inspectPayload)};\nif (args[0] === "info") { console.log("29.7.2"); process.exit(0); }\nif (args[0] === "port") {\n  const port = args[2] === "7148/tcp" ? ${apiPort} : args[2] === "3389/tcp" ? ${rdpPort} : 0;\n  if (port) { console.log("127.0.0.1:" + port); process.exit(0); }\n}\nif (args[0] === "inspect") { console.log(JSON.stringify(inspect)); process.exit(0); }\nprocess.exit(1);\n`,
+    `#!${process.execPath}
+const { appendFileSync, existsSync } = require("node:fs");
+const { spawn } = require("node:child_process");
+const args = process.argv.slice(2);
+const inspect = ${JSON.stringify(inspectPayload)};
+const hangFlag = ${JSON.stringify(runtimeHangFlag)};
+const hangPids = ${JSON.stringify(runtimeHangPids)};
+if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
+  const descendant = spawn(
+    process.execPath,
+    ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"],
+    { stdio: "ignore" },
+  );
+  appendFileSync(hangPids, process.pid + "\\n" + descendant.pid + "\\n");
+  process.on("SIGTERM", () => {});
+  setInterval(() => {}, 1000);
+} else if (args[0] === "info") {
+  console.log("29.7.2");
+  process.exit(0);
+} else if (args[0] === "port") {
+  const port = args[2] === "7148/tcp" ? ${apiPort} : args[2] === "3389/tcp" ? ${rdpPort} : 0;
+  if (port) { console.log("127.0.0.1:" + port); process.exit(0); }
+  process.exit(1);
+} else if (args[0] === "inspect") {
+  console.log(JSON.stringify(inspect));
+  process.exit(0);
+} else {
+  process.exit(1);
+}
+`,
   );
   const freerdp = path.join(bin, "xfreerdp3");
   await writeExecutable(
@@ -894,6 +995,8 @@ async function createFixture(root) {
     chrome,
     legacyPartial,
     legacySentinel,
+    runtimeHangFlag,
+    runtimeHangPids,
     shared,
     xdgCache,
     xdgConfig,
@@ -1224,6 +1327,16 @@ function linuxClockTicks() {
   );
   assert.ok(Number.isFinite(clockTicks) && clockTicks > 0);
   return clockTicks;
+}
+
+function linuxProcessExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === "ESRCH") return false;
+    throw error;
+  }
 }
 
 async function findApplicationProcess(binary, expectedConfigHome) {

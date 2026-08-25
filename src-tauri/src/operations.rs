@@ -15,7 +15,7 @@ use tauri::AppHandle;
 
 const HISTORY_FILE_NAME: &str = "operation-history.json";
 const HISTORY_SCHEMA_VERSION: &str = "1.0.0";
-const LEGACY_RECORD_SCHEMA_VERSIONS: &[&str] = &["1.0.0", "2.0.0"];
+const LEGACY_RECORD_SCHEMA_VERSIONS: &[&str] = &["1.0.0", "2.0.0", "3.0.0"];
 const MAX_HISTORY_BYTES: u64 = 512 * 1024;
 const MAX_RECORDS: usize = 250;
 const MAX_IDENTIFIER_BYTES: usize = 160;
@@ -205,13 +205,17 @@ impl OperationTracker {
         )
     }
 
-    pub(crate) fn cancel(mut self, reason: &str) -> Result<(), String> {
+    pub(crate) fn cancel(self, reason: &str) -> Result<(), String> {
+        self.cancel_with_code("download_cancelled", reason)
+    }
+
+    pub(crate) fn cancel_with_code(mut self, code: &str, reason: &str) -> Result<(), String> {
         self.finish(
             OperationState::Cancelled,
             self.last_stage,
             self.last_percentage,
             Some(OperationError {
-                code: "download_cancelled".to_string(),
+                code: safe_reason(code),
                 reason: safe_reason(reason),
                 exit_code: None,
             }),
@@ -869,6 +873,9 @@ fn failure_classification(error: &CommandError) -> (&'static str, bool) {
                 .as_ref()
                 .is_some_and(|details| details.retryable),
         ),
+        CommandErrorCode::ExternalProcessTimeout => ("external_process_timeout", true),
+        CommandErrorCode::ExternalProcessCancelled => ("external_process_cancelled", true),
+        CommandErrorCode::ExternalProcessInterrupted => ("external_process_interrupted", true),
         CommandErrorCode::ToolchainUnavailable => ("toolchain_unavailable", false),
         CommandErrorCode::RuntimeVersionUnsupported => ("runtime_version_unsupported", false),
         CommandErrorCode::ConsistencyFailed => ("consistency_failed", false),
@@ -1001,7 +1008,8 @@ mod tests {
     use super::{OperationTracker, SessionActionGuard};
     use crate::contracts::{BackendError, BackendId, CapabilityId};
     use crate::models::{
-        AppConfig, CommandError, ContainerRuntime, OperationKind, OperationStage, OperationState,
+        AppConfig, CommandError, CommandErrorCode, ContainerRuntime, OperationKind, OperationStage,
+        OperationState,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1208,6 +1216,62 @@ mod tests {
     }
 
     #[test]
+    fn external_process_deadlines_and_cancellation_are_exact_terminal_states() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let config = config(temporary.path());
+        let timeout = begin(
+            &config,
+            OperationKind::Install,
+            "11.12.2",
+            false,
+            OperationStage::Installing,
+            None,
+        )
+        .expect("begin timed operation");
+        timeout
+            .fail(&CommandError::new(
+                CommandErrorCode::ExternalProcessTimeout,
+                "the installer reached its deadline".into(),
+            ))
+            .expect("persist timeout");
+
+        let cancelled = begin(
+            &config,
+            OperationKind::Install,
+            "11.13.0",
+            false,
+            OperationStage::Installing,
+            None,
+        )
+        .expect("begin cancelled operation");
+        cancelled
+            .cancel_with_code("external_process_cancelled", "external_process_cancelled")
+            .expect("persist cancellation");
+
+        let records = list(&config).expect("reload exact terminal states");
+        let timeout = records
+            .iter()
+            .find(|record| record.target_version == "11.12.2")
+            .expect("timeout record");
+        assert_eq!(timeout.state, OperationState::Failed);
+        assert_eq!(
+            timeout.error.as_ref().expect("timeout error").code,
+            "external_process_timeout"
+        );
+        assert_ne!(timeout.state, OperationState::Interrupted);
+
+        let cancelled = records
+            .iter()
+            .find(|record| record.target_version == "11.13.0")
+            .expect("cancelled record");
+        assert_eq!(cancelled.state, OperationState::Cancelled);
+        assert_eq!(
+            cancelled.error.as_ref().expect("cancellation error").code,
+            "external_process_cancelled"
+        );
+    }
+
+    #[test]
     fn migrates_compatible_record_contract_versions_on_the_next_write() {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let config = config(temporary.path());
@@ -1227,7 +1291,7 @@ mod tests {
         let mut legacy: serde_json::Value =
             serde_json::from_slice(&fs::read(&history).expect("read history"))
                 .expect("parse history");
-        legacy["records"][0]["schemaVersion"] = serde_json::json!("1.0.0");
+        legacy["records"][0]["schemaVersion"] = serde_json::json!("3.0.0");
         fs::write(
             &history,
             serde_json::to_vec_pretty(&legacy).expect("serialize legacy history"),

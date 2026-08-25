@@ -5,7 +5,7 @@ use std::fmt;
 /// Contract versions follow semantic versioning. Changes accepted by the
 /// current closed schemas may increment the minor version; serialized fields,
 /// enum variants, capability IDs, or semantics require a major version.
-pub const CONTRACT_SCHEMA_VERSION: &str = "3.0.0";
+pub const CONTRACT_SCHEMA_VERSION: &str = "4.0.0";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
@@ -196,6 +196,9 @@ pub enum BackendErrorCode {
     InvalidRequest,
     PreconditionFailed,
     OperationFailed,
+    ExternalProcessTimeout,
+    ExternalProcessCancelled,
+    ExternalProcessInterrupted,
     ToolchainUnavailable,
     RuntimeVersionUnsupported,
     ConsistencyFailed,
@@ -885,6 +888,9 @@ mod tests {
                 BackendErrorCode::InvalidRequest,
                 BackendErrorCode::PreconditionFailed,
                 BackendErrorCode::OperationFailed,
+                BackendErrorCode::ExternalProcessTimeout,
+                BackendErrorCode::ExternalProcessCancelled,
+                BackendErrorCode::ExternalProcessInterrupted,
                 BackendErrorCode::ToolchainUnavailable,
                 BackendErrorCode::RuntimeVersionUnsupported,
                 BackendErrorCode::ConsistencyFailed,

@@ -6,6 +6,7 @@ import type { AppConfig, EnvironmentStatus } from "../../domain/types";
 import type { PathField } from "./SettingsPage";
 import type { SettingsDraftDependencies } from "./dependencies";
 import { configsEqual } from "./environmentState";
+import type { EnvironmentRefreshOptions } from "./useEnvironmentStatus";
 
 type SettingsState =
   | { status: "loading" }
@@ -14,7 +15,7 @@ type SettingsState =
 
 interface UseSettingsDraftOptions extends SettingsDraftDependencies {
   environmentStatus: EnvironmentStatus | null;
-  refreshStatus: () => Promise<void>;
+  refreshStatus: (options?: EnvironmentRefreshOptions) => Promise<void>;
 }
 
 export function useSettingsDraft({
@@ -192,7 +193,7 @@ export function useSettingsDraft({
             ? t("toast-mount-deferred")
             : undefined,
         );
-        await refreshStatus();
+        await refreshStatus({ sourceChanged: true });
       });
 
     if (
@@ -228,7 +229,7 @@ export function useSettingsDraft({
         applyConfig(detected);
         onWarning(null);
         notify("success", t("toast-redetected"));
-        await refreshStatus();
+        await refreshStatus({ sourceChanged: true });
       }),
     [applyConfig, notify, onWarning, refreshStatus, runAction, t],
   );

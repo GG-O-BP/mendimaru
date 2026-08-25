@@ -122,10 +122,13 @@ pub(crate) async fn start(
     let mapping_is_prepared = existing_mapping.is_some_and(|mapping| {
         mapping.host_ip == "127.0.0.1" && mapping.host_port.is_none() && mapping.protocol == "tcp"
     });
-    let live_mapping_is_prepared = mapping_is_prepared
-        && runtime_host_binding(config, guest_port).is_ok_and(|binding| {
-            binding.host_ip == "127.0.0.1" && binding.guest_port == guest_port
-        });
+    let live_mapping_is_prepared = if mapping_is_prepared {
+        runtime_host_binding(config, guest_port)
+            .await
+            .is_ok_and(|binding| binding.host_ip == "127.0.0.1" && binding.guest_port == guest_port)
+    } else {
+        false
+    };
     if request.studio_session_id.is_some() && !live_mapping_is_prepared {
         return Err(runtime_error(
             CapabilityId::RuntimeStart,
@@ -180,7 +183,7 @@ pub(crate) async fn start(
         )
     })?;
     let mut transaction = ComposeTransaction::new(snapshot);
-    let storage_before = storage_mount_identity(config).map_err(|_| {
+    let storage_before = storage_mount_identity(config).await.map_err(|_| {
         runtime_error(
             CapabilityId::RuntimeStart,
             BackendErrorCode::RuntimePortForwardingInvalid,
@@ -233,7 +236,7 @@ pub(crate) async fn start(
         }
     }
 
-    let storage_after = match storage_mount_identity(config) {
+    let storage_after = match storage_mount_identity(config).await {
         Ok(identity) if identity == storage_before => identity,
         _ => {
             rollback_compose(
@@ -260,7 +263,7 @@ pub(crate) async fn start(
         )
     })?;
     let managed_compose_sha256 = format!("{:x}", Sha256::digest(&managed_compose));
-    let binding = match runtime_host_binding(config, guest_port) {
+    let binding = match runtime_host_binding(config, guest_port).await {
         Ok(binding) => binding,
         Err(_) => {
             if compose_changed {
@@ -473,7 +476,7 @@ pub(crate) async fn stop(config: &AppConfig, session_id: &str) -> BackendResult<
             Some(record.log_artifact.artifact_id.clone()),
         )
     })?;
-    let storage_after = storage_mount_identity(config).map_err(|_| {
+    let storage_after = storage_mount_identity(config).await.map_err(|_| {
         runtime_error(
             CapabilityId::RuntimeStop,
             BackendErrorCode::RuntimeComposeRecoveryFailed,
@@ -549,7 +552,7 @@ async fn refresh(
             .map_err(|_| record_error(record, CapabilityId::RuntimeStatus))?;
         return Ok(());
     }
-    let binding = match runtime_host_binding(config, record.guest_port) {
+    let binding = match runtime_host_binding(config, record.guest_port).await {
         Ok(binding) => binding,
         Err(_) => {
             record.state = RuntimeState::Failed;
@@ -635,7 +638,10 @@ async fn diagnose_unready_runtime(config: &AppConfig, record: &SessionRecord) ->
     if !guest_is_online(config).await {
         return BackendErrorCode::RuntimeGuestOffline;
     }
-    if runtime_host_binding(config, record.guest_port).is_err() {
+    if runtime_host_binding(config, record.guest_port)
+        .await
+        .is_err()
+    {
         return BackendErrorCode::RuntimePortForwardingInvalid;
     }
     diagnostic_code(guest_port_diagnostic(config, record.guest_port).await)
@@ -676,6 +682,7 @@ async fn guest_port_diagnostic(config: &AppConfig, guest_port: u16) -> Option<&'
             timeout_seconds: PORT_DIAGNOSTIC_TIMEOUT_SECONDS,
             operation: "diagnosing the Mendix Runtime port",
             keep_remote_app_alive: false,
+            cancellation: None,
         },
         |_| {},
     )
@@ -699,12 +706,17 @@ async fn rollback_compose(
     expected_storage: &[String],
     capability: CapabilityId,
 ) -> BackendResult<()> {
-    if restore_file(snapshot).is_err()
-        || recreate_container(config).await.is_err()
-        || wait_for_guest(config).await.is_err()
-        || !storage_mount_identity(config)
+    let restored = restore_file(snapshot).is_ok();
+    let recreated = restored && recreate_container(config).await.is_ok();
+    let online = recreated && wait_for_guest(config).await.is_ok();
+    let storage_matches = if online {
+        storage_mount_identity(config)
+            .await
             .is_ok_and(|identity| identity.as_slice() == expected_storage)
-    {
+    } else {
+        false
+    };
+    if !storage_matches {
         return Err(runtime_error(
             capability,
             BackendErrorCode::RuntimeComposeRecoveryFailed,
@@ -1173,6 +1185,12 @@ mod tests {
         valid_studio_session_id, validate_runtime_session_id, ComposeTransaction,
     };
     use crate::contracts::BackendErrorCode;
+    #[cfg(unix)]
+    use crate::models::{AppConfig, ContainerRuntime};
+    #[cfg(unix)]
+    use crate::process::CommandPolicy;
+    #[cfg(unix)]
+    use std::time::Duration;
 
     #[test]
     fn validates_only_opaque_runtime_and_exact_studio_process_identities() {
@@ -1227,5 +1245,62 @@ mod tests {
             .expect("changed Compose");
         drop(transaction);
         assert_eq!(std::fs::read(compose).expect("restored Compose"), original);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn timed_out_compose_start_and_recreate_restore_the_original_bytes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let compose = temporary.path().join("docker-compose.yml");
+        let runtime = temporary.path().join("fake-docker");
+        let original = b"services:\n  windows:\n    image: original\n";
+        std::fs::write(&compose, original).expect("original Compose");
+        std::fs::write(
+            &runtime,
+            "#!/bin/sh\ntrap '' TERM\nwhile :; do sleep 1; done\n",
+        )
+        .expect("fake runtime");
+        let mut permissions = std::fs::metadata(&runtime)
+            .expect("runtime metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&runtime, permissions).expect("executable runtime");
+        let config = AppConfig {
+            language_preference: "system".into(),
+            winboat_setup_pending: false,
+            winboat_executable: "winboat".into(),
+            compose_file: compose.to_string_lossy().to_string(),
+            container_runtime: ContainerRuntime::Docker,
+            container_name: "WinBoat".into(),
+            api_url: "http://127.0.0.1:47271".into(),
+            rdp_host: "127.0.0.1".into(),
+            rdp_port: 47273,
+            shared_directory: temporary.path().to_string_lossy().to_string(),
+            windows_shared_directory: r"\\host.lan\Data".into(),
+            freerdp_binary: "xfreerdp3".into(),
+            mendix_install_root: r"C:\Program Files\Mendix".into(),
+            mendix_data_root: r"C:\ProgramData\Mendix".into(),
+            windows_studio_paths: Vec::new(),
+            startup_timeout_seconds: 1,
+        };
+
+        for force_recreate in [false, true] {
+            let snapshot = crate::config::snapshot_file(&compose).expect("Compose snapshot");
+            let transaction = ComposeTransaction::new(snapshot);
+            std::fs::write(&compose, b"services:\n  windows:\n    image: changed\n")
+                .expect("changed Compose");
+            let result = super::super::container::compose_up_with_policy(
+                &config,
+                force_recreate,
+                runtime.to_str().expect("runtime path"),
+                CommandPolicy::new(Duration::from_millis(100), 1024),
+            )
+            .await;
+            assert!(result.is_err(), "hanging Compose command must time out");
+            drop(transaction);
+            assert_eq!(std::fs::read(&compose).expect("restored Compose"), original);
+        }
     }
 }

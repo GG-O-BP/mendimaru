@@ -9,6 +9,7 @@ use super::scripts::{
 };
 use crate::models::{AppConfig, StudioInstallPhase, StudioInstallProgress};
 use crate::platform::validate_version;
+use crate::process::CancellationToken;
 use crate::projects::{linux_path_to_windows_share, scan_projects};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -85,6 +86,7 @@ pub async fn launch_studio(
                 timeout_seconds: STUDIO_LAUNCH_TIMEOUT_SECONDS,
                 operation: &operation,
                 keep_remote_app_alive: true,
+                cancellation: None,
             },
             |report| {
                 if report.state == WindowsOperationState::Running && report.sessions.len() == 1 {
@@ -194,6 +196,7 @@ async fn abort_incomplete_launch(
             timeout_seconds: FAILED_LAUNCH_ABORT_TIMEOUT_SECONDS,
             operation: "cleaning up incomplete Studio Pro launch",
             keep_remote_app_alive: false,
+            cancellation: None,
         },
         |_| {},
     )
@@ -277,6 +280,7 @@ pub async fn install_studio<F>(
     operation_id: &str,
     windows_installer_path: &str,
     expected_sha256: &str,
+    cancellation: CancellationToken,
     mut on_progress: F,
 ) -> Result<String, WindowsOperationFailure>
 where
@@ -324,6 +328,7 @@ where
             timeout_seconds: INSTALL_TIMEOUT_SECONDS,
             operation: &operation,
             keep_remote_app_alive: false,
+            cancellation: Some(&cancellation),
         },
         |report| {
             let phase = match report.state {
@@ -470,6 +475,7 @@ pub async fn launch_uninstaller(
             timeout_seconds: UNINSTALL_TIMEOUT_SECONDS,
             operation: &operation,
             keep_remote_app_alive: false,
+            cancellation: None,
         },
         |_| {},
     )
@@ -484,6 +490,7 @@ fn ensure_no_registered_remote_app() -> Result<(), WindowsOperationFailure> {
             message: "a connected Studio Pro RemoteApp session is still running".to_string(),
             exit_code: None,
             retryable: false,
+            failure_kind: None,
         });
     }
     Ok(())

@@ -193,6 +193,7 @@ mod tests {
                 timeout_seconds,
                 operation: "running a WinBoat security probe",
                 keep_remote_app_alive: false,
+                cancellation: None,
             },
             |_| {},
         ));
@@ -548,11 +549,7 @@ mod tests {
             .expect("locate user configuration directory");
         let pin = base
             .join("mendimaru/freerdp-config/freerdp/server")
-            .join(format!(
-                "{}_{}.pem",
-                config.rdp_host,
-                crate::config::resolved_rdp_port(&config)
-            ));
+            .join(format!("{}_{}.pem", config.rdp_host, config.rdp_port));
         let original = std::fs::read(&pin).expect("a prior live launch must create the TOFU pin");
         let restore = FileRestore {
             path: pin.clone(),
@@ -644,6 +641,7 @@ mod tests {
             &format!("install-{version}-live-e2e"),
             &windows_installer_path,
             &expected_sha256,
+            crate::process::CancellationToken::default(),
             |progress| {
                 eprintln!(
                     "install progress: state={:?} percentage={:?} estimated={}",

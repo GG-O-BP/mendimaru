@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const ENVIRONMENT_DIAGNOSTIC_SCHEMA_VERSION: &str = "1.0.0";
+pub const ENVIRONMENT_DIAGNOSTIC_SCHEMA_VERSION: &str = "2.0.0";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -92,6 +92,15 @@ pub enum EnvironmentDiagnosticAction {
     OpenSettings,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum EnvironmentDiagnosticErrorCode {
+    ExternalProcessSpawnFailed,
+    ExternalProcessTimeout,
+    ExternalProcessCancelled,
+    ExternalProcessInterrupted,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentDiagnostic {
@@ -101,6 +110,8 @@ pub struct EnvironmentDiagnostic {
     pub observed: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub action: Option<EnvironmentDiagnosticAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<EnvironmentDiagnosticErrorCode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -139,6 +150,8 @@ struct EnvironmentDiagnosticReportCheck {
     status: EnvironmentDiagnosticStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     action: Option<EnvironmentDiagnosticAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<EnvironmentDiagnosticErrorCode>,
 }
 
 pub fn environment_diagnostic_report(status: &EnvironmentStatus) -> Result<String, String> {
@@ -155,6 +168,7 @@ pub fn environment_diagnostic_report(status: &EnvironmentStatus) -> Result<Strin
                 id: diagnostic.id,
                 status: diagnostic.status,
                 action: diagnostic.action,
+                error_code: diagnostic.error_code,
             })
             .collect(),
     };
@@ -195,6 +209,7 @@ mod diagnostic_report_tests {
                 status: EnvironmentDiagnosticStatus::Failure,
                 observed: Some(secret.to_string()),
                 action: Some(EnvironmentDiagnosticAction::Redetect),
+                error_code: Some(EnvironmentDiagnosticErrorCode::ExternalProcessTimeout),
             }],
         };
 
@@ -202,7 +217,9 @@ mod diagnostic_report_tests {
         assert!(!report.contains("hunter2"));
         assert!(!report.contains("private-value"));
         assert!(!report.contains("/home/private"));
+        assert!(report.contains("\"schemaVersion\": \"2.0.0\""));
         assert!(report.contains("\"id\": \"winboat\""));
         assert!(report.contains("\"action\": \"redetect\""));
+        assert!(report.contains("\"errorCode\": \"external-process-timeout\""));
     }
 }

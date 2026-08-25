@@ -1,4 +1,5 @@
 use super::process::hidden_command;
+use crate::process::{self, CommandPolicy};
 use base64::Engine;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -134,7 +135,8 @@ $json = $report | ConvertTo-Json -Compress
 $bytes = [Text.Encoding]::UTF8.GetBytes($json)
 [Console]::Out.Write([Convert]::ToBase64String($bytes))
 "#;
-    let output = hidden_command("powershell.exe")
+    let mut command = hidden_command("powershell.exe");
+    command
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -145,9 +147,14 @@ $bytes = [Text.Encoding]::UTF8.GetBytes($json)
             SCRIPT,
         ])
         .env("MENDIMARU_SIGNATURE_PATH", path)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|error| crate::tr!("error-native-signature-tool", error = error))?;
+        .stdin(Stdio::null());
+    let output = process::output_sync(
+        command,
+        CommandPolicy::STATUS,
+        None,
+        "Authenticode verification",
+    )
+    .map_err(|error| crate::tr!("error-native-signature-tool", error = error))?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(crate::tr!(

@@ -18,7 +18,7 @@ import {
   unzipArchiveBounded,
 } from "./browser-artifact-safety.mjs";
 
-const SCHEMA_VERSION = "3.0.0";
+const SCHEMA_VERSION = "4.0.0";
 const RUNNER_VERSION = "1.0.0";
 const MINIMUM_NODE_VERSION = "22.22.2";
 const MAX_STDIN_BYTES = 4 * 1024 * 1024;

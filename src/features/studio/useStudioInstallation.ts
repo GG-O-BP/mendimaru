@@ -92,7 +92,10 @@ export function useStudioInstallation({
           installed = exact;
         } catch (error) {
           const message = errorText(error, t);
-          const cancelled = errorCode(error) === "download_cancelled";
+          const code = errorCode(error);
+          const cancelled =
+            code === "download_cancelled" ||
+            code === "external_process_cancelled";
           setDownloadProgress((current) => ({
             version: version.version,
             state:

@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type {
   DownloadProgress,
@@ -68,5 +68,19 @@ describe("InstallationProgress motion state", () => {
         view.container.querySelector(".progress-track > span"),
       ).not.toHaveClass("active");
     }
+  });
+
+  it("keeps user cancellation available while the installer is running", () => {
+    render(
+      <InstallationProgress
+        t={t}
+        localization={localization}
+        progress={progress("installing")}
+        isInstalling
+        onCancel={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "action-cancel" })).toBeEnabled();
   });
 });

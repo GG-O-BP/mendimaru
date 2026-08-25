@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "code", "message", "retryable"],
   "properties": {
-    "schemaVersion": { "const": "3.0.0" },
+    "schemaVersion": { "const": "4.0.0" },
     "code": {
       "enum": [
         "unsupported_capability",
@@ -14,6 +14,9 @@
         "invalid_request",
         "precondition_failed",
         "operation_failed",
+        "external_process_timeout",
+        "external_process_cancelled",
+        "external_process_interrupted",
         "toolchain_unavailable",
         "runtime_version_unsupported",
         "consistency_failed",
@@ -50,6 +53,9 @@
             "invalid_request",
             "precondition_failed",
             "operation_failed",
+            "external_process_timeout",
+            "external_process_cancelled",
+            "external_process_interrupted",
             "toolchain_unavailable",
             "runtime_version_unsupported",
             "consistency_failed",

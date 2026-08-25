@@ -43,7 +43,7 @@ fn real_binary_emits_a_complete_platform_neutral_capability_snapshot() {
     let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
     assert_eq!(stdout.lines().count(), 1);
     let json: Value = serde_json::from_str(&stdout).expect("stdout is one JSON document");
-    assert_eq!(json["schemaVersion"], "3.0.0");
+    assert_eq!(json["schemaVersion"], "4.0.0");
     assert_eq!(json["command"], "capabilities");
     assert_eq!(json["ok"], true);
     assert_eq!(json["data"]["manifest"]["backend"], current_backend());

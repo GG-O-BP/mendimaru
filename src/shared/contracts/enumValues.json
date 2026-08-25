@@ -53,6 +53,9 @@
     "invalid_request": true,
     "precondition_failed": true,
     "operation_failed": true,
+    "external_process_timeout": true,
+    "external_process_cancelled": true,
+    "external_process_interrupted": true,
     "toolchain_unavailable": true,
     "runtime_version_unsupported": true,
     "consistency_failed": true,
@@ -165,6 +168,12 @@
     "open-winboat": true,
     "open-settings": true
   },
+  "environmentDiagnosticErrorCode": {
+    "external-process-spawn-failed": true,
+    "external-process-timeout": true,
+    "external-process-cancelled": true,
+    "external-process-interrupted": true
+  },
   "downloadState": {
     "starting": true,
     "preparing": true,
@@ -219,6 +228,9 @@
     "invalid_request": true,
     "precondition_failed": true,
     "operation_failed": true,
+    "external_process_timeout": true,
+    "external_process_cancelled": true,
+    "external_process_interrupted": true,
     "toolchain_unavailable": true,
     "runtime_version_unsupported": true,
     "consistency_failed": true,
