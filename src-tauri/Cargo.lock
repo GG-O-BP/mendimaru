@@ -2719,6 +2719,7 @@ dependencies = [
 name = "mendimaru"
 version = "0.2.2"
 dependencies = [
+ "aho-corasick",
  "base64 0.22.1",
  "cap-fs-ext",
  "cap-std",

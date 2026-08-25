@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { Buffer } from "node:buffer";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import { createRequire } from "node:module";
@@ -8,7 +8,15 @@ import path from "node:path";
 import process from "node:process";
 import { URL } from "node:url";
 import { chromium, expect } from "@playwright/test";
-import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import { strToU8, zipSync } from "fflate";
+import {
+  ARTIFACT_SCAN_BUFFER_BYTES,
+  ArtifactSafetyError,
+  BytePatternMatcher,
+  DEFAULT_ARTIFACT_SAFETY_LIMITS,
+  StreamingPatternScanner,
+  unzipArchiveBounded,
+} from "./browser-artifact-safety.mjs";
 
 const SCHEMA_VERSION = "3.0.0";
 const RUNNER_VERSION = "1.0.0";
@@ -245,6 +253,7 @@ async function run(rawRequest) {
     "text/html; charset=utf-8",
   );
 
+  await enforceOutputLimits(outputDirectory, request.policy.maxArtifactBytes);
   await sanitizeArtifacts(outputDirectory, secrets);
   const describedFiles = await describeFiles(outputDirectory, files);
   const manifest = {
@@ -1112,20 +1121,22 @@ async function describeFiles(directory, files) {
   const descriptions = [];
   for (const file of files) {
     const filename = safeArtifactPath(directory, file.path);
-    const bytes = await fsp.readFile(filename);
+    const { sha256, sizeBytes } = await digestFile(filename);
     descriptions.push({
       file: file.path,
       kind: file.kind,
       mediaType: file.mediaType,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      sizeBytes: bytes.length,
+      sha256,
+      sizeBytes,
     });
   }
   return descriptions;
 }
 
 async function sanitizeArtifacts(directory, secrets) {
-  if (secrets.size === 0) return;
+  const variants = secretVariants(secrets);
+  const needles = variants.map((value) => strToU8(value));
+  const matcher = new BytePatternMatcher(needles);
   for (const entry of await fsp.readdir(directory, { withFileTypes: true })) {
     if (entry.isDirectory()) continue;
     if (!entry.isFile() || entry.isSymbolicLink()) {
@@ -1133,110 +1144,175 @@ async function sanitizeArtifacts(directory, secrets) {
     }
     const filename = path.join(directory, entry.name);
     if (entry.name.endsWith(".zip")) {
-      const archive = unzipSync(await fsp.readFile(filename));
+      let archive;
+      try {
+        archive = unzipArchiveBounded(await fsp.readFile(filename), {
+          collect: secrets.size !== 0,
+        });
+      } catch (error) {
+        throwArtifactSafetyError(error);
+      }
+      if (secrets.size === 0) continue;
       for (const [name, bytes] of Object.entries(archive)) {
-        if (containsSecret(Buffer.from(name, "utf8"), secrets)) {
+        if (matcher.contains(Buffer.from(name, "utf8"))) {
           throw new RunnerError(
             "artifact_secret_detected",
             "a trace entry name contains a private value",
           );
         }
-        archive[name] = sanitizeBytes(bytes, secrets);
+        archive[name] = sanitizeBytes(bytes, matcher);
       }
       await fsp.writeFile(filename, zipSync(archive, { level: 6 }), {
         mode: 0o600,
       });
-    } else if (!entry.name.endsWith(".png") && !entry.name.endsWith(".webm")) {
-      const bytes = await fsp.readFile(filename);
-      await fsp.writeFile(filename, sanitizeBytes(bytes, secrets), {
-        mode: 0o600,
-      });
+    } else if (
+      secrets.size !== 0 &&
+      !entry.name.endsWith(".png") &&
+      !entry.name.endsWith(".webm")
+    ) {
+      await sanitizeFileStreaming(filename, matcher);
     }
   }
 }
 
-function sanitizeBytes(bytes, secrets) {
-  let text;
-  try {
-    text = strFromU8(bytes, true);
-  } catch {
-    return replaceBinarySecrets(bytes, secretVariants(secrets));
-  }
-  return strToU8(redactText(text, secrets));
-}
-
-function replaceBinarySecrets(bytes, variants) {
-  const output = Uint8Array.from(bytes);
-  for (const value of variants) {
-    const needle = strToU8(value);
-    if (needle.length === 0 || needle.length > output.length) continue;
-    for (let index = 0; index <= output.length - needle.length; index += 1) {
-      let matches = true;
-      for (let offset = 0; offset < needle.length; offset += 1) {
-        if (output[index + offset] !== needle[offset]) {
-          matches = false;
-          break;
-        }
-      }
-      if (matches) output.fill(42, index, index + needle.length);
-    }
-  }
-  return output;
+function sanitizeBytes(bytes, matcher) {
+  return matcher.redact(bytes);
 }
 
 async function verifyNoSecrets(directory, secrets) {
   if (secrets.size === 0) return;
   const variants = secretVariants(secrets).map((value) => strToU8(value));
+  const matcher = new BytePatternMatcher(variants);
+  const startedAt = Date.now();
   for (const entry of await fsp.readdir(directory, { withFileTypes: true })) {
     if (entry.isDirectory()) continue;
     const filename = path.join(directory, entry.name);
-    const archive = entry.name.endsWith(".zip")
-      ? unzipSync(await fsp.readFile(filename))
-      : null;
-    if (
-      archive &&
-      Object.keys(archive).some((name) =>
-        containsSecret(Buffer.from(name, "utf8"), secrets),
-      )
-    ) {
-      throw new RunnerError(
-        "artifact_secret_detected",
-        "a trace entry name contains a private value",
-      );
+    try {
+      if (entry.name.endsWith(".zip")) {
+        unzipArchiveBounded(await fsp.readFile(filename), {
+          collect: false,
+          needles: variants,
+          startedAt,
+        });
+      } else {
+        await scanFileForSecrets(filename, matcher, startedAt);
+      }
+    } catch (error) {
+      throwArtifactSafetyError(error);
     }
-    const archives = archive
-      ? Object.values(archive)
-      : [await fsp.readFile(filename)];
-    for (const bytes of archives) {
-      if (variants.some((needle) => includesBytes(bytes, needle))) {
-        throw new RunnerError(
-          "artifact_secret_detected",
-          "a private value remained in browser artifacts",
+  }
+}
+
+async function digestFile(filename) {
+  const digest = createHash("sha256");
+  let sizeBytes = 0;
+  for await (const chunk of fs.createReadStream(filename, {
+    highWaterMark: ARTIFACT_SCAN_BUFFER_BYTES,
+  })) {
+    sizeBytes += chunk.length;
+    digest.update(chunk);
+  }
+  return { sha256: digest.digest("hex"), sizeBytes };
+}
+
+async function scanFileForSecrets(filename, matcher, startedAt) {
+  const scanner = new StreamingPatternScanner(matcher);
+  let actualBytes = 0;
+  for await (const chunk of fs.createReadStream(filename, {
+    highWaterMark: ARTIFACT_SCAN_BUFFER_BYTES,
+  })) {
+    if (
+      Date.now() - startedAt >=
+      DEFAULT_ARTIFACT_SAFETY_LIMITS.maximumDurationMilliseconds
+    ) {
+      throw new ArtifactSafetyError("scan_time_limit");
+    }
+    actualBytes += chunk.length;
+    if (actualBytes > DEFAULT_ARTIFACT_SAFETY_LIMITS.maximumFileBytes) {
+      throw new ArtifactSafetyError("file_size_limit");
+    }
+    scanner.push(chunk);
+  }
+}
+
+async function sanitizeFileStreaming(filename, matcher) {
+  const suffix = randomBytes(12).toString("hex");
+  const temporary = `${filename}.${suffix}.redact`;
+  const maximumOverlap = Math.max(0, matcher.maximumPatternBytes - 1);
+  let source;
+  let destination;
+  try {
+    source = await fsp.open(filename, "r");
+    destination = await fsp.open(temporary, "wx", 0o600);
+    const buffer = Buffer.allocUnsafe(ARTIFACT_SCAN_BUFFER_BYTES);
+    let pending = Buffer.alloc(0);
+    let actualBytes = 0;
+    const startedAt = Date.now();
+    while (true) {
+      const { bytesRead } = await source.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      actualBytes += bytesRead;
+      if (
+        actualBytes > DEFAULT_ARTIFACT_SAFETY_LIMITS.maximumFileBytes ||
+        Date.now() - startedAt >=
+          DEFAULT_ARTIFACT_SAFETY_LIMITS.maximumDurationMilliseconds
+      ) {
+        throw new ArtifactSafetyError(
+          actualBytes > DEFAULT_ARTIFACT_SAFETY_LIMITS.maximumFileBytes
+            ? "file_size_limit"
+            : "scan_time_limit",
         );
       }
+      const combined = matcher.redact(
+        Buffer.concat([pending, buffer.subarray(0, bytesRead)]),
+      );
+      const retained = Math.min(maximumOverlap, combined.length);
+      const writable = combined.length - retained;
+      if (writable !== 0) {
+        await writeAll(destination, combined.subarray(0, writable));
+      }
+      pending = Buffer.from(combined.subarray(writable));
     }
+    if (pending.length !== 0) await writeAll(destination, pending);
+    await destination.sync();
+    await source.close();
+    source = undefined;
+    await destination.close();
+    destination = undefined;
+    await fsp.rename(temporary, filename);
+    if (process.platform !== "win32") await fsp.chmod(filename, 0o600);
+  } catch (error) {
+    if (error instanceof ArtifactSafetyError) throwArtifactSafetyError(error);
+    throw error;
+  } finally {
+    await source?.close().catch(() => {});
+    await destination?.close().catch(() => {});
+    await fsp.rm(temporary, { force: true }).catch(() => {});
   }
 }
 
-function containsSecret(bytes, secrets) {
-  return secretVariants(secrets)
-    .map((value) => strToU8(value))
-    .some((needle) => includesBytes(bytes, needle));
+async function writeAll(file, bytes) {
+  let offset = 0;
+  while (offset < bytes.length) {
+    const { bytesWritten } = await file.write(
+      bytes,
+      offset,
+      bytes.length - offset,
+    );
+    if (bytesWritten === 0) throw new Error("browser artifact write stalled");
+    offset += bytesWritten;
+  }
 }
 
-function includesBytes(haystack, needle) {
-  if (needle.length === 0 || needle.length > haystack.length) return false;
-  outer: for (
-    let index = 0;
-    index <= haystack.length - needle.length;
-    index += 1
-  ) {
-    for (let offset = 0; offset < needle.length; offset += 1) {
-      if (haystack[index + offset] !== needle[offset]) continue outer;
-    }
-    return true;
+function throwArtifactSafetyError(error) {
+  if (!(error instanceof ArtifactSafetyError)) throw error;
+  if (error.kind === "private_entry_name" || error.kind === "private_value") {
+    throw new RunnerError("artifact_secret_detected", error.message);
   }
-  return false;
+  if (error.kind.endsWith("_limit")) {
+    throw new RunnerError("artifact_limit_exceeded", error.message);
+  }
+  throw new RunnerError("artifact_unsafe", error.message);
 }
 
 function redactText(value, secrets) {

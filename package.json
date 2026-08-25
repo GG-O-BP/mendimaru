@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "npm run test:frontend && npm run test:motion && npm run test:e2e:windows:helpers && npm run test:backend && npm run test:contracts",
+    "test": "npm run test:frontend && npm run test:motion && npm run test:e2e:windows:helpers && npm run test:browser:security && npm run test:backend && npm run test:contracts",
     "test:frontend": "vitest run",
     "test:app-flow": "vitest run src/App.e2e.test.tsx",
     "test:motion": "node scripts/verify-motion-contract.mjs",
@@ -24,6 +24,7 @@
     "test:winboat-smoke": "node scripts/test-winboat-e2e.mjs --smoke",
     "test:winboat-e2e": "node scripts/test-winboat-e2e.mjs --lifecycle",
     "test:browser": "node scripts/test-browser-e2e.mjs",
+    "test:browser:security": "node --test scripts/browser-artifact-safety.node-test.mjs",
     "test:backend": "cargo test --manifest-path src-tauri/Cargo.toml",
     "test:contracts": "cargo run --quiet --manifest-path src-tauri/Cargo.toml -- capabilities --json | node scripts/validate-backend-contract.mjs",
     "test:security": "npm audit --audit-level=high",

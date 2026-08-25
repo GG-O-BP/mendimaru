@@ -84,6 +84,9 @@ jobs:
       - name: Verify the animation lifecycle contract
         run: npm run test:motion
 
+      - name: Test bounded browser artifact scanning
+        run: npm run test:browser:security
+
       - name: Run strict Playwright browser E2E
         if: runner.os == 'Linux'
         run: npm run test:browser

@@ -10,6 +10,10 @@ import readline from "node:readline";
 import { setTimeout } from "node:timers";
 import { fileURLToPath } from "node:url";
 import { unzipSync } from "fflate";
+import {
+  DEFAULT_ARTIFACT_SAFETY_LIMITS,
+  inspectZipArchive,
+} from "./browser-artifact-safety.mjs";
 
 const repository = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -19,6 +23,7 @@ const runner = path.join(repository, "scripts/browser-runner.mjs");
 const fixtureServer = path.join(repository, "tests/browser/fixture-server.mjs");
 const password = 'canary P@"ss&word</trace+har-2026';
 const username = "fixture-user";
+const MAX_COMPRESSIBLE_RUNNER_RSS_BYTES = 512 * 1024 * 1024;
 const temporary = await fs.mkdtemp(
   path.join(os.tmpdir(), "mendimaru-browser-e2e-"),
 );
@@ -248,6 +253,16 @@ try {
   );
   assert(networkReport.entries.some(({ status }) => status === 503));
 
+  await runCompressibleTraceRejection(baseUrl);
+  const recovery = await runSuite({
+    baseUrl,
+    mode: "portable",
+    name: "post-limit-recovery",
+    suite: "smoke.browser.json",
+  });
+  assert.equal(recovery.result.outcome, "passed");
+  await verifyNoSecret(recovery.directory);
+
   const successSummary = JSON.parse(
     await fs.readFile(path.join(portable.directory, "summary.json"), "utf8"),
   );
@@ -261,13 +276,101 @@ try {
   assert.match(html, /Outcome: passed/);
 
   process.stdout.write(
-    "browser E2E: 11 scenarios passed (Portable, WinBoat metadata, env/storage auth, assertion/page/navigation/origin failures, console/network policy, missing Chromium, video/HAR, secret scan)\n",
+    "browser E2E: 13 scenarios passed (Portable, WinBoat metadata, env/storage auth, assertion/page/navigation/origin failures, console/network policy, missing Chromium, video/HAR, bounded malicious trace, recovery, secret scan)\n",
   );
 } finally {
   server.kill("SIGTERM");
   await Promise.race([onceExit(server), delay(2_000)]);
   if (server.exitCode === null) server.kill("SIGKILL");
   await fs.rm(temporary, { recursive: true, force: true });
+}
+
+async function runCompressibleTraceRejection(baseUrl) {
+  const directory = path.join(temporary, "compressible-trace");
+  await fs.mkdir(directory, { mode: 0o700 });
+  const request = {
+    schemaVersion: "3.0.0",
+    sessionId: `session_${randomBytes(16).toString("hex")}`,
+    baseUrl,
+    outputDirectory: directory,
+    runtimeContext: {
+      hostPlatform: "linux",
+      studioPlatform: "windows",
+      runtimePlatform: "linux",
+      backend: "linux-winboat",
+      runtimeMode: "portable",
+      runtimeVersion: "11.12.2",
+    },
+    policy: {
+      navigationTimeoutMilliseconds: 15_000,
+      actionTimeoutMilliseconds: 10_000,
+      assertionTimeoutMilliseconds: 10_000,
+      failOnConsoleError: true,
+      failOnNetworkFailure: true,
+      recordVideo: false,
+      recordHar: false,
+      maxArtifactBytes: 128 * 1024 * 1024,
+      retentionRuns: 20,
+    },
+    suite: JSON.parse(
+      await fs.readFile(
+        path.join(repository, "tests/browser/compressible-trace.browser.json"),
+        "utf8",
+      ),
+    ),
+  };
+  const { code, peakResidentBytes, stderr, stdout } = await invokeRunnerRaw(
+    "run",
+    request,
+    {},
+    true,
+  );
+  assert.equal(stderr, "", `browser runner wrote stderr: ${stderr}`);
+  assert.equal(stdout.includes(password), false);
+  const envelope = JSON.parse(stdout);
+  const entries = await fs.readdir(directory);
+  const trace = entries.find((name) => name.endsWith("-trace.zip"));
+  assert.ok(trace, "malicious response must produce a trace fixture");
+  const traceBytes = await fs.readFile(path.join(directory, trace));
+  const maximumTraceMemberBytes = Math.max(
+    0,
+    ...[
+      ...inspectZipArchive(traceBytes, {
+        ...DEFAULT_ARTIFACT_SAFETY_LIMITS,
+        maximumZipCompressionRatio: 1_000_000,
+        maximumZipEntryBytes: 1024 * 1024 * 1024,
+        maximumZipTotalBytes: 2 * 1024 * 1024 * 1024,
+      }).values(),
+    ].map(({ uncompressedSize }) => uncompressedSize),
+  );
+  assert.ok(
+    maximumTraceMemberBytes > 64 * 1024 * 1024,
+    `trace member ${maximumTraceMemberBytes} must exceed the safety limit`,
+  );
+  assert.equal(
+    code,
+    1,
+    `ZIP bomb fixture unexpectedly succeeded with maximum member ${maximumTraceMemberBytes}: ${stdout}`,
+  );
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.error.code, "artifact_limit_exceeded");
+  assert.ok(
+    peakResidentBytes > 0 &&
+      peakResidentBytes < MAX_COMPRESSIBLE_RUNNER_RSS_BYTES,
+    `bounded ${maximumTraceMemberBytes}-byte trace runner RSS ${peakResidentBytes} must remain below ${MAX_COMPRESSIBLE_RUNNER_RSS_BYTES}`,
+  );
+  assert.ok(
+    traceBytes.length < 8 * 1024 * 1024,
+    "malicious trace must have a small compressed representation",
+  );
+  assert.equal(entries.includes("artifact-manifest.json"), false);
+  assert.equal(
+    entries.some((name) => name.endsWith(".redact")),
+    false,
+  );
+  process.stdout.write(
+    `browser artifact security: compressed=${traceBytes.length} bytes, maximumMember=${maximumTraceMemberBytes} bytes, runnerPeakRss=${peakResidentBytes} bytes\n`,
+  );
 }
 
 async function runSuite({
@@ -352,7 +455,12 @@ async function invokeRunnerFailure(command, request, environment = {}) {
   return envelope;
 }
 
-async function invokeRunnerRaw(command, request, environment) {
+async function invokeRunnerRaw(
+  command,
+  request,
+  environment,
+  measureMemory = false,
+) {
   const child = spawn(process.execPath, [runner, command], {
     cwd: repository,
     env: {
@@ -365,12 +473,27 @@ async function invokeRunnerRaw(command, request, environment) {
     stdio: [request ? "pipe" : "ignore", "pipe", "pipe"],
   });
   if (request) child.stdin.end(JSON.stringify(request));
-  const [stdout, stderr, code] = await Promise.all([
+  const [stdout, stderr, code, peakResidentBytes] = await Promise.all([
     collect(child.stdout),
     collect(child.stderr),
     onceExit(child),
+    measureMemory ? peakLinuxResidentBytes(child) : Promise.resolve(null),
   ]);
-  return { code, stderr, stdout };
+  return { code, peakResidentBytes, stderr, stdout };
+}
+
+async function peakLinuxResidentBytes(child) {
+  if (process.platform !== "linux") return 0;
+  let peak = 0;
+  while (child.exitCode === null) {
+    const status = await fs
+      .readFile(`/proc/${child.pid}/status`, "utf8")
+      .catch(() => "");
+    const match = /^VmRSS:\s+(\d+)\s+kB$/m.exec(status);
+    if (match) peak = Math.max(peak, Number(match[1]) * 1024);
+    if (child.exitCode === null) await delay(10);
+  }
+  return peak;
 }
 
 async function verifyManifest(directory, mode, runtimePlatform) {
