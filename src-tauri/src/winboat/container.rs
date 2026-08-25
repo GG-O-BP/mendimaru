@@ -23,18 +23,14 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     let browser = crate::marketplace::browser_executable()
         .map(|executable| probe_tool(&executable, &["--version"]))
         .unwrap_or_default();
+    #[cfg(target_os = "linux")]
     let browser_sandbox_available = if browser.usable {
-        #[cfg(target_os = "linux")]
-        {
-            crate::marketplace::browser_sandbox_available().await
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            true
-        }
+        crate::marketplace::browser_sandbox_available().await
     } else {
         false
     };
+    #[cfg(not(target_os = "linux"))]
+    let browser_sandbox_available = browser.usable;
     let shared_directory_available = Path::new(&config.shared_directory).is_dir();
     let inspection = inspect_container(config);
     let compose_shared = compose_shared_directory(&config.compose_file);
