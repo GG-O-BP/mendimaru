@@ -508,8 +508,8 @@ fn download_user_agent() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        cache, download_file_with_progress, download_user_agent, AppPaths, DownloadManager,
-        DownloadPolicy, InstallError,
+        cache, download_file_with_progress, download_user_agent, DownloadManager, DownloadPolicy,
+        InstallError,
     };
     use crate::models::DownloadState;
     use std::io::{Read, Write};
@@ -715,6 +715,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn legacy_shared_partial_symlink_is_ignored_by_the_private_cache() {
+        use crate::app_paths::AppPaths;
         use std::os::unix::fs::symlink;
         use tokio::io::AsyncWriteExt;
 

@@ -227,7 +227,10 @@ fn open_absolute_directory(path: &Path, create: bool) -> Result<SecureDirectory,
         let next = match directory.open_dir_nofollow(&component) {
             Ok(next) => next,
             Err(error) if create && error.kind() == io::ErrorKind::NotFound => {
+                #[cfg(unix)]
                 let mut builder = DirBuilder::new();
+                #[cfg(not(unix))]
+                let builder = DirBuilder::new();
                 #[cfg(unix)]
                 {
                     use cap_std::fs::DirBuilderExt;
