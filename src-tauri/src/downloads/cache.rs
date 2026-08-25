@@ -1,12 +1,68 @@
+use super::storage::{SecureDirectory, SecureTemporaryFile};
+use crate::app_paths::AppPaths;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 const CACHE_METADATA_SCHEMA_VERSION: u32 = 1;
 const MIN_INSTALLER_SIZE: u64 = 1024 * 1024;
 const HASH_BUFFER_SIZE: usize = 128 * 1024;
+const MAX_METADATA_BYTES: u64 = 64 * 1024;
+const INSTALLER_CACHE_DIRECTORY: &str = "installers";
+
+pub(super) struct InstallerCache {
+    directory: SecureDirectory,
+    installer_name: String,
+    metadata_name: String,
+}
+
+impl InstallerCache {
+    pub(super) fn open(paths: &AppPaths, version: &str) -> Result<Self, String> {
+        Self::open_in(
+            paths.cache_directory().join(INSTALLER_CACHE_DIRECTORY),
+            version,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn open_for_tests(directory: &Path, version: &str) -> Result<Self, String> {
+        Self::open_in(directory.to_path_buf(), version)
+    }
+
+    fn open_in(directory: PathBuf, version: &str) -> Result<Self, String> {
+        let installer_name = format!("Mendix-{version}-Setup.exe");
+        let metadata_name = format!("{installer_name}.metadata.json");
+        let directory = SecureDirectory::open_or_create(&directory)?;
+        // Validate both names before retaining the cache so a caller can never
+        // turn a version into a path traversal, even if it skipped the public
+        // version validator.
+        directory.path_for(&installer_name)?;
+        directory.path_for(&metadata_name)?;
+        Ok(Self {
+            directory,
+            installer_name,
+            metadata_name,
+        })
+    }
+
+    pub(super) fn installer_path(&self) -> Result<PathBuf, String> {
+        self.directory.path_for(&self.installer_name)
+    }
+
+    pub(super) fn create_payload(&self) -> Result<SecureTemporaryFile, String> {
+        self.directory
+            .create_random_file("mendimaru-installer-", ".download")
+    }
+
+    #[cfg(test)]
+    pub(super) fn metadata_path(&self) -> Result<PathBuf, String> {
+        self.directory.path_for(&self.metadata_name)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -83,46 +139,35 @@ pub(super) struct RemoteMetadata {
     pub(super) last_modified: Option<String>,
 }
 
-pub(super) fn metadata_path(installer: &Path) -> PathBuf {
-    append_suffix(installer, ".metadata.json")
-}
-
-pub(super) fn partial_path(installer: &Path) -> PathBuf {
-    append_suffix(installer, ".download")
-}
-
-pub(super) async fn inspect(installer: &Path, version: &str, source_url: &str) -> CacheInspection {
-    let installer_metadata = match tokio::fs::symlink_metadata(installer).await {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return if tokio::fs::try_exists(metadata_path(installer))
-                .await
-                .unwrap_or(false)
-            {
-                CacheInspection::Invalid(CacheValidationError::InstallerNotFile)
-            } else {
-                CacheInspection::Missing
-            };
+pub(super) async fn inspect(
+    cache: &InstallerCache,
+    version: &str,
+    source_url: &str,
+) -> CacheInspection {
+    let installer_metadata = match cache.directory.symlink_metadata(&cache.installer_name) {
+        Ok(Some(metadata)) => metadata,
+        Ok(None) => {
+            return match cache.directory.symlink_metadata(&cache.metadata_name) {
+                Ok(Some(_)) => CacheInspection::Invalid(CacheValidationError::InstallerNotFile),
+                Ok(None) => CacheInspection::Missing,
+                Err(error) => {
+                    CacheInspection::Invalid(CacheValidationError::FileRead(error.to_string()))
+                }
+            }
         }
         Err(error) => {
-            return CacheInspection::Invalid(CacheValidationError::FileRead(error.to_string()));
+            return CacheInspection::Invalid(CacheValidationError::FileRead(error.to_string()))
         }
     };
-    if !installer_metadata.file_type().is_file() {
+    if installer_metadata.file_type().is_symlink() || !installer_metadata.is_file() {
         return CacheInspection::Invalid(CacheValidationError::InstallerNotFile);
     }
 
-    let metadata_file = metadata_path(installer);
-    let serialized = match tokio::fs::read_to_string(&metadata_file).await {
+    let serialized = match read_metadata(cache).await {
         Ok(serialized) => serialized,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return CacheInspection::Invalid(CacheValidationError::MetadataMissing);
-        }
-        Err(error) => {
-            return CacheInspection::Invalid(CacheValidationError::MetadataRead(error.to_string()));
-        }
+        Err(error) => return CacheInspection::Invalid(error),
     };
-    let metadata = match serde_json::from_str::<InstallerCacheMetadata>(&serialized) {
+    let metadata = match serde_json::from_slice::<InstallerCacheMetadata>(&serialized) {
         Ok(metadata) => metadata,
         Err(error) => {
             return CacheInspection::Invalid(CacheValidationError::MetadataInvalid(
@@ -142,7 +187,13 @@ pub(super) async fn inspect(installer: &Path, version: &str, source_url: &str) -
         return CacheInspection::Invalid(CacheValidationError::SourceMismatch);
     }
     let expected_size = metadata.remote_content_length.unwrap_or(metadata.size);
-    match validate_payload(installer, Some(expected_size), Some(&metadata.sha256)).await {
+    let mut installer = match cache.directory.open_regular_file(&cache.installer_name) {
+        Ok(installer) => installer,
+        Err(error) => {
+            return CacheInspection::Invalid(CacheValidationError::FileRead(error.to_string()))
+        }
+    };
+    match validate_open_payload(&mut installer, Some(expected_size), Some(&metadata.sha256)).await {
         Ok(validated) if validated.size == metadata.size => CacheInspection::Valid(metadata),
         Ok(validated) => CacheInspection::Invalid(CacheValidationError::SizeMismatch {
             expected: metadata.size,
@@ -152,11 +203,73 @@ pub(super) async fn inspect(installer: &Path, version: &str, source_url: &str) -
     }
 }
 
+async fn read_metadata(cache: &InstallerCache) -> Result<Vec<u8>, CacheValidationError> {
+    let metadata = match cache.directory.symlink_metadata(&cache.metadata_name) {
+        Ok(Some(metadata)) => metadata,
+        Ok(None) => return Err(CacheValidationError::MetadataMissing),
+        Err(error) => return Err(CacheValidationError::MetadataRead(error)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CacheValidationError::MetadataRead(
+            "the metadata path is not a direct regular file".to_string(),
+        ));
+    }
+    if metadata.len() > MAX_METADATA_BYTES {
+        return Err(CacheValidationError::MetadataRead(
+            "the metadata exceeds its safe size limit".to_string(),
+        ));
+    }
+    let file = cache
+        .directory
+        .open_regular_file(&cache.metadata_name)
+        .map_err(CacheValidationError::MetadataRead)?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_METADATA_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|error| CacheValidationError::MetadataRead(error.to_string()))?;
+    if bytes.len() as u64 > MAX_METADATA_BYTES {
+        return Err(CacheValidationError::MetadataRead(
+            "the metadata exceeds its safe size limit".to_string(),
+        ));
+    }
+    Ok(bytes)
+}
+
+#[cfg(test)]
 pub(super) async fn validate_download(
     installer: &Path,
     expected_size: Option<u64>,
 ) -> Result<DownloadedInstaller, CacheValidationError> {
-    validate_payload(installer, expected_size, None).await
+    let parent = installer.parent().ok_or_else(|| {
+        CacheValidationError::FileRead("the installer has no parent directory".to_string())
+    })?;
+    let name = installer
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| {
+            CacheValidationError::FileRead("the installer name is not valid UTF-8".to_string())
+        })?;
+    let directory =
+        SecureDirectory::open_existing(parent).map_err(CacheValidationError::FileRead)?;
+    let metadata = directory
+        .symlink_metadata(name)
+        .map_err(CacheValidationError::FileRead)?
+        .ok_or_else(|| CacheValidationError::FileRead("the installer is missing".to_string()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CacheValidationError::InstallerNotFile);
+    }
+    let mut file = directory
+        .open_regular_file(name)
+        .map_err(CacheValidationError::FileRead)?;
+    validate_open_payload(&mut file, expected_size, None).await
+}
+
+pub(super) async fn validate_temporary_download(
+    partial: &mut SecureTemporaryFile,
+    expected_size: Option<u64>,
+) -> Result<DownloadedInstaller, CacheValidationError> {
+    validate_open_payload(partial.file_mut(), expected_size, None).await
 }
 
 pub(super) fn metadata_for_download(
@@ -178,87 +291,101 @@ pub(super) fn metadata_for_download(
 }
 
 pub(super) async fn commit(
-    partial: &Path,
-    destination: &Path,
+    cache: &InstallerCache,
+    partial: &mut SecureTemporaryFile,
     metadata: &InstallerCacheMetadata,
 ) -> Result<(), String> {
-    let destination_metadata = metadata_path(destination);
-    let metadata_partial = append_suffix(&destination_metadata, ".download");
-    let installer_backup = append_suffix(destination, ".previous");
-    let metadata_backup = append_suffix(&destination_metadata, ".previous");
-
-    remove_if_exists(&metadata_partial).await?;
-    remove_if_exists(&installer_backup).await?;
-    remove_if_exists(&metadata_backup).await?;
-
     let serialized = serde_json::to_vec_pretty(metadata).map_err(|error| error.to_string())?;
-    let mut file = tokio::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&metadata_partial)
+    if serialized.len() as u64 > MAX_METADATA_BYTES {
+        return Err("installer cache metadata exceeds its safe size limit".to_string());
+    }
+    let mut metadata_partial = cache
+        .directory
+        .create_random_file("mendimaru-metadata-", ".tmp")?;
+    metadata_partial
+        .file_mut()
+        .write_all(&serialized)
         .await
         .map_err(|error| error.to_string())?;
-    file.write_all(&serialized)
+    metadata_partial
+        .file_mut()
+        .flush()
         .await
         .map_err(|error| error.to_string())?;
-    file.flush().await.map_err(|error| error.to_string())?;
-    file.sync_all().await.map_err(|error| error.to_string())?;
-    drop(file);
+    metadata_partial
+        .file_mut()
+        .sync_all()
+        .await
+        .map_err(|error| error.to_string())?;
 
-    let had_installer = move_to_backup(destination, &installer_backup).await?;
-    if let Err(error) = tokio::fs::rename(partial, destination).await {
+    ensure_optional_regular(&cache.directory, &cache.installer_name)?;
+    ensure_optional_regular(&cache.directory, &cache.metadata_name)?;
+    let installer_backup = cache
+        .directory
+        .random_unused_name("mendimaru-installer-", ".backup")?;
+    let metadata_backup = cache
+        .directory
+        .random_unused_name("mendimaru-metadata-", ".backup")?;
+    let had_installer = move_to_backup(&cache.directory, &cache.installer_name, &installer_backup)?;
+    if let Err(error) = cache
+        .directory
+        .rename(partial.name(), &cache.installer_name)
+    {
         if had_installer {
-            let _ = tokio::fs::rename(&installer_backup, destination).await;
+            let _ = cache
+                .directory
+                .rename(&installer_backup, &cache.installer_name);
         }
-        let _ = remove_if_exists(&metadata_partial).await;
-        return Err(error.to_string());
+        return Err(error);
     }
+    partial.disarm();
 
-    let had_metadata = match move_to_backup(&destination_metadata, &metadata_backup).await {
-        Ok(value) => value,
-        Err(error) => {
-            rollback_installer(destination, &installer_backup, had_installer).await;
-            let _ = remove_if_exists(&metadata_partial).await;
-            return Err(error);
-        }
-    };
-    if let Err(error) = tokio::fs::rename(&metadata_partial, &destination_metadata).await {
-        rollback_installer(destination, &installer_backup, had_installer).await;
+    let had_metadata =
+        match move_to_backup(&cache.directory, &cache.metadata_name, &metadata_backup) {
+            Ok(value) => value,
+            Err(error) => {
+                rollback_installer(cache, &installer_backup, had_installer);
+                return Err(error);
+            }
+        };
+    if let Err(error) = cache
+        .directory
+        .rename(metadata_partial.name(), &cache.metadata_name)
+    {
+        rollback_installer(cache, &installer_backup, had_installer);
         if had_metadata {
-            let _ = tokio::fs::rename(&metadata_backup, &destination_metadata).await;
+            let _ = cache
+                .directory
+                .rename(&metadata_backup, &cache.metadata_name);
         }
-        let _ = remove_if_exists(&metadata_partial).await;
-        return Err(error.to_string());
+        return Err(error);
     }
+    metadata_partial.disarm();
 
-    remove_if_exists(&installer_backup).await?;
-    remove_if_exists(&metadata_backup).await?;
+    cache.directory.remove_file(&installer_backup)?;
+    cache.directory.remove_file(&metadata_backup)?;
+    cache.directory.sync()?;
     Ok(())
 }
 
-pub(super) async fn discard(installer: &Path) -> Result<(), String> {
-    for path in [
-        installer.to_path_buf(),
-        metadata_path(installer),
-        partial_path(installer),
-        append_suffix(installer, ".previous"),
-        append_suffix(&metadata_path(installer), ".download"),
-        append_suffix(&metadata_path(installer), ".previous"),
-    ] {
-        remove_if_exists(&path).await?;
+pub(super) async fn discard(cache: &InstallerCache) -> Result<(), String> {
+    for name in [&cache.installer_name, &cache.metadata_name] {
+        cache.directory.remove_file(name)?;
     }
+    cache.directory.sync()?;
     Ok(())
 }
 
-async fn validate_payload(
-    installer: &Path,
+async fn validate_open_payload(
+    installer: &mut tokio::fs::File,
     expected_size: Option<u64>,
     expected_hash: Option<&str>,
 ) -> Result<DownloadedInstaller, CacheValidationError> {
-    let filesystem_metadata = tokio::fs::symlink_metadata(installer)
+    let filesystem_metadata = installer
+        .metadata()
         .await
         .map_err(|error| CacheValidationError::FileRead(error.to_string()))?;
-    if !filesystem_metadata.file_type().is_file() {
+    if !filesystem_metadata.is_file() {
         return Err(CacheValidationError::InstallerNotFile);
     }
     let size = filesystem_metadata.len();
@@ -281,12 +408,17 @@ async fn validate_payload(
     Ok(DownloadedInstaller { size, sha256 })
 }
 
-async fn validate_pe(installer: &Path, size: u64) -> Result<(), CacheValidationError> {
-    let mut file = tokio::fs::File::open(installer)
+async fn validate_pe(
+    installer: &mut tokio::fs::File,
+    size: u64,
+) -> Result<(), CacheValidationError> {
+    installer
+        .seek(std::io::SeekFrom::Start(0))
         .await
         .map_err(|error| CacheValidationError::FileRead(error.to_string()))?;
     let mut dos_header = [0_u8; 64];
-    file.read_exact(&mut dos_header)
+    installer
+        .read_exact(&mut dos_header)
         .await
         .map_err(|_| CacheValidationError::PeHeader("truncated DOS header"))?;
     if &dos_header[..2] != b"MZ" {
@@ -300,11 +432,13 @@ async fn validate_pe(installer: &Path, size: u64) -> Result<(), CacheValidationE
     if pe_offset < dos_header.len() as u64 || pe_offset.saturating_add(6) > size {
         return Err(CacheValidationError::PeHeader("invalid PE offset"));
     }
-    file.seek(std::io::SeekFrom::Start(pe_offset))
+    installer
+        .seek(std::io::SeekFrom::Start(pe_offset))
         .await
         .map_err(|error| CacheValidationError::FileRead(error.to_string()))?;
     let mut pe_header = [0_u8; 6];
-    file.read_exact(&mut pe_header)
+    installer
+        .read_exact(&mut pe_header)
         .await
         .map_err(|_| CacheValidationError::PeHeader("truncated PE header"))?;
     if &pe_header[..4] != b"PE\0\0" {
@@ -317,14 +451,15 @@ async fn validate_pe(installer: &Path, size: u64) -> Result<(), CacheValidationE
     Ok(())
 }
 
-async fn sha256(path: &Path) -> Result<String, CacheValidationError> {
-    let mut file = tokio::fs::File::open(path)
+async fn sha256(installer: &mut tokio::fs::File) -> Result<String, CacheValidationError> {
+    installer
+        .seek(std::io::SeekFrom::Start(0))
         .await
         .map_err(|error| CacheValidationError::FileRead(error.to_string()))?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0_u8; HASH_BUFFER_SIZE];
     loop {
-        let read = file
+        let read = installer
             .read(&mut buffer)
             .await
             .map_err(|error| CacheValidationError::FileRead(error.to_string()))?;
@@ -336,32 +471,26 @@ async fn sha256(path: &Path) -> Result<String, CacheValidationError> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
-    let mut value = path.as_os_str().to_os_string();
-    value.push(suffix);
-    PathBuf::from(value)
-}
-
-async fn move_to_backup(path: &Path, backup: &Path) -> Result<bool, String> {
-    match tokio::fs::rename(path, backup).await {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error.to_string()),
+fn ensure_optional_regular(directory: &SecureDirectory, name: &str) -> Result<bool, String> {
+    match directory.symlink_metadata(name)? {
+        None => Ok(false),
+        Some(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
+        Some(_) => Err("an installer cache entry is not a direct regular file".to_string()),
     }
 }
 
-async fn rollback_installer(destination: &Path, backup: &Path, had_installer: bool) {
-    let _ = remove_if_exists(destination).await;
+fn move_to_backup(directory: &SecureDirectory, source: &str, backup: &str) -> Result<bool, String> {
+    if !ensure_optional_regular(directory, source)? {
+        return Ok(false);
+    }
+    directory.rename(source, backup)?;
+    Ok(true)
+}
+
+fn rollback_installer(cache: &InstallerCache, backup: &str, had_installer: bool) {
+    let _ = cache.directory.remove_file(&cache.installer_name);
     if had_installer {
-        let _ = tokio::fs::rename(backup, destination).await;
-    }
-}
-
-async fn remove_if_exists(path: &Path) -> Result<(), String> {
-    match tokio::fs::remove_file(path).await {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.to_string()),
+        let _ = cache.directory.rename(backup, &cache.installer_name);
     }
 }
 
@@ -385,14 +514,59 @@ mod tests {
         file.flush().expect("flush fixture");
     }
 
+    async fn write_temporary_pe(temporary: &mut SecureTemporaryFile, size: u64, machine: u16) {
+        temporary
+            .file_mut()
+            .set_len(size)
+            .await
+            .expect("size PE fixture");
+        temporary
+            .file_mut()
+            .seek(SeekFrom::Start(0))
+            .await
+            .expect("seek DOS header");
+        temporary
+            .file_mut()
+            .write_all(b"MZ")
+            .await
+            .expect("DOS signature");
+        temporary
+            .file_mut()
+            .seek(SeekFrom::Start(0x3c))
+            .await
+            .expect("seek PE offset");
+        temporary
+            .file_mut()
+            .write_all(&0x80_u32.to_le_bytes())
+            .await
+            .expect("PE offset");
+        temporary
+            .file_mut()
+            .seek(SeekFrom::Start(0x80))
+            .await
+            .expect("seek PE header");
+        temporary
+            .file_mut()
+            .write_all(b"PE\0\0")
+            .await
+            .expect("PE signature");
+        temporary
+            .file_mut()
+            .write_all(&machine.to_le_bytes())
+            .await
+            .expect("machine type");
+        temporary.file_mut().sync_all().await.expect("sync fixture");
+    }
+
     async fn create_cache(
         directory: &Path,
         version: &str,
         source_url: &str,
-    ) -> (PathBuf, InstallerCacheMetadata) {
-        let installer = directory.join(format!("Mendix-{version}-Setup.exe"));
-        write_pe(&installer, MIN_INSTALLER_SIZE + 4096, 0x8664);
-        let downloaded = validate_download(&installer, None)
+    ) -> (InstallerCache, PathBuf, InstallerCacheMetadata) {
+        let cache = InstallerCache::open_for_tests(directory, version).expect("installer cache");
+        let mut partial = cache.create_payload().expect("temporary installer");
+        write_temporary_pe(&mut partial, MIN_INSTALLER_SIZE + 4096, 0x8664).await;
+        let downloaded = validate_temporary_download(&mut partial, None)
             .await
             .expect("valid fixture");
         let metadata = metadata_for_download(
@@ -405,18 +579,17 @@ mod tests {
                 last_modified: None,
             },
         );
-        fs::write(
-            metadata_path(&installer),
-            serde_json::to_vec_pretty(&metadata).expect("serialize metadata"),
-        )
-        .expect("write metadata");
-        (installer, metadata)
+        commit(&cache, &mut partial, &metadata)
+            .await
+            .expect("commit fixture cache");
+        let installer = cache.installer_path().expect("installer path");
+        (cache, installer, metadata)
     }
 
     #[tokio::test]
     async fn reuses_only_a_complete_pe_with_matching_metadata_and_hash() {
         let temporary = tempfile::tempdir().expect("temporary directory");
-        let (installer, metadata) = create_cache(
+        let (cache, _, metadata) = create_cache(
             temporary.path(),
             "11.12.2",
             "https://example.test/installer",
@@ -424,7 +597,7 @@ mod tests {
         .await;
 
         assert_eq!(
-            inspect(&installer, "11.12.2", "https://example.test/installer").await,
+            inspect(&cache, "11.12.2", "https://example.test/installer").await,
             CacheInspection::Valid(metadata)
         );
     }
@@ -463,16 +636,19 @@ mod tests {
     #[tokio::test]
     async fn rejects_missing_or_corrupt_cache_metadata() {
         let temporary = tempfile::tempdir().expect("temporary directory");
-        let installer = temporary.path().join("Mendix-11.12.2-Setup.exe");
+        let cache =
+            InstallerCache::open_for_tests(temporary.path(), "11.12.2").expect("installer cache");
+        let installer = cache.installer_path().expect("installer path");
         write_pe(&installer, MIN_INSTALLER_SIZE + 1, 0x014c);
         assert_eq!(
-            inspect(&installer, "11.12.2", "https://example.test/installer").await,
+            inspect(&cache, "11.12.2", "https://example.test/installer").await,
             CacheInspection::Invalid(CacheValidationError::MetadataMissing)
         );
 
-        fs::write(metadata_path(&installer), b"not json").expect("write bad metadata");
+        fs::write(cache.metadata_path().expect("metadata path"), b"not json")
+            .expect("write bad metadata");
         assert!(matches!(
-            inspect(&installer, "11.12.2", "https://example.test/installer").await,
+            inspect(&cache, "11.12.2", "https://example.test/installer").await,
             CacheInspection::Invalid(CacheValidationError::MetadataInvalid(_))
         ));
     }
@@ -480,7 +656,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_version_source_size_and_hash_changes() {
         let temporary = tempfile::tempdir().expect("temporary directory");
-        let (installer, _) = create_cache(
+        let (cache, installer, _) = create_cache(
             temporary.path(),
             "11.12.2",
             "https://example.test/installer",
@@ -488,11 +664,11 @@ mod tests {
         .await;
 
         assert_eq!(
-            inspect(&installer, "11.13.0", "https://example.test/installer").await,
+            inspect(&cache, "11.13.0", "https://example.test/installer").await,
             CacheInspection::Invalid(CacheValidationError::VersionMismatch)
         );
         assert_eq!(
-            inspect(&installer, "11.12.2", "https://example.test/other").await,
+            inspect(&cache, "11.12.2", "https://example.test/other").await,
             CacheInspection::Invalid(CacheValidationError::SourceMismatch)
         );
 
@@ -504,14 +680,14 @@ mod tests {
             .write_all(b"changed size")
             .expect("append fixture");
         assert!(matches!(
-            inspect(&installer, "11.12.2", "https://example.test/installer").await,
+            inspect(&cache, "11.12.2", "https://example.test/installer").await,
             CacheInspection::Invalid(CacheValidationError::SizeMismatch {
                 expected,
                 actual
             }) if expected == original_size && actual > expected
         ));
 
-        let (installer, _) = create_cache(
+        let (cache, installer, _) = create_cache(
             temporary.path(),
             "11.12.2",
             "https://example.test/installer",
@@ -526,7 +702,7 @@ mod tests {
             .expect("mutate payload");
         file.flush().expect("flush mutation");
         assert_eq!(
-            inspect(&installer, "11.12.2", "https://example.test/installer").await,
+            inspect(&cache, "11.12.2", "https://example.test/installer").await,
             CacheInspection::Invalid(CacheValidationError::HashMismatch)
         );
     }
@@ -539,11 +715,13 @@ mod tests {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let target = temporary.path().join("target.exe");
         write_pe(&target, MIN_INSTALLER_SIZE + 1, 0x8664);
-        let installer = temporary.path().join("Mendix-11.12.2-Setup.exe");
+        let cache =
+            InstallerCache::open_for_tests(temporary.path(), "11.12.2").expect("installer cache");
+        let installer = cache.installer_path().expect("installer path");
         symlink(&target, &installer).expect("create symlink");
 
         assert_eq!(
-            inspect(&installer, "11.12.2", "https://example.test/installer").await,
+            inspect(&cache, "11.12.2", "https://example.test/installer").await,
             CacheInspection::Invalid(CacheValidationError::InstallerNotFile)
         );
     }
@@ -551,12 +729,18 @@ mod tests {
     #[tokio::test]
     async fn commit_replaces_installer_and_metadata_as_one_valid_cache() {
         let temporary = tempfile::tempdir().expect("temporary directory");
-        let destination = temporary.path().join("Mendix-11.12.2-Setup.exe");
-        let partial = partial_path(&destination);
+        let cache =
+            InstallerCache::open_for_tests(temporary.path(), "11.12.2").expect("installer cache");
+        let destination = cache.installer_path().expect("installer path");
         write_pe(&destination, MIN_INSTALLER_SIZE + 1, 0x014c);
-        fs::write(metadata_path(&destination), b"old metadata").expect("old metadata");
-        write_pe(&partial, MIN_INSTALLER_SIZE + 8192, 0x8664);
-        let downloaded = validate_download(&partial, None)
+        fs::write(
+            cache.metadata_path().expect("metadata path"),
+            b"old metadata",
+        )
+        .expect("old metadata");
+        let mut partial = cache.create_payload().expect("temporary installer");
+        write_temporary_pe(&mut partial, MIN_INSTALLER_SIZE + 8192, 0x8664).await;
+        let downloaded = validate_temporary_download(&mut partial, None)
             .await
             .expect("valid partial");
         let metadata = metadata_for_download(
@@ -570,13 +754,14 @@ mod tests {
             },
         );
 
-        commit(&partial, &destination, &metadata)
+        let partial_path = partial.path().to_path_buf();
+        commit(&cache, &mut partial, &metadata)
             .await
             .expect("commit cache");
 
-        assert!(!partial.exists());
+        assert!(!partial_path.exists());
         assert_eq!(
-            inspect(&destination, "11.12.2", "https://example.test/installer").await,
+            inspect(&cache, "11.12.2", "https://example.test/installer").await,
             CacheInspection::Valid(metadata)
         );
     }
@@ -584,22 +769,48 @@ mod tests {
     #[tokio::test]
     async fn discard_removes_payload_metadata_and_interrupted_files() {
         let temporary = tempfile::tempdir().expect("temporary directory");
-        let installer = temporary.path().join("Mendix-11.12.2-Setup.exe");
-        for path in [
-            installer.clone(),
-            metadata_path(&installer),
-            partial_path(&installer),
-            append_suffix(&installer, ".previous"),
-            append_suffix(&metadata_path(&installer), ".download"),
-            append_suffix(&metadata_path(&installer), ".previous"),
-        ] {
+        let cache =
+            InstallerCache::open_for_tests(temporary.path(), "11.12.2").expect("installer cache");
+        let installer = cache.installer_path().expect("installer path");
+        let metadata = cache.metadata_path().expect("metadata path");
+        for path in [&installer, &metadata] {
             fs::write(path, b"fixture").expect("write cache artifact");
         }
 
-        discard(&installer).await.expect("discard cache");
+        discard(&cache).await.expect("discard cache");
 
         assert!(!installer.exists());
-        assert!(!metadata_path(&installer).exists());
-        assert!(!partial_path(&installer).exists());
+        assert!(!metadata.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn commit_rejects_a_symlinked_destination_without_changing_its_target() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let cache =
+            InstallerCache::open_for_tests(temporary.path(), "11.12.2").expect("installer cache");
+        let sentinel = temporary.path().join("sentinel");
+        fs::write(&sentinel, b"unchanged").expect("sentinel");
+        symlink(&sentinel, cache.installer_path().expect("installer path")).expect("cache symlink");
+        let mut partial = cache.create_payload().expect("temporary installer");
+        write_temporary_pe(&mut partial, MIN_INSTALLER_SIZE + 4096, 0x8664).await;
+        let downloaded = validate_temporary_download(&mut partial, None)
+            .await
+            .expect("valid partial");
+        let metadata = metadata_for_download(
+            "11.12.2",
+            "https://example.test/installer",
+            &downloaded,
+            RemoteMetadata {
+                content_length: Some(downloaded.size),
+                etag: None,
+                last_modified: None,
+            },
+        );
+
+        assert!(commit(&cache, &mut partial, &metadata).await.is_err());
+        assert_eq!(fs::read(&sentinel).expect("read sentinel"), b"unchanged");
     }
 }

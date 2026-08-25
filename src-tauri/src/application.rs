@@ -577,6 +577,7 @@ where
     .map_err(operation_history_error)?;
     let operation_id = tracker.id().to_string();
     let result = crate::downloads::download_and_launch(
+        paths,
         config,
         manager,
         version,

@@ -38,6 +38,8 @@ chrono = { version = "0.4", features = ["serde"] }
 chromiumoxide = "0.9"
 scraper = "0.27"
 base64 = "0.22"
+cap-fs-ext = "4.0.3"
+cap-std = "4.0.3"
 i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
 i18n-embed-fl = "0.10"
 rust-embed = "8"

@@ -11,9 +11,11 @@ Before Windows starts an installer, Studio Pro, or an official uninstaller, Mend
 - the file has a valid Authenticode status and an exact `CN` or `O` component for Mendix Technology B.V. or Siemens AG;
 - the SHA-256 value is stable before and after signature verification;
 - on native Windows, the verified executable remains open without write or delete sharing until process creation completes;
-- installers on Linux match both the host-validated cache digest and a fresh, unique guest staging copy.
+- installers are downloaded only from the exact `https://artifacts.rnd.mendix.com` origin (including every redirect hop), with a 2 GiB declared and streamed-byte limit;
+- installer payloads and metadata live in the host-private application cache, are created with CSPRNG create-new names, and remain descriptor-bound through sync, validation, and commit;
+- installers on Linux match the host-private cache digest, a fresh create-new file in the untrusted shared transport, and a fresh unique Windows-private staging copy. The shared host staging file is removed after either success or failure.
 
-An installer is never reused merely because its length matches. Uninstall refuses to recurse over a version directory when trusted uninstall metadata is missing.
+All installer cache and host staging ancestors are opened without following symbolic links or reparse points. A legacy installer in the shared workspace is never migrated into the private cache, and an installer is never reused merely because its length matches. Uninstall refuses to recurse over a version directory when trusted uninstall metadata is missing.
 
 ## Command and result channel
 

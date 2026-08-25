@@ -442,9 +442,22 @@ impl StudioBackend for LinuxWinboatBackend<'_> {
         on_progress: ProgressCallback<'a>,
     ) -> BackendFuture<'a, String> {
         Box::pin(async move {
-            let windows_installer_path = crate::projects::linux_path_to_windows_share(
+            let staged_installer = crate::winboat::stage_installer(
                 Path::new(&self.config.shared_directory),
                 installer_path,
+                expected_sha256,
+            )
+            .await
+            .map_err(|error| {
+                BackendError::operation(
+                    self.backend_id(),
+                    CapabilityId::StudioInstall,
+                    crate::tr!("error-installer-staging", error = error),
+                )
+            })?;
+            let windows_installer_path = crate::projects::linux_path_to_windows_share(
+                Path::new(&self.config.shared_directory),
+                staged_installer.path(),
                 &self.config.windows_shared_directory,
             )
             .map_err(|error| {

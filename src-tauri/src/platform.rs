@@ -332,6 +332,7 @@ mod tests {
     #[test]
     #[ignore = "installs, launches, observes, stops, and uninstalls a disposable Studio Pro version"]
     fn live_e2e_linux_winboat_backend_lifecycle() {
+        use crate::app_paths::AppPaths;
         use crate::contracts::{
             BackendErrorCode, BackendId, CapabilityId, PlatformId, StudioConnectionState,
             StudioProcessState,
@@ -421,6 +422,22 @@ mod tests {
             artifacts
         }
 
+        fn host_staging_artifacts(config: &AppConfig) -> Vec<String> {
+            let directory = Path::new(&config.shared_directory).join(".mendimaru/installers");
+            let entries = match std::fs::read_dir(directory) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+                Err(error) => panic!("inspect host installer staging artifacts: {error}"),
+            };
+            let mut artifacts = entries
+                .map(|entry| entry.expect("read host staging artifact entry"))
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .filter(|name| name.starts_with("mendimaru-installer-stage-"))
+                .collect::<Vec<_>>();
+            artifacts.sort();
+            artifacts
+        }
+
         assert_eq!(
             std::env::var("MENDIMARU_E2E_ALLOW_MUTATION").as_deref(),
             Ok("1"),
@@ -451,6 +468,7 @@ mod tests {
         let environment = tauri::async_runtime::block_on(super::environment_status(&config));
         assert!(environment.guest_online, "the WinBoat guest must be online");
         let baseline_control_artifacts = control_artifacts(&config);
+        let baseline_staging_artifacts = host_staging_artifacts(&config);
 
         let baseline = tauri::async_runtime::block_on(super::installed_versions(&config))
             .expect("the adapter must detect installed versions");
@@ -471,12 +489,14 @@ mod tests {
             version: &version,
         };
 
-        let installer_path = Path::new(&config.shared_directory)
-            .join(".mendimaru/installers")
+        let installer_path = AppPaths::discover_for_cli()
+            .expect("resolve the host-private app cache")
+            .cache_directory()
+            .join("installers")
             .join(format!("Mendix-{version}-Setup.exe"));
         assert!(
             installer_path.is_file(),
-            "cached installer does not exist: {}",
+            "private cached installer does not exist: {}",
             installer_path.display()
         );
         let mut installer = File::open(&installer_path).expect("open the E2E installer");
@@ -677,6 +697,11 @@ mod tests {
             control_artifacts(&config),
             baseline_control_artifacts,
             "the lifecycle leaked an authenticated control artifact"
+        );
+        assert_eq!(
+            host_staging_artifacts(&config),
+            baseline_staging_artifacts,
+            "the lifecycle leaked a shared host installer staging file"
         );
     }
 }
