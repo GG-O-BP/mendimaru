@@ -115,6 +115,11 @@ use browser::{scrape_build_number, scrape_page};
 pub(crate) fn browser_executable() -> Option<String> {
     browser::browser_executable()
 }
+
+#[cfg(target_os = "linux")]
+pub(crate) async fn browser_sandbox_available() -> bool {
+    browser::browser_sandbox_available().await
+}
 #[cfg(test)]
 use parser::parse_datagrid_html;
 
@@ -195,6 +200,11 @@ mod tests {
     #[ignore = "uses the installed Chrome against the live Mendix Marketplace"]
     async fn live_scrapes_the_first_catalog_page() {
         let _guard = SCRAPE_LOCK.lock().await;
+        #[cfg(target_os = "linux")]
+        assert!(
+            browser::browser_sandbox_available().await,
+            "live Marketplace tests require a verified Chromium renderer sandbox"
+        );
         let (versions, total) = scrape_page(1).await.expect("live catalog page");
         assert_eq!(versions.len(), 10);
         assert!(total.is_some_and(|count| count >= 10));

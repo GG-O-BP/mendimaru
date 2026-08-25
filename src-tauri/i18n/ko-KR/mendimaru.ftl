@@ -386,9 +386,13 @@ error-version-list-find = Studio Pro 버전 목록을 찾을 수 없습니다: {
 error-version-list-read = Studio Pro 버전 목록을 읽을 수 없습니다: { $error }
 error-version-list-empty = Studio Pro 버전 목록이 비어 있습니다.
 error-browser-required = Studio Pro 버전 목록을 읽으려면 Microsoft Edge, Google Chrome 또는 Chromium이 필요합니다. MENDIMARU_CHROME_PATH로 직접 지정할 수도 있습니다.
+error-browser-profile-create = 비공개 Marketplace 브라우저 프로필을 만들 수 없습니다: { $error }
 error-browser-config = Marketplace 브라우저 설정을 만들 수 없습니다: { $error }
 error-browser-start = Marketplace 브라우저를 시작할 수 없습니다: { $error }
+error-browser-sandbox-disabled = Chromium이 브라우저 보안 경계를 비활성화하는 옵션으로 시작되어 Marketplace 접근을 차단했습니다.
+error-browser-sandbox-unavailable = Linux Chromium renderer sandbox를 검증할 수 없어 Marketplace 접근을 차단했습니다. user namespace를 활성화하거나 Chromium SUID sandbox를 설치하고 seccomp 사용 가능 여부를 확인하세요.
 error-browser-page = Marketplace 페이지를 만들 수 없습니다: { $error }
+error-browser-cleanup = Marketplace 브라우저 프로세스 또는 비공개 프로필을 안전하게 정리하지 못했습니다.
 error-marketplace-connection-timeout = Mendix Marketplace 연결 시간이 초과되었습니다.
 error-marketplace-open = Mendix Marketplace를 열 수 없습니다: { $error }
 
