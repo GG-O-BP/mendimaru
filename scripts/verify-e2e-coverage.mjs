@@ -5,16 +5,38 @@ import process from "node:process";
 
 const root = path.resolve(import.meta.dirname, "..");
 const artifactDirectory = path.join(root, "artifacts", "e2e");
-const [packageJson, ci, linuxDesktop, windowsDesktop, windowsBundle, winboat] =
-  await Promise.all([
-    read("package.json"),
-    read(".github/workflows/ci.yml"),
-    read("scripts/test-tauri-e2e.mjs"),
-    read("scripts/e2e/windows-native.mjs"),
-    read("scripts/e2e/windows-bundle-smoke.ps1"),
-    read("scripts/test-winboat-e2e.mjs"),
-  ]);
+const [
+  packageJson,
+  ci,
+  linuxDesktop,
+  windowsDesktop,
+  windowsBundle,
+  winboat,
+  marketplaceSession,
+] = await Promise.all([
+  read("package.json"),
+  read(".github/workflows/ci.yml"),
+  read("scripts/test-tauri-e2e.mjs"),
+  read("scripts/e2e/windows-native.mjs"),
+  read("scripts/e2e/windows-bundle-smoke.ps1"),
+  read("scripts/test-winboat-e2e.mjs"),
+  read("src-tauri/src/marketplace/browser/session.rs"),
+]);
 const scripts = JSON.parse(packageJson).scripts;
+
+const marketplaceSandboxGate =
+  hasAll(ci, [
+    "Run sandboxed Marketplace Chromium security gate",
+    "live_linux_marketplace_browser_security_gate",
+    'MENDIMARU_CHROME_PATH="$chrome_path"',
+  ]) &&
+  hasAll(marketplaceSession, [
+    "GetProcessInfoParams",
+    "NoNewPrivs:",
+    "Seccomp:",
+    "renderer_process_is_sandboxed",
+    "profile_process_ids",
+  ]);
 
 const linux = {
   realDesktopWebView: hasAll(linuxDesktop, [
@@ -29,14 +51,16 @@ const linux = {
     '"Settings"',
     '"Studio Pro"',
   ]),
-  securityDesktop: hasAll(linuxDesktop, [
-    'VITE_MENDIMARU_E2E: "1"',
-    "window.__MENDIMARU_CSP_PROBE__",
-    '"11.12.2; calc.exe"',
-    "legacy shared-cache partial symlink",
-    '"../11.12.2"',
-    "expectedSharedDirectory",
-  ]),
+  securityDesktop:
+    hasAll(linuxDesktop, [
+      'VITE_MENDIMARU_E2E: "1"',
+      "window.__MENDIMARU_CSP_PROBE__",
+      '"11.12.2; calc.exe"',
+      "legacy shared-cache partial symlink",
+      '"../11.12.2"',
+      "expectedSharedDirectory",
+    ]) && marketplaceSandboxGate,
+  marketplaceSandboxGate,
   performanceDesktop: hasAll(linuxDesktop, [
     "MENDIMARU_E2E_MAX_STARTUP_MS",
     "MENDIMARU_E2E_MAX_ENVIRONMENT_MS",

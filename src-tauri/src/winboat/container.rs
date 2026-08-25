@@ -23,6 +23,18 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     let browser = crate::marketplace::browser_executable()
         .map(|executable| probe_tool(&executable, &["--version"]))
         .unwrap_or_default();
+    let browser_sandbox_available = if browser.usable {
+        #[cfg(target_os = "linux")]
+        {
+            crate::marketplace::browser_sandbox_available().await
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            true
+        }
+    } else {
+        false
+    };
     let shared_directory_available = Path::new(&config.shared_directory).is_dir();
     let inspection = inspect_container(config);
     let compose_shared = compose_shared_directory(&config.compose_file);
@@ -52,6 +64,7 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
         guest_online,
         rdp_reachable,
         browser,
+        browser_sandbox_available,
     };
     let ready = state.ready();
     let diagnostics = build_linux_diagnostics(&state);
@@ -93,6 +106,7 @@ struct LinuxDiagnosticState {
     guest_online: bool,
     rdp_reachable: bool,
     browser: ToolProbe,
+    browser_sandbox_available: bool,
 }
 
 impl LinuxDiagnosticState {
@@ -240,13 +254,15 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
         ),
         diagnostic(
             MarketplaceBrowser,
-            if state.browser.usable {
+            if state.browser.usable && state.browser_sandbox_available {
                 Success
+            } else if state.browser.usable {
+                Failure
             } else {
                 Warning
             },
-            observed_tool(&state.browser),
-            (!state.browser.usable).then_some(Redetect),
+            observed_browser(&state.browser, state.browser_sandbox_available),
+            (!state.browser.usable || !state.browser_sandbox_available).then_some(Redetect),
         ),
     ]
 }
@@ -256,6 +272,22 @@ fn observed_tool(probe: &ToolProbe) -> Option<String> {
         .version
         .clone()
         .or_else(|| probe.available.then(|| "detected-but-unusable".to_string()))
+}
+
+fn observed_browser(probe: &ToolProbe, sandbox_available: bool) -> Option<String> {
+    if !probe.usable {
+        return observed_tool(probe);
+    }
+    let sandbox = if sandbox_available {
+        "sandbox=active"
+    } else {
+        "sandbox=unavailable"
+    };
+    probe
+        .version
+        .as_ref()
+        .map(|version| format!("{version}; {sandbox}"))
+        .or_else(|| probe.available.then(|| sandbox.to_string()))
 }
 
 fn diagnostic(
@@ -803,6 +835,7 @@ mod tests {
                 usable: true,
                 version: Some("151.0.7922.137".to_string()),
             },
+            browser_sandbox_available: true,
         }
     }
 
@@ -823,6 +856,13 @@ mod tests {
                 .and_then(|diagnostic| diagnostic.observed.as_deref()),
             Some("29.7.2")
         );
+        assert_eq!(
+            diagnostics
+                .iter()
+                .find(|diagnostic| { diagnostic.id == EnvironmentDiagnosticId::MarketplaceBrowser })
+                .and_then(|diagnostic| diagnostic.observed.as_deref()),
+            Some("151.0.7922.137; sandbox=active")
+        );
     }
 
     #[test]
@@ -831,6 +871,7 @@ mod tests {
         state.compose_valid = false;
         state.guest_online = false;
         state.browser = ToolProbe::default();
+        state.browser_sandbox_available = false;
         let diagnostics = build_linux_diagnostics(&state);
 
         assert!(!state.ready());
@@ -861,6 +902,24 @@ mod tests {
                 .find(|diagnostic| diagnostic.id == EnvironmentDiagnosticId::Freerdp)
                 .map(|diagnostic| diagnostic.status),
             Some(EnvironmentDiagnosticStatus::Success)
+        );
+    }
+
+    #[test]
+    fn usable_browser_without_a_verified_sandbox_is_a_failure() {
+        let mut state = healthy_state();
+        state.browser_sandbox_available = false;
+        let diagnostics = build_linux_diagnostics(&state);
+        let browser = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.id == EnvironmentDiagnosticId::MarketplaceBrowser)
+            .expect("browser check");
+
+        assert_eq!(browser.status, EnvironmentDiagnosticStatus::Failure);
+        assert_eq!(browser.action, Some(EnvironmentDiagnosticAction::Redetect));
+        assert_eq!(
+            browser.observed.as_deref(),
+            Some("151.0.7922.137; sandbox=unavailable")
         );
     }
 

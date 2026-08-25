@@ -24,6 +24,21 @@ pub(crate) fn browser_executable() -> Option<String> {
     session::chrome_executable()
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) async fn browser_sandbox_available() -> bool {
+    session::sandbox_available().await
+}
+
+fn finish_session<T>(
+    operation: Result<T, String>,
+    cleanup: Result<(), String>,
+) -> Result<T, String> {
+    match operation {
+        Ok(value) => cleanup.map(|()| value),
+        Err(error) => Err(error),
+    }
+}
+
 pub(super) async fn scrape_page(
     target_page: u32,
 ) -> Result<(Vec<DownloadableVersion>, Option<u32>), String> {
@@ -39,8 +54,8 @@ pub(super) async fn scrape_page(
         Ok((versions, total_count))
     }
     .await;
-    session.cleanup().await;
-    result
+    let cleanup = session.cleanup().await;
+    finish_session(result, cleanup)
 }
 
 pub(super) async fn scrape_build_number(version: &str) -> Result<String, String> {
@@ -53,8 +68,8 @@ pub(super) async fn scrape_build_number(version: &str) -> Result<String, String>
         find_build_number(&page, BUILD_NUMBER_SELECTOR, version, ELEMENT_TIMEOUT).await
     }
     .await;
-    session.cleanup().await;
-    result
+    let cleanup = session.cleanup().await;
+    finish_session(result, cleanup)
 }
 
 pub(super) async fn verify_version_available(version: &str) -> Result<(), String> {
@@ -67,6 +82,6 @@ pub(super) async fn verify_version_available(version: &str) -> Result<(), String
         verify_exact_version_page(&page, version, ELEMENT_TIMEOUT).await
     }
     .await;
-    session.cleanup().await;
-    result
+    let cleanup = session.cleanup().await;
+    finish_session(result, cleanup)
 }

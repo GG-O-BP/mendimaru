@@ -88,6 +88,20 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run test:browser
 
+      - name: Run sandboxed Marketplace Chromium security gate
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          chrome_path="$(
+            node --input-type=module -e \
+              "import { chromium } from '@playwright/test'; process.stdout.write(chromium.executablePath())"
+          )"
+          test -x "$chrome_path"
+          MENDIMARU_CHROME_PATH="$chrome_path" \
+            cargo test --manifest-path src-tauri/Cargo.toml \
+              live_linux_marketplace_browser_security_gate -- \
+              --ignored --nocapture --test-threads=1
+
       - name: Run real Tauri WebKit E2E
         if: runner.os == 'Linux'
         env:

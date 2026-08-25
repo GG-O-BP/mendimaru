@@ -386,9 +386,13 @@ error-version-list-find = Could not find the Studio Pro version catalog: { $erro
 error-version-list-read = Could not read the Studio Pro version catalog: { $error }
 error-version-list-empty = The Studio Pro version catalog is empty.
 error-browser-required = Microsoft Edge, Google Chrome, or Chromium is required to read the Studio Pro version catalog. You can also set MENDIMARU_CHROME_PATH explicitly.
+error-browser-profile-create = Could not create a private Marketplace browser profile: { $error }
 error-browser-config = Could not create the Marketplace browser configuration: { $error }
 error-browser-start = Could not start the Marketplace browser: { $error }
+error-browser-sandbox-disabled = Marketplace access was blocked because Chromium was started with a switch that disables a browser security boundary.
+error-browser-sandbox-unavailable = Marketplace access was blocked because the Linux Chromium renderer sandbox could not be verified. Enable user namespaces or install the Chromium SUID sandbox, and ensure seccomp is available.
 error-browser-page = Could not create the Marketplace page: { $error }
+error-browser-cleanup = The Marketplace browser process or its private profile could not be cleaned up safely.
 error-marketplace-connection-timeout = The connection to Mendix Marketplace timed out.
 error-marketplace-open = Could not open Mendix Marketplace: { $error }
 
