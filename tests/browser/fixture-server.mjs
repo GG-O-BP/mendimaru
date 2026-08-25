@@ -1,4 +1,5 @@
 import http from "node:http";
+import { Buffer } from "node:buffer";
 import process from "node:process";
 import { setTimeout } from "node:timers";
 import { URL } from "node:url";
@@ -67,6 +68,22 @@ const page = `<!doctype html>
 </body>
 </html>`;
 
+const compressiblePagePrefix = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Compressible trace fixture</title></head>
+<body>
+  <p role="status" aria-label="Download">Loading</p>
+  <div hidden>`;
+const compressiblePageSuffix = `</div>
+  <script>
+    document.querySelector('[role="status"]').textContent = 'Loaded';
+    setTimeout(() => { throw new Error('compressible trace fixture failure'); }, 0);
+  </script>
+</body>
+</html>`;
+const COMPRESSIBLE_RESPONSE_BYTES = 36 * 1024 * 1024;
+const COMPRESSIBLE_CHUNK = Buffer.alloc(64 * 1024, 0x61);
+
 const server = http.createServer((request, response) => {
   const url = new URL(request.url, "http://127.0.0.1");
   if (url.pathname === "/api/save" && request.method === "POST") {
@@ -93,6 +110,20 @@ const server = http.createServer((request, response) => {
     }, 1_500);
     return;
   }
+  if (url.pathname === "/compressible") {
+    response.writeHead(200, {
+      "content-length":
+        Buffer.byteLength(compressiblePagePrefix) +
+        COMPRESSIBLE_RESPONSE_BYTES +
+        Buffer.byteLength(compressiblePageSuffix),
+      "content-type": "text/html; charset=utf-8",
+    });
+    response.write(compressiblePagePrefix);
+    streamCompressibleResponse(response, COMPRESSIBLE_RESPONSE_BYTES, () =>
+      response.end(compressiblePageSuffix),
+    );
+    return;
+  }
   if (url.pathname === "/storage-auth") {
     const authenticated = (request.headers.cookie || "")
       .split(";")
@@ -110,6 +141,22 @@ const server = http.createServer((request, response) => {
   response.writeHead(404, { "content-type": "text/plain" });
   response.end("not found");
 });
+
+function streamCompressibleResponse(response, totalBytes, complete) {
+  let remaining = totalBytes;
+  const write = () => {
+    while (remaining > 0 && !response.destroyed) {
+      const bytes = Math.min(remaining, COMPRESSIBLE_CHUNK.length);
+      remaining -= bytes;
+      if (!response.write(COMPRESSIBLE_CHUNK.subarray(0, bytes))) {
+        response.once("drain", write);
+        return;
+      }
+    }
+    if (!response.destroyed) complete();
+  };
+  write();
+}
 
 server.listen(0, "127.0.0.1", () => {
   const address = server.address();

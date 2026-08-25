@@ -4,17 +4,19 @@ use crate::contracts::{
     BrowserTestCaseSummary, BrowserTestOutcome, BrowserTestPolicy, BrowserTestRequest,
     BrowserTestSummary, CapabilityId, PlatformId, RuntimeMode, CONTRACT_SCHEMA_VERSION,
 };
+use aho_corasick::AhoCorasick;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
+use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
-use zip::ZipArchive;
+use zip::{CompressionMethod, ZipArchive};
 
 const STORE_DIRECTORY: &str = "browser-tests";
 const MAX_SUITE_BYTES: u64 = 2 * 1024 * 1024;
@@ -22,10 +24,112 @@ const MAX_RUNNER_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_ARTIFACT_FILES: usize = 512;
 const MAX_STORE_BYTES: u64 = 1024 * 1024 * 1024;
+const ARTIFACT_SCAN_BUFFER_BYTES: usize = 64 * 1024;
+const DEFAULT_ARTIFACT_SCAN_LIMITS: ArtifactScanLimits = ArtifactScanLimits {
+    maximum_file_bytes: 512 * 1024 * 1024,
+    maximum_zip_entries: 4_096,
+    maximum_zip_central_directory_bytes: 8 * 1024 * 1024,
+    maximum_zip_entry_bytes: 64 * 1024 * 1024,
+    maximum_zip_total_bytes: 256 * 1024 * 1024,
+    maximum_zip_compression_ratio: 200,
+    maximum_zip_entry_name_bytes: 1_024,
+    maximum_zip_path_components: 32,
+    maximum_duration: Duration::from_secs(30),
+};
 const RUNNER_PATH_OVERRIDE: &str = "MENDIMARU_BROWSER_RUNNER_PATH";
 const NODE_BINARY_OVERRIDE: &str = "MENDIMARU_NODE_BINARY";
 const RUNNER_VERSION: &str = "1.0.0";
 const MINIMUM_NODE_VERSION: &str = "22.22.2";
+
+#[derive(Debug, Clone, Copy)]
+struct ArtifactScanLimits {
+    maximum_file_bytes: u64,
+    maximum_zip_entries: usize,
+    maximum_zip_central_directory_bytes: u64,
+    maximum_zip_entry_bytes: u64,
+    maximum_zip_total_bytes: u64,
+    maximum_zip_compression_ratio: u64,
+    maximum_zip_entry_name_bytes: usize,
+    maximum_zip_path_components: usize,
+    maximum_duration: Duration,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArtifactScanError {
+    ArtifactChanged,
+    ArtifactIo,
+    FileSizeLimit,
+    PrivateEntryName,
+    PrivateValue,
+    ScanTimeLimit,
+    UnsafeArtifact,
+    ZipCompressionRatioLimit,
+    ZipCentralDirectoryLimit,
+    ZipDeclaredSizeMismatch,
+    ZipEntryCountLimit,
+    ZipEntrySizeLimit,
+    ZipMalformed,
+    ZipTotalSizeLimit,
+    ZipUnsafePath,
+    ZipUnsupportedEntry,
+}
+
+impl std::fmt::Display for ArtifactScanError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::ArtifactChanged => "a browser artifact changed while it was scanned",
+            Self::ArtifactIo => "could not scan a browser artifact",
+            Self::FileSizeLimit => "a browser artifact exceeds the scan file size limit",
+            Self::PrivateEntryName => "a trace entry name contains a private value",
+            Self::PrivateValue => "a browser artifact contains a private value",
+            Self::ScanTimeLimit => "the browser artifact scan time limit was exceeded",
+            Self::UnsafeArtifact => "an unsafe browser artifact was encountered",
+            Self::ZipCompressionRatioLimit => {
+                "a trace ZIP entry exceeds the compression ratio limit"
+            }
+            Self::ZipCentralDirectoryLimit => {
+                "the trace ZIP central directory exceeds the size limit"
+            }
+            Self::ZipDeclaredSizeMismatch => "a trace ZIP entry does not match its declared size",
+            Self::ZipEntryCountLimit => "the trace ZIP entry count limit was exceeded",
+            Self::ZipEntrySizeLimit => "a trace ZIP entry exceeds the size limit",
+            Self::ZipMalformed => "the trace ZIP is malformed",
+            Self::ZipTotalSizeLimit => "the trace ZIP cumulative size limit was exceeded",
+            Self::ZipUnsafePath => "a trace ZIP entry path is unsafe",
+            Self::ZipUnsupportedEntry => "the trace ZIP contains an unsupported entry",
+        };
+        formatter.write_str(message)
+    }
+}
+
+#[derive(Debug)]
+struct SecretMatcher {
+    automaton: AhoCorasick,
+    overlap_bytes: usize,
+}
+
+impl SecretMatcher {
+    fn new(patterns: &[Vec<u8>]) -> Result<Option<Self>, ArtifactScanError> {
+        let patterns = patterns
+            .iter()
+            .filter(|pattern| !pattern.is_empty())
+            .map(Vec::as_slice)
+            .collect::<Vec<_>>();
+        let Some(maximum_pattern_bytes) = patterns.iter().map(|pattern| pattern.len()).max() else {
+            return Ok(None);
+        };
+        let automaton =
+            AhoCorasick::new(patterns).map_err(|_| ArtifactScanError::UnsafeArtifact)?;
+        Ok(Some(Self {
+            automaton,
+            overlap_bytes: maximum_pattern_bytes.saturating_sub(1),
+        }))
+    }
+
+    fn contains(&self, bytes: &[u8]) -> bool {
+        self.automaton.is_match(bytes)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -1207,58 +1311,457 @@ fn collect_storage_secrets(value: &Value, values: &mut BTreeSet<String>) {
     }
 }
 
-fn verify_secret_free(directory: &Path, secrets: &[Vec<u8>]) -> Result<(), String> {
-    if secrets.is_empty() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(directory)
-        .map_err(|error| format!("could not scan browser artifacts: {error}"))?
-    {
-        let entry = entry.map_err(|error| format!("could not inspect artifact: {error}"))?;
-        let metadata = fs::symlink_metadata(entry.path())
-            .map_err(|error| format!("could not inspect artifact: {error}"))?;
+#[derive(Debug, Clone)]
+struct ZipEntryScanPlan {
+    compressed_bytes: u64,
+    compression_method: u16,
+    crc32: u32,
+    data_start: u64,
+    declared_bytes: u64,
+    data_end: u64,
+    central_header_start: u64,
+    header_start: u64,
+    name: Vec<u8>,
+}
+
+fn verify_secret_free(directory: &Path, secrets: &[Vec<u8>]) -> Result<(), ArtifactScanError> {
+    verify_secret_free_with_limits(directory, secrets, DEFAULT_ARTIFACT_SCAN_LIMITS)
+}
+
+fn verify_secret_free_with_limits(
+    directory: &Path,
+    secrets: &[Vec<u8>],
+    limits: ArtifactScanLimits,
+) -> Result<(), ArtifactScanError> {
+    let matcher = SecretMatcher::new(secrets)?;
+    let started = Instant::now();
+    let entries = fs::read_dir(directory).map_err(|_| ArtifactScanError::ArtifactIo)?;
+    for entry in entries {
+        ensure_scan_time(started, limits.maximum_duration)?;
+        let entry = entry.map_err(|_| ArtifactScanError::ArtifactIo)?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|_| ArtifactScanError::ArtifactIo)?;
         if metadata.file_type().is_symlink() || !metadata.is_file() {
-            return Err("unsafe browser artifact encountered".to_string());
+            return Err(ArtifactScanError::UnsafeArtifact);
         }
-        if entry.path().extension().and_then(|value| value.to_str()) == Some("zip") {
-            let file = File::open(entry.path())
-                .map_err(|error| format!("could not inspect trace archive: {error}"))?;
-            let mut archive = ZipArchive::new(file)
-                .map_err(|error| format!("could not parse trace archive: {error}"))?;
-            for index in 0..archive.len() {
-                let mut entry = archive
-                    .by_index(index)
-                    .map_err(|error| format!("could not inspect trace entry: {error}"))?;
-                if secrets
-                    .iter()
-                    .any(|secret| contains_bytes(entry.name_raw(), secret))
-                {
-                    return Err("a trace entry name contains a private value".to_string());
-                }
-                let mut bytes = Vec::new();
-                entry
-                    .read_to_end(&mut bytes)
-                    .map_err(|error| format!("could not read trace entry: {error}"))?;
-                if secrets.iter().any(|secret| contains_bytes(&bytes, secret)) {
-                    return Err("a browser artifact contains a private value".to_string());
-                }
-            }
-        } else {
-            let bytes = fs::read(entry.path())
-                .map_err(|error| format!("could not scan browser artifact: {error}"))?;
-            if secrets.iter().any(|secret| contains_bytes(&bytes, secret)) {
-                return Err("a browser artifact contains a private value".to_string());
-            }
+        if path.extension().and_then(|value| value.to_str()) == Some("zip") {
+            scan_trace_zip(&path, matcher.as_ref(), started, limits)?;
+            continue;
+        }
+        if metadata.len() > limits.maximum_file_bytes {
+            return Err(ArtifactScanError::FileSizeLimit);
+        }
+        let mut file = File::open(&path).map_err(|_| ArtifactScanError::ArtifactIo)?;
+        let mut total = 0_u64;
+        let actual = scan_stream(
+            &mut file,
+            matcher.as_ref(),
+            started,
+            limits.maximum_duration,
+            limits.maximum_file_bytes,
+            &mut total,
+            limits.maximum_file_bytes,
+            ArtifactScanError::FileSizeLimit,
+            ArtifactScanError::FileSizeLimit,
+            ArtifactScanError::ArtifactIo,
+        )?;
+        if actual != metadata.len() {
+            return Err(ArtifactScanError::ArtifactChanged);
         }
     }
     Ok(())
 }
 
-fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty()
-        && haystack
-            .windows(needle.len())
-            .any(|window| window == needle)
+fn scan_trace_zip(
+    path: &Path,
+    matcher: Option<&SecretMatcher>,
+    started: Instant,
+    limits: ArtifactScanLimits,
+) -> Result<(), ArtifactScanError> {
+    let mut file = File::open(path).map_err(|_| ArtifactScanError::ArtifactIo)?;
+    let file_bytes = file
+        .metadata()
+        .map_err(|_| ArtifactScanError::ArtifactIo)?
+        .len();
+    if file_bytes > limits.maximum_file_bytes {
+        return Err(ArtifactScanError::FileSizeLimit);
+    }
+    let expected_entries = preflight_zip_end_record(&mut file, file_bytes, limits)?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|_| ArtifactScanError::ArtifactIo)?;
+    let mut archive = ZipArchive::new(file).map_err(|_| ArtifactScanError::ZipMalformed)?;
+    if archive.len() != expected_entries || archive.len() > limits.maximum_zip_entries {
+        return Err(ArtifactScanError::ZipEntryCountLimit);
+    }
+
+    let mut declared_total = 0_u64;
+    let mut names = BTreeSet::new();
+    let mut plans = Vec::with_capacity(archive.len());
+    for index in 0..archive.len() {
+        ensure_scan_time(started, limits.maximum_duration)?;
+        let entry = archive
+            .by_index_raw(index)
+            .map_err(|_| ArtifactScanError::ZipMalformed)?;
+        if matcher.is_some_and(|matcher| matcher.contains(entry.name_raw())) {
+            return Err(ArtifactScanError::PrivateEntryName);
+        }
+        validate_zip_entry_path(
+            entry.name_raw(),
+            entry.enclosed_name().as_deref(),
+            entry.is_dir(),
+            limits,
+        )?;
+        if !names.insert(entry.name_raw().to_vec()) {
+            return Err(ArtifactScanError::ZipUnsafePath);
+        }
+        if entry.encrypted()
+            || !matches!(
+                entry.compression(),
+                CompressionMethod::Stored | CompressionMethod::Deflated
+            )
+            || entry.is_symlink()
+            || !zip_entry_kind_is_supported(entry.is_dir(), entry.unix_mode())
+        {
+            return Err(ArtifactScanError::ZipUnsupportedEntry);
+        }
+        if entry.is_dir() {
+            if entry.size() != 0
+                || entry.compressed_size() != 0
+                || entry.compression() != CompressionMethod::Stored
+            {
+                return Err(ArtifactScanError::ZipUnsupportedEntry);
+            }
+        } else if !entry.is_file() {
+            return Err(ArtifactScanError::ZipUnsupportedEntry);
+        }
+        if entry.size() > limits.maximum_zip_entry_bytes {
+            return Err(ArtifactScanError::ZipEntrySizeLimit);
+        }
+        declared_total = declared_total
+            .checked_add(entry.size())
+            .ok_or(ArtifactScanError::ZipTotalSizeLimit)?;
+        if declared_total > limits.maximum_zip_total_bytes {
+            return Err(ArtifactScanError::ZipTotalSizeLimit);
+        }
+        if compression_ratio_exceeded(
+            entry.size(),
+            entry.compressed_size(),
+            limits.maximum_zip_compression_ratio,
+        ) {
+            return Err(ArtifactScanError::ZipCompressionRatioLimit);
+        }
+        let data_end = entry
+            .data_start()
+            .checked_add(entry.compressed_size())
+            .ok_or(ArtifactScanError::ZipMalformed)?;
+        plans.push(ZipEntryScanPlan {
+            compressed_bytes: entry.compressed_size(),
+            compression_method: match entry.compression() {
+                CompressionMethod::Stored => 0,
+                CompressionMethod::Deflated => 8,
+                _ => return Err(ArtifactScanError::ZipUnsupportedEntry),
+            },
+            crc32: entry.crc32(),
+            data_start: entry.data_start(),
+            declared_bytes: entry.size(),
+            data_end,
+            central_header_start: entry.central_header_start(),
+            header_start: entry.header_start(),
+            name: entry.name_raw().to_vec(),
+        });
+    }
+
+    if let Some(central_directory_start) =
+        plans.iter().map(|entry| entry.central_header_start).min()
+    {
+        if plans
+            .iter()
+            .any(|entry| entry.data_end > central_directory_start)
+        {
+            return Err(ArtifactScanError::ZipMalformed);
+        }
+    }
+    validate_zip_local_headers(path, &plans, started, limits.maximum_duration)?;
+
+    let mut actual_total = 0_u64;
+    for (index, plan) in plans.iter().enumerate() {
+        ensure_scan_time(started, limits.maximum_duration)?;
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|_| ArtifactScanError::ZipMalformed)?;
+        let actual = scan_stream(
+            &mut entry,
+            matcher,
+            started,
+            limits.maximum_duration,
+            limits.maximum_zip_entry_bytes,
+            &mut actual_total,
+            limits.maximum_zip_total_bytes,
+            ArtifactScanError::ZipEntrySizeLimit,
+            ArtifactScanError::ZipTotalSizeLimit,
+            ArtifactScanError::ZipMalformed,
+        )?;
+        if compression_ratio_exceeded(
+            actual,
+            plan.compressed_bytes,
+            limits.maximum_zip_compression_ratio,
+        ) {
+            return Err(ArtifactScanError::ZipCompressionRatioLimit);
+        }
+        if actual != plan.declared_bytes {
+            return Err(ArtifactScanError::ZipDeclaredSizeMismatch);
+        }
+    }
+    Ok(())
+}
+
+fn validate_zip_local_headers(
+    path: &Path,
+    plans: &[ZipEntryScanPlan],
+    started: Instant,
+    maximum_duration: Duration,
+) -> Result<(), ArtifactScanError> {
+    const LOCAL_HEADER_BYTES: usize = 30;
+    const LOCAL_HEADER_SIGNATURE: u32 = 0x0403_4b50;
+    const DATA_DESCRIPTOR_FLAG: u16 = 1 << 3;
+    const ENCRYPTED_FLAGS: u16 = (1 << 0) | (1 << 6);
+    let mut file = File::open(path).map_err(|_| ArtifactScanError::ArtifactIo)?;
+    let mut header = [0_u8; LOCAL_HEADER_BYTES];
+    for plan in plans {
+        ensure_scan_time(started, maximum_duration)?;
+        file.seek(SeekFrom::Start(plan.header_start))
+            .map_err(|_| ArtifactScanError::ZipMalformed)?;
+        file.read_exact(&mut header)
+            .map_err(|_| ArtifactScanError::ZipMalformed)?;
+        let signature = zip_u32(&header, 0).ok_or(ArtifactScanError::ZipMalformed)?;
+        let flags = zip_u16(&header, 6).ok_or(ArtifactScanError::ZipMalformed)?;
+        let compression = zip_u16(&header, 8).ok_or(ArtifactScanError::ZipMalformed)?;
+        let crc32 = zip_u32(&header, 14).ok_or(ArtifactScanError::ZipMalformed)?;
+        let compressed_bytes = zip_u32(&header, 18).ok_or(ArtifactScanError::ZipMalformed)? as u64;
+        let uncompressed_bytes =
+            zip_u32(&header, 22).ok_or(ArtifactScanError::ZipMalformed)? as u64;
+        let name_bytes = zip_u16(&header, 26).ok_or(ArtifactScanError::ZipMalformed)? as usize;
+        let extra_bytes = zip_u16(&header, 28).ok_or(ArtifactScanError::ZipMalformed)? as u64;
+        if flags & ENCRYPTED_FLAGS != 0 {
+            return Err(ArtifactScanError::ZipUnsupportedEntry);
+        }
+        if signature != LOCAL_HEADER_SIGNATURE
+            || compression != plan.compression_method
+            || name_bytes != plan.name.len()
+            || plan
+                .header_start
+                .checked_add(LOCAL_HEADER_BYTES as u64)
+                .and_then(|offset| offset.checked_add(name_bytes as u64))
+                .and_then(|offset| offset.checked_add(extra_bytes))
+                != Some(plan.data_start)
+        {
+            return Err(ArtifactScanError::ZipMalformed);
+        }
+        let mut name = vec![0_u8; name_bytes];
+        file.read_exact(&mut name)
+            .map_err(|_| ArtifactScanError::ZipMalformed)?;
+        if name != plan.name {
+            return Err(ArtifactScanError::ZipMalformed);
+        }
+        if flags & DATA_DESCRIPTOR_FLAG == 0
+            && (crc32 != plan.crc32
+                || compressed_bytes != plan.compressed_bytes
+                || uncompressed_bytes != plan.declared_bytes)
+        {
+            return Err(ArtifactScanError::ZipDeclaredSizeMismatch);
+        }
+    }
+    Ok(())
+}
+
+fn preflight_zip_end_record(
+    file: &mut File,
+    file_bytes: u64,
+    limits: ArtifactScanLimits,
+) -> Result<usize, ArtifactScanError> {
+    const END_RECORD_BYTES: usize = 22;
+    const MAXIMUM_COMMENT_BYTES: usize = u16::MAX as usize;
+    const END_RECORD_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
+    if file_bytes < END_RECORD_BYTES as u64 {
+        return Err(ArtifactScanError::ZipMalformed);
+    }
+    let tail_bytes = file_bytes.min((END_RECORD_BYTES + MAXIMUM_COMMENT_BYTES) as u64) as usize;
+    let tail_offset = file_bytes - tail_bytes as u64;
+    file.seek(SeekFrom::Start(tail_offset))
+        .map_err(|_| ArtifactScanError::ArtifactIo)?;
+    let mut tail = vec![0_u8; tail_bytes];
+    file.read_exact(&mut tail)
+        .map_err(|_| ArtifactScanError::ZipMalformed)?;
+    let end_offset = (0..=tail.len() - END_RECORD_BYTES)
+        .rev()
+        .find(|offset| {
+            tail[*offset..*offset + 4] == END_RECORD_SIGNATURE
+                && zip_u16(&tail, *offset + 20).is_some_and(|comment_bytes| {
+                    *offset + END_RECORD_BYTES + comment_bytes as usize == tail.len()
+                })
+        })
+        .ok_or(ArtifactScanError::ZipMalformed)?;
+    let disk = zip_u16(&tail, end_offset + 4).ok_or(ArtifactScanError::ZipMalformed)?;
+    let central_disk = zip_u16(&tail, end_offset + 6).ok_or(ArtifactScanError::ZipMalformed)?;
+    let entries_on_disk = zip_u16(&tail, end_offset + 8).ok_or(ArtifactScanError::ZipMalformed)?;
+    let entries = zip_u16(&tail, end_offset + 10).ok_or(ArtifactScanError::ZipMalformed)?;
+    let central_bytes = zip_u32(&tail, end_offset + 12).ok_or(ArtifactScanError::ZipMalformed)?;
+    let central_offset = zip_u32(&tail, end_offset + 16).ok_or(ArtifactScanError::ZipMalformed)?;
+    if disk != 0
+        || central_disk != 0
+        || entries_on_disk != entries
+        || entries == u16::MAX
+        || central_bytes == u32::MAX
+        || central_offset == u32::MAX
+    {
+        return Err(ArtifactScanError::ZipUnsupportedEntry);
+    }
+    if entries as usize > limits.maximum_zip_entries {
+        return Err(ArtifactScanError::ZipEntryCountLimit);
+    }
+    if central_bytes as u64 > limits.maximum_zip_central_directory_bytes {
+        return Err(ArtifactScanError::ZipCentralDirectoryLimit);
+    }
+    let absolute_end_offset = tail_offset
+        .checked_add(end_offset as u64)
+        .ok_or(ArtifactScanError::ZipMalformed)?;
+    if (central_offset as u64)
+        .checked_add(central_bytes as u64)
+        .filter(|end| *end == absolute_end_offset)
+        .is_none()
+    {
+        return Err(ArtifactScanError::ZipMalformed);
+    }
+    Ok(entries as usize)
+}
+
+fn zip_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+    bytes
+        .get(offset..offset.checked_add(2)?)?
+        .try_into()
+        .ok()
+        .map(u16::from_le_bytes)
+}
+
+fn zip_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    bytes
+        .get(offset..offset.checked_add(4)?)?
+        .try_into()
+        .ok()
+        .map(u32::from_le_bytes)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scan_stream<R: Read>(
+    reader: &mut R,
+    matcher: Option<&SecretMatcher>,
+    started: Instant,
+    maximum_duration: Duration,
+    maximum_bytes: u64,
+    cumulative_bytes: &mut u64,
+    maximum_cumulative_bytes: u64,
+    size_error: ArtifactScanError,
+    cumulative_error: ArtifactScanError,
+    read_error: ArtifactScanError,
+) -> Result<u64, ArtifactScanError> {
+    let mut buffer = [0_u8; ARTIFACT_SCAN_BUFFER_BYTES];
+    let mut window = Vec::new();
+    let mut actual = 0_u64;
+    loop {
+        ensure_scan_time(started, maximum_duration)?;
+        let read = reader.read(&mut buffer).map_err(|_| read_error)?;
+        ensure_scan_time(started, maximum_duration)?;
+        if read == 0 {
+            break;
+        }
+        actual = actual.checked_add(read as u64).ok_or(size_error)?;
+        if actual > maximum_bytes {
+            return Err(size_error);
+        }
+        *cumulative_bytes = cumulative_bytes
+            .checked_add(read as u64)
+            .ok_or(cumulative_error)?;
+        if *cumulative_bytes > maximum_cumulative_bytes {
+            return Err(cumulative_error);
+        }
+        if let Some(matcher) = matcher {
+            window.extend_from_slice(&buffer[..read]);
+            if matcher.contains(&window) {
+                return Err(ArtifactScanError::PrivateValue);
+            }
+            if window.len() > matcher.overlap_bytes {
+                let retained_start = window.len() - matcher.overlap_bytes;
+                window.copy_within(retained_start.., 0);
+                window.truncate(matcher.overlap_bytes);
+            }
+        }
+    }
+    Ok(actual)
+}
+
+fn ensure_scan_time(started: Instant, maximum_duration: Duration) -> Result<(), ArtifactScanError> {
+    if started.elapsed() >= maximum_duration {
+        return Err(ArtifactScanError::ScanTimeLimit);
+    }
+    Ok(())
+}
+
+fn compression_ratio_exceeded(uncompressed: u64, compressed: u64, maximum_ratio: u64) -> bool {
+    uncompressed != 0
+        && (compressed == 0 || uncompressed > compressed.saturating_mul(maximum_ratio))
+}
+
+fn validate_zip_entry_path(
+    raw_name: &[u8],
+    enclosed_name: Option<&Path>,
+    is_directory: bool,
+    limits: ArtifactScanLimits,
+) -> Result<(), ArtifactScanError> {
+    if raw_name.is_empty()
+        || raw_name.len() > limits.maximum_zip_entry_name_bytes
+        || std::str::from_utf8(raw_name).is_err()
+        || raw_name.contains(&0)
+        || raw_name.contains(&b'\\')
+        || raw_name.contains(&b':')
+        || raw_name.starts_with(b"/")
+        || raw_name.ends_with(b"/") != is_directory
+        || enclosed_name.is_none()
+    {
+        return Err(ArtifactScanError::ZipUnsafePath);
+    }
+    let path_bytes = if is_directory {
+        &raw_name[..raw_name.len().saturating_sub(1)]
+    } else {
+        raw_name
+    };
+    let mut component_count = 0_usize;
+    for component in path_bytes.split(|byte| *byte == b'/') {
+        component_count = component_count.saturating_add(1);
+        if component.is_empty()
+            || component == b"."
+            || component == b".."
+            || component.len() > 255
+            || component_count > limits.maximum_zip_path_components
+        {
+            return Err(ArtifactScanError::ZipUnsafePath);
+        }
+    }
+    if !enclosed_name.is_some_and(|path| {
+        path.components().count() == component_count
+            && path
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+    }) {
+        return Err(ArtifactScanError::ZipUnsafePath);
+    }
+    Ok(())
+}
+
+fn zip_entry_kind_is_supported(is_directory: bool, unix_mode: Option<u32>) -> bool {
+    unix_mode.is_none_or(|mode| {
+        let kind = mode & 0o170_000;
+        kind == 0 || kind == if is_directory { 0o040_000 } else { 0o100_000 }
+    })
 }
 
 fn percent_encode(value: &[u8], uppercase: bool) -> String {
@@ -1503,6 +2006,60 @@ mod tests {
     use super::*;
     use crate::contracts::{BrowserRuntimeContext, BrowserTestPolicy, PlatformId, RuntimeMode};
     use serde_json::json;
+    use std::io::Cursor;
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+
+    fn zip_fixture(entries: &[(&str, &[u8], CompressionMethod)]) -> Vec<u8> {
+        let cursor = Cursor::new(Vec::new());
+        let mut archive = ZipWriter::new(cursor);
+        for (name, bytes, compression) in entries {
+            let options = SimpleFileOptions::default().compression_method(*compression);
+            archive.start_file(*name, options).expect("start ZIP entry");
+            archive.write_all(bytes).expect("write ZIP entry");
+        }
+        archive.finish().expect("finish ZIP fixture").into_inner()
+    }
+
+    fn write_trace_fixture(directory: &Path, bytes: &[u8]) -> PathBuf {
+        let path = directory.join("trace.zip");
+        fs::write(&path, bytes).expect("write trace fixture");
+        path
+    }
+
+    fn signature_offsets(bytes: &[u8], signature: [u8; 4]) -> Vec<usize> {
+        bytes
+            .windows(signature.len())
+            .enumerate()
+            .filter_map(|(offset, value)| (value == signature).then_some(offset))
+            .collect()
+    }
+
+    fn write_u16(bytes: &mut [u8], offset: usize, value: u16) {
+        bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_u32(bytes: &mut [u8], offset: usize, value: u32) {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn read_u16(bytes: &[u8], offset: usize) -> u16 {
+        u16::from_le_bytes(bytes[offset..offset + 2].try_into().expect("u16 field"))
+    }
+
+    fn test_scan_limits() -> ArtifactScanLimits {
+        ArtifactScanLimits {
+            maximum_file_bytes: 4 * 1024 * 1024,
+            maximum_zip_entries: 32,
+            maximum_zip_central_directory_bytes: 1024 * 1024,
+            maximum_zip_entry_bytes: 2 * 1024 * 1024,
+            maximum_zip_total_bytes: 3 * 1024 * 1024,
+            maximum_zip_compression_ratio: 10_000,
+            maximum_zip_entry_name_bytes: 1_024,
+            maximum_zip_path_components: 32,
+            maximum_duration: Duration::from_secs(5),
+        }
+    }
 
     fn request(suite_path: &Path) -> BrowserTestRequest {
         BrowserTestRequest {
@@ -1646,6 +2203,371 @@ mod tests {
         std::env::remove_var("MENDIMARU_TEST_PASSWORD");
         std::env::remove_var("MENDIMARU_TEST_STORAGE_STATE");
         std::env::remove_var("MENDIMARU_TEST_USERNAME");
+    }
+
+    #[test]
+    fn streaming_scan_finds_secrets_at_file_and_chunk_boundaries() {
+        const SECRET: &[u8] = b"boundary-private-value";
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let positions = [
+            0,
+            ARTIFACT_SCAN_BUFFER_BYTES - SECRET.len(),
+            ARTIFACT_SCAN_BUFFER_BYTES - SECRET.len() / 2,
+            2 * ARTIFACT_SCAN_BUFFER_BYTES - SECRET.len() / 2,
+        ];
+        for (index, position) in positions.into_iter().enumerate() {
+            let directory = temporary.path().join(format!("case-{index}"));
+            fs::create_dir(&directory).expect("case directory");
+            let mut bytes = vec![b'x'; 3 * ARTIFACT_SCAN_BUFFER_BYTES];
+            bytes[position..position + SECRET.len()].copy_from_slice(SECRET);
+            fs::write(directory.join("artifact.bin"), bytes).expect("artifact fixture");
+            assert_eq!(
+                verify_secret_free_with_limits(&directory, &[SECRET.to_vec()], test_scan_limits(),),
+                Err(ArtifactScanError::PrivateValue)
+            );
+        }
+
+        let zip_directory = temporary.path().join("zip-case");
+        fs::create_dir(&zip_directory).expect("ZIP case directory");
+        let mut bytes = vec![b'x'; 3 * ARTIFACT_SCAN_BUFFER_BYTES];
+        let position = 2 * ARTIFACT_SCAN_BUFFER_BYTES - SECRET.len() / 2;
+        bytes[position..position + SECRET.len()].copy_from_slice(SECRET);
+        write_trace_fixture(
+            &zip_directory,
+            &zip_fixture(&[("resources/body", &bytes, CompressionMethod::Stored)]),
+        );
+        assert_eq!(
+            verify_secret_free_with_limits(&zip_directory, &[SECRET.to_vec()], test_scan_limits(),),
+            Err(ArtifactScanError::PrivateValue)
+        );
+    }
+
+    #[test]
+    fn streaming_scan_memory_is_independent_of_input_size() {
+        struct RepeatedReader {
+            maximum_requested: usize,
+            remaining: usize,
+        }
+
+        impl Read for RepeatedReader {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                self.maximum_requested = self.maximum_requested.max(buffer.len());
+                let read = self.remaining.min(buffer.len());
+                buffer[..read].fill(b'x');
+                self.remaining -= read;
+                Ok(read)
+            }
+        }
+
+        let input_bytes = 16 * 1024 * 1024;
+        let mut reader = RepeatedReader {
+            maximum_requested: 0,
+            remaining: input_bytes,
+        };
+        let mut cumulative = 0;
+        let actual = scan_stream(
+            &mut reader,
+            None,
+            Instant::now(),
+            Duration::from_secs(5),
+            input_bytes as u64,
+            &mut cumulative,
+            input_bytes as u64,
+            ArtifactScanError::FileSizeLimit,
+            ArtifactScanError::FileSizeLimit,
+            ArtifactScanError::ArtifactIo,
+        )
+        .expect("bounded stream scan");
+        assert_eq!(actual, input_bytes as u64);
+        assert_eq!(cumulative, input_bytes as u64);
+        assert_eq!(reader.maximum_requested, ARTIFACT_SCAN_BUFFER_BYTES);
+    }
+
+    #[test]
+    fn zip_scan_rejects_private_entry_names_and_unsafe_paths() {
+        const SECRET: &[u8] = b"private-name";
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        write_trace_fixture(
+            temporary.path(),
+            &zip_fixture(&[(
+                "resources/private-name.txt",
+                b"safe",
+                CompressionMethod::Stored,
+            )]),
+        );
+        assert_eq!(
+            verify_secret_free_with_limits(
+                temporary.path(),
+                &[SECRET.to_vec()],
+                test_scan_limits(),
+            ),
+            Err(ArtifactScanError::PrivateEntryName)
+        );
+
+        write_trace_fixture(
+            temporary.path(),
+            &zip_fixture(&[("../escape.txt", b"safe", CompressionMethod::Stored)]),
+        );
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], test_scan_limits()),
+            Err(ArtifactScanError::ZipUnsafePath)
+        );
+    }
+
+    #[test]
+    fn zip_scan_distinguishes_declared_safety_limits() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let entries = [
+            ("one.txt", b"one".as_slice(), CompressionMethod::Stored),
+            ("two.txt", b"two".as_slice(), CompressionMethod::Stored),
+            ("three.txt", b"three".as_slice(), CompressionMethod::Stored),
+        ];
+        write_trace_fixture(temporary.path(), &zip_fixture(&entries));
+        let mut limits = test_scan_limits();
+        limits.maximum_zip_entries = 2;
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], limits),
+            Err(ArtifactScanError::ZipEntryCountLimit)
+        );
+
+        limits = test_scan_limits();
+        limits.maximum_zip_central_directory_bytes = 1;
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], limits),
+            Err(ArtifactScanError::ZipCentralDirectoryLimit)
+        );
+
+        write_trace_fixture(
+            temporary.path(),
+            &zip_fixture(&[("large.bin", &[b'x'; 1_025], CompressionMethod::Stored)]),
+        );
+        limits = test_scan_limits();
+        limits.maximum_zip_entry_bytes = 1_024;
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], limits),
+            Err(ArtifactScanError::ZipEntrySizeLimit)
+        );
+
+        let first = vec![b'a'; 768];
+        let second = vec![b'b'; 768];
+        write_trace_fixture(
+            temporary.path(),
+            &zip_fixture(&[
+                ("first.bin", &first, CompressionMethod::Stored),
+                ("second.bin", &second, CompressionMethod::Stored),
+            ]),
+        );
+        limits = test_scan_limits();
+        limits.maximum_zip_entry_bytes = 1_024;
+        limits.maximum_zip_total_bytes = 1_024;
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], limits),
+            Err(ArtifactScanError::ZipTotalSizeLimit)
+        );
+
+        let repeated = vec![b'z'; 32 * 1024];
+        write_trace_fixture(
+            temporary.path(),
+            &zip_fixture(&[("repeated.txt", &repeated, CompressionMethod::Deflated)]),
+        );
+        limits = test_scan_limits();
+        limits.maximum_zip_compression_ratio = 2;
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], limits),
+            Err(ArtifactScanError::ZipCompressionRatioLimit)
+        );
+    }
+
+    #[test]
+    fn small_zip_bomb_is_rejected_before_unbounded_expansion() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let repeated = vec![b'z'; 2 * 1024 * 1024];
+        let archive = zip_fixture(&[("repeated.txt", &repeated, CompressionMethod::Deflated)]);
+        assert!(
+            archive.len() < 16 * 1024,
+            "fixture must remain highly compressed"
+        );
+        write_trace_fixture(temporary.path(), &archive);
+        let mut limits = test_scan_limits();
+        limits.maximum_zip_entry_bytes = 1024 * 1024;
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], limits),
+            Err(ArtifactScanError::ZipEntrySizeLimit)
+        );
+    }
+
+    #[test]
+    fn zip_scan_rejects_declared_size_lies_crc_errors_and_truncation() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let original =
+            zip_fixture(&[("payload.bin", b"bounded payload", CompressionMethod::Stored)]);
+        let local = signature_offsets(&original, [0x50, 0x4b, 0x03, 0x04]);
+        let central = signature_offsets(&original, [0x50, 0x4b, 0x01, 0x02]);
+        assert_eq!((local.len(), central.len()), (1, 1));
+
+        let mut declared_size_lie = original.clone();
+        write_u32(
+            &mut declared_size_lie,
+            local[0] + 22,
+            b"bounded payload".len() as u32 + 1,
+        );
+        write_u32(
+            &mut declared_size_lie,
+            central[0] + 24,
+            b"bounded payload".len() as u32 + 1,
+        );
+        write_trace_fixture(temporary.path(), &declared_size_lie);
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], test_scan_limits()),
+            Err(ArtifactScanError::ZipDeclaredSizeMismatch)
+        );
+
+        let mut bad_crc = original.clone();
+        bad_crc[local[0] + 14] ^= 0xff;
+        bad_crc[central[0] + 16] ^= 0xff;
+        write_trace_fixture(temporary.path(), &bad_crc);
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], test_scan_limits()),
+            Err(ArtifactScanError::ZipMalformed)
+        );
+
+        let mut truncated = original;
+        truncated.truncate(truncated.len() - 8);
+        write_trace_fixture(temporary.path(), &truncated);
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], test_scan_limits()),
+            Err(ArtifactScanError::ZipMalformed)
+        );
+    }
+
+    #[test]
+    fn zip_scan_rejects_encryption_unsupported_methods_and_actual_size_overrun() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let original = zip_fixture(&[("payload.bin", &[b'x'; 2_048], CompressionMethod::Stored)]);
+        let local = signature_offsets(&original, [0x50, 0x4b, 0x03, 0x04]);
+        let central = signature_offsets(&original, [0x50, 0x4b, 0x01, 0x02]);
+        assert_eq!((local.len(), central.len()), (1, 1));
+
+        let mut encrypted = original.clone();
+        let local_flags = read_u16(&encrypted, local[0] + 6) | 1;
+        let central_flags = read_u16(&encrypted, central[0] + 8) | 1;
+        write_u16(&mut encrypted, local[0] + 6, local_flags);
+        write_u16(&mut encrypted, central[0] + 8, central_flags);
+        write_trace_fixture(temporary.path(), &encrypted);
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], test_scan_limits()),
+            Err(ArtifactScanError::ZipUnsupportedEntry)
+        );
+
+        let mut unsupported = original.clone();
+        write_u16(&mut unsupported, local[0] + 8, 12);
+        write_u16(&mut unsupported, central[0] + 10, 12);
+        write_trace_fixture(temporary.path(), &unsupported);
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], test_scan_limits()),
+            Err(ArtifactScanError::ZipUnsupportedEntry)
+        );
+
+        let mut mismatched_local_header = original.clone();
+        write_u16(&mut mismatched_local_header, local[0] + 8, 8);
+        write_trace_fixture(temporary.path(), &mismatched_local_header);
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], test_scan_limits()),
+            Err(ArtifactScanError::ZipMalformed)
+        );
+
+        let mut declared_small = original;
+        write_u32(&mut declared_small, local[0] + 22, 1);
+        write_u32(&mut declared_small, central[0] + 24, 1);
+        write_trace_fixture(temporary.path(), &declared_small);
+        let mut limits = test_scan_limits();
+        limits.maximum_zip_entry_bytes = 1_024;
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], limits),
+            Err(ArtifactScanError::ZipEntrySizeLimit)
+        );
+    }
+
+    #[test]
+    fn regular_artifact_size_and_scan_time_limits_are_independent() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let artifact = temporary.path().join("artifact.bin");
+        let mut limits = test_scan_limits();
+        limits.maximum_file_bytes = 2 * ARTIFACT_SCAN_BUFFER_BYTES as u64;
+        fs::write(&artifact, vec![b'x'; limits.maximum_file_bytes as usize])
+            .expect("maximum-size artifact");
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], limits),
+            Ok(())
+        );
+
+        fs::write(
+            &artifact,
+            vec![b'x'; limits.maximum_file_bytes as usize + 1],
+        )
+        .expect("oversized artifact");
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], limits),
+            Err(ArtifactScanError::FileSizeLimit)
+        );
+
+        fs::write(&artifact, b"safe").expect("safe artifact");
+        limits.maximum_duration = Duration::ZERO;
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], limits),
+            Err(ArtifactScanError::ScanTimeLimit)
+        );
+    }
+
+    #[test]
+    fn scan_failure_is_secret_free_and_staging_guard_removes_partial_run() {
+        const SECRET: &str = "never-include-this-private-value";
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let staging = temporary.path().join(".run.staging");
+        fs::create_dir(&staging).expect("staging directory");
+        fs::write(staging.join("report.html"), SECRET).expect("unsafe artifact");
+        let guard = StagingGuard {
+            path: staging.clone(),
+            armed: true,
+        };
+        let error = verify_secret_free_with_limits(
+            &staging,
+            &[SECRET.as_bytes().to_vec()],
+            test_scan_limits(),
+        )
+        .expect_err("secret scan must fail");
+        assert!(!error.to_string().contains(SECRET));
+        assert!(!staging.join("index.json").exists());
+        drop(guard);
+        assert!(!staging.exists());
+    }
+
+    #[test]
+    fn normal_stored_and_deflated_trace_entries_remain_supported() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let cursor = Cursor::new(Vec::new());
+        let mut archive = ZipWriter::new(cursor);
+        archive
+            .add_directory(
+                "resources/",
+                SimpleFileOptions::default().compression_method(CompressionMethod::Stored),
+            )
+            .expect("trace directory");
+        archive
+            .start_file(
+                "resources/body.txt",
+                SimpleFileOptions::default().compression_method(CompressionMethod::Deflated),
+            )
+            .expect("trace resource");
+        archive
+            .write_all(b"normal Playwright trace content")
+            .expect("trace body");
+        let bytes = archive.finish().expect("trace ZIP").into_inner();
+        write_trace_fixture(temporary.path(), &bytes);
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], test_scan_limits()),
+            Ok(())
+        );
     }
 
     #[test]

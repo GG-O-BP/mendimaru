@@ -149,9 +149,32 @@ Before capture, password fields, `[data-mendimaru-private="true"]`,
 `.mx-name-MendimaruPrivate`, and `maskLocators` are visually masked. Textual
 artifacts and trace entries are redacted. Publication then independently scans
 every file and every ZIP member for raw, percent-encoded, and Base64 forms of
-all declared secrets. Any hit fails publication. Suite and storage-state
-symlinks are rejected, and the run directory/files use user-only permissions
-on Unix.
+all declared secrets. The scan uses a 64 KiB streaming buffer and preserves
+enough overlap to detect a value split across read boundaries. Any hit fails
+publication. Suite and storage-state symlinks are rejected, and the run
+directory/files use user-only permissions on Unix.
+
+Artifact scanning has fail-closed safety ceilings that are independent of the
+user-configurable compressed inventory limit:
+
+| Safety ceiling                   | Limit                   |
+| -------------------------------- | ----------------------- |
+| Regular artifact actual bytes    | 512 MiB                 |
+| ZIP members                      | 4,096                   |
+| ZIP central directory            | 8 MiB                   |
+| One ZIP member, uncompressed     | 64 MiB                  |
+| One ZIP, cumulative uncompressed | 256 MiB                 |
+| ZIP member compression ratio     | 200:1                   |
+| Whole publication scan wall time | 30 seconds              |
+| ZIP member name / path depth     | 1,024 B / 32 components |
+
+ZIP central-directory declarations are checked before decompression. Only
+unencrypted Stored and Deflate members with bounded, relative paths are
+accepted; symlink and special entries are rejected. Declared limits are checked
+again against bytes actually produced while streaming, and size mismatches,
+truncation, malformed headers, unsupported encryption/compression, and CRC
+errors all abort publication. These ceilings cannot be raised with
+`--max-artifact-mib`.
 
 ## Results and artifacts
 
@@ -182,7 +205,9 @@ On Linux the private files are under
 descriptor; a modified or symlinked file is rejected. The current run is never
 deleted during its own commit. Older runs are pruned best-effort by count and a
 1 GiB global cap, while each run is independently limited by
-`--max-artifact-mib`.
+`--max-artifact-mib`. A scan or validation failure occurs before `index.json`
+and the atomic run-directory rename, so the staging directory is removed and
+the failed session does not appear in `browser artifacts`.
 
 ## Verification
 
@@ -195,8 +220,11 @@ npm run test:browser
 It exercises the same platform-neutral suite for Portable and WinBoat metadata,
 login and Mendix widget interaction, assertion/navigation/page failures,
 console/network policy behavior, optional video/HAR, unavailable Chromium
-diagnostics, failure evidence, and whole-artifact secret scanning. The Rust CLI
-E2E launches the compiled executable and runs that exact smoke suite through
-both a real Portable supervisor URL and a WinBoat loopback adapter URL. It also
-verifies exit/stream semantics and Runtime readiness rejection, re-queries
-artifacts, checks integrity, and scans trace members again.
+diagnostics, failure evidence, and whole-artifact secret scanning. A malicious
+local target also produces a small, highly compressible trace with a member
+over the uncompressed limit; the test verifies pre-extraction rejection, a
+576 MiB runner RSS budget, and a successful next run. The Rust CLI E2E launches
+the compiled executable and runs that exact smoke suite through both a real
+Portable supervisor URL and a WinBoat loopback adapter URL. It also verifies
+exit/stream semantics and Runtime readiness rejection, re-queries artifacts,
+checks integrity, and scans trace members again.

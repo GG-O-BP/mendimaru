@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1.0.0",
+  "name": "Highly compressible trace rejection",
+  "beforeEach": [{ "action": "goto", "path": "/compressible" }],
+  "tests": [
+    {
+      "name": "large response body cannot become a ZIP bomb",
+      "steps": [
+        {
+          "action": "expectText",
+          "locator": { "by": "role", "role": "status", "name": "Download" },
+          "value": "Loaded"
+        }
+      ]
+    }
+  ]
+}
