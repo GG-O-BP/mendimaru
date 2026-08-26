@@ -172,7 +172,12 @@ export async function createReleaseFixture(platform = process.platform) {
     async clearWebviewCache() {
       await Promise.all(
         [webviewCache, webviewData].map(async (directory) => {
-          await fs.rm(directory, { force: true, recursive: true });
+          await fs.rm(directory, {
+            force: true,
+            recursive: true,
+            maxRetries: 20,
+            retryDelay: 250,
+          });
           await fs.mkdir(directory, { recursive: true });
         }),
       );

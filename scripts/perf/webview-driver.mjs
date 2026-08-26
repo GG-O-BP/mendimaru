@@ -181,11 +181,18 @@ class WindowsWebviewDriver extends WebviewDriverBase {
   }
 
   async stop() {
-    if (this.client) await this.client.deleteSession().catch(() => undefined);
+    const applicationPid = this.appProcess?.pid;
+    if (applicationPid) {
+      // Kill the tree while its root still exists. Deleting the embedded
+      // WebDriver session first can let the root exit before taskkill discovers
+      // WebView2 descendants, leaving the user-data lock held briefly.
+      terminateWindowsTree(applicationPid);
+    } else if (this.client) {
+      await this.client.deleteSession().catch(() => undefined);
+    }
     this.client = undefined;
-    if (this.appProcess?.pid) terminateWindowsTree(this.appProcess.pid);
     await waitFor(
-      () => !this.appProcess?.pid || !processExists(this.appProcess.pid),
+      () => !applicationPid || !processExists(applicationPid),
       10_000,
       "Windows release application exit",
     ).catch(() => undefined);
