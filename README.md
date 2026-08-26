@@ -140,7 +140,7 @@ In Linux WinBoat mode, the Studio Pro launch button remains disabled until the W
 
 The Linux shared directory is connected to the `<host path>:/shared` mount in the WinBoat Compose file. It is treated as an untrusted transport, not as installer storage. The project list scans only this directory and excludes generated and cache directories such as `.git`, `node_modules`, `deployment`, `.mendix-cache`, and `.mendimaru`.
 
-When the shared directory changes, Mendimaru backs up the existing Compose file as `*.mendimaru.bak`. If you choose to apply the change immediately in Settings, Mendimaru recreates the WinBoat container while preserving the `/storage` virtual disk and installed Windows apps.
+When the shared directory changes, Mendimaru first previews the identified WinBoat service, the old and new `/shared` sources, and the restart scope. It rejects non-WinBoat or ambiguous Compose files and aborts if the file changes between preview and save. Mendimaru backs up the existing Compose file as `*.mendimaru.bak` and recreates only the identified service when immediate apply is enabled. `/storage`, other volumes, environment, networks, and unrelated services are preserved semantically; because the Compose document is serialized after the targeted edit, YAML formatting and comments may be normalized.
 
 ## Backend capability contract
 

@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   formatNumbers: vi.fn(),
   formatBytes: vi.fn(),
   redetectConfig: vi.fn(),
+  previewSettingsSave: vi.fn(),
   saveConfig: vi.fn(),
   getEnvironmentStatus: vi.fn(),
   getEnvironmentDiagnosticReport: vi.fn(),
@@ -71,6 +72,7 @@ vi.mock("./api/tauri", () => ({
     formatNumbers: mocks.formatNumbers,
     formatBytes: mocks.formatBytes,
     redetectConfig: mocks.redetectConfig,
+    previewSettingsSave: mocks.previewSettingsSave,
     saveConfig: mocks.saveConfig,
     getEnvironmentStatus: mocks.getEnvironmentStatus,
     getEnvironmentDiagnosticReport: mocks.getEnvironmentDiagnosticReport,
@@ -294,6 +296,7 @@ beforeEach(() => {
     value: { writeText: mocks.writeClipboard },
   });
   mocks.redetectConfig.mockResolvedValue({ ...config });
+  mocks.previewSettingsSave.mockResolvedValue(null);
   mocks.saveConfig.mockImplementation(async (nextConfig: AppConfig) => ({
     config: nextConfig,
     mountChanged: false,

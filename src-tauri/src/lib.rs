@@ -55,6 +55,7 @@ pub fn run() {
             format_localized_numbers,
             format_localized_bytes,
             redetect_config,
+            preview_settings_save,
             save_config,
             get_capabilities,
             get_environment_status,

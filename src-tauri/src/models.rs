@@ -8,7 +8,7 @@ mod operation;
 mod projects;
 mod studio;
 
-pub use config::{AppConfig, ContainerRuntime, SettingsSaveResult};
+pub use config::{AppConfig, ContainerRuntime, SettingsSavePreview, SettingsSaveResult};
 pub use download::{DownloadProgress, DownloadState};
 pub use environment::{
     environment_diagnostic_report, ContainerStatus, EnvironmentDiagnostic,
@@ -232,6 +232,9 @@ mod tests {
                 CommandErrorCode::RuntimeFirewallBlocked,
                 CommandErrorCode::RuntimeNotListening,
                 CommandErrorCode::RuntimeComposeRecoveryFailed,
+                CommandErrorCode::ComposeNotWinboat,
+                CommandErrorCode::ComposeAmbiguous,
+                CommandErrorCode::ComposeRevisionConflict,
             ],
         );
         assert_registry("textDirection", [TextDirection::Ltr, TextDirection::Rtl]);

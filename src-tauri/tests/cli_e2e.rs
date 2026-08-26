@@ -1310,7 +1310,7 @@ impl WinboatRuntimeFixture {
         let runtime_port = runtime_server.port();
         let compose_path = root.join("docker-compose.yml");
         let original_compose = format!(
-            "services:\n  windows:\n    image: winboat-fixture\n    container_name: MendimaruE2EWinBoat\n    volumes:\n      - winboat-storage:/storage\n      - {}:/shared\n    ports:\n      - 127.0.0.1:47280:7148\n      - 127.0.0.1:47300:3389\nvolumes:\n  winboat-storage: {{}}\n",
+            "services:\n  windows:\n    image: ghcr.io/dockur/windows:e2e-fixture\n    container_name: MendimaruE2EWinBoat\n    volumes:\n      - winboat-storage:/storage\n      - {}:/shared\n    ports:\n      - 127.0.0.1:47280:7148\n      - 127.0.0.1:47300:3389\nvolumes:\n  winboat-storage: {{}}\n",
             workspace.to_string_lossy()
         );
         fs::write(&compose_path, &original_compose).expect("Compose fixture");
