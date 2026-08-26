@@ -131,6 +131,8 @@ Marketplace 카탈로그 캐시는 최대 6시간 재사용하므로 일반 시�
 
 앱을 시작하면 호스트의 비공개 캐시에서 마지막으로 검증된 설치 버전 목록을 복원하므로 알려진 Studio Pro 릴리스가 즉시 표시됩니다. 현재 Windows 목록은 백그라운드에서 다시 검증하며, 검증이 성공할 때까지 설치·제거·실행·프로젝트 열기 동작을 잠급니다. 검증에 실패해도 설치 목록을 빈 상태로 오인하지 않고 마지막 목록과 명시적인 재시도를 유지합니다.
 
+WinBoat Guest가 `apps-query-v1`을 알리면 Mendimaru는 WinBoat의 비공개 공유 토큰으로 인증하고 설정된 Mendix 루트 아래에서 icon 없는 `Name`, `Path`, `Source` 필드만 요청합니다. 구버전 Guest는 크기가 제한된 전체 `/apps` 응답으로 안전하게 fallback하지만, 경량 capability가 광고된 뒤 인증·timeout·검증에 실패하면 전체 경로로 조용히 강등하지 않습니다. 자세한 계약은 [WinBoat Studio 감지](docs/winboat-studio-discovery.md)를 참고하세요.
+
 Linux WinBoat 모드에서는 Studio Pro 실행 버튼이 Windows 프로세스의 실제 창이 생성되고 FreeRDP가 표시할 준비를 마칠 때까지 비활성화됩니다. WinBoat는 연결된 Studio Pro RemoteApp을 한 번에 하나만 유지할 수 있으므로, 연결된 세션이 있으면 Studio Pro 화면에서 해당 세션을 종료할 때까지 새 Studio 실행, 프로젝트 열기, 설치, 제거를 잠급니다. 실행 준비 중에도 같은 동작을 잠가 중복 실행을 방지합니다. Windows는 공유 작업 스크립트의 해시를 고정하고 고유한 전용 경로에 복사해 그 사본만 실행합니다. 설치·제거는 이미 관리자 권한인 WinBoat 세션의 토큰을 상속하므로 별도의 UAC 창을 표시하지 않습니다.
 
 ## Linux 공유 워크스페이스

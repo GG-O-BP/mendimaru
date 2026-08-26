@@ -412,6 +412,8 @@ error-marketplace-open = Mendix Marketplace를 열 수 없습니다: { $error }
 
 # WinBoat 백엔드
 error-guest-offline = WinBoat Guest Server가 오프라인입니다. Windows를 시작한 뒤 다시 시도하세요.
+error-guest-auth-token = WinBoat Guest 인증 토큰이 없거나 안전하지 않습니다. WinBoat를 업데이트하거나 복구한 뒤 다시 시도하세요.
+error-guest-auth-required = WinBoat Guest Server 인증에 실패했습니다. WinBoat를 업데이트하거나 복구한 뒤 다시 시도하세요.
 error-windows-apps-fetch = Windows 앱 목록을 가져오지 못했습니다: { $error }
 error-windows-apps-response = Windows 앱 목록 응답이 올바르지 않습니다: { $error }
 error-windows-apps-parse = Windows 앱 목록을 해석하지 못했습니다: { $error }
