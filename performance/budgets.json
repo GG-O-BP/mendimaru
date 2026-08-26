@@ -15,6 +15,10 @@
       {
         "source": "PR #58 runs 32942547888, 32946504534, and 32950388617: identical bootstrap catalog hooks kept refresh p50 within 785.39-813.42 ms while first-browser p95 ranged from 873.86-1727.80 ms; cached-read p95 ranged from 3.17-59.56 ms",
         "recordedAt": "2026-08-26T09:30:21Z"
+      },
+      {
+        "source": "PR #58 runs 32946504534, 32950388617, and 32953791298: identical Windows bootstrap sources kept candidate warm-start p50 changes to 16.0, 1.9, and 8.6 percent; run 32953791298 failed p95 only because one 984.97 ms Tukey outlier exceeded the 765.82 ms baseline p95",
+        "recordedAt": "2026-08-26T09:55:43Z"
       }
     ]
   },
@@ -243,10 +247,10 @@
               "rationale": "Release WebView2 startup replaces the former 180 second CI override with a 20 second safety rail."
             },
             "warmStartupMs": {
-              "statistic": "p95",
+              "statistic": "p50",
               "absoluteMax": 12000,
               "relativeMaxPercent": 20,
-              "rationale": "Warm release startup excludes Rust compilation and Vite readiness."
+              "rationale": "Warm release startup excludes Rust compilation and Vite readiness. Across three same-host bootstrap comparisons, candidate p50 changes stayed within 16 percent while a single 984.97 ms Tukey outlier produced a 28.62 percent p95 false positive; p95 remains reported and the relative gate uses p50."
             },
             "firstIpcMs": {
               "statistic": "p95",

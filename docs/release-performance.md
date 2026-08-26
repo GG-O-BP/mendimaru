@@ -84,8 +84,11 @@ outlier indices. Outliers are diagnostic only and are never removed from the
 report or the selected gate statistic. Policies may gate p50, p95, or maximum;
 the isolated catalog refresh uses p50 because three same-host runs showed a
 stable 785–813 ms median while one-time browser bootstrap moved seven-sample
-p95 between 874 and 1,728 ms. At least five samples are required by the schema;
-the tracked policy uses seven.
+p95 between 874 and 1,728 ms. Windows warm startup likewise gates p50 after
+three same-host comparisons kept candidate medians within 16 percent while one
+984.97 ms Tukey outlier alone moved p95 by 28.62 percent. Both p95 values remain
+visible in reports. At least five samples are required by the schema; the
+tracked policy uses seven.
 
 A performance failure is not cleared by repeating until a favorable sample is
 found. One rerun is permitted only for an identified infrastructure failure,
