@@ -69,9 +69,18 @@ pub(crate) async fn e2e_bounded_process_cleanup() -> Result<BoundedProcessCleanu
     use tokio::process::Command;
 
     const SCRIPT: &str = r#"
-$child = Start-Process -FilePath $env:MENDIMARU_E2E_CHILD -ArgumentList @("-t", "127.0.0.1") -WindowStyle Hidden -PassThru
-[IO.File]::WriteAllText($env:MENDIMARU_E2E_PID_FILE, "$PID`n$($child.Id)`n", [Text.Encoding]::ASCII)
-while ($true) { Start-Sleep -Milliseconds 100 }
+const { spawn } = require("node:child_process");
+const { writeFileSync } = require("node:fs");
+const child = spawn(process.env.MENDIMARU_E2E_CHILD, ["-t", "127.0.0.1"], {
+  stdio: "ignore",
+  windowsHide: true,
+});
+writeFileSync(
+  process.env.MENDIMARU_E2E_PID_FILE,
+  `${process.pid}\n${child.pid}\n`,
+  { encoding: "ascii" },
+);
+setInterval(() => {}, 100);
 "#;
 
     let root = require_isolated_root()?;
@@ -81,39 +90,43 @@ while ($true) { Start-Sleep -Milliseconds 100 }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(format!("failed to reset the e2e PID fixture: {error}")),
     }
+    let node = std::env::var_os("MENDIMARU_E2E_NODE")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute() && path.is_file())
+        .ok_or_else(|| "MENDIMARU_E2E_NODE must name the running Node executable".to_string())?;
     let system_root = std::env::var_os("SystemRoot")
         .map(PathBuf::from)
         .ok_or_else(|| "SystemRoot is unavailable for the Windows e2e fixture".to_string())?;
-    let powershell = system_root.join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
     let child = system_root.join(r"System32\ping.exe");
-    if !powershell.is_file() || !child.is_file() {
+    if !child.is_file() {
         return Err("the protected Windows e2e process fixtures are unavailable".to_string());
     }
 
-    let mut command = Command::new(powershell);
+    let mut command = Command::new(node);
     command
         .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            SCRIPT,
-        ])
+        .args(["-e", SCRIPT])
         .env("MENDIMARU_E2E_CHILD", child)
         .env("MENDIMARU_E2E_PID_FILE", &pid_file);
     let cancellation = CancellationToken::default();
     let trigger = cancellation.clone();
     let observed_pid_file = pid_file.clone();
     let observe_and_cancel = async move {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
         loop {
-            match tokio::fs::metadata(&observed_pid_file).await {
-                Ok(metadata) if metadata.is_file() && metadata.len() > 0 => {
-                    trigger.cancel();
-                    return Ok::<(), String>(());
+            match tokio::fs::read_to_string(&observed_pid_file).await {
+                Ok(content) => {
+                    let process_ids = content
+                        .lines()
+                        .map(str::parse::<u32>)
+                        .collect::<Result<Vec<_>, _>>();
+                    if process_ids.is_ok_and(|process_ids| {
+                        process_ids.len() == 2 && !process_ids.contains(&0)
+                    }) {
+                        trigger.cancel();
+                        return Ok::<(), String>(());
+                    }
                 }
-                Ok(_) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => {
                     return Err(format!("failed to inspect the e2e PID fixture: {error}"))
@@ -128,7 +141,7 @@ while ($true) { Start-Sleep -Milliseconds 100 }
     let (result, observed) = tokio::join!(
         process::output(
             command,
-            CommandPolicy::new(Duration::from_secs(10), 1024),
+            CommandPolicy::new(Duration::from_secs(9), 1024),
             Some(&cancellation),
             "Windows e2e process cancellation",
         ),

@@ -117,6 +117,7 @@ async function run() {
         cwd: ROOT,
         env: {
           ...process.env,
+          MENDIMARU_E2E_NODE: process.execPath,
           MENDIMARU_E2E_ROOT: isolatedRoot,
           TAURI_WEBDRIVER_PORT: String(port),
           VITE_MENDIMARU_E2E: "1",

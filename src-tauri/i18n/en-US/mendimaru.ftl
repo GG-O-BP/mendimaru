@@ -412,6 +412,8 @@ error-marketplace-open = Could not open Mendix Marketplace: { $error }
 
 # WinBoat backend
 error-guest-offline = WinBoat Guest Server is offline. Start Windows and try again.
+error-guest-auth-token = The WinBoat Guest authentication token is missing or unsafe. Update or repair WinBoat and try again.
+error-guest-auth-required = WinBoat Guest Server authentication failed. Update or repair WinBoat and try again.
 error-windows-apps-fetch = Could not retrieve the Windows app list: { $error }
 error-windows-apps-response = The Windows app-list response is invalid: { $error }
 error-windows-apps-parse = Could not parse the Windows app list: { $error }
