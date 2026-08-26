@@ -105,6 +105,7 @@ refresh-installed = 설치된 버전 새로고침
 installed-loading-title = 설치된 Studio Pro 버전을 확인하고 있습니다
 installed-loading-detail = 현재 Windows 설치 목록을 읽는 중입니다.
 installed-cache-verifying = 마지막으로 확인한 설치 목록을 표시하고 있으며 Windows에서 다시 검증 중입니다.
+installed-cache-stale = Windows에서 현재 상태를 확인하지 못해 마지막으로 검증된 목록을 표시합니다.
 studio-session-count = %count%개 실행 중
 studio-session-no-project = 감지된 프로젝트 없음
 studio-session-started = 시작 %date%

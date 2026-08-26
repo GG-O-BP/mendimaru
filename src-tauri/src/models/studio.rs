@@ -9,10 +9,6 @@ pub struct WinApp {
     #[serde(default)]
     pub path: String,
     #[serde(default)]
-    pub args: String,
-    #[serde(default)]
-    pub icon: String,
-    #[serde(default)]
     pub source: String,
 }
 

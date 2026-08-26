@@ -40,6 +40,10 @@ export function StudioPage({
     [installed.versions.length],
     localization,
   );
+  const visibleInstalledCount =
+    installed.loaded || installed.versions.length > 0
+      ? installedCountLabel
+      : "\u2014";
 
   return (
     <div className="studio-page" data-testid="studio-page">
@@ -92,7 +96,7 @@ export function StudioPage({
         localization={localization}
         online={online}
         model={installed}
-        countLabel={installedCountLabel}
+        countLabel={visibleInstalledCount}
       />
       <AvailableVersionsSection
         t={t}

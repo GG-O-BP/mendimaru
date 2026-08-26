@@ -368,6 +368,16 @@ describe("native Windows application E2E", () => {
 
     expect(await screen.findByText("installed-loading-title")).toBeVisible();
     expect(screen.queryByText("empty-installed-title")).toBeNull();
+    expect(screen.getByTestId("refresh-installed")).toBeDisabled();
+    expect(
+      screen.getByTestId("refresh-installed").querySelector(".spin"),
+    ).not.toBeNull();
+    const installedHeading = screen.getByRole("heading", {
+      name: "installed-title",
+    });
+    expect(
+      within(installedHeading.parentElement!).getByText("\u2014"),
+    ).toBeVisible();
     expect(
       screen.getByRole("button", { name: "action-install" }),
     ).toBeDisabled();
@@ -381,6 +391,22 @@ describe("native Windows application E2E", () => {
         screen.getByRole("button", { name: "action-install" }),
       ).toBeEnabled(),
     );
+    expect(screen.getByTestId("refresh-installed")).toBeEnabled();
+  });
+
+  it("shows zero and the empty state only after an authoritative empty result", async () => {
+    mocks.getInstalledVersions.mockResolvedValueOnce([]);
+
+    await renderReadyApp();
+
+    expect(await screen.findByText("empty-installed-title")).toBeVisible();
+    const installedHeading = screen.getByRole("heading", {
+      name: "installed-title",
+    });
+    expect(
+      within(installedHeading.parentElement!).getByText("0"),
+    ).toBeVisible();
+    expect(screen.queryByText("installed-loading-title")).toBeNull();
   });
 
   it("keeps the last known list, exposes detection failure, and supports retry", async () => {
@@ -396,6 +422,8 @@ describe("native Windows application E2E", () => {
 
     expect(await screen.findByText("guest apps unavailable")).toBeVisible();
     expect(screen.getByText("11.12.2")).toBeVisible();
+    expect(screen.getByText("installed-cache-stale")).toBeVisible();
+    expect(screen.queryByText("installed-cache-verifying")).toBeNull();
     expect(
       screen.getByRole("button", { name: "action-install" }),
     ).toBeDisabled();
@@ -408,6 +436,7 @@ describe("native Windows application E2E", () => {
       ).toBeEnabled(),
     );
     expect(screen.queryByText("guest apps unavailable")).toBeNull();
+    expect(screen.queryByText("installed-cache-stale")).toBeNull();
   });
 
   it("renders native capabilities without any WinBoat route or control", async () => {

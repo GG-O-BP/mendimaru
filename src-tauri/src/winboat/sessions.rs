@@ -22,7 +22,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const SESSION_OPERATION_TIMEOUT_SECONDS: u64 = 90;
 const SESSION_CONTROL_TIMEOUT_SECONDS: u64 = 45;
@@ -67,8 +67,10 @@ struct SessionIdentity {
 pub(crate) async fn list(
     config: &AppConfig,
 ) -> Result<Vec<StudioSessionStatus>, WindowsOperationFailure> {
+    let started_at = Instant::now();
     let registered = registered_client_sessions();
     if !registered.is_empty() {
+        trace_session_query(started_at.elapsed(), registered.len(), true);
         return Ok(registered);
     }
     ensure_guest_online(config).await?;
@@ -81,7 +83,19 @@ pub(crate) async fn list(
         false,
     )
     .await?;
-    normalize_sessions(&studios, outcome.outcome.report.sessions)
+    let sessions = normalize_sessions(&studios, outcome.outcome.report.sessions)?;
+    trace_session_query(started_at.elapsed(), sessions.len(), false);
+    Ok(sessions)
+}
+
+fn trace_session_query(duration: Duration, session_count: usize, registered: bool) {
+    if !crate::studio_trace::enabled() {
+        return;
+    }
+    eprintln!(
+        "[studio-overview] session-query duration_ms={} session_count={session_count} registered={registered}",
+        duration.as_millis()
+    );
 }
 
 pub(crate) async fn reconnect(

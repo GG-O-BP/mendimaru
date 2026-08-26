@@ -105,6 +105,7 @@ refresh-installed = Refresh installed versions
 installed-loading-title = Checking installed Studio Pro versions
 installed-loading-detail = Reading the current Windows installation list.
 installed-cache-verifying = Showing the last known installation list while Windows verifies it.
+installed-cache-stale = Showing the last verified installation list because Windows could not be checked.
 studio-session-count = %count% running
 studio-session-no-project = No project detected
 studio-session-started = Started %date%

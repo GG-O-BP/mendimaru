@@ -164,6 +164,8 @@ npm install
 npm run tauri dev
 ```
 
+`npm run tauri dev` 실행 시 `MENDIMARU_STUDIO_TRACE=1`을 설정하면 Studio overview 구간별 시간과 요청 병합 진단을 확인할 수 있습니다. trace에는 시간, payload 크기, 항목 수만 포함되며 설정 경로나 Guest 원문 payload는 기록하지 않습니다.
+
 호스트에 독립적인 검증과 번들 생성:
 
 ```bash

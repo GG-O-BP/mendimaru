@@ -101,6 +101,7 @@
   "installed-loading-title": true,
   "installed-loading-detail": true,
   "installed-cache-verifying": true,
+  "installed-cache-stale": true,
   "studio-session-count": true,
   "studio-session-no-project": true,
   "studio-session-started": true,

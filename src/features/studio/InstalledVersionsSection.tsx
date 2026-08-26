@@ -1,5 +1,6 @@
 import {
   AppWindow,
+  CircleAlert,
   CircleStop,
   Cable,
   LoaderCircle,
@@ -92,8 +93,16 @@ export function InstalledVersionsSection({
         )}
         {model.stale && model.versions.length > 0 && (
           <div className="installed-stale" role="status">
-            <LoaderCircle size={15} className={model.loading ? "spin" : ""} />
-            {t("installed-cache-verifying")}
+            {model.loading ? (
+              <LoaderCircle size={15} className="spin" />
+            ) : (
+              <CircleAlert size={15} />
+            )}
+            {t(
+              model.loading
+                ? "installed-cache-verifying"
+                : "installed-cache-stale",
+            )}
           </div>
         )}
         {model.versions.map((version) => {
