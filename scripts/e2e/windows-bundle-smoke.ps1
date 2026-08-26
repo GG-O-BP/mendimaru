@@ -131,7 +131,7 @@ try {
         -ApplicationData $applicationData `
         -WebViewData $webViewData `
         -ClearWebViewData
-    Stop-BundleApplication -Process $warmup.Process
+    Stop-BundleApplication -Process $warmup.Process -WebViewData $webViewData
 
     for ($sample = 0; $sample -lt $performanceSampleCount; $sample += 1) {
         $cold = Start-BundleApplication `
@@ -140,14 +140,14 @@ try {
             -WebViewData $webViewData `
             -ClearWebViewData
         $report.measurements.coldStartupMs += [long]$cold.ElapsedMilliseconds
-        Stop-BundleApplication -Process $cold.Process
+        Stop-BundleApplication -Process $cold.Process -WebViewData $webViewData
 
         $warm = Start-BundleApplication `
             -Application $application `
             -ApplicationData $applicationData `
             -WebViewData $webViewData
         $report.measurements.warmStartupMs += [long]$warm.ElapsedMilliseconds
-        Stop-BundleApplication -Process $warm.Process
+        Stop-BundleApplication -Process $warm.Process -WebViewData $webViewData
     }
 
     $idleLaunch = Start-BundleApplication `
@@ -226,7 +226,7 @@ try {
         }
     }
 
-    Stop-BundleApplication -Process $applicationProcess
+    Stop-BundleApplication -Process $applicationProcess -WebViewData $webViewData
     $applicationProcess = $null
 
     $uninstallStarted = [Diagnostics.Stopwatch]::StartNew()
@@ -279,7 +279,9 @@ catch {
 finally {
     if ($null -ne $applicationProcess -and -not $applicationProcess.HasExited) {
         try {
-            Stop-BundleApplication -Process $applicationProcess
+            Stop-BundleApplication `
+                -Process $applicationProcess `
+                -WebViewData $webViewData
         }
         catch {
             Stop-Process -Id $applicationProcess.Id -Force -ErrorAction SilentlyContinue
@@ -320,10 +322,7 @@ function Start-BundleApplication {
         }
     }
     if ($ClearWebViewData) {
-        Remove-Item -LiteralPath $canonicalData -Recurse -Force -ErrorAction SilentlyContinue
-        if (Test-Path -LiteralPath $canonicalData) {
-            throw "Cold-start WebView data could not be cleared: $canonicalData"
-        }
+        Clear-BundleWebViewData -WebViewData $canonicalData
     }
     New-Item -ItemType Directory -Path $canonicalData -Force | Out-Null
     $roamingData = Join-Path $canonicalApplicationData 'Roaming'
@@ -364,7 +363,10 @@ function Start-BundleApplication {
 }
 
 function Stop-BundleApplication {
-    param([Parameter(Mandatory = $true)][Diagnostics.Process]$Process)
+    param(
+        [Parameter(Mandatory = $true)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)][string]$WebViewData
+    )
     if (-not $Process.HasExited) {
         $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
         $exitCode = Invoke-ExactProcess `
@@ -376,6 +378,73 @@ function Stop-BundleApplication {
         }
     }
     $Process.WaitForExit(10000) | Out-Null
+    Stop-BundleWebViewDataProcesses -WebViewData $WebViewData
+}
+
+function Clear-BundleWebViewData {
+    param([Parameter(Mandatory = $true)][string]$WebViewData)
+    $canonicalData = [IO.Path]::GetFullPath($WebViewData)
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
+    do {
+        Stop-BundleWebViewDataProcesses -WebViewData $canonicalData
+        Remove-Item `
+            -LiteralPath $canonicalData `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
+        if (-not (Test-Path -LiteralPath $canonicalData)) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTimeOffset]::UtcNow -lt $deadline)
+    throw "Cold-start WebView data could not be cleared: $canonicalData"
+}
+
+function Stop-BundleWebViewDataProcesses {
+    param([Parameter(Mandatory = $true)][string]$WebViewData)
+    $canonicalData = [IO.Path]::GetFullPath($WebViewData)
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(10)
+    $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+    do {
+        $matches = @(
+            Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" |
+                Where-Object {
+                    Test-WebViewDataProcess `
+                        -Record $_ `
+                        -WebViewData $canonicalData
+                }
+        )
+        if ($matches.Count -eq 0) {
+            return
+        }
+        foreach ($record in $matches) {
+            Invoke-ExactProcess `
+                -FilePath $taskkill `
+                -Arguments @('/PID', [string]$record.ProcessId, '/T', '/F') |
+                Out-Null
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTimeOffset]::UtcNow -lt $deadline)
+    $processIds = $matches.ProcessId -join ', '
+    throw "WebView2 processes retained the guarded data directory: $processIds"
+}
+
+function Test-WebViewDataProcess {
+    param(
+        [Parameter(Mandatory = $true)]$Record,
+        [Parameter(Mandatory = $true)][string]$WebViewData
+    )
+    if (
+        [string]$Record.Name -ine 'msedgewebview2.exe' -or
+        [string]::IsNullOrWhiteSpace([string]$Record.CommandLine)
+    ) {
+        return $false
+    }
+    $canonicalData = [IO.Path]::GetFullPath($WebViewData)
+    return $Record.CommandLine.IndexOf(
+        $canonicalData,
+        [StringComparison]::OrdinalIgnoreCase
+    ) -ge 0
 }
 
 function Get-WebViewVersion {
