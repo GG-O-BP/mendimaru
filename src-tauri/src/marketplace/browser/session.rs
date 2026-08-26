@@ -315,7 +315,7 @@ fn direct_child_processes() -> Vec<DirectChildProcess> {
         .collect()
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 fn proc_stat_identity(stat: &str) -> Option<(String, char, i32)> {
     let opening_parenthesis = stat.find('(')?;
     let closing_parenthesis = stat.rfind(')')?;
@@ -328,7 +328,7 @@ fn proc_stat_identity(stat: &str) -> Option<(String, char, i32)> {
     Some((name, state, parent_pid))
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 fn browser_helper_name(name: &str) -> bool {
     name == "cat" || name.starts_with("chrome") || name.starts_with("chromium")
 }
