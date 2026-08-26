@@ -10,13 +10,14 @@ use std::process::Command as StdCommand;
 use tokio::process::Command as TokioCommand;
 
 pub(crate) use compose::{
-    apply_shared_mount, plan_shared_mount, restore_file, restore_file_if_revision, snapshot_file,
-    verify_plan_revision, winboat_compose_service_name, AppliedSharedMount, ComposeError,
-    ComposeErrorKind, FileSnapshot,
+    apply_shared_mount, plan_shared_mount, restore_file_if_revision, verify_plan_revision,
+    winboat_compose_service_name, AppliedSharedMount, ComposeError, ComposeErrorKind,
 };
 pub use compose::{compose_file_is_valid, compose_shared_directory};
 #[cfg(target_os = "linux")]
-pub(crate) use compose::{ensure_runtime_port_mapping, runtime_port_mapping};
+pub(crate) use compose::{
+    ensure_runtime_port_mapping, restore_file, runtime_port_mapping, snapshot_file, FileSnapshot,
+};
 pub use store::{load_config, persist_config};
 pub(crate) use store::{load_config_from, restore_config, snapshot_config, ConfigSnapshot};
 pub(crate) use validation::normalize_and_validate;

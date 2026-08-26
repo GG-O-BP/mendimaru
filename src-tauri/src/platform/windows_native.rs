@@ -1211,11 +1211,13 @@ mod tests {
         let mut progress = Vec::new();
         let exit_code = wait_for_installer(
             async {
-                tokio::time::sleep(Duration::from_millis(25)).await;
+                // Keep several heartbeats between the Windows timer quanta so this
+                // assertion measures recurrence instead of scheduler resolution.
+                tokio::time::sleep(Duration::from_millis(100)).await;
                 Ok(1641)
             },
-            Duration::from_millis(100),
-            Duration::from_millis(5),
+            Duration::from_millis(500),
+            Duration::from_millis(10),
             &mut |update| progress.push(update),
         )
         .await
