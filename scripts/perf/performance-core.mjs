@@ -473,6 +473,7 @@ export function evaluatePerformance(candidate, baseline, policy) {
     const baselineValue = baselineSummary[statistic];
     const relativeChangePercent = relativeChange(actual, baselineValue);
     const relativeNoiseFloor =
+      budget.relativeNoiseFloor ??
       suitePolicy.relativeNoiseFloor[actualSummary.unit];
     const relativeLimit = rounded(
       baselineValue +

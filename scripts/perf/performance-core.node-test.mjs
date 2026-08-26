@@ -274,6 +274,29 @@ test("relative noise floor permits a bounded delta from a zero baseline", () => 
   assert.equal(comparison.relativeLimit, 2);
 });
 
+test("a metric-specific noise floor overrides its suite unit floor", () => {
+  const testPolicy = structuredClone(policy);
+  const suite = testPolicy.platforms.windows.suites["installed-bundle"];
+  suite.relativeNoiseFloor = { ms: 0, bytes: 0, percent: 0, count: 0 };
+  for (const budget of Object.values(suite.metrics)) {
+    budget.absoluteMax = 1000;
+    budget.relativeMaxPercent = 30;
+  }
+  suite.metrics.coldStartupMs.relativeMaxPercent = 20;
+  suite.metrics.coldStartupMs.relativeNoiseFloor = 30;
+
+  const baseline = makeReport({ commit: baselineCommit, sampleValue: 100 });
+  const candidate = makeReport({ commit: candidateCommit, sampleValue: 125 });
+  const gate = evaluatePerformance(candidate, baseline, testPolicy);
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === "coldStartupMs",
+  );
+
+  assert.equal(gate.status, "passed");
+  assert.equal(comparison.relativeNoiseFloor, 30);
+  assert.equal(comparison.relativeLimit, 130);
+});
+
 test("child, memory, and sustained CPU leak fixtures fail their budgets", () => {
   const baseline = makeReport({
     commit: baselineCommit,

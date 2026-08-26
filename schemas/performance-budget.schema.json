@@ -117,6 +117,10 @@
           "minimum": 10,
           "maximum": 30
         },
+        "relativeNoiseFloor": {
+          "type": "number",
+          "minimum": 0
+        },
         "rationale": {
           "type": "string",
           "minLength": 30,

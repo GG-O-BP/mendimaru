@@ -80,8 +80,12 @@ leak budget.
 
 The report retains every non-negative finite raw sample. It records nearest-rank
 p50 and p95, minimum, maximum, median absolute deviation, IQR, and Tukey-IQR
-outlier indices. Outliers are diagnostic only and are never removed from a gate.
-At least five samples are required by the schema; the tracked policy uses seven.
+outlier indices. Outliers are diagnostic only and are never removed from the
+report or the selected gate statistic. Policies may gate p50, p95, or maximum;
+the isolated catalog refresh uses p50 because three same-host runs showed a
+stable 785–813 ms median while one-time browser bootstrap moved seven-sample
+p95 between 874 and 1,728 ms. At least five samples are required by the schema;
+the tracked policy uses seven.
 
 A performance failure is not cleared by repeating until a favorable sample is
 found. One rerun is permitted only for an identified infrastructure failure,
@@ -111,10 +115,13 @@ limit in [`performance/budgets.json`](../performance/budgets.json). The initial
 relative limit is the baseline plus the larger of 20 percent or the tracked
 unit noise floor. Linux floors are 50 ms, 32 MiB, one percentage point, and one
 process; Windows floors are 75 ms, 64 MiB, one percentage point, and two
-processes. This keeps tiny or zero measurements from turning harmless scheduler
-noise into an infinite percentage while 20–30 percent regressions above that
-floor still fail. Release-tag MSI and NSIS verification repeats the absolute
-ceiling check; the same-host relative comparison has already run before merge.
+processes. A reviewed metric may declare a scoped unit-specific override; the
+Linux cached-catalog p95 uses 75 ms after three same-host comparisons observed a
+3–60 ms range. This keeps tiny or zero measurements from turning harmless
+scheduler noise into an infinite percentage while 20–30 percent regressions
+above that floor still fail. Release-tag MSI and NSIS verification repeats the
+absolute ceiling check; the same-host relative comparison has already run
+before merge.
 
 Budget values cannot be changed with environment variables. A budget change
 must update its rationale and dated evidence, reference the motivating issue or
