@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StudioSessionStatus, StudioVersion } from "../../domain/types";
 import { useInstalledVersions } from "./useInstalledVersions";
@@ -57,12 +58,9 @@ describe("useInstalledVersions", () => {
     api.getStudioSessions.mockResolvedValue([]);
   });
 
-  it("ignores a slower obsolete detection response", async () => {
+  it("coalesces concurrent installed-version refreshes", async () => {
     const initial = deferred<StudioVersion[]>();
-    const latest = deferred<StudioVersion[]>();
-    api.getInstalledVersions
-      .mockImplementationOnce(() => initial.promise)
-      .mockImplementationOnce(() => latest.promise);
+    api.getInstalledVersions.mockImplementationOnce(() => initial.promise);
     const dependencies = {
       t: (key: string) => key,
       installedVersionsSourceKey: "environment-a",
@@ -77,30 +75,42 @@ describe("useInstalledVersions", () => {
     await waitFor(() =>
       expect(api.getInstalledVersions).toHaveBeenCalledTimes(1),
     );
-    let latestRefresh!: Promise<StudioVersion[] | undefined>;
+    let sharedRefresh!: Promise<StudioVersion[] | undefined>;
     act(() => {
-      latestRefresh = result.current.refreshInstalled();
+      sharedRefresh = result.current.refreshInstalled();
     });
-    await waitFor(() =>
-      expect(api.getInstalledVersions).toHaveBeenCalledTimes(2),
-    );
+    expect(api.getInstalledVersions).toHaveBeenCalledTimes(1);
 
-    latest.resolve([version("11.12.3")]);
+    initial.resolve([version("11.12.3")]);
     await act(async () => {
-      await latestRefresh;
+      await sharedRefresh;
     });
     expect(
       result.current.installedVersions.map(({ version }) => version),
     ).toEqual(["11.12.3"]);
     expect(result.current.installedLoaded).toBe(true);
+  });
 
-    initial.resolve([version("10.24.24")]);
-    await act(async () => {
-      await initial.promise;
+  it("starts each initial IPC once during StrictMode effect replay", async () => {
+    api.getInstalledVersions.mockResolvedValue([version("11.12.3")]);
+    const dependencies = {
+      t: (key: string) => key,
+      installedVersionsSourceKey: "environment-strict",
+      notify: vi.fn(),
+      requestConfirmation: vi.fn(),
+      runAction: async (_key: string, action: () => Promise<void>) => action(),
+      hasBusyPrefix: () => false,
+      onWarning: vi.fn(),
+    };
+    const { result } = renderHook(() => useInstalledVersions(dependencies), {
+      wrapper: StrictMode,
     });
-    expect(
-      result.current.installedVersions.map(({ version }) => version),
-    ).toEqual(["11.12.3"]);
+
+    await waitFor(() => expect(result.current.installedLoaded).toBe(true));
+    await waitFor(() => expect(result.current.sessionsLoading).toBe(false));
+    expect(api.getInstalledVersionsCache).toHaveBeenCalledTimes(1);
+    expect(api.getInstalledVersions).toHaveBeenCalledTimes(1);
+    expect(api.getStudioSessions).toHaveBeenCalledTimes(1);
   });
 
   it("keeps cached versions visible but untrusted until live detection succeeds", async () => {
@@ -160,6 +170,46 @@ describe("useInstalledVersions", () => {
     await act(async () => {
       await liveVersions.promise;
     });
+  });
+
+  it("refreshes an existing overview without hiding versions or duplicating sessions", async () => {
+    api.getInstalledVersions.mockResolvedValue([version("11.12.3")]);
+    const dependencies = {
+      t: (key: string) => key,
+      installedVersionsSourceKey: "environment-overview",
+      notify: vi.fn(),
+      requestConfirmation: vi.fn(),
+      runAction: async (_key: string, action: () => Promise<void>) => action(),
+      hasBusyPrefix: () => false,
+      onWarning: vi.fn(),
+    };
+    const { result } = renderHook(() => useInstalledVersions(dependencies));
+    await waitFor(() => expect(result.current.installedLoaded).toBe(true));
+    await waitFor(() => expect(result.current.sessionsLoading).toBe(false));
+
+    api.getInstalledVersions.mockClear();
+    api.getStudioSessions.mockClear();
+    const liveVersions = deferred<StudioVersion[]>();
+    const liveSessions = deferred<StudioSessionStatus[]>();
+    api.getInstalledVersions.mockImplementationOnce(() => liveVersions.promise);
+    api.getStudioSessions.mockImplementationOnce(() => liveSessions.promise);
+
+    let overview!: Promise<void>;
+    act(() => {
+      overview = result.current.refreshOverview();
+    });
+    expect(api.getInstalledVersions).toHaveBeenCalledTimes(1);
+    expect(api.getStudioSessions).toHaveBeenCalledTimes(1);
+    expect(result.current.installedVersions[0]?.version).toBe("11.12.3");
+
+    liveVersions.resolve([version("11.12.3")]);
+    liveSessions.resolve([]);
+    await act(async () => {
+      await overview;
+    });
+    expect(api.getInstalledVersions).toHaveBeenCalledTimes(1);
+    expect(api.getStudioSessions).toHaveBeenCalledTimes(1);
+    expect(result.current.installedStale).toBe(false);
   });
 
   it("waits for cold-start version detection before inspecting sessions", async () => {
@@ -308,6 +358,7 @@ describe("useInstalledVersions", () => {
     expect(result.current.installedVersions[0]?.version).toBe("11.6.9");
     expect(result.current.installedLoading).toBe(false);
     expect(result.current.installedLoaded).toBe(false);
+    expect(result.current.sessionsLoading).toBe(false);
   });
 
   it("automatically removes a session after Studio Pro exits", async () => {

@@ -9,6 +9,7 @@ import { useProjects } from "../features/projects/useProjects";
 import { useOperations } from "../features/operations/useOperations";
 import type { EnvironmentController } from "../features/settings/useEnvironment";
 import { useStudio } from "../features/studio/useStudio";
+import { traceStudioOverview } from "../features/studio/overviewTrace";
 import type { Translate } from "../i18n";
 import { AppShell } from "./AppShell";
 import { ProjectsView } from "./ProjectsView";
@@ -69,7 +70,7 @@ export function Workspace({
     onWarning,
   });
   const { refresh: refreshProjects, setSearch: setProjectSearch } = projects;
-  const { refreshInstalled, resetFilters } = studio;
+  const { refreshOverview, resetFilters } = studio;
   const {
     setupCompletion,
     updateLanguagePreference,
@@ -78,14 +79,18 @@ export function Workspace({
   } = environment;
 
   useEffect(() => {
+    traceStudioOverview("workspace-ready");
+  }, []);
+
+  useEffect(() => {
     const completion = setupCompletion;
     if (!completion || completion.sequence === processedSetup.current) return;
     processedSetup.current = completion.sequence;
     void Promise.all([
       refreshProjects(),
-      completion.containerRecreated ? Promise.resolve() : refreshInstalled(),
+      completion.containerRecreated ? Promise.resolve() : refreshOverview(),
     ]);
-  }, [refreshInstalled, refreshProjects, setupCompletion]);
+  }, [refreshOverview, refreshProjects, setupCompletion]);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {

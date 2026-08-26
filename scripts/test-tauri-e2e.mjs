@@ -168,6 +168,20 @@ try {
     1_500,
     "the cached installed list was not rendered safely before live detection",
   );
+  const cacheRenderMs = await execute(`
+    const workspace = performance
+      .getEntriesByName("mendimaru:studio-overview:workspace-ready")
+      .at(-1);
+    const cache = performance
+      .getEntriesByName("mendimaru:studio-overview:cache-render")
+      .at(-1);
+    return workspace && cache ? Math.max(0, cache.startTime - workspace.startTime) : null;
+  `);
+  report.measurements.installedCacheRenderMs = rounded(cacheRenderMs);
+  recordAssertion(
+    Number.isFinite(cacheRenderMs) && cacheRenderMs <= 500,
+    `installed cache render ${rounded(cacheRenderMs)} ms <= 500 ms`,
+  );
 
   assert.match(
     await command("GET", "/title"),
@@ -324,6 +338,10 @@ try {
       `),
     20_000,
     "the fixture-backed native commands did not populate the online Studio view",
+  );
+  recordAssertion(
+    fixture.appRequestCount() === 1,
+    "the initial overview performs exactly one expensive Guest app discovery",
   );
 
   const routeMotion = await execute(`
@@ -530,6 +548,10 @@ try {
       `),
     5_000,
     "the installed-version busy animation did not stop after refresh",
+  );
+  recordAssertion(
+    fixture.appRequestCount() === 2,
+    "the manual overview refresh performs exactly one additional Guest app discovery",
   );
 
   for (const [name, shortcut, heading, expectedText] of [
@@ -890,6 +912,7 @@ async function createFixture(root) {
   });
   await fs.symlink(legacySentinel, legacyPartial);
 
+  let appRequestCount = 0;
   const api = http.createServer(async (request, response) => {
     response.setHeader("content-type", "application/json");
     if (request.url === "/health") {
@@ -897,6 +920,7 @@ async function createFixture(root) {
       return;
     }
     if (request.url === "/apps") {
+      appRequestCount += 1;
       await delay(2_000);
       response.end(
         JSON.stringify([
@@ -1134,6 +1158,7 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
   );
 
   return {
+    appRequestCount: () => appRequestCount,
     bin,
     chrome,
     compose,

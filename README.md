@@ -169,6 +169,8 @@ npm install
 npm run tauri dev
 ```
 
+Set `MENDIMARU_STUDIO_TRACE=1` while running `npm run tauri dev` to emit bounded Studio overview timing and coalescing diagnostics. The trace contains durations, payload sizes, and item counts, but no configured paths or raw Guest payloads.
+
 To run the host-portable validation suite and build an application bundle:
 
 ```bash

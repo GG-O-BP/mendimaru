@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorText } from "../../api/errors";
 import { tauriApi } from "../../api/tauri";
-import type { StudioSessionStatus, StudioVersion } from "../../domain/types";
+import type {
+  InstalledVersionsCache,
+  StudioSessionStatus,
+  StudioVersion,
+} from "../../domain/types";
 import type { InstalledVersionsDependencies } from "./dependencies";
+import { traceStudioOverview } from "./overviewTrace";
 
 const ACTIVE_SESSION_REFRESH_INTERVAL_MS = 1_000;
+
+interface SourceRequest<T> {
+  sourceKey: string;
+  promise: Promise<T>;
+}
 
 function sameStudioPaths(left: StudioVersion[], right: StudioVersion[]) {
   if (left.length !== right.length) return false;
@@ -53,117 +63,234 @@ export function useInstalledVersions({
   >(null);
   const installedRequest = useRef(0);
   const sessionRequest = useRef(0);
-  const sessionRefreshSourceInFlight = useRef<string | null>(null);
+  const cacheRequestInFlight = useRef<
+    SourceRequest<InstalledVersionsCache> | undefined
+  >(undefined);
+  const installedRefreshInFlight = useRef<
+    SourceRequest<StudioVersion[] | undefined> | undefined
+  >(undefined);
+  const sessionRefreshInFlight = useRef<
+    SourceRequest<StudioSessionStatus[] | undefined> | undefined
+  >(undefined);
+  const overviewRefreshInFlight = useRef<SourceRequest<void> | undefined>(
+    undefined,
+  );
+  const installedVersionsRef = useRef(installedVersions);
+  const displayedInstalledSourceRef = useRef(displayedInstalledSource);
   const launchLock = useRef(false);
 
+  useEffect(() => {
+    installedVersionsRef.current = installedVersions;
+    displayedInstalledSourceRef.current = displayedInstalledSource;
+  }, [displayedInstalledSource, installedVersions]);
+
+  const loadInstalledCache = useCallback(() => {
+    const current = cacheRequestInFlight.current;
+    if (current?.sourceKey === installedVersionsSourceKey) {
+      return current.promise;
+    }
+    traceStudioOverview("cache-request-start");
+    const startedAt = performance.now();
+    const request: SourceRequest<InstalledVersionsCache> = {
+      sourceKey: installedVersionsSourceKey,
+      promise: tauriApi.getInstalledVersionsCache().finally(() => {
+        traceStudioOverview("cache-request-end", {
+          durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+        });
+      }),
+    };
+    cacheRequestInFlight.current = request;
+    return request.promise;
+  }, [installedVersionsSourceKey]);
+
   const refreshSessions = useCallback(
-    async (silent = false) => {
-      if (sessionRefreshSourceInFlight.current === installedVersionsSourceKey) {
-        return;
+    (silent = false) => {
+      const current = sessionRefreshInFlight.current;
+      if (current?.sourceKey === installedVersionsSourceKey) {
+        return current.promise;
       }
-      sessionRefreshSourceInFlight.current = installedVersionsSourceKey;
       const request = ++sessionRequest.current;
       setSessionsLoading(true);
-      try {
-        const next = await tauriApi.getStudioSessions();
-        if (request === sessionRequest.current) {
-          setDisplayedSessionsSource(installedVersionsSourceKey);
-          setSessions(next);
+      traceStudioOverview("session-request-start");
+      const startedAt = performance.now();
+      const promise = (async () => {
+        try {
+          const next = await tauriApi.getStudioSessions();
+          if (request === sessionRequest.current) {
+            setDisplayedSessionsSource(installedVersionsSourceKey);
+            setSessions(next);
+          }
+          traceStudioOverview("session-request-end", {
+            durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+            sessionCount: next.length,
+          });
+          return request === sessionRequest.current ? next : undefined;
+        } catch (error) {
+          if (request === sessionRequest.current) {
+            setDisplayedSessionsSource(installedVersionsSourceKey);
+            setSessions([]);
+          }
+          traceStudioOverview("session-request-error", {
+            durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+          });
+          if (!silent) onWarning(errorText(error, t));
+          return undefined;
+        } finally {
+          if (request === sessionRequest.current) setSessionsLoading(false);
         }
-      } catch (error) {
-        if (request === sessionRequest.current) {
-          setDisplayedSessionsSource(installedVersionsSourceKey);
-          setSessions([]);
+      })();
+      const inFlight = {
+        sourceKey: installedVersionsSourceKey,
+        promise,
+      };
+      sessionRefreshInFlight.current = inFlight;
+      void promise.finally(() => {
+        if (sessionRefreshInFlight.current === inFlight) {
+          sessionRefreshInFlight.current = undefined;
         }
-        if (!silent) onWarning(errorText(error, t));
-      } finally {
-        if (request === sessionRequest.current) setSessionsLoading(false);
-        if (
-          sessionRefreshSourceInFlight.current === installedVersionsSourceKey
-        ) {
-          sessionRefreshSourceInFlight.current = null;
-        }
-      }
+      });
+      return promise;
     },
     [installedVersionsSourceKey, onWarning, t],
   );
 
   const refreshInstalled = useCallback(
-    async (silent = false) => {
+    (silent = false) => {
+      const current = installedRefreshInFlight.current;
+      if (current?.sourceKey === installedVersionsSourceKey) {
+        return current.promise;
+      }
       const request = ++installedRequest.current;
       setInstalledLoading(true);
       setInstalledLoaded(false);
       setInstalledStale(true);
       setInstalledError(null);
-      let next: StudioVersion[] | undefined;
-      try {
-        next = await tauriApi.getInstalledVersions();
-        if (request === installedRequest.current) {
-          setDisplayedInstalledSource(installedVersionsSourceKey);
-          setVerifiedInstalledSource(installedVersionsSourceKey);
-          setInstalledErrorSource(null);
-          setInstalledVersions(next);
-          setInstalledLoaded(true);
-          setInstalledStale(false);
+      traceStudioOverview("installed-request-start");
+      const startedAt = performance.now();
+      const promise = (async () => {
+        let next: StudioVersion[] | undefined;
+        try {
+          next = await tauriApi.getInstalledVersions();
+          if (request === installedRequest.current) {
+            setDisplayedInstalledSource(installedVersionsSourceKey);
+            setVerifiedInstalledSource(installedVersionsSourceKey);
+            setInstalledErrorSource(null);
+            setInstalledVersions(next);
+            setInstalledLoaded(true);
+            setInstalledStale(false);
+          }
+          traceStudioOverview("installed-request-end", {
+            durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+            versionCount: next.length,
+          });
+        } catch (error) {
+          if (request === installedRequest.current) {
+            const message = errorText(error, t);
+            setInstalledErrorSource(installedVersionsSourceKey);
+            setInstalledError(message);
+            if (!silent) onWarning(message);
+          }
+          traceStudioOverview("installed-request-error", {
+            durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
+          });
+        } finally {
+          if (request === installedRequest.current) setInstalledLoading(false);
         }
-      } catch (error) {
-        if (request === installedRequest.current) {
-          const message = errorText(error, t);
-          setInstalledErrorSource(installedVersionsSourceKey);
-          setInstalledError(message);
-          if (!silent) onWarning(message);
+        return request === installedRequest.current ? next : undefined;
+      })();
+      const inFlight = {
+        sourceKey: installedVersionsSourceKey,
+        promise,
+      };
+      installedRefreshInFlight.current = inFlight;
+      void promise.finally(() => {
+        if (installedRefreshInFlight.current === inFlight) {
+          installedRefreshInFlight.current = undefined;
         }
-      } finally {
-        if (request === installedRequest.current) setInstalledLoading(false);
-      }
-      return request === installedRequest.current ? next : undefined;
+      });
+      return promise;
     },
     [installedVersionsSourceKey, onWarning, t],
   );
+
+  const refreshOverview = useCallback(
+    (silent = false, baseline?: StudioVersion[]) => {
+      const current = overviewRefreshInFlight.current;
+      if (current?.sourceKey === installedVersionsSourceKey) {
+        return current.promise;
+      }
+      const knownVersions =
+        baseline ??
+        (displayedInstalledSourceRef.current === installedVersionsSourceKey
+          ? installedVersionsRef.current
+          : []);
+      const promise = (async () => {
+        const installed = refreshInstalled(silent);
+        const initialSessions =
+          knownVersions.length > 0 ? refreshSessions(silent) : undefined;
+        const next = await installed;
+        if (next === undefined) {
+          await initialSessions;
+          return;
+        }
+        if (!initialSessions) {
+          await refreshSessions(silent);
+        } else {
+          await initialSessions;
+          if (!sameStudioPaths(knownVersions, next)) {
+            await refreshSessions(silent);
+          }
+        }
+        traceStudioOverview("overview-ready", {
+          versionCount: next.length,
+        });
+      })();
+      const inFlight = {
+        sourceKey: installedVersionsSourceKey,
+        promise,
+      };
+      overviewRefreshInFlight.current = inFlight;
+      void promise.finally(() => {
+        if (overviewRefreshInFlight.current === inFlight) {
+          overviewRefreshInFlight.current = undefined;
+        }
+      });
+      return promise;
+    },
+    [installedVersionsSourceKey, refreshInstalled, refreshSessions],
+  );
+  const refreshOverviewRef = useRef(refreshOverview);
+  useEffect(() => {
+    refreshOverviewRef.current = refreshOverview;
+  }, [refreshOverview]);
 
   useEffect(() => {
     let active = true;
     const initialize = async () => {
       let cachedVersions: StudioVersion[] = [];
       try {
-        const cached = await tauriApi.getInstalledVersionsCache();
+        const cached = await loadInstalledCache();
         if (!active) return;
         cachedVersions = cached.versions;
         if (cachedVersions.length > 0) {
           setDisplayedInstalledSource(installedVersionsSourceKey);
           setInstalledVersions(cachedVersions);
           setInstalledStale(true);
+          traceStudioOverview("cache-render", {
+            versionCount: cachedVersions.length,
+          });
         }
       } catch {
         // A missing or invalid cache is equivalent to a cold start.
       }
       if (!active) return;
-
-      const installed = refreshInstalled(true);
-      if (cachedVersions.length === 0) {
-        const next = await installed;
-        if (active && next !== undefined) await refreshSessions(true);
-        return;
-      }
-
-      const sessions = refreshSessions(true);
-      const next = await installed;
-      if (
-        !active ||
-        next === undefined ||
-        sameStudioPaths(cachedVersions, next)
-      ) {
-        return;
-      }
-      await sessions;
-      if (active) await refreshSessions(true);
+      await refreshOverviewRef.current(true, cachedVersions);
     };
     void initialize();
     return () => {
       active = false;
-      installedRequest.current += 1;
     };
-  }, [installedVersionsSourceKey, refreshInstalled, refreshSessions]);
+  }, [installedVersionsSourceKey, loadInstalledCache]);
 
   useEffect(() => {
     if (
@@ -289,13 +416,14 @@ export function useInstalledVersions({
     verifiedInstalledSource === installedVersionsSourceKey;
   const sessionsSourceMatches =
     displayedSessionsSource === installedVersionsSourceKey;
+  const currentInstalledLoading =
+    installedErrorSource !== installedVersionsSourceKey &&
+    (!installedSourceVerified || installedLoading);
 
   return {
     installedVersions: installedSourceMatches ? installedVersions : [],
     installedSet: installedSourceMatches ? installedSet : new Set<string>(),
-    installedLoading:
-      installedErrorSource !== installedVersionsSourceKey &&
-      (!installedSourceVerified || installedLoading),
+    installedLoading: currentInstalledLoading,
     installedLoaded: installedSourceVerified && installedLoaded,
     launchReady: installedSourceMatches && installedVersions.length > 0,
     installedStale: installedSourceMatches && installedStale,
@@ -304,9 +432,12 @@ export function useInstalledVersions({
         ? installedError
         : null,
     sessions: sessionsSourceMatches ? sessions : [],
-    sessionsLoading: !sessionsSourceMatches || sessionsLoading,
+    sessionsLoading: installedSourceVerified
+      ? !sessionsSourceMatches || sessionsLoading
+      : currentInstalledLoading || sessionsLoading,
     isLaunching: hasBusyPrefix("launch-"),
     refreshInstalled,
+    refreshOverview,
     refreshSessions,
     launchVersion,
     reconnectSession,

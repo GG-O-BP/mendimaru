@@ -86,6 +86,25 @@ pub(crate) fn save(
     atomic_write(&path, &content)
 }
 
+pub(crate) fn invalidate(paths: &AppPaths) -> Result<(), String> {
+    paths.ensure_cache_directory()?;
+    let path = cache_path(paths);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "could not inspect installed-version cache: {error}"
+            ))
+        }
+    };
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("installed-version cache must be a regular file".to_string());
+    }
+    fs::remove_file(&path)
+        .map_err(|error| format!("could not invalidate installed-version cache: {error}"))
+}
+
 fn source_identity(config: &AppConfig) -> String {
     let mut digest = Sha256::new();
     for value in [
@@ -272,6 +291,20 @@ mod tests {
         }
     }
 
+    #[test]
+    fn invalidates_a_successful_cache_and_accepts_an_absent_cache() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let paths = AppPaths::for_tests(
+            temporary.path().join("config"),
+            temporary.path().join("cache"),
+        );
+        let config = config();
+        save(&paths, &config, &[version("11.12.3")]).expect("save cache");
+        invalidate(&paths).expect("invalidate cache");
+        assert_eq!(load(&paths, &config).expect("empty cache").versions, vec![]);
+        invalidate(&paths).expect("absent cache is already invalidated");
+    }
+
     #[cfg(unix)]
     #[test]
     fn rejects_symlinked_oversized_and_forged_caches() {
@@ -288,6 +321,8 @@ mod tests {
         fs::write(&target, b"{}").expect("target");
         symlink(&target, &cache).expect("cache symlink");
         assert!(load(&paths, &config).is_err());
+        assert!(invalidate(&paths).is_err());
+        assert_eq!(fs::read(&target).expect("symlink target"), b"{}");
 
         fs::remove_file(&cache).expect("remove symlink");
         fs::write(&cache, vec![b'x'; MAX_CACHE_BYTES as usize + 1]).expect("oversized cache");

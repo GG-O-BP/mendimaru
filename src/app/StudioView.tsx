@@ -41,7 +41,7 @@ export function StudioView({
         sessionsLoading: studio.sessionsLoading,
         isLaunching: studio.isLaunching,
         isBusy,
-        onRefresh: () => void studio.refreshInstalled(),
+        onRefresh: () => void studio.refreshOverview(),
         onLaunch: (version) => void studio.launchVersion(version),
         onUninstall: studio.askUninstall,
         onReconnect: (session) => void studio.reconnectSession(session),

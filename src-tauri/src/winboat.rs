@@ -233,22 +233,16 @@ mod tests {
             WinApp {
                 name: "studiopro".into(),
                 path: r"C:\Program Files\Mendix\11.12.2\modeler\studiopro.exe".into(),
-                args: String::new(),
-                icon: String::new(),
                 source: String::new(),
             },
             WinApp {
                 name: "Mendix.VersionSelector".into(),
                 path: r"C:\Program Files\Mendix\Version Selector\VersionSelector.exe".into(),
-                args: String::new(),
-                icon: String::new(),
                 source: String::new(),
             },
             WinApp {
                 name: "Studio Pro".into(),
                 path: r"C:\Program Files\Mendix\10.24.3.12345\modeler\studiopro.exe".into(),
-                args: String::new(),
-                icon: String::new(),
                 source: "registry".into(),
             },
         ];

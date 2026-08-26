@@ -545,6 +545,7 @@ pub(crate) async fn uninstall(
     let result = crate::platform::uninstall_studio(config, &version, &operation_id)
         .await
         .map_err(CommandError::from);
+    invalidate_installed_versions_cache_after_mutation(paths, result.is_ok());
     complete_operation(tracker, result)?;
     Ok(operation_id)
 }
@@ -597,8 +598,11 @@ where
         },
     )
     .await;
+    invalidate_installed_versions_cache_after_mutation(paths, result.is_ok());
     match result {
-        Ok(()) => tracker.succeed().map_err(operation_history_error)?,
+        Ok(()) => {
+            tracker.succeed().map_err(operation_history_error)?;
+        }
         Err(InstallError::Cancelled(message)) => {
             let command_error = CommandError::new(CommandErrorCode::DownloadCancelled, message);
             let _ = tracker.cancel("download_cancelled");
@@ -616,6 +620,21 @@ where
         }
     }
     Ok(operation_id)
+}
+
+fn invalidate_installed_versions_cache_after_mutation(paths: &AppPaths, succeeded: bool) {
+    if !succeeded {
+        return;
+    }
+    if let Err(error) = crate::studio_cache::invalidate(paths) {
+        if !crate::studio_trace::enabled() {
+            return;
+        }
+        eprintln!(
+            "[studio-overview] disk-cache-invalidation failed=true error_bytes={}",
+            error.len()
+        );
+    }
 }
 
 pub(crate) fn operations(
@@ -859,8 +878,8 @@ fn precondition_error(capability: CapabilityId, message: &str, retryable: bool) 
 mod tests {
     use super::{
         ensure_no_connected_remote_app_version, ensure_version_not_installed,
-        exact_project_launch_path, launch_project, operation, project, projects,
-        SafeEnvironmentStatus,
+        exact_project_launch_path, invalidate_installed_versions_cache_after_mutation,
+        launch_project, operation, project, projects, SafeEnvironmentStatus,
     };
     use crate::app_paths::AppPaths;
     use crate::contracts::CapabilityId;
@@ -947,6 +966,40 @@ mod tests {
         assert_eq!(error.code, CommandErrorCode::PreconditionFailed);
         assert!(error.message.contains("11.12.3"));
         ensure_version_not_installed(&[], "11.12.3").expect("absent version may install");
+    }
+
+    #[test]
+    fn mutation_cache_is_retained_on_failure_and_invalidated_on_success() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let paths = AppPaths::for_tests(
+            temporary.path().join("config"),
+            temporary.path().join("cache"),
+        );
+        let config = config(temporary.path());
+        let installed = StudioVersion {
+            version: "11.12.3".into(),
+            display_name: "Studio Pro 11.12.3".into(),
+            executable_path: r"C:\Program Files\Mendix\11.12.3\modeler\StudioPro.exe".into(),
+            install_root: r"C:\Program Files\Mendix\11.12.3".into(),
+            source: "fixture".into(),
+            removable: true,
+        };
+        crate::studio_cache::save(&paths, &config, std::slice::from_ref(&installed))
+            .expect("save cache");
+
+        invalidate_installed_versions_cache_after_mutation(&paths, false);
+        assert_eq!(
+            crate::studio_cache::load(&paths, &config)
+                .expect("failed mutation retains cache")
+                .versions,
+            vec![installed]
+        );
+
+        invalidate_installed_versions_cache_after_mutation(&paths, true);
+        assert!(crate::studio_cache::load(&paths, &config)
+            .expect("successful mutation invalidates cache")
+            .versions
+            .is_empty());
     }
 
     #[test]

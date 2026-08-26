@@ -23,6 +23,7 @@ mod project_launches;
 mod projects;
 mod settings;
 mod studio_cache;
+mod studio_trace;
 #[cfg_attr(target_os = "windows", allow(dead_code, unused_imports))]
 mod winboat;
 
@@ -31,6 +32,7 @@ use downloads::DownloadManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    studio_trace::enable_desktop();
     let builder = tauri::Builder::default()
         .setup(|app| {
             #[cfg(feature = "e2e")]

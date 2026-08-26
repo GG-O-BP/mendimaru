@@ -163,6 +163,8 @@ npm install
 npm run tauri dev
 ```
 
+`npm run tauri dev` の実行時に `MENDIMARU_STUDIO_TRACE=1` を設定すると、Studio overview の区間時間と request coalescing 診断を出力できます。trace には時間、payload size、項目数だけが含まれ、設定 path や Guest の raw payload は記録されません。
+
 ホストに依存しない検証とアプリバンドルの生成：
 
 ```bash
