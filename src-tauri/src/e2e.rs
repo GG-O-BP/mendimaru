@@ -69,8 +69,9 @@ pub(crate) async fn e2e_bounded_process_cleanup() -> Result<BoundedProcessCleanu
     use tokio::process::Command;
 
     const SCRIPT: &str = r#"
+[IO.File]::WriteAllText($env:MENDIMARU_E2E_PID_FILE, "$PID`n", [Text.Encoding]::ASCII)
 $child = Start-Process -FilePath $env:MENDIMARU_E2E_CHILD -ArgumentList @("-t", "127.0.0.1") -WindowStyle Hidden -PassThru
-[IO.File]::WriteAllText($env:MENDIMARU_E2E_PID_FILE, "$PID`n$($child.Id)`n", [Text.Encoding]::ASCII)
+[IO.File]::AppendAllText($env:MENDIMARU_E2E_PID_FILE, "$($child.Id)`n", [Text.Encoding]::ASCII)
 while ($true) { Start-Sleep -Milliseconds 100 }
 "#;
 
@@ -106,14 +107,21 @@ while ($true) { Start-Sleep -Milliseconds 100 }
     let trigger = cancellation.clone();
     let observed_pid_file = pid_file.clone();
     let observe_and_cancel = async move {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
         loop {
-            match tokio::fs::metadata(&observed_pid_file).await {
-                Ok(metadata) if metadata.is_file() && metadata.len() > 0 => {
-                    trigger.cancel();
-                    return Ok::<(), String>(());
+            match tokio::fs::read_to_string(&observed_pid_file).await {
+                Ok(content) => {
+                    let process_ids = content
+                        .lines()
+                        .map(str::parse::<u32>)
+                        .collect::<Result<Vec<_>, _>>();
+                    if process_ids.is_ok_and(|process_ids| {
+                        process_ids.len() == 2 && !process_ids.contains(&0)
+                    }) {
+                        trigger.cancel();
+                        return Ok::<(), String>(());
+                    }
                 }
-                Ok(_) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => {
                     return Err(format!("failed to inspect the e2e PID fixture: {error}"))
@@ -128,7 +136,7 @@ while ($true) { Start-Sleep -Milliseconds 100 }
     let (result, observed) = tokio::join!(
         process::output(
             command,
-            CommandPolicy::new(Duration::from_secs(10), 1024),
+            CommandPolicy::new(Duration::from_secs(9), 1024),
             Some(&cancellation),
             "Windows e2e process cancellation",
         ),
