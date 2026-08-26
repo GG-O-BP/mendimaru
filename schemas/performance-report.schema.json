@@ -1,0 +1,555 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/performance-report.schema.json",
+  "title": "Mendimaru performance report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "status",
+    "benchmark",
+    "host",
+    "fixture",
+    "sampling",
+    "metrics",
+    "resources",
+    "gate",
+    "assertions"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "status": {
+      "enum": ["passed", "failed"]
+    },
+    "benchmark": {
+      "$ref": "#/definitions/benchmark"
+    },
+    "host": {
+      "$ref": "#/definitions/host"
+    },
+    "fixture": {
+      "$ref": "#/definitions/fixture"
+    },
+    "sampling": {
+      "$ref": "#/definitions/sampling"
+    },
+    "metrics": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[a-z][A-Za-z0-9]+$"
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/metricSummary"
+      }
+    },
+    "resources": {
+      "$ref": "#/definitions/resources"
+    },
+    "gate": {
+      "$ref": "#/definitions/gate"
+    },
+    "assertions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "maxItems": 500
+    },
+    "error": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384
+    }
+  },
+  "definitions": {
+    "gitCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "benchmark": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suite",
+        "platform",
+        "buildProfile",
+        "packageKind",
+        "commit",
+        "baselineCommit",
+        "startedAt",
+        "finishedAt"
+      ],
+      "properties": {
+        "suite": {
+          "enum": ["release-webview", "installed-bundle"]
+        },
+        "platform": {
+          "enum": ["linux", "windows"]
+        },
+        "buildProfile": {
+          "const": "release"
+        },
+        "packageKind": {
+          "enum": ["release-executable", "appimage", "msi", "nsis"]
+        },
+        "commit": {
+          "$ref": "#/definitions/gitCommit"
+        },
+        "baselineCommit": {
+          "$ref": "#/definitions/gitCommit"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finishedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "os",
+        "osVersion",
+        "arch",
+        "runnerImage",
+        "cpuModel",
+        "logicalCores",
+        "memoryBytes",
+        "memoryClassBytes",
+        "webviewVersion"
+      ],
+      "properties": {
+        "os": {
+          "enum": ["linux", "windows"]
+        },
+        "osVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "arch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "runnerImage": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "cpuModel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "logicalCores": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        },
+        "memoryBytes": {
+          "type": "integer",
+          "minimum": 134217728
+        },
+        "memoryClassBytes": {
+          "type": "integer",
+          "minimum": 134217728
+        },
+        "webviewVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "fixtureTier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projectCount", "totalBytes"],
+      "properties": {
+        "projectCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "totalBytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workspaceTiers", "catalogModes", "environmentModes"],
+      "properties": {
+        "workspaceTiers": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["small", "large"],
+              "properties": {
+                "small": {
+                  "$ref": "#/definitions/fixtureTier"
+                },
+                "large": {
+                  "$ref": "#/definitions/fixtureTier"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "catalogModes": {
+          "oneOf": [
+            {
+              "type": "array",
+              "const": ["cached", "isolated-refresh"]
+            },
+            {
+              "type": "array",
+              "maxItems": 0
+            }
+          ]
+        },
+        "environmentModes": {
+          "oneOf": [
+            {
+              "type": "array",
+              "const": ["normal", "slow", "timeout-recovery"]
+            },
+            {
+              "type": "array",
+              "maxItems": 0
+            }
+          ]
+        }
+      }
+    },
+    "sampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "warmupCount",
+        "sampleCount",
+        "percentileMethod",
+        "dispersion",
+        "outlierPolicy",
+        "rerunPolicy",
+        "idleWindowSeconds",
+        "idleSampleSeconds",
+        "environmentSlowDelayMs",
+        "environmentClientTimeoutMs",
+        "cpuNormalization",
+        "processTreeScope"
+      ],
+      "properties": {
+        "warmupCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "sampleCount": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 1000
+        },
+        "percentileMethod": {
+          "const": "nearest-rank"
+        },
+        "dispersion": {
+          "const": "median-absolute-deviation-and-iqr"
+        },
+        "outlierPolicy": {
+          "const": "tukey-iqr-report-only-never-discarded"
+        },
+        "rerunPolicy": {
+          "const": "one-infrastructure-rerun-performance-failure-preserved"
+        },
+        "idleWindowSeconds": {
+          "type": "number",
+          "minimum": 300
+        },
+        "idleSampleSeconds": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 60
+        },
+        "environmentSlowDelayMs": {
+          "const": 400
+        },
+        "environmentClientTimeoutMs": {
+          "const": 750
+        },
+        "cpuNormalization": {
+          "const": "process-tree-cpu-seconds/(wall-seconds*logical-cores)*100"
+        },
+        "processTreeScope": {
+          "const": "root-and-live-descendants-at-each-sample"
+        }
+      }
+    },
+    "metricSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit",
+        "samples",
+        "sampleCount",
+        "min",
+        "max",
+        "p50",
+        "p95",
+        "medianAbsoluteDeviation",
+        "iqr",
+        "outlierIndices"
+      ],
+      "properties": {
+        "unit": {
+          "enum": ["ms", "bytes", "percent", "count"]
+        },
+        "samples": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10000,
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "sampleCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "min": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p50": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95": {
+          "type": "number",
+          "minimum": 0
+        },
+        "medianAbsoluteDeviation": {
+          "type": "number",
+          "minimum": 0
+        },
+        "iqr": {
+          "type": "number",
+          "minimum": 0
+        },
+        "outlierIndices": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "resourceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "processCount",
+        "privateMemoryBytes",
+        "workingSetBytes",
+        "cpuSeconds"
+      ],
+      "properties": {
+        "processCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "privateMemoryBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "workingSetBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cpuSeconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "after", "peak", "delta"],
+      "properties": {
+        "before": {
+          "$ref": "#/definitions/resourceSnapshot"
+        },
+        "after": {
+          "$ref": "#/definitions/resourceSnapshot"
+        },
+        "peak": {
+          "$ref": "#/definitions/resourceSnapshot"
+        },
+        "delta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["processCount", "privateMemoryBytes", "workingSetBytes"],
+          "properties": {
+            "processCount": {
+              "type": "integer"
+            },
+            "privateMemoryBytes": {
+              "type": "integer"
+            },
+            "workingSetBytes": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "violation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "statistic", "kind", "actual", "limit"],
+      "properties": {
+        "metric": {
+          "type": "string",
+          "minLength": 1
+        },
+        "statistic": {
+          "enum": ["p50", "p95", "max"]
+        },
+        "kind": {
+          "enum": ["absolute", "relative", "missing"]
+        },
+        "actual": {
+          "type": "number"
+        },
+        "limit": {
+          "type": "number"
+        },
+        "baseline": {
+          "type": "number"
+        },
+        "relativeChangePercent": {
+          "type": "number"
+        }
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric",
+        "statistic",
+        "actual",
+        "baseline",
+        "relativeChangePercent",
+        "absoluteLimit",
+        "relativeLimitPercent",
+        "relativeNoiseFloor",
+        "relativeLimit",
+        "passed"
+      ],
+      "properties": {
+        "metric": {
+          "type": "string",
+          "minLength": 1
+        },
+        "statistic": {
+          "enum": ["p50", "p95", "max"]
+        },
+        "actual": {
+          "type": "number",
+          "minimum": 0
+        },
+        "baseline": {
+          "type": "number",
+          "minimum": 0
+        },
+        "relativeChangePercent": {
+          "type": "number"
+        },
+        "absoluteLimit": {
+          "type": "number",
+          "minimum": 0
+        },
+        "relativeLimitPercent": {
+          "type": "number",
+          "minimum": 0
+        },
+        "relativeNoiseFloor": {
+          "type": "number",
+          "minimum": 0
+        },
+        "relativeLimit": {
+          "type": "number",
+          "minimum": 0
+        },
+        "passed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "baselineCompatible",
+        "baselineCommit",
+        "violations",
+        "comparisons"
+      ],
+      "properties": {
+        "status": {
+          "enum": ["not-evaluated", "passed", "failed"]
+        },
+        "baselineCompatible": {
+          "type": "boolean"
+        },
+        "baselineCommit": {
+          "$ref": "#/definitions/gitCommit"
+        },
+        "violations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/violation"
+          }
+        },
+        "comparisons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/comparison"
+          }
+        }
+      }
+    }
+  }
+}

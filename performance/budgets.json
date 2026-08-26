@@ -1,0 +1,407 @@
+{
+  "schemaVersion": "1.0.0",
+  "review": {
+    "issue": "#49",
+    "rationale": "Initial release budgets replace the debug-only 120/180 second launch ceilings. Absolute limits are safety rails derived from the 2026-08-25 real WebView observations, while the same-host current-main comparison is the primary 20 percent regression gate.",
+    "evidence": [
+      {
+        "source": "Issue #49: 2026-08-25 Linux WebKit measurements and implementation baseline runs",
+        "recordedAt": "2026-08-26T00:00:00Z"
+      }
+    ]
+  },
+  "changeControl": {
+    "environmentOverridesAllowed": false,
+    "requiredReview": "CODEOWNERS",
+    "performanceFailureRerun": "preserve-original-failure"
+  },
+  "compatibilityFields": [
+    "benchmark.suite",
+    "benchmark.platform",
+    "benchmark.buildProfile",
+    "benchmark.packageKind",
+    "host.os",
+    "host.arch",
+    "host.runnerImage",
+    "host.cpuModel",
+    "host.logicalCores",
+    "host.memoryClassBytes",
+    "host.webviewVersion",
+    "fixture",
+    "sampling"
+  ],
+  "platforms": {
+    "linux": {
+      "suites": {
+        "release-webview": {
+          "relativeNoiseFloor": {
+            "ms": 50,
+            "bytes": 33554432,
+            "percent": 1,
+            "count": 1
+          },
+          "metrics": {
+            "coldStartupMs": {
+              "statistic": "p95",
+              "absoluteMax": 15000,
+              "relativeMaxPercent": 20,
+              "rationale": "Release startup should remain far below the former 120 second debug safety timeout."
+            },
+            "warmStartupMs": {
+              "statistic": "p95",
+              "absoluteMax": 10000,
+              "relativeMaxPercent": 20,
+              "rationale": "Warm release startup excludes build and development-server work."
+            },
+            "firstIpcMs": {
+              "statistic": "p95",
+              "absoluteMax": 3000,
+              "relativeMaxPercent": 20,
+              "rationale": "The environment IPC observation was 346 ms; this retains hosted-runner headroom."
+            },
+            "environmentSlowMs": {
+              "statistic": "p95",
+              "absoluteMax": 5000,
+              "relativeMaxPercent": 20,
+              "rationale": "A tracked 400 ms backend delay verifies that slow environment discovery remains observable and bounded."
+            },
+            "environmentTimeoutRecoveryMs": {
+              "statistic": "p95",
+              "absoluteMax": 6000,
+              "relativeMaxPercent": 20,
+              "rationale": "A client deadline against a two-second probe must recover on the next normal environment request."
+            },
+            "catalogCachedMs": {
+              "statistic": "p95",
+              "absoluteMax": 750,
+              "relativeMaxPercent": 20,
+              "rationale": "A valid disk catalog must be visible without waiting for an isolated refresh."
+            },
+            "catalogRefreshMs": {
+              "statistic": "p95",
+              "absoluteMax": 15000,
+              "relativeMaxPercent": 20,
+              "rationale": "The isolated catalog fixture is bounded separately from external Marketplace availability."
+            },
+            "smallWorkspaceScanMs": {
+              "statistic": "p95",
+              "absoluteMax": 3000,
+              "relativeMaxPercent": 20,
+              "rationale": "The one-project observation was 16 ms and should not regress into user-visible delay."
+            },
+            "largeWorkspaceScanMs": {
+              "statistic": "p95",
+              "absoluteMax": 12000,
+              "relativeMaxPercent": 20,
+              "rationale": "The realistic tier intentionally carries enough projects and bytes to expose linear scan regressions."
+            },
+            "navigationMs": {
+              "statistic": "p95",
+              "absoluteMax": 1500,
+              "relativeMaxPercent": 20,
+              "rationale": "Observed debug navigation was 111 to 248 ms; release navigation receives bounded noise headroom."
+            },
+            "backgroundPollingCpuPercent": {
+              "statistic": "p95",
+              "absoluteMax": 8,
+              "relativeMaxPercent": 20,
+              "rationale": "Five-second normalized samples catch sustained polling without treating a single wakeup as idle load."
+            },
+            "idleCpuPercent": {
+              "statistic": "p95",
+              "absoluteMax": 8,
+              "relativeMaxPercent": 20,
+              "rationale": "The previous normalized idle observation was 4.41 percent over a much shorter window."
+            },
+            "privateMemoryBytes": {
+              "statistic": "p95",
+              "absoluteMax": 536870912,
+              "relativeMaxPercent": 20,
+              "rationale": "The observed 331 MB process tree leaves material but finite WebKit runner variance."
+            },
+            "workingSetBytes": {
+              "statistic": "p95",
+              "absoluteMax": 1073741824,
+              "relativeMaxPercent": 20,
+              "rationale": "RSS is tracked independently because shared WebKit pages make it larger than private memory."
+            },
+            "processCount": {
+              "statistic": "p95",
+              "absoluteMax": 20,
+              "relativeMaxPercent": 20,
+              "rationale": "The complete release WebKit root and descendant tree is bounded and compared with main."
+            },
+            "privateMemoryGrowthBytes": {
+              "statistic": "max",
+              "absoluteMax": 67108864,
+              "relativeMaxPercent": 20,
+              "rationale": "Five-minute positive private-memory growth above 64 MiB is treated as a leak signal."
+            },
+            "workingSetGrowthBytes": {
+              "statistic": "max",
+              "absoluteMax": 134217728,
+              "relativeMaxPercent": 20,
+              "rationale": "Working-set growth receives extra shared-page headroom but remains bounded."
+            },
+            "processCountGrowth": {
+              "statistic": "max",
+              "absoluteMax": 2,
+              "relativeMaxPercent": 20,
+              "rationale": "At most two transient descendants may remain at the final sample; larger growth fails."
+            }
+          }
+        },
+        "installed-bundle": {
+          "relativeNoiseFloor": {
+            "ms": 50,
+            "bytes": 33554432,
+            "percent": 1,
+            "count": 1
+          },
+          "metrics": {
+            "coldStartupMs": {
+              "statistic": "p95",
+              "absoluteMax": 15000,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed package launch must create its native window within a user-visible budget."
+            },
+            "warmStartupMs": {
+              "statistic": "p95",
+              "absoluteMax": 10000,
+              "relativeMaxPercent": 20,
+              "rationale": "Repeated installed package launches exercise the warmed OS and WebView caches."
+            },
+            "idleCpuPercent": {
+              "statistic": "p95",
+              "absoluteMax": 8,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed package idle CPU uses the same normalized process-tree meaning."
+            },
+            "privateMemoryBytes": {
+              "statistic": "p95",
+              "absoluteMax": 536870912,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed package private memory uses the release WebView safety ceiling."
+            },
+            "workingSetBytes": {
+              "statistic": "p95",
+              "absoluteMax": 1073741824,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed package RSS is reported separately from private memory."
+            },
+            "processCount": {
+              "statistic": "p95",
+              "absoluteMax": 20,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed package root and live descendants use the same bounded process-tree scope."
+            },
+            "privateMemoryGrowthBytes": {
+              "statistic": "max",
+              "absoluteMax": 67108864,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed package private-memory growth is bounded across the five-minute window."
+            },
+            "workingSetGrowthBytes": {
+              "statistic": "max",
+              "absoluteMax": 134217728,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed package working-set growth is tracked separately from private bytes."
+            },
+            "processCountGrowth": {
+              "statistic": "max",
+              "absoluteMax": 2,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed package child-process growth is checked across the full idle window."
+            }
+          }
+        }
+      }
+    },
+    "windows": {
+      "suites": {
+        "release-webview": {
+          "relativeNoiseFloor": {
+            "ms": 75,
+            "bytes": 67108864,
+            "percent": 1,
+            "count": 2
+          },
+          "metrics": {
+            "coldStartupMs": {
+              "statistic": "p95",
+              "absoluteMax": 20000,
+              "relativeMaxPercent": 20,
+              "rationale": "Release WebView2 startup replaces the former 180 second CI override with a 20 second safety rail."
+            },
+            "warmStartupMs": {
+              "statistic": "p95",
+              "absoluteMax": 12000,
+              "relativeMaxPercent": 20,
+              "rationale": "Warm release startup excludes Rust compilation and Vite readiness."
+            },
+            "firstIpcMs": {
+              "statistic": "p95",
+              "absoluteMax": 4000,
+              "relativeMaxPercent": 20,
+              "rationale": "Native environment discovery gets explicit hosted Windows variance headroom."
+            },
+            "environmentSlowMs": {
+              "statistic": "p95",
+              "absoluteMax": 6000,
+              "relativeMaxPercent": 20,
+              "rationale": "A tracked 400 ms backend delay verifies that slow native discovery stays observable and bounded."
+            },
+            "environmentTimeoutRecoveryMs": {
+              "statistic": "p95",
+              "absoluteMax": 7000,
+              "relativeMaxPercent": 20,
+              "rationale": "WebView2 must recover after a client deadline without requiring an application restart."
+            },
+            "catalogCachedMs": {
+              "statistic": "p95",
+              "absoluteMax": 1000,
+              "relativeMaxPercent": 20,
+              "rationale": "Cached Marketplace state must render without a live browser refresh."
+            },
+            "catalogRefreshMs": {
+              "statistic": "p95",
+              "absoluteMax": 20000,
+              "relativeMaxPercent": 20,
+              "rationale": "The isolated browser fixture has its own ceiling and never depends on live Marketplace health."
+            },
+            "smallWorkspaceScanMs": {
+              "statistic": "p95",
+              "absoluteMax": 4000,
+              "relativeMaxPercent": 20,
+              "rationale": "Small native workspace discovery should remain well below the old 10 second ceiling."
+            },
+            "largeWorkspaceScanMs": {
+              "statistic": "p95",
+              "absoluteMax": 15000,
+              "relativeMaxPercent": 20,
+              "rationale": "The large tier bounds registry and filesystem scanning on hosted Windows."
+            },
+            "navigationMs": {
+              "statistic": "p95",
+              "absoluteMax": 2000,
+              "relativeMaxPercent": 20,
+              "rationale": "WebView2 navigation should stay interactive under hosted runner noise."
+            },
+            "backgroundPollingCpuPercent": {
+              "statistic": "p95",
+              "absoluteMax": 8,
+              "relativeMaxPercent": 20,
+              "rationale": "Normalized five-second samples distinguish periodic work from sustained CPU."
+            },
+            "idleCpuPercent": {
+              "statistic": "p95",
+              "absoluteMax": 8,
+              "relativeMaxPercent": 20,
+              "rationale": "The five-minute window covers WebView2 and backend polling descendants."
+            },
+            "privateMemoryBytes": {
+              "statistic": "p95",
+              "absoluteMax": 805306368,
+              "relativeMaxPercent": 20,
+              "rationale": "WebView2 receives a 768 MiB safety ceiling while same-host main catches smaller changes."
+            },
+            "workingSetBytes": {
+              "statistic": "p95",
+              "absoluteMax": 1207959552,
+              "relativeMaxPercent": 20,
+              "rationale": "Working set is distinct from private memory and includes shared WebView2 pages."
+            },
+            "processCount": {
+              "statistic": "p95",
+              "absoluteMax": 24,
+              "relativeMaxPercent": 20,
+              "rationale": "The Tauri and WebView2 descendant tree is counted on every sample."
+            },
+            "privateMemoryGrowthBytes": {
+              "statistic": "max",
+              "absoluteMax": 100663296,
+              "relativeMaxPercent": 20,
+              "rationale": "Five-minute positive private-memory growth above 96 MiB is a leak signal."
+            },
+            "workingSetGrowthBytes": {
+              "statistic": "max",
+              "absoluteMax": 167772160,
+              "relativeMaxPercent": 20,
+              "rationale": "WebView2 working-set growth is bounded separately from private bytes."
+            },
+            "processCountGrowth": {
+              "statistic": "max",
+              "absoluteMax": 2,
+              "relativeMaxPercent": 20,
+              "rationale": "Long-idle child count may not accumulate beyond two transient processes."
+            }
+          }
+        },
+        "installed-bundle": {
+          "relativeNoiseFloor": {
+            "ms": 75,
+            "bytes": 67108864,
+            "percent": 1,
+            "count": 2
+          },
+          "metrics": {
+            "coldStartupMs": {
+              "statistic": "p95",
+              "absoluteMax": 20000,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed MSI and NSIS cold launches must create a native window within 20 seconds."
+            },
+            "warmStartupMs": {
+              "statistic": "p95",
+              "absoluteMax": 12000,
+              "relativeMaxPercent": 20,
+              "rationale": "Warm installer launches isolate application startup from installation time."
+            },
+            "idleCpuPercent": {
+              "statistic": "p95",
+              "absoluteMax": 8,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed WebView2 process-tree CPU uses five-minute normalized sampling."
+            },
+            "privateMemoryBytes": {
+              "statistic": "p95",
+              "absoluteMax": 805306368,
+              "relativeMaxPercent": 20,
+              "rationale": "MSI and NSIS package memory shares the release WebView2 safety ceiling."
+            },
+            "workingSetBytes": {
+              "statistic": "p95",
+              "absoluteMax": 1207959552,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed bundle RSS remains independently visible and bounded."
+            },
+            "processCount": {
+              "statistic": "p95",
+              "absoluteMax": 24,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed Tauri and WebView2 root and descendants are counted at every sample."
+            },
+            "privateMemoryGrowthBytes": {
+              "statistic": "max",
+              "absoluteMax": 100663296,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed bundle private-memory growth is bounded across the five-minute window."
+            },
+            "workingSetGrowthBytes": {
+              "statistic": "max",
+              "absoluteMax": 167772160,
+              "relativeMaxPercent": 20,
+              "rationale": "Installed bundle working-set growth is tracked separately from private bytes."
+            },
+            "processCountGrowth": {
+              "statistic": "max",
+              "absoluteMax": 2,
+              "relativeMaxPercent": 20,
+              "rationale": "The installed process tree may not leak descendants during five minutes idle."
+            }
+          }
+        }
+      }
+    }
+  }
+}

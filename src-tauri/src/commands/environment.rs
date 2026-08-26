@@ -11,6 +11,8 @@ pub(crate) fn get_capabilities(backend: Option<BackendId>) -> CommandResult<Capa
 
 #[tauri::command]
 pub(crate) async fn get_environment_status(app: AppHandle) -> CommandResult<EnvironmentStatus> {
+    #[cfg(feature = "e2e")]
+    crate::e2e::delay_environment_status_for_performance().await?;
     let config = load_command_config(&app)?;
     Ok(crate::platform::environment_status(&config).await)
 }
