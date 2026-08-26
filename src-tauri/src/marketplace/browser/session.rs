@@ -11,6 +11,8 @@ use std::path::Path;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use std::path::PathBuf;
 use std::pin::Pin;
+#[cfg(target_os = "linux")]
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 #[cfg(target_os = "linux")]
 use std::time::Instant;
@@ -25,7 +27,7 @@ const SECURITY_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const HANDLER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 const CLEANUP_RETRY_DELAY: Duration = Duration::from_millis(100);
-const CLEANUP_RETRIES: usize = 10;
+const CLEANUP_RETRIES: usize = 50;
 
 const FORBIDDEN_BROWSER_SWITCHES: [&str; 7] = [
     "allow-running-insecure-content",
@@ -223,6 +225,8 @@ async fn shutdown_resources(
     };
     #[cfg(not(target_os = "linux"))]
     let descendants_stopped = true;
+    #[cfg(target_os = "linux")]
+    let browser_stopped = browser_stopped || descendants_stopped;
 
     if let Some(handler_task) = handler_task {
         handler_task.abort();
@@ -232,12 +236,101 @@ async fn shutdown_resources(
         Some(profile) => profile.cleanup().await,
         None => true,
     };
+    #[cfg(target_os = "linux")]
+    reap_adopted_browser_zombies();
+    #[cfg(target_os = "linux")]
+    start_adopted_browser_zombie_monitor(SHUTDOWN_TIMEOUT);
 
     if browser_stopped && descendants_stopped && profile_removed {
         Ok(())
     } else {
         Err(crate::tr!("error-browser-cleanup"))
     }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DirectChildProcess {
+    pid: i32,
+    name: String,
+    state: char,
+}
+
+#[cfg(target_os = "linux")]
+fn reap_adopted_browser_zombies() {
+    for zombie in direct_child_processes()
+        .into_iter()
+        .filter(|process| process.state == 'Z' && browser_helper_name(&process.name))
+    {
+        // SAFETY: this waits only for a direct browser-helper child that /proc already
+        // reports as a zombie. It cannot terminate a live process. The application does
+        // not directly launch these commands; Linux subreaper adoption is what makes
+        // exited Chromium/WebKit helpers our children.
+        let _ = unsafe { libc::waitpid(zombie.pid, std::ptr::null_mut(), libc::WNOHANG) };
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn start_adopted_browser_zombie_monitor(shutdown_timeout: Duration) {
+    static GENERATION: AtomicU64 = AtomicU64::new(0);
+    let generation = GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+    tokio::spawn(async move {
+        monitor_adopted_browser_zombies(&GENERATION, generation, shutdown_timeout).await;
+    });
+}
+
+#[cfg(target_os = "linux")]
+async fn monitor_adopted_browser_zombies(
+    current_generation: &'static AtomicU64,
+    generation: u64,
+    shutdown_timeout: Duration,
+) {
+    let deadline = Instant::now() + shutdown_timeout;
+    while Instant::now() < deadline {
+        if current_generation.load(Ordering::Relaxed) != generation {
+            return;
+        }
+        reap_adopted_browser_zombies();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    reap_adopted_browser_zombies();
+}
+
+#[cfg(target_os = "linux")]
+fn direct_child_processes() -> Vec<DirectChildProcess> {
+    let Ok(self_pid) = i32::try_from(std::process::id()) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let pid = entry.file_name().to_str()?.parse::<i32>().ok()?;
+            let stat = std::fs::read_to_string(entry.path().join("stat")).ok()?;
+            let (name, state, parent_pid) = proc_stat_identity(&stat)?;
+            (parent_pid == self_pid).then_some(DirectChildProcess { pid, name, state })
+        })
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn proc_stat_identity(stat: &str) -> Option<(String, char, i32)> {
+    let opening_parenthesis = stat.find('(')?;
+    let closing_parenthesis = stat.rfind(')')?;
+    let name = stat
+        .get(opening_parenthesis + 1..closing_parenthesis)?
+        .to_owned();
+    let mut fields = stat.get(closing_parenthesis + 2..)?.split_whitespace();
+    let state = fields.next()?.chars().next()?;
+    let parent_pid = fields.next()?.parse().ok()?;
+    Some((name, state, parent_pid))
+}
+
+#[cfg(target_os = "linux")]
+fn browser_helper_name(name: &str) -> bool {
+    name == "cat" || name.starts_with("chrome") || name.starts_with("chromium")
 }
 
 type LifecycleFuture<'a> = Pin<Box<dyn Future<Output = Result<(), ()>> + Send + 'a>>;
@@ -660,6 +753,20 @@ mod tests {
             "chrome --headless=new --user-data-dir=/tmp/no-sandbox-profile",
             "no-sandbox"
         ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parses_proc_identity_after_parenthesized_names() {
+        assert_eq!(
+            proc_stat_identity("123 (name with ) paren) Z 42 1 2 3"),
+            Some(("name with ) paren".to_owned(), 'Z', 42))
+        );
+        assert_eq!(proc_stat_identity("malformed"), None);
+        assert_eq!(proc_stat_identity("123 (name) Q nope"), None);
+        assert!(browser_helper_name("cat"));
+        assert!(browser_helper_name("chrome_crashpad"));
+        assert!(!browser_helper_name("powershell"));
     }
 
     #[test]

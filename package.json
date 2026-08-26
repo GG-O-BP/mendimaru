@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "npm run test:frontend && npm run test:motion && npm run test:e2e:windows:helpers && npm run test:browser:security && npm run test:backend && npm run test:contracts",
+    "test": "npm run test:frontend && npm run test:motion && npm run test:perf && npm run test:e2e:windows:helpers && npm run test:browser:security && npm run test:backend && npm run test:contracts",
     "test:frontend": "vitest run",
     "test:app-flow": "vitest run src/App.e2e.test.tsx",
     "test:motion": "node scripts/verify-motion-contract.mjs",
@@ -21,6 +21,8 @@
     "test:e2e:windows:powershell": "pwsh -NoLogo -NoProfile -NonInteractive -File scripts/e2e/windows-bundle-smoke.test.ps1",
     "test:e2e:windows": "npm run test:e2e:windows:build && node scripts/e2e/windows-native.mjs",
     "test:e2e:windows:build": "cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --features e2e",
+    "test:perf": "node --test scripts/perf/performance-core.node-test.mjs",
+    "test:perf:release:build": "npm run tauri -- build --no-bundle --features e2e --config src-tauri/tauri.e2e.conf.json",
     "test:winboat-smoke": "node scripts/test-winboat-e2e.mjs --smoke",
     "test:winboat-e2e": "node scripts/test-winboat-e2e.mjs --lifecycle",
     "test:browser": "node scripts/test-browser-e2e.mjs",

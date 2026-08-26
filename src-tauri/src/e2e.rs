@@ -3,6 +3,7 @@ use std::path::PathBuf;
 const ROOT_ENVIRONMENT_VARIABLE: &str = "MENDIMARU_E2E_ROOT";
 const ROOT_MARKER_FILE: &str = ".mendimaru-e2e-root";
 const ROOT_MARKER_CONTENT: &str = "mendimaru isolated native e2e\n";
+const PERFORMANCE_ENVIRONMENT_MODE_FILE: &str = "performance-environment-mode";
 
 pub(crate) fn require_isolated_root() -> Result<PathBuf, String> {
     let configured = std::env::var_os(ROOT_ENVIRONMENT_VARIABLE)
@@ -51,6 +52,27 @@ pub(crate) fn directory(name: &str) -> Result<PathBuf, String> {
         return Err("invalid e2e directory name".to_string());
     }
     Ok(require_isolated_root()?.join(name))
+}
+
+pub(crate) async fn delay_environment_status_for_performance() -> Result<(), String> {
+    let path = require_isolated_root()?.join(PERFORMANCE_ENVIRONMENT_MODE_FILE);
+    let mode = match tokio::fs::read_to_string(&path).await {
+        Ok(mode) => mode,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "failed to read the e2e environment performance mode: {error}"
+            ))
+        }
+    };
+    let delay = match mode.trim() {
+        "normal" => return Ok(()),
+        "slow" => std::time::Duration::from_millis(400),
+        "timeout" => std::time::Duration::from_millis(2_000),
+        _ => return Err("invalid e2e environment performance mode".to_string()),
+    };
+    tokio::time::sleep(delay).await;
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]

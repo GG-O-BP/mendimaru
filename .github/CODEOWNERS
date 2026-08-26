@@ -1,0 +1,6 @@
+# Performance ceilings can only change with an explicit owner review and evidence.
+/performance/budgets.json @GG-O-BP
+/schemas/performance-*.schema.json @GG-O-BP
+/scripts/perf/ @GG-O-BP
+/.github/workflows/release-performance.yml @GG-O-BP
+/docs/release-performance.md @GG-O-BP

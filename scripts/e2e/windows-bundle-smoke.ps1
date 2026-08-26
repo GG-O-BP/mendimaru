@@ -7,14 +7,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InstallerPath,
 
-    [ValidateRange(1, 2147483647)]
-    [long]$MaxPrivateMemoryBytes = 1073741824,
-
-    [ValidateRange(0.0, 100.0)]
-    [double]$MaxIdleCpuPercent = 10.0,
-
-    [ValidateRange(5, 180)]
-    [int]$IdleSettleTimeoutSeconds = 60,
+    [switch]$Performance,
 
     [switch]$HelpersOnly
 )
@@ -23,6 +16,9 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 function Invoke-BundleSmoke {
+$performanceSampleCount = if ($Performance) { 7 } else { 1 }
+$idleWindowSeconds = if ($Performance) { 300 } else { 5 }
+$idleSampleSeconds = 5
 $expectedGuard = 'mendimaru-github-hosted-ephemeral-vm'
 if (
     $env:GITHUB_ACTIONS -ne 'true' -or
@@ -56,18 +52,29 @@ $reportPath = Join-Path $artifactDirectory "$InstallerKind.json"
 $installLog = Join-Path $artifactDirectory "$InstallerKind-install.log"
 $uninstallLog = Join-Path $artifactDirectory "$InstallerKind-uninstall.log"
 $report = [ordered]@{
+    schemaVersion = 'raw-1.0.0'
     status = 'running'
     installerKind = $InstallerKind
     installer = $installer
     startedAt = [DateTimeOffset]::UtcNow.ToString('O')
-    thresholds = [ordered]@{
-        privateMemoryBytes = $MaxPrivateMemoryBytes
-        idleCpuPercent = $MaxIdleCpuPercent
-        idleSettleTimeoutSeconds = $IdleSettleTimeoutSeconds
+    sampling = [ordered]@{
+        warmupCount = 1
+        sampleCount = $performanceSampleCount
+        idleWindowSeconds = $idleWindowSeconds
+        idleSampleSeconds = $idleSampleSeconds
     }
-    measurements = [ordered]@{}
+    measurements = [ordered]@{
+        coldStartupMs = @()
+        warmStartupMs = @()
+        idleCpuPercent = @()
+        privateMemoryBytes = @()
+        workingSetBytes = @()
+        processCount = @()
+    }
 }
 $applicationProcess = $null
+$webViewData = $null
+$applicationData = $null
 
 try {
     $existingEntries = @(Get-MendimaruUninstallEntries)
@@ -115,47 +122,82 @@ try {
         $report.applicationSignature = 'valid'
     }
 
-    $launchStarted = [Diagnostics.Stopwatch]::StartNew()
-    $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $application
-    $startInfo.UseShellExecute = $false
-    $applicationProcess = [Diagnostics.Process]::Start($startInfo)
-    if ($null -eq $applicationProcess) {
-        throw 'Installed application did not start.'
-    }
-    $windowDeadline = [DateTimeOffset]::UtcNow.AddSeconds(30)
-    do {
-        Start-Sleep -Milliseconds 250
-        $applicationProcess.Refresh()
-        if ($applicationProcess.HasExited) {
-            throw "Installed application exited early with code $($applicationProcess.ExitCode)."
-        }
-    } while (
-        $applicationProcess.MainWindowHandle -eq [IntPtr]::Zero -and
-        [DateTimeOffset]::UtcNow -lt $windowDeadline
-    )
-    if ($applicationProcess.MainWindowHandle -eq [IntPtr]::Zero) {
-        throw 'Installed application did not create a native window within 30 seconds.'
-    }
-    $launchStarted.Stop()
-    $report.measurements.launchMs = $launchStarted.ElapsedMilliseconds
+    $webViewData = Join-Path $artifactDirectory "$InstallerKind-webview-data"
+    $applicationData = Join-Path $artifactDirectory "$InstallerKind-application-data"
+    Remove-Item -LiteralPath $applicationData -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $applicationData -Force | Out-Null
+    $warmup = Start-BundleApplication `
+        -Application $application `
+        -ApplicationData $applicationData `
+        -WebViewData $webViewData `
+        -ClearWebViewData
+    Stop-BundleApplication -Process $warmup.Process -WebViewData $webViewData
 
+    for ($sample = 0; $sample -lt $performanceSampleCount; $sample += 1) {
+        $cold = Start-BundleApplication `
+            -Application $application `
+            -ApplicationData $applicationData `
+            -WebViewData $webViewData `
+            -ClearWebViewData
+        $report.measurements.coldStartupMs += [long]$cold.ElapsedMilliseconds
+        Stop-BundleApplication -Process $cold.Process -WebViewData $webViewData
+
+        $warm = Start-BundleApplication `
+            -Application $application `
+            -ApplicationData $applicationData `
+            -WebViewData $webViewData
+        $report.measurements.warmStartupMs += [long]$warm.ElapsedMilliseconds
+        Stop-BundleApplication -Process $warm.Process -WebViewData $webViewData
+    }
+
+    $idleLaunch = Start-BundleApplication `
+        -Application $application `
+        -ApplicationData $applicationData `
+        -WebViewData $webViewData
+    $applicationProcess = $idleLaunch.Process
+    $report.webviewVersion = Get-WebViewVersion `
+        -RootProcessId $applicationProcess.Id
     $logicalProcessors = [Environment]::ProcessorCount
-    $settleStarted = [Diagnostics.Stopwatch]::StartNew()
-    $beforeIdle = Get-ProcessTreeSnapshot -RootProcessId $applicationProcess.Id
+    Start-Sleep -Seconds $idleSampleSeconds
+    $cpuTracker = @{
+        initialized = $false
+        cumulativeSeconds = 0.0
+        previous = @{}
+    }
+    $beforeIdle = Get-ProcessTreeSnapshot `
+        -RootProcessId $applicationProcess.Id `
+        -CpuTracker $cpuTracker
+    $previousIdle = $beforeIdle
     $peakProcessCount = $beforeIdle.ProcessCount
     $peakPrivateMemoryBytes = $beforeIdle.PrivateMemoryBytes
     $peakWorkingSetBytes = $beforeIdle.WorkingSetBytes
-    $idleCpuPercent = [double]::PositiveInfinity
-    do {
+    $peakCpuSeconds = $beforeIdle.CpuSeconds
+    $idleSamples = [Math]::Ceiling($idleWindowSeconds / $idleSampleSeconds)
+    for ($sample = 0; $sample -lt $idleSamples; $sample += 1) {
         $sampleTimer = [Diagnostics.Stopwatch]::StartNew()
-        Start-Sleep -Seconds 5
+        Start-Sleep -Seconds $idleSampleSeconds
         $sampleTimer.Stop()
         $applicationProcess.Refresh()
         if ($applicationProcess.HasExited) {
             throw "Installed application exited during the idle performance sample with code $($applicationProcess.ExitCode)."
         }
-        $afterIdle = Get-ProcessTreeSnapshot -RootProcessId $applicationProcess.Id
+        $afterIdle = Get-ProcessTreeSnapshot `
+            -RootProcessId $applicationProcess.Id `
+            -CpuTracker $cpuTracker
+        if ($afterIdle.CpuSeconds -lt $previousIdle.CpuSeconds) {
+            throw 'Installed application process-tree CPU time moved backwards.'
+        }
+        $idleCpuPercent = [Math]::Round(
+            (
+                ($afterIdle.CpuSeconds - $previousIdle.CpuSeconds) /
+                ($sampleTimer.Elapsed.TotalSeconds * $logicalProcessors)
+            ) * 100,
+            3
+        )
+        $report.measurements.idleCpuPercent += $idleCpuPercent
+        $report.measurements.privateMemoryBytes += [long]$afterIdle.PrivateMemoryBytes
+        $report.measurements.workingSetBytes += [long]$afterIdle.WorkingSetBytes
+        $report.measurements.processCount += [int]$afterIdle.ProcessCount
         $peakProcessCount = [Math]::Max($peakProcessCount, $afterIdle.ProcessCount)
         $peakPrivateMemoryBytes = [Math]::Max(
             $peakPrivateMemoryBytes,
@@ -165,33 +207,26 @@ try {
             $peakWorkingSetBytes,
             $afterIdle.WorkingSetBytes
         )
-        $idleCpuPercent = [Math]::Round(
-            (
-                [Math]::Max(0, $afterIdle.CpuSeconds - $beforeIdle.CpuSeconds) /
-                ($sampleTimer.Elapsed.TotalSeconds * $logicalProcessors)
-            ) * 100,
-            2
-        )
-        $beforeIdle = $afterIdle
-    } while (
-        $idleCpuPercent -gt $MaxIdleCpuPercent -and
-        $settleStarted.Elapsed.TotalSeconds -lt $IdleSettleTimeoutSeconds
-    )
-    $settleStarted.Stop()
-    $report.measurements.idleSettleMs = $settleStarted.ElapsedMilliseconds
-    $report.measurements.peakProcessCount = $peakProcessCount
-    $report.measurements.peakPrivateMemoryBytes = $peakPrivateMemoryBytes
-    $report.measurements.peakWorkingSetBytes = $peakWorkingSetBytes
-    $report.measurements.idleCpuPercent = $idleCpuPercent
-    if ($peakPrivateMemoryBytes -gt $MaxPrivateMemoryBytes) {
-        throw "Installed application process tree exceeded the peak private-memory threshold."
+        $peakCpuSeconds = [Math]::Max($peakCpuSeconds, $afterIdle.CpuSeconds)
+        $previousIdle = $afterIdle
     }
-    if ($idleCpuPercent -gt $MaxIdleCpuPercent) {
-        throw "Installed application process tree exceeded the idle-CPU threshold."
+    $report.resources = [ordered]@{
+        before = $beforeIdle
+        after = $previousIdle
+        peak = [ordered]@{
+            processCount = $peakProcessCount
+            privateMemoryBytes = $peakPrivateMemoryBytes
+            workingSetBytes = $peakWorkingSetBytes
+            cpuSeconds = $peakCpuSeconds
+        }
+        delta = [ordered]@{
+            processCount = $previousIdle.ProcessCount - $beforeIdle.ProcessCount
+            privateMemoryBytes = $previousIdle.PrivateMemoryBytes - $beforeIdle.PrivateMemoryBytes
+            workingSetBytes = $previousIdle.WorkingSetBytes - $beforeIdle.WorkingSetBytes
+        }
     }
 
-    Stop-Process -Id $applicationProcess.Id -Force
-    $applicationProcess.WaitForExit(10000) | Out-Null
+    Stop-BundleApplication -Process $applicationProcess -WebViewData $webViewData
     $applicationProcess = $null
 
     $uninstallStarted = [Diagnostics.Stopwatch]::StartNew()
@@ -243,11 +278,205 @@ catch {
 }
 finally {
     if ($null -ne $applicationProcess -and -not $applicationProcess.HasExited) {
-        Stop-Process -Id $applicationProcess.Id -Force -ErrorAction SilentlyContinue
+        try {
+            Stop-BundleApplication `
+                -Process $applicationProcess `
+                -WebViewData $webViewData
+        }
+        catch {
+            Stop-Process -Id $applicationProcess.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if (
+        $null -ne $webViewData -and
+        (Test-Path -LiteralPath $webViewData)
+    ) {
+        Remove-Item -LiteralPath $webViewData -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (
+        $null -ne $applicationData -and
+        (Test-Path -LiteralPath $applicationData)
+    ) {
+        Remove-Item -LiteralPath $applicationData -Recurse -Force -ErrorAction SilentlyContinue
     }
     $report.finishedAt = [DateTimeOffset]::UtcNow.ToString('O')
     $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encoding utf8
 }
+}
+
+function Start-BundleApplication {
+    param(
+        [Parameter(Mandatory = $true)][string]$Application,
+        [Parameter(Mandatory = $true)][string]$ApplicationData,
+        [Parameter(Mandatory = $true)][string]$WebViewData,
+        [switch]$ClearWebViewData
+    )
+    $canonicalData = [IO.Path]::GetFullPath($WebViewData)
+    $canonicalApplicationData = [IO.Path]::GetFullPath($ApplicationData)
+    $artifactRoot = [IO.Path]::GetFullPath(
+        (Join-Path $env:GITHUB_WORKSPACE 'artifacts\bundle-smoke')
+    )
+    foreach ($directory in @($canonicalData, $canonicalApplicationData)) {
+        if (-not (Test-PathWithin -Path $directory -Root $artifactRoot)) {
+            throw "Application data must stay under bundle-smoke artifacts: $directory"
+        }
+    }
+    if ($ClearWebViewData) {
+        Clear-BundleWebViewData -WebViewData $canonicalData
+    }
+    New-Item -ItemType Directory -Path $canonicalData -Force | Out-Null
+    $roamingData = Join-Path $canonicalApplicationData 'Roaming'
+    $localData = Join-Path $canonicalApplicationData 'Local'
+    New-Item -ItemType Directory -Path $roamingData, $localData -Force | Out-Null
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = [IO.Path]::GetFullPath($Application)
+    $startInfo.UseShellExecute = $false
+    $startInfo.Environment['APPDATA'] = $roamingData
+    $startInfo.Environment['LOCALAPPDATA'] = $localData
+    $startInfo.Environment['WEBVIEW2_USER_DATA_FOLDER'] = $canonicalData
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $process = [Diagnostics.Process]::Start($startInfo)
+    if ($null -eq $process) {
+        throw 'Installed application did not start.'
+    }
+    $windowDeadline = [DateTimeOffset]::UtcNow.AddSeconds(30)
+    do {
+        Start-Sleep -Milliseconds 100
+        $process.Refresh()
+        if ($process.HasExited) {
+            throw "Installed application exited early with code $($process.ExitCode)."
+        }
+    } while (
+        $process.MainWindowHandle -eq [IntPtr]::Zero -and
+        [DateTimeOffset]::UtcNow -lt $windowDeadline
+    )
+    $timer.Stop()
+    if ($process.MainWindowHandle -eq [IntPtr]::Zero) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        throw 'Installed application did not create a native window within 30 seconds.'
+    }
+    return [PSCustomObject]@{
+        Process = $process
+        ElapsedMilliseconds = $timer.Elapsed.TotalMilliseconds
+    }
+}
+
+function Stop-BundleApplication {
+    param(
+        [Parameter(Mandatory = $true)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory = $true)][string]$WebViewData
+    )
+    if (-not $Process.HasExited) {
+        $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+        $exitCode = Invoke-ExactProcess `
+            -FilePath $taskkill `
+            -Arguments @('/PID', [string]$Process.Id, '/T', '/F')
+        $Process.Refresh()
+        if ($exitCode -ne 0 -and -not $Process.HasExited) {
+            throw "Failed to stop installed application tree rooted at PID $($Process.Id)."
+        }
+    }
+    $Process.WaitForExit(10000) | Out-Null
+    Stop-BundleWebViewDataProcesses -WebViewData $WebViewData
+}
+
+function Clear-BundleWebViewData {
+    param([Parameter(Mandatory = $true)][string]$WebViewData)
+    $canonicalData = [IO.Path]::GetFullPath($WebViewData)
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
+    do {
+        Stop-BundleWebViewDataProcesses -WebViewData $canonicalData
+        Remove-Item `
+            -LiteralPath $canonicalData `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
+        if (-not (Test-Path -LiteralPath $canonicalData)) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTimeOffset]::UtcNow -lt $deadline)
+    throw "Cold-start WebView data could not be cleared: $canonicalData"
+}
+
+function Stop-BundleWebViewDataProcesses {
+    param([Parameter(Mandatory = $true)][string]$WebViewData)
+    $canonicalData = [IO.Path]::GetFullPath($WebViewData)
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(10)
+    $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+    do {
+        $matches = @(
+            Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" |
+                Where-Object {
+                    Test-WebViewDataProcess `
+                        -Record $_ `
+                        -WebViewData $canonicalData
+                }
+        )
+        if ($matches.Count -eq 0) {
+            return
+        }
+        foreach ($record in $matches) {
+            Invoke-ExactProcess `
+                -FilePath $taskkill `
+                -Arguments @('/PID', [string]$record.ProcessId, '/T', '/F') |
+                Out-Null
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTimeOffset]::UtcNow -lt $deadline)
+    $processIds = $matches.ProcessId -join ', '
+    throw "WebView2 processes retained the guarded data directory: $processIds"
+}
+
+function Test-WebViewDataProcess {
+    param(
+        [Parameter(Mandatory = $true)]$Record,
+        [Parameter(Mandatory = $true)][string]$WebViewData
+    )
+    if (
+        [string]$Record.Name -ine 'msedgewebview2.exe' -or
+        [string]::IsNullOrWhiteSpace([string]$Record.CommandLine)
+    ) {
+        return $false
+    }
+    $canonicalData = [IO.Path]::GetFullPath($WebViewData)
+    return $Record.CommandLine.IndexOf(
+        $canonicalData,
+        [StringComparison]::OrdinalIgnoreCase
+    ) -ge 0
+}
+
+function Get-WebViewVersion {
+    param([Parameter(Mandatory = $true)][int]$RootProcessId)
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
+    do {
+        $records = @(Get-CimInstance Win32_Process)
+        $tree = @(Get-ProcessTreeRecords `
+            -Records $records `
+            -RootProcessId $RootProcessId)
+        $versions = @(
+            $tree |
+                Where-Object {
+                    $_.Name -ieq 'msedgewebview2.exe' -and
+                    -not [string]::IsNullOrWhiteSpace($_.ExecutablePath)
+                } |
+                ForEach-Object {
+                    (Get-Item -LiteralPath $_.ExecutablePath).VersionInfo.ProductVersion
+                } |
+                Sort-Object -Unique
+        )
+        if ($versions.Count -eq 1) {
+            return $versions[0]
+        }
+        if ($versions.Count -gt 1) {
+            break
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTimeOffset]::UtcNow -lt $deadline)
+    if ($versions.Count -ne 1) {
+        throw "Expected one WebView2 version in the installed process tree; found $($versions -join ',')."
+    }
 }
 
 function Invoke-ExactProcess {
@@ -295,14 +524,17 @@ function Test-MendimaruUninstallEntry {
 }
 
 function Get-ProcessTreeSnapshot {
-    param([Parameter(Mandatory = $true)][int]$RootProcessId)
+    param(
+        [Parameter(Mandatory = $true)][int]$RootProcessId,
+        [Parameter(Mandatory = $true)][hashtable]$CpuTracker
+    )
 
     $records = @(Get-CimInstance Win32_Process)
     $treeRecords = @(Get-ProcessTreeRecords `
         -Records $records `
         -RootProcessId $RootProcessId)
 
-    $cpuSeconds = 0.0
+    $currentCpu = @{}
     $privateMemoryBytes = [long]0
     $workingSetBytes = [long]0
     $sampled = 0
@@ -314,7 +546,21 @@ function Get-ProcessTreeSnapshot {
                 continue
             }
             $process.Refresh()
-            $cpuSeconds += $process.TotalProcessorTime.TotalSeconds
+            $createdAt = ([DateTimeOffset]$record.CreationDate).UtcDateTime.Ticks
+            $identity = "${processId}:$createdAt"
+            $currentSeconds = [double]$process.TotalProcessorTime.TotalSeconds
+            $currentCpu[$identity] = $currentSeconds
+            if ($CpuTracker.initialized) {
+                if ($CpuTracker.previous.ContainsKey($identity)) {
+                    $CpuTracker.cumulativeSeconds += [Math]::Max(
+                        0,
+                        $currentSeconds - [double]$CpuTracker.previous[$identity]
+                    )
+                }
+                else {
+                    $CpuTracker.cumulativeSeconds += $currentSeconds
+                }
+            }
             $privateMemoryBytes += $process.PrivateMemorySize64
             $workingSetBytes += $process.WorkingSet64
             $sampled += 1
@@ -327,9 +573,11 @@ function Get-ProcessTreeSnapshot {
     if ($sampled -eq 0) {
         throw "Could not sample application process tree rooted at PID $RootProcessId."
     }
+    $CpuTracker.previous = $currentCpu
+    $CpuTracker.initialized = $true
 
     return [PSCustomObject]@{
-        CpuSeconds = $cpuSeconds
+        CpuSeconds = [double]$CpuTracker.cumulativeSeconds
         PrivateMemoryBytes = $privateMemoryBytes
         WorkingSetBytes = $workingSetBytes
         ProcessCount = $sampled

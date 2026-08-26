@@ -89,6 +89,32 @@ Assert-Equal `
     -Expected '400,401,402' `
     -Message 'A reused root PID must not adopt older orphaned processes or their descendants.'
 
+$profilePath = Join-Path ([IO.Path]::GetTempPath()) 'guarded-webview-profile'
+Assert-True `
+    -Condition (Test-WebViewDataProcess `
+        -Record ([PSCustomObject]@{
+            Name = 'msedgewebview2.exe'
+            CommandLine = "msedgewebview2.exe --user-data-dir=`"$profilePath\EBWebView`""
+        }) `
+        -WebViewData $profilePath) `
+    -Message 'A WebView2 process scoped to the guarded profile must be selected for cleanup.'
+Assert-True `
+    -Condition (-not (Test-WebViewDataProcess `
+        -Record ([PSCustomObject]@{
+            Name = 'msedgewebview2.exe'
+            CommandLine = 'msedgewebview2.exe --user-data-dir=C:\unrelated\EBWebView'
+        }) `
+        -WebViewData $profilePath)) `
+    -Message 'An unrelated WebView2 profile must not be selected for cleanup.'
+Assert-True `
+    -Condition (-not (Test-WebViewDataProcess `
+        -Record ([PSCustomObject]@{
+            Name = 'unrelated.exe'
+            CommandLine = "unrelated.exe $profilePath"
+        }) `
+        -WebViewData $profilePath)) `
+    -Message 'A non-WebView2 process must not be selected for cleanup.'
+
 $temporary = Join-Path ([IO.Path]::GetTempPath()) "mendimaru-bundle-helper-$([Guid]::NewGuid().ToString('N'))"
 $originalProgramFiles = $env:ProgramFiles
 $originalLocalAppData = $env:LOCALAPPDATA

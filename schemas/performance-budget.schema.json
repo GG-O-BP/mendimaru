@@ -1,0 +1,195 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/performance-budget.schema.json",
+  "title": "Mendimaru performance budget policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "review",
+    "changeControl",
+    "compatibilityFields",
+    "platforms"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "rationale", "evidence"],
+      "properties": {
+        "issue": {
+          "type": "string",
+          "pattern": "^#[1-9][0-9]*$"
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 80,
+          "maxLength": 4000
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "recordedAt"],
+            "properties": {
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "recordedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
+    },
+    "changeControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environmentOverridesAllowed",
+        "requiredReview",
+        "performanceFailureRerun"
+      ],
+      "properties": {
+        "environmentOverridesAllowed": {
+          "const": false
+        },
+        "requiredReview": {
+          "const": "CODEOWNERS"
+        },
+        "performanceFailureRerun": {
+          "const": "preserve-original-failure"
+        }
+      }
+    },
+    "compatibilityFields": {
+      "type": "array",
+      "minItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "platforms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["linux", "windows"],
+      "properties": {
+        "linux": {
+          "$ref": "#/definitions/platform"
+        },
+        "windows": {
+          "$ref": "#/definitions/platform"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "statistic",
+        "absoluteMax",
+        "relativeMaxPercent",
+        "rationale"
+      ],
+      "properties": {
+        "statistic": {
+          "enum": ["p50", "p95", "max"]
+        },
+        "absoluteMax": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "relativeMaxPercent": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 30
+        },
+        "relativeNoiseFloor": {
+          "type": "number",
+          "minimum": 0
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 30,
+          "maxLength": 1000
+        }
+      }
+    },
+    "suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relativeNoiseFloor", "metrics"],
+      "properties": {
+        "relativeNoiseFloor": {
+          "$ref": "#/definitions/noiseFloor"
+        },
+        "metrics": {
+          "type": "object",
+          "minProperties": 5,
+          "propertyNames": {
+            "pattern": "^[a-z][A-Za-z0-9]+$"
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/budget"
+          }
+        }
+      }
+    },
+    "noiseFloor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ms", "bytes", "percent", "count"],
+      "properties": {
+        "ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "bytes": {
+          "type": "number",
+          "minimum": 0
+        },
+        "percent": {
+          "type": "number",
+          "minimum": 0
+        },
+        "count": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["suites"],
+      "properties": {
+        "suites": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["release-webview", "installed-bundle"],
+          "properties": {
+            "release-webview": {
+              "$ref": "#/definitions/suite"
+            },
+            "installed-bundle": {
+              "$ref": "#/definitions/suite"
+            }
+          }
+        }
+      }
+    }
+  }
+}

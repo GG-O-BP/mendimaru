@@ -1,0 +1,395 @@
+name: Release performance
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    - cron: "41 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-performance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-webview:
+    name: Release WebView (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            runner: ubuntu-latest
+            package-kind: appimage
+          - platform: windows
+            runner: windows-latest
+            package-kind: release-executable
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - name: Check out candidate source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Resolve measured revisions
+        id: revisions
+        shell: bash
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          candidate="$(git rev-parse HEAD)"
+          if [[ -n "$PULL_REQUEST_BASE_SHA" ]]; then
+            baseline="$PULL_REQUEST_BASE_SHA"
+          else
+            baseline="$(git rev-parse HEAD^)"
+          fi
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$baseline" =~ ^[0-9a-f]{40}$ ]]
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+
+      - name: Check out current-main baseline
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.revisions.outputs.baseline }}
+          path: baseline-source
+
+      - name: Backport test-only fixture hooks for the bootstrap baseline
+        shell: bash
+        run: |
+          if ! grep -q MENDIMARU_E2E_MARKETPLACE_URL \
+            baseline-source/src-tauri/src/marketplace/browser.rs; then
+            cp src-tauri/src/marketplace/browser.rs \
+              baseline-source/src-tauri/src/marketplace/browser.rs
+            cp src-tauri/src/marketplace/browser/session.rs \
+              baseline-source/src-tauri/src/marketplace/browser/session.rs
+          fi
+          if ! grep -q delay_environment_status_for_performance \
+            baseline-source/src-tauri/src/e2e.rs; then
+            cp src-tauri/src/e2e.rs baseline-source/src-tauri/src/e2e.rs
+            cp src-tauri/src/commands/environment.rs \
+              baseline-source/src-tauri/src/commands/environment.rs
+          fi
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            at-spi2-core \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            webkit2gtk-driver \
+            xvfb
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache both Rust release builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            baseline-source/src-tauri
+          shared-key: release-performance-${{ matrix.platform }}
+
+      - name: Install candidate dependencies
+        run: npm ci
+
+      - name: Install baseline dependencies
+        working-directory: baseline-source
+        run: npm ci
+
+      - name: Install pinned Tauri WebDriver bridge
+        if: runner.os == 'Linux'
+        run: cargo install tauri-driver --version 2.0.6 --locked
+
+      - name: Build candidate Linux AppImage
+        if: runner.os == 'Linux'
+        run: >-
+          npm run tauri -- build --bundles appimage --features e2e
+          --config src-tauri/tauri.e2e.conf.json
+
+      - name: Build baseline Linux AppImage
+        if: runner.os == 'Linux'
+        working-directory: baseline-source
+        run: >-
+          npm run tauri -- build --bundles appimage --features e2e
+          --config src-tauri/tauri.e2e.conf.json
+
+      - name: Build candidate Windows release executable
+        if: runner.os == 'Windows'
+        run: >-
+          npm run tauri -- build --no-bundle --features e2e
+          --config src-tauri/tauri.e2e.conf.json
+
+      - name: Build baseline Windows release executable
+        if: runner.os == 'Windows'
+        working-directory: baseline-source
+        run: >-
+          npm run tauri -- build --no-bundle --features e2e
+          --config src-tauri/tauri.e2e.conf.json
+
+      - name: Resolve Linux applications
+        if: runner.os == 'Linux'
+        id: linux-applications
+        shell: bash
+        run: |
+          mapfile -t candidate < <(
+            find src-tauri/target/release/bundle/appimage \
+              -maxdepth 1 -type f -name '*.AppImage'
+          )
+          mapfile -t baseline < <(
+            find baseline-source/src-tauri/target/release/bundle/appimage \
+              -maxdepth 1 -type f -name '*.AppImage'
+          )
+          [[ ${#candidate[@]} -eq 1 ]]
+          [[ ${#baseline[@]} -eq 1 ]]
+          echo "candidate=${candidate[0]}" >> "$GITHUB_OUTPUT"
+          echo "baseline=${baseline[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Measure baseline and candidate Linux AppImages
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+        run: |
+          mkdir -p artifacts/e2e/release-performance
+          chrome_path=""
+          for command_name in google-chrome-stable google-chrome chromium chromium-browser; do
+            if command -v "$command_name" >/dev/null 2>&1; then
+              chrome_path="$(command -v "$command_name")"
+              break
+            fi
+          done
+          test -x "$chrome_path"
+          export MENDIMARU_CHROME_PATH="$chrome_path"
+          xvfb-run --auto-servernum node scripts/perf/release-webview.mjs \
+            --application "${{ steps.linux-applications.outputs.baseline }}" \
+            --report artifacts/e2e/release-performance/linux-baseline.json \
+            --commit "${{ steps.revisions.outputs.baseline }}" \
+            --baseline-commit "${{ steps.revisions.outputs.baseline }}" \
+            --package-kind appimage \
+            --run-id "${GITHUB_RUN_ID}-baseline"
+          xvfb-run --auto-servernum node scripts/perf/release-webview.mjs \
+            --application "${{ steps.linux-applications.outputs.candidate }}" \
+            --report artifacts/e2e/release-performance/linux-candidate.json \
+            --commit "${{ steps.revisions.outputs.candidate }}" \
+            --baseline-commit "${{ steps.revisions.outputs.baseline }}" \
+            --package-kind appimage \
+            --run-id "${GITHUB_RUN_ID}-candidate"
+
+      - name: Measure baseline and candidate Windows executables
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory `
+            -Path artifacts/e2e/release-performance `
+            -Force | Out-Null
+          node scripts/perf/release-webview.mjs `
+            --application baseline-source/src-tauri/target/release/mendimaru.exe `
+            --report artifacts/e2e/release-performance/windows-baseline.json `
+            --commit "${{ steps.revisions.outputs.baseline }}" `
+            --baseline-commit "${{ steps.revisions.outputs.baseline }}" `
+            --package-kind release-executable `
+            --run-id "$env:GITHUB_RUN_ID-baseline"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows baseline measurement failed.' }
+          node scripts/perf/release-webview.mjs `
+            --application src-tauri/target/release/mendimaru.exe `
+            --report artifacts/e2e/release-performance/windows-candidate.json `
+            --commit "${{ steps.revisions.outputs.candidate }}" `
+            --baseline-commit "${{ steps.revisions.outputs.baseline }}" `
+            --package-kind release-executable `
+            --run-id "$env:GITHUB_RUN_ID-candidate"
+          if ($LASTEXITCODE -ne 0) { throw 'Windows candidate measurement failed.' }
+
+      - name: Apply absolute and current-main regression budgets
+        run: >-
+          node scripts/perf/performance-gate.mjs
+          artifacts/e2e/release-performance/${{ matrix.platform }}-candidate.json
+          artifacts/e2e/release-performance/${{ matrix.platform }}-baseline.json
+
+      - name: Upload release WebView reports and evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-release-performance-${{ matrix.platform }}
+          path: artifacts/e2e/release-performance
+          if-no-files-found: warn
+          retention-days: ${{ github.event_name == 'pull_request' && 30 || 90 }}
+
+  installed-windows-bundles:
+    name: Installed Windows bundle performance
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out candidate source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Resolve measured revisions
+        id: revisions
+        shell: bash
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          candidate="$(git rev-parse HEAD)"
+          if [[ -n "$PULL_REQUEST_BASE_SHA" ]]; then
+            baseline="$PULL_REQUEST_BASE_SHA"
+          else
+            baseline="$(git rev-parse HEAD^)"
+          fi
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$baseline" =~ ^[0-9a-f]{40}$ ]]
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+
+      - name: Check out current-main baseline
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.revisions.outputs.baseline }}
+          path: baseline-source
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache both Windows bundle builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            baseline-source/src-tauri
+          shared-key: release-performance-windows-bundles
+
+      - name: Install candidate dependencies
+        run: npm ci
+
+      - name: Install baseline dependencies
+        working-directory: baseline-source
+        run: npm ci
+
+      - name: Build candidate MSI and NSIS
+        run: npm run tauri -- build --bundles msi,nsis
+
+      - name: Build baseline MSI and NSIS
+        working-directory: baseline-source
+        run: npm run tauri -- build --bundles msi,nsis
+
+      - name: Stage baseline installers under the guarded bundle root
+        shell: pwsh
+        run: |
+          foreach ($kind in @('msi', 'nsis')) {
+            $filter = if ($kind -eq 'msi') { '*.msi' } else { '*.exe' }
+            $source = @(
+              Get-ChildItem `
+                "baseline-source/src-tauri/target/release/bundle/$kind" `
+                -Filter $filter -File -ErrorAction Stop
+            )
+            if ($source.Count -ne 1) {
+              throw "Expected exactly one baseline $kind installer."
+            }
+            $destination = "src-tauri/target/release/bundle/baseline/$kind"
+            New-Item -ItemType Directory -Path $destination -Force | Out-Null
+            Copy-Item -LiteralPath $source[0].FullName -Destination $destination
+          }
+
+      - name: Measure baseline and candidate installed bundles
+        shell: pwsh
+        env:
+          MENDIMARU_EPHEMERAL_WINDOWS_VM: mendimaru-github-hosted-ephemeral-vm
+        run: |
+          $artifactRoot = 'artifacts/e2e/release-performance'
+          New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+          $cases = @(
+            [PSCustomObject]@{
+              Label = 'baseline'; Kind = 'msi'
+              Commit = '${{ steps.revisions.outputs.baseline }}'
+              Installer = @(Get-ChildItem 'src-tauri/target/release/bundle/baseline/msi' -Filter '*.msi' -File)[0].FullName
+            }
+            [PSCustomObject]@{
+              Label = 'baseline'; Kind = 'nsis'
+              Commit = '${{ steps.revisions.outputs.baseline }}'
+              Installer = @(Get-ChildItem 'src-tauri/target/release/bundle/baseline/nsis' -Filter '*.exe' -File)[0].FullName
+            }
+            [PSCustomObject]@{
+              Label = 'candidate'; Kind = 'msi'
+              Commit = '${{ steps.revisions.outputs.candidate }}'
+              Installer = @(Get-ChildItem 'src-tauri/target/release/bundle/msi' -Filter '*.msi' -File)[0].FullName
+            }
+            [PSCustomObject]@{
+              Label = 'candidate'; Kind = 'nsis'
+              Commit = '${{ steps.revisions.outputs.candidate }}'
+              Installer = @(Get-ChildItem 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' -File)[0].FullName
+            }
+          )
+          foreach ($case in $cases) {
+            ./scripts/e2e/windows-bundle-smoke.ps1 `
+              -InstallerKind $case.Kind `
+              -InstallerPath $case.Installer `
+              -Performance
+            $raw = "artifacts/bundle-smoke/$($case.Kind).json"
+            $rawCopy = "$artifactRoot/$($case.Label)-$($case.Kind).raw.json"
+            $report = "$artifactRoot/$($case.Label)-$($case.Kind).json"
+            Copy-Item -LiteralPath $raw -Destination $rawCopy -Force
+            foreach ($suffix in @('install.log', 'uninstall.log')) {
+              $log = "artifacts/bundle-smoke/$($case.Kind)-$suffix"
+              if (Test-Path -LiteralPath $log) {
+                Copy-Item `
+                  -LiteralPath $log `
+                  -Destination "$artifactRoot/$($case.Label)-$($case.Kind)-$suffix" `
+                  -Force
+              }
+            }
+            node scripts/perf/bundle-report.mjs `
+              --raw $rawCopy `
+              --output $report `
+              --commit $case.Commit `
+              --baseline-commit '${{ steps.revisions.outputs.baseline }}' `
+              --run-id "$env:GITHUB_RUN_ID-$($case.Label)-$($case.Kind)"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to normalize $($case.Label) $($case.Kind) report."
+            }
+          }
+
+      - name: Gate MSI against current main
+        run: >-
+          node scripts/perf/performance-gate.mjs
+          artifacts/e2e/release-performance/candidate-msi.json
+          artifacts/e2e/release-performance/baseline-msi.json
+
+      - name: Gate NSIS against current main
+        run: >-
+          node scripts/perf/performance-gate.mjs
+          artifacts/e2e/release-performance/candidate-nsis.json
+          artifacts/e2e/release-performance/baseline-nsis.json
+
+      - name: Upload installed bundle reports and evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-release-performance-windows-bundles
+          path: artifacts/e2e/release-performance
+          if-no-files-found: warn
+          retention-days: ${{ github.event_name == 'pull_request' && 30 || 90 }}

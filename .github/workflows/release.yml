@@ -266,7 +266,7 @@ jobs:
     name: Build and publish Windows installers
     needs: release
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     permissions:
       contents: write
     steps:
@@ -458,7 +458,8 @@ jobs:
           }
           ./scripts/e2e/windows-bundle-smoke.ps1 `
             -InstallerKind msi `
-            -InstallerPath $installers[0].FullName
+            -InstallerPath $installers[0].FullName `
+            -Performance
 
       - name: Install, launch, and uninstall NSIS in the ephemeral VM
         shell: pwsh
@@ -475,14 +476,44 @@ jobs:
           }
           ./scripts/e2e/windows-bundle-smoke.ps1 `
             -InstallerKind nsis `
-            -InstallerPath $installers[0].FullName
+            -InstallerPath $installers[0].FullName `
+            -Performance
+
+      - name: Validate release bundle performance reports and budgets
+        shell: pwsh
+        run: |
+          $commit = (git rev-parse HEAD).Trim()
+          if ($commit -notmatch '^[0-9a-f]{40}$') {
+            throw 'Release checkout did not resolve to a full Git commit.'
+          }
+          $artifactRoot = 'artifacts/e2e/release-performance'
+          New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+          foreach ($kind in @('msi', 'nsis')) {
+            $raw = "artifacts/bundle-smoke/$kind.json"
+            $report = "$artifactRoot/release-$kind.json"
+            node scripts/perf/bundle-report.mjs `
+              --raw $raw `
+              --output $report `
+              --commit $commit `
+              --baseline-commit $commit `
+              --run-id "$env:GITHUB_RUN_ID-release-$kind"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to normalize the release $kind report."
+            }
+            node scripts/perf/performance-gate.mjs $report $report
+            if ($LASTEXITCODE -ne 0) {
+              throw "Release $kind exceeded an absolute performance budget."
+            }
+          }
 
       - name: Upload bundle smoke diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: mendimaru-release-windows-bundle-smoke
-          path: artifacts/bundle-smoke
+          path: |
+            artifacts/bundle-smoke
+            artifacts/e2e/release-performance
           if-no-files-found: warn
 
       - name: Upload installers to the GitHub release
