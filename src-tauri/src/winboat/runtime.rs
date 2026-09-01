@@ -381,7 +381,13 @@ pub(crate) async fn wait(config: &AppConfig, session_id: &str) -> BackendResult<
         tokio::time::sleep(WAIT_POLL_INTERVAL).await;
     }
 
-    let code = diagnose_unready_runtime(config, &record).await;
+    let mut code = diagnose_unready_runtime(config, &record).await;
+    if code == BackendErrorCode::RuntimeReadinessTimeout && record.studio_session_id.is_some() && {
+        observe_studio(config, &mut record).await;
+        record.studio_state == StudioProcessState::Stopped
+    } {
+        code = BackendErrorCode::RuntimeExited;
+    }
     let previous_failure = (record.state, record.failure_code);
     record.state = RuntimeState::Failed;
     record.http_ready = false;
@@ -610,33 +616,19 @@ async fn refresh(
 
     let url = runtime_url(record.host_port);
     record.http_ready = http_ready(&url).await;
+    apply_http_only_readiness(record);
+    write_record(directory, record).map_err(|_| record_error(record, CapabilityId::RuntimeStatus))
+}
+
+fn apply_http_only_readiness(record: &mut SessionRecord) {
     if record.http_ready {
         record.state = RuntimeState::Ready;
         record.failure_code = None;
         record.studio_state = StudioProcessState::Running;
-    } else {
-        observe_studio(config, record).await;
-        if record.studio_state == StudioProcessState::Stopped && record.studio_session_id.is_some()
-        {
-            let previous_failure = (record.state, record.failure_code);
-            record.state = RuntimeState::Failed;
-            record.failure_code = Some(BackendErrorCode::RuntimeExited);
-            append_failure_diagnostic(
-                directory,
-                record,
-                previous_failure,
-                "The linked Studio Pro session was absent from the authoritative session report.",
-            );
-        } else {
-            record.state = if record.studio_state == StudioProcessState::Running {
-                RuntimeState::Running
-            } else {
-                RuntimeState::Starting
-            };
-            record.failure_code = None;
-        }
+        return;
     }
-    write_record(directory, record).map_err(|_| record_error(record, CapabilityId::RuntimeStatus))
+    record.state = RuntimeState::Starting;
+    record.failure_code = None;
 }
 
 async fn observe_studio(config: &AppConfig, record: &mut SessionRecord) {
@@ -652,20 +644,14 @@ async fn observe_studio(config: &AppConfig, record: &mut SessionRecord) {
         sessions
             .into_iter()
             .find(|session| session.session_id == session_id)
-    } else if sessions.len() == 1 {
-        sessions.into_iter().next()
     } else {
         None
     };
     if let Some(session) = selected {
-        record.studio_session_id = Some(session.session_id);
         record.studio_state = session.state;
         record.studio_process_id = session.process_id;
-    } else if record.studio_session_id.is_some() {
-        record.studio_state = StudioProcessState::Stopped;
-        record.studio_process_id = None;
     } else {
-        record.studio_state = StudioProcessState::Unknown;
+        record.studio_state = StudioProcessState::Stopped;
         record.studio_process_id = None;
     }
 }
