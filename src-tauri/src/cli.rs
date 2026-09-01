@@ -294,6 +294,9 @@ fn execute(arguments: &[OsString]) -> Option<CliExecution> {
     if arguments.is_empty() {
         return None;
     }
+    if let Some(execution) = help_execution(arguments) {
+        return Some(execution);
+    }
     if !is_headless_command(arguments.first()) {
         return Some(unknown_command_execution(arguments));
     }
@@ -345,6 +348,217 @@ fn execute(arguments: &[OsString]) -> Option<CliExecution> {
             command_error_to_backend(error, context.snapshot.manifest.backend),
         ),
     })
+}
+
+fn help_execution(arguments: &[OsString]) -> Option<CliExecution> {
+    let mut values = arguments.iter().filter_map(|value| value.to_str());
+    let mut command_values = Vec::new();
+    let mut help_requested = false;
+    let mut option_value_expected = false;
+    for value in values.by_ref() {
+        if option_value_expected {
+            option_value_expected = false;
+            continue;
+        }
+        match value {
+            "--help" | "-h" => {
+                help_requested = true;
+                break;
+            }
+            "--json" | "--ndjson" => {}
+            "--backend" | "--timeout-seconds" => option_value_expected = true,
+            value if value.starts_with("--backend=") || value.starts_with("--timeout-seconds=") => {
+            }
+            value => command_values.push(value),
+        }
+    }
+    if !help_requested {
+        return None;
+    }
+    if command_values.is_empty() {
+        return Some(root_help_execution());
+    }
+    let help = subcommand_help(&command_values)?;
+    Some(CliExecution {
+        exit_code: EXIT_OK,
+        stdout: format!("{help}\n"),
+        stderr: String::new(),
+    })
+}
+
+fn subcommand_help(values: &[&str]) -> Option<&'static str> {
+    let subcommand = values.get(1).copied();
+    match (values.first().copied(), subcommand) {
+        (Some("capabilities"), None) => Some(
+            "Usage: mendimaru capabilities [--backend BACKEND]\n\
+             \n\
+             Prints the immutable backend capability snapshot. Global --json,\n\
+             --ndjson, --backend, and --timeout-seconds options are accepted.",
+        ),
+        (Some("env"), None) => Some(
+            "Usage: mendimaru env COMMAND\n\
+             \n\
+             Commands:\n\
+               status   Report dependency, container, guest, and shared-directory status\n\
+               ensure   Ensure required environment dependencies are ready",
+        ),
+        (Some("env"), Some("status")) => Some(
+            "Usage: mendimaru env status\n\
+             \n\
+             Reports the current environment status without mutating it.",
+        ),
+        (Some("env"), Some("ensure")) => Some(
+            "Usage: mendimaru env ensure\n\
+             \n\
+             Ensures required environment dependencies are ready. Use\n\
+             --timeout-seconds to bound the operation.",
+        ),
+        (Some("studio"), None) => Some(
+            "Usage: mendimaru studio COMMAND\n\
+             \n\
+             Commands: list, install, uninstall, start, status, stop",
+        ),
+        (Some("studio"), Some("list")) => Some(
+            "Usage: mendimaru studio list\n\
+             \n\
+             Lists authoritative installed Studio Pro versions.",
+        ),
+        (Some("studio"), Some("install")) => Some(
+            "Usage: mendimaru studio install --version VERSION [--force-redownload]\n\
+             \n\
+             Installs an exact Studio Pro version. --force-redownload discards a\n\
+             matching cached installer; --ndjson emits download progress.",
+        ),
+        (Some("studio"), Some("uninstall")) => Some(
+            "Usage: mendimaru studio uninstall --version VERSION\n\
+             \n\
+             Uninstalls one exact Studio Pro version.",
+        ),
+        (Some("studio"), Some("start")) => Some(
+            "Usage: mendimaru studio start --version VERSION [--project-id PROJECT_ID]\n\
+             \n\
+             Starts Studio Pro. A project ID requires the exact declared version.",
+        ),
+        (Some("studio"), Some("status")) => Some(
+            "Usage: mendimaru studio status [--session-id STUDIO_SESSION_ID]\n\
+             \n\
+             Without --session-id, reports all Studio sessions. With it, reports\n\
+             one selected session. Linux first checks the trusted session keeper.",
+        ),
+        (Some("studio"), Some("stop")) => Some(
+            "Usage: mendimaru studio stop --session-id STUDIO_SESSION_ID\n\
+             \n\
+             Stops the selected Studio session through its verified process identity.",
+        ),
+        (Some("runtime"), None) => Some(
+            "Usage: mendimaru runtime COMMAND\n\
+             \n\
+             Commands: build, start, status, wait, url, stop, logs",
+        ),
+        (Some("runtime"), Some("build")) => Some(
+            "Usage: mendimaru runtime build --project-id PROJECT_ID [--clean]\n\
+             \n\
+             Builds the portable Runtime package for the project's exact version.\n\
+             --clean rebuilds only that project's cached package.",
+        ),
+        (Some("runtime"), Some("start")) => Some(
+            "Usage: mendimaru runtime start --project-id PROJECT_ID [--clean] [--mode portable]\n\
+             Usage: mendimaru runtime start --mode studio-run-locally [--guest-port PORT]\n\
+                    [--studio-session-id STUDIO_SESSION_ID]\n\
+             \n\
+             Portable mode requires a project ID. Studio Run Locally uses the\n\
+             Linux WinBoat adapter and optionally attaches to a live Studio session.",
+        ),
+        (Some("runtime"), Some("status")) => Some(
+            "Usage: mendimaru runtime status --session-id RUNTIME_SESSION_ID\n\
+             \n\
+             Reports the Runtime session state and forwarded port information.",
+        ),
+        (Some("runtime"), Some("wait")) => Some(
+            "Usage: mendimaru runtime wait --session-id RUNTIME_SESSION_ID\n\
+             \n\
+             Waits until Runtime is HTTP-ready, fails, or reaches the CLI timeout.",
+        ),
+        (Some("runtime"), Some("url")) => Some(
+            "Usage: mendimaru runtime url --session-id RUNTIME_SESSION_ID\n\
+             \n\
+             Returns a Runtime URL only after HTTP readiness is verified.",
+        ),
+        (Some("runtime"), Some("stop")) => Some(
+            "Usage: mendimaru runtime stop --session-id RUNTIME_SESSION_ID\n\
+             \n\
+             Stops the Runtime session and restores any managed port forwarding.",
+        ),
+        (Some("runtime"), Some("logs")) => Some(
+            "Usage: mendimaru runtime logs --session-id RUNTIME_SESSION_ID [--cursor CURSOR]\n\
+             \n\
+             Reads bounded diagnostic log entries. Secrets and raw paths are excluded.",
+        ),
+        (Some("browser"), None) => Some(
+            "Usage: mendimaru browser COMMAND\n\
+             \n\
+             Commands: doctor, install chromium, test, artifacts",
+        ),
+        (Some("browser"), Some("doctor")) => Some(
+            "Usage: mendimaru browser doctor\n\
+             \n\
+             Checks the browser test toolchain without installing anything.",
+        ),
+        (Some("browser"), Some("install")) => Some(
+            "Usage: mendimaru browser install chromium\n\
+             \n\
+             Installs the pinned Chromium browser used by browser tests.",
+        ),
+        (Some("browser"), Some("test")) => Some(
+            "Usage: mendimaru browser test (--base-url URL | --runtime-session-id ID)\n\
+                    --suite-path SUITE_JSON [options]\n\
+             \n\
+             Options include timeout controls, --record-video, --record-har,\n\
+             --fail-on-console-error, --fail-on-network-failure,\n\
+             --max-artifact-mib, and --retention-runs. See browser-testing.md.",
+        ),
+        (Some("browser"), Some("artifacts")) => Some(
+            "Usage: mendimaru browser artifacts --session-id BROWSER_SESSION_ID\n\
+             \n\
+             Exports retained artifacts for a browser test session.",
+        ),
+        (Some("project"), None) => Some(
+            "Usage: mendimaru project COMMAND\n\
+             \n\
+             Commands: list, version",
+        ),
+        (Some("project"), Some("list")) => Some(
+            "Usage: mendimaru project list\n\
+             \n\
+             Lists projects in the configured workspace using opaque project IDs.",
+        ),
+        (Some("project"), Some("version")) => Some(
+            "Usage: mendimaru project version --project-id PROJECT_ID\n\
+             \n\
+             Resolves the exact Studio Pro version declared by a project.",
+        ),
+        (Some("operation"), None) => Some(
+            "Usage: mendimaru operation COMMAND\n\
+             \n\
+             Commands: list, status, retry",
+        ),
+        (Some("operation"), Some("list")) => Some(
+            "Usage: mendimaru operation list\n\
+             \n\
+             Lists persistent operation history.",
+        ),
+        (Some("operation"), Some("status")) => Some(
+            "Usage: mendimaru operation status --operation-id OPERATION_ID\n\
+             \n\
+             Inspects one persistent operation and its safe diagnostic summary.",
+        ),
+        (Some("operation"), Some("retry")) => Some(
+            "Usage: mendimaru operation retry --operation-id OPERATION_ID\n\
+             \n\
+             Retries only operations recorded as safely resumable.",
+        ),
+        _ => None,
+    }
 }
 
 fn unknown_command_execution(arguments: &[OsString]) -> CliExecution {
@@ -2096,9 +2310,71 @@ mod tests {
     }
 
     #[test]
+    fn help_covers_the_complete_command_tree_without_backend_output() {
+        let command_tree = [
+            vec!["capabilities"],
+            vec!["env"],
+            vec!["env", "status"],
+            vec!["env", "ensure"],
+            vec!["studio"],
+            vec!["studio", "list"],
+            vec!["studio", "install"],
+            vec!["studio", "uninstall"],
+            vec!["studio", "start"],
+            vec!["studio", "status"],
+            vec!["studio", "stop"],
+            vec!["runtime"],
+            vec!["runtime", "build"],
+            vec!["runtime", "start"],
+            vec!["runtime", "status"],
+            vec!["runtime", "wait"],
+            vec!["runtime", "url"],
+            vec!["runtime", "stop"],
+            vec!["runtime", "logs"],
+            vec!["browser"],
+            vec!["browser", "doctor"],
+            vec!["browser", "install"],
+            vec!["browser", "test"],
+            vec!["browser", "artifacts"],
+            vec!["project"],
+            vec!["project", "list"],
+            vec!["project", "version"],
+            vec!["operation"],
+            vec!["operation", "list"],
+            vec!["operation", "status"],
+            vec!["operation", "retry"],
+        ];
+        for command in command_tree {
+            let mut arguments = args(&command);
+            arguments.push("--help".into());
+            let execution = execute(&arguments).expect("command help execution");
+            assert_eq!(execution.exit_code, 0);
+            assert!(execution.stderr.is_empty());
+            assert!(
+                execution
+                    .stdout
+                    .contains(&format!("Usage: mendimaru {}", command.join(" "))),
+                "missing usage for {}",
+                command.join(" ")
+            );
+            assert!(!execution.stdout.contains("schemaVersion"));
+            assert!(!execution.stdout.contains("snapshotId"));
+        }
+    }
+
+    #[test]
+    fn global_flags_can_precede_subcommand_help() {
+        let execution =
+            execute(&args(&["--json", "env", "status", "--help"])).expect("help after flags");
+        assert_eq!(execution.exit_code, 0);
+        assert!(execution.stdout.contains("Usage: mendimaru env status"));
+        assert!(execution.stderr.is_empty());
+    }
+
+    #[test]
     fn unrelated_arguments_continue_to_the_desktop_app() {
         assert_eq!(execute(&[]), None);
-        assert_eq!(execute(&args(&["project.mpr"])), None);
+        assert!(execute(&args(&["project.mpr"])).is_some());
     }
 
     #[test]

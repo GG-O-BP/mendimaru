@@ -71,6 +71,32 @@ fn real_binary_rejects_unknown_commands_immediately_without_backend_context() {
 }
 
 #[test]
+fn real_binary_prints_subcommand_help_without_machine_readable_errors() {
+    for command in [
+        "runtime start",
+        "runtime wait",
+        "studio status",
+        "browser install",
+        "operation retry",
+    ] {
+        let mut arguments = command.split(' ').collect::<Vec<_>>();
+        arguments.push("--help");
+        let output = run(&arguments);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty());
+        let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+        assert!(stdout.contains(&format!("Usage: mendimaru {command}")));
+        assert!(!stdout.contains("schemaVersion"));
+        assert!(!stdout.contains("snapshotId"));
+    }
+}
+
+#[test]
 fn real_binary_emits_a_complete_platform_neutral_capability_snapshot() {
     let output = run(&["capabilities", "--json", "--backend", current_backend()]);
     assert!(
