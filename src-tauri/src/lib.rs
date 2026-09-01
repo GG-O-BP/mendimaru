@@ -20,6 +20,7 @@ pub mod platform;
 mod portable_runtime;
 pub mod process;
 mod project_launches;
+mod project_watcher;
 mod projects;
 mod settings;
 mod studio_cache;
@@ -74,6 +75,7 @@ pub fn run() {
             get_projects,
             select_external_project,
             set_project_launch_preference,
+            set_project_favorite,
             start_winboat_windows,
             open_winboat,
             begin_winboat_setup,

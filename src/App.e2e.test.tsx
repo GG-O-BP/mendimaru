@@ -45,6 +45,7 @@ const mocks = vi.hoisted(() => ({
   getProjects: vi.fn(),
   selectExternalProject: vi.fn(),
   setProjectLaunchPreference: vi.fn(),
+  setProjectFavorite: vi.fn(),
   startWinBoatWindows: vi.fn(),
   openWinBoat: vi.fn(),
   beginWinBoatSetup: vi.fn(),
@@ -61,6 +62,7 @@ const mocks = vi.hoisted(() => ({
   openOperationLogs: vi.fn(),
   openFolder: vi.fn(),
   onStudioDownloadProgress: vi.fn(),
+  onWorkspaceProjectsChanged: vi.fn(),
   openDialog: vi.fn(),
   setWindowTitle: vi.fn(),
   writeClipboard: vi.fn(),
@@ -91,6 +93,7 @@ vi.mock("./api/tauri", () => ({
     getProjects: mocks.getProjects,
     selectExternalProject: mocks.selectExternalProject,
     setProjectLaunchPreference: mocks.setProjectLaunchPreference,
+    setProjectFavorite: mocks.setProjectFavorite,
     startWinBoatWindows: mocks.startWinBoatWindows,
     openWinBoat: mocks.openWinBoat,
     beginWinBoatSetup: mocks.beginWinBoatSetup,
@@ -107,6 +110,7 @@ vi.mock("./api/tauri", () => ({
     openOperationLogs: mocks.openOperationLogs,
     openFolder: mocks.openFolder,
     onStudioDownloadProgress: mocks.onStudioDownloadProgress,
+    onWorkspaceProjectsChanged: mocks.onWorkspaceProjectsChanged,
   },
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: mocks.openDialog }));
@@ -193,8 +197,24 @@ const project: MendixProject = {
   location: "configured-workspace",
   version: "11.12.2",
   launchPending: false,
+  favorite: false,
   lastModified: "2026-08-14T03:00:00Z",
 };
+
+function scanResult(projects: MendixProject[]) {
+  return {
+    sourceKey: config.sharedDirectory,
+    projects,
+    visitedEntries: projects.length,
+    skippedEntries: 0,
+    errorCount: 0,
+    errors: [],
+    settingsBytesRead: 0,
+    truncated: false,
+    durationMs: 0,
+    watcherActive: false,
+  };
+}
 
 const catalog: StudioVersionCatalog = {
   versions: [
@@ -261,9 +281,10 @@ beforeEach(() => {
       isLatest: false,
     }),
   );
-  mocks.getProjects.mockResolvedValue([project]);
+  mocks.getProjects.mockResolvedValue(scanResult([project]));
   mocks.selectExternalProject.mockResolvedValue(null);
   mocks.setProjectLaunchPreference.mockResolvedValue(undefined);
+  mocks.setProjectFavorite.mockResolvedValue(undefined);
   mocks.launchStudioPro.mockResolvedValue(undefined);
   mocks.reconnectStudioSession.mockImplementation(async (sessionId: string) => {
     sessions = sessions.map((session) =>
@@ -296,6 +317,7 @@ beforeEach(() => {
   mocks.openOperationLogs.mockResolvedValue(undefined);
   mocks.openFolder.mockResolvedValue(undefined);
   mocks.onStudioDownloadProgress.mockResolvedValue(vi.fn());
+  mocks.onWorkspaceProjectsChanged.mockResolvedValue(vi.fn());
   mocks.openDialog.mockResolvedValue(undefined);
   mocks.setWindowTitle.mockResolvedValue(undefined);
   mocks.writeClipboard.mockResolvedValue(undefined);
@@ -689,6 +711,7 @@ describe("native Windows application E2E", () => {
       location: "explicit-host-selection",
       version: "11.12.2",
       launchPending: false,
+      favorite: false,
       lastModified: "2026-08-31T03:00:00Z",
     };
     mocks.getConfig.mockResolvedValue(linuxConfig);
@@ -906,7 +929,7 @@ describe("native Windows application E2E", () => {
       preferredVersion: "10.24.9",
       launchPending: true,
     };
-    mocks.getProjects.mockResolvedValue([resumedProject]);
+    mocks.getProjects.mockResolvedValue(scanResult([resumedProject]));
     await renderReadyApp();
     fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
     await screen.findByText("Orders");
@@ -936,6 +959,7 @@ describe("native Windows application E2E", () => {
       resumedProject.mprPath,
       "10.24.9",
       false,
+      true,
     );
   });
 
@@ -981,6 +1005,7 @@ describe("native Windows application E2E", () => {
         project.mprPath,
         "11.12.2",
         false,
+        true,
       ),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -1082,7 +1107,7 @@ describe("native Windows application E2E", () => {
       preferredVersion: undefined,
       launchPending: false,
     };
-    mocks.getProjects.mockResolvedValue([unknownProject]);
+    mocks.getProjects.mockResolvedValue(scanResult([unknownProject]));
     await renderReadyApp();
     fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
     await screen.findByText("Orders");
@@ -1181,11 +1206,13 @@ describe("native Windows application E2E", () => {
       project.mprPath,
       "11.12.2",
       true,
+      false,
     );
     expect(mocks.setProjectLaunchPreference).toHaveBeenLastCalledWith(
       project.mprPath,
       "11.12.2",
       false,
+      true,
     );
   });
 

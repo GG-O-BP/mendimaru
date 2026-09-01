@@ -215,8 +215,25 @@ export interface MendixProject {
   version?: string;
   preferredVersion?: string;
   launchPending: boolean;
+  favorite: boolean;
+  lastLaunchedAt?: string;
   lastModified?: string;
 }
+
+export interface ProjectScanResult {
+  sourceKey: string;
+  projects: MendixProject[];
+  visitedEntries: number;
+  skippedEntries: number;
+  errorCount: number;
+  errors: string[];
+  settingsBytesRead: number;
+  truncated: boolean;
+  durationMs: number;
+  watcherActive: boolean;
+}
+
+export type ProjectSortKey = "modified" | "name" | "version" | "recent";
 
 export type ProjectLocation = keyof typeof enumValues.projectLocation;
 

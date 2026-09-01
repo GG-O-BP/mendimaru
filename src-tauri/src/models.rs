@@ -24,7 +24,7 @@ pub use marketplace::{DownloadableVersion, StudioVersionCatalog};
 pub use operation::{
     OperationError, OperationKind, OperationRecord, OperationStage, OperationState,
 };
-pub use projects::{MendixProject, ProjectLocation};
+pub use projects::{MendixProject, ProjectLocation, ProjectScanResult};
 pub use studio::{
     InstalledVersionsCache, StudioInstallPhase, StudioInstallProgress, StudioVersion, WinApp,
 };

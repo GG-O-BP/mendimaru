@@ -170,7 +170,7 @@ try {
       await elapsed(async () => {
         const projects = await client.invoke("get_projects");
         assert.equal(
-          projects.length,
+          projects.projects.length,
           fixture.workspaceTiers.small.projectCount,
         );
       }),
@@ -183,7 +183,7 @@ try {
       await elapsed(async () => {
         const projects = await client.invoke("get_projects");
         assert.equal(
-          projects.length,
+          projects.projects.length,
           fixture.workspaceTiers.large.projectCount,
         );
       }),

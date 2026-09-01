@@ -21,7 +21,8 @@ pub(crate) use localization::{
     set_language_preference,
 };
 pub(crate) use projects::{
-    get_projects, open_folder, select_external_project, set_project_launch_preference,
+    get_projects, open_folder, select_external_project, set_project_favorite,
+    set_project_launch_preference,
 };
 pub(crate) use studio::{
     cancel_studio_download, clear_operation_history, fetch_downloadable_versions,

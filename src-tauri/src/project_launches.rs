@@ -9,7 +9,8 @@ use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Manager};
 
 const STORE_FILE_NAME: &str = "project-launches.json";
-const STORE_SCHEMA_VERSION: &str = "1.0.0";
+const STORE_SCHEMA_VERSION: &str = "2.0.0";
+const LEGACY_STORE_SCHEMA_VERSION: &str = "1.0.0";
 const MAX_STORE_BYTES: u64 = 128 * 1024;
 const MAX_RECORDS: usize = 256;
 
@@ -37,6 +38,10 @@ struct ProjectLaunchRecord {
     project_key: String,
     selected_version: Option<String>,
     pending: bool,
+    #[serde(default)]
+    favorite: bool,
+    #[serde(default)]
+    last_launched_at: Option<DateTime<Utc>>,
     updated_at: DateTime<Utc>,
 }
 
@@ -55,6 +60,7 @@ pub(crate) fn remember(
     project_mpr_path: &str,
     selected_version: Option<&str>,
     pending: bool,
+    completed_launch: bool,
 ) -> Result<(), String> {
     remember_at(
         &store_path(app)?,
@@ -62,7 +68,17 @@ pub(crate) fn remember(
         project_mpr_path,
         selected_version,
         pending,
+        completed_launch,
     )
+}
+
+pub(crate) fn set_favorite(
+    app: &AppHandle,
+    config: &AppConfig,
+    project_mpr_path: &str,
+    favorite: bool,
+) -> Result<(), String> {
+    set_favorite_at(&store_path(app)?, config, project_mpr_path, favorite)
 }
 
 fn apply_preferences_at(
@@ -71,9 +87,11 @@ fn apply_preferences_at(
     projects: &mut [MendixProject],
 ) -> Result<(), String> {
     let _guard = lock_store()?;
-    let store = load_store(path)?;
+    let mut store = load_store(path)?;
+    let mut present_keys = HashSet::new();
     for project in projects {
         let key = project_key(config, &project.mpr_path)?;
+        present_keys.insert(key.clone());
         if let Some(record) = store
             .records
             .iter()
@@ -81,7 +99,18 @@ fn apply_preferences_at(
         {
             project.preferred_version = record.selected_version.clone();
             project.launch_pending = record.pending;
+            project.favorite = record.favorite;
+            project.last_launched_at = record
+                .last_launched_at
+                .map(|timestamp| timestamp.to_rfc3339());
         }
+    }
+    let record_count = store.records.len();
+    store
+        .records
+        .retain(|record| !record.favorite || present_keys.contains(&record.project_key));
+    if store.records.len() != record_count {
+        save_store(path, &store)?;
     }
     Ok(())
 }
@@ -92,6 +121,7 @@ fn remember_at(
     project_mpr_path: &str,
     selected_version: Option<&str>,
     pending: bool,
+    completed_launch: bool,
 ) -> Result<(), String> {
     let selected_version = selected_version
         .map(str::trim)
@@ -102,17 +132,66 @@ fn remember_at(
     let key = project_key(config, project_mpr_path)?;
     let _guard = lock_store()?;
     let mut store = load_store(path)?;
+    let existing = store
+        .records
+        .iter()
+        .find(|record| record.project_key == key)
+        .cloned();
     store.records.retain(|record| record.project_key != key);
+    let now = Utc::now();
     store.records.push(ProjectLaunchRecord {
         project_key: key,
         selected_version: selected_version.map(ToString::to_string),
-        pending,
-        updated_at: Utc::now(),
+        pending: pending && !completed_launch,
+        favorite: existing.as_ref().is_some_and(|record| record.favorite),
+        last_launched_at: if completed_launch {
+            Some(now)
+        } else {
+            existing.and_then(|record| record.last_launched_at)
+        },
+        updated_at: now,
     });
     store
         .records
         .sort_by_key(|record| std::cmp::Reverse(record.updated_at));
     store.records.truncate(MAX_RECORDS);
+    save_store(path, &store)
+}
+
+fn set_favorite_at(
+    path: &Path,
+    config: &AppConfig,
+    project_mpr_path: &str,
+    favorite: bool,
+) -> Result<(), String> {
+    let key = project_key(config, project_mpr_path)?;
+    let _guard = lock_store()?;
+    let mut store = load_store(path)?;
+    let Some(record) = store
+        .records
+        .iter_mut()
+        .find(|record| record.project_key == key)
+    else {
+        let now = Utc::now();
+        store.records.push(ProjectLaunchRecord {
+            project_key: key,
+            selected_version: None,
+            pending: false,
+            favorite,
+            last_launched_at: None,
+            updated_at: now,
+        });
+        store
+            .records
+            .sort_by_key(|record| std::cmp::Reverse(record.updated_at));
+        store.records.truncate(MAX_RECORDS);
+        return save_store(path, &store);
+    };
+    record.favorite = favorite;
+    record.updated_at = Utc::now();
+    store
+        .records
+        .sort_by_key(|record| std::cmp::Reverse(record.updated_at));
     save_store(path, &store)
 }
 
@@ -150,11 +229,18 @@ fn load_store(path: &Path) -> Result<ProjectLaunchStore, String> {
     let store = serde_json::from_slice::<ProjectLaunchStore>(&content)
         .map_err(|error| format!("project launch preferences are invalid: {error}"))?;
     validate_store(&store)?;
+    let mut store = store;
+    if store.schema_version == LEGACY_STORE_SCHEMA_VERSION {
+        store.schema_version = STORE_SCHEMA_VERSION.to_string();
+    }
     Ok(store)
 }
 
 fn validate_store(store: &ProjectLaunchStore) -> Result<(), String> {
-    if store.schema_version != STORE_SCHEMA_VERSION || store.records.len() > MAX_RECORDS {
+    if (store.schema_version != STORE_SCHEMA_VERSION
+        && store.schema_version != LEGACY_STORE_SCHEMA_VERSION)
+        || store.records.len() > MAX_RECORDS
+    {
         return Err("project launch preferences use an unsupported shape".into());
     }
     let mut keys = HashSet::new();
@@ -170,6 +256,16 @@ fn validate_store(store: &ProjectLaunchStore) -> Result<(), String> {
         }
         if let Some(version) = &record.selected_version {
             crate::platform::validate_version(version)?;
+        }
+        if let Some(launched_at) = record.last_launched_at {
+            if launched_at > Utc::now() {
+                return Err("project launch preferences contain an invalid launch time".into());
+            }
+        }
+        if (record.favorite || record.last_launched_at.is_some())
+            && store.schema_version == LEGACY_STORE_SCHEMA_VERSION
+        {
+            return Err("project launch preferences contain an invalid schema".into());
         }
     }
     Ok(())
@@ -305,8 +401,8 @@ fn lock_store() -> Result<std::sync::MutexGuard<'static, ()>, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_preferences_at, load_store, remember_at, save_store, ProjectLaunchRecord,
-        ProjectLaunchStore, MAX_RECORDS, STORE_SCHEMA_VERSION,
+        apply_preferences_at, load_store, remember_at, save_store, set_favorite_at,
+        ProjectLaunchRecord, ProjectLaunchStore, MAX_RECORDS, STORE_SCHEMA_VERSION,
     };
     use crate::models::{AppConfig, ContainerRuntime, MendixProject};
     use chrono::{Duration, Utc};
@@ -347,6 +443,8 @@ mod tests {
             version: None,
             preferred_version: None,
             launch_pending: false,
+            favorite: false,
+            last_launched_at: None,
             last_modified: None,
         }
     }
@@ -359,6 +457,7 @@ mod tests {
         let mpr = project_directory.join("Orders.mpr");
         fs::write(&mpr, b"fixture").expect("project fixture");
         let store_path = temporary.path().join("config/project-launches.json");
+        fs::create_dir_all(store_path.parent().expect("store parent")).expect("store parent");
         let config = config(temporary.path());
 
         remember_at(
@@ -367,6 +466,7 @@ mod tests {
             &mpr.to_string_lossy(),
             Some("11.12.2"),
             true,
+            false,
         )
         .expect("remember preference");
         let serialized = fs::read_to_string(&store_path).expect("preference file");
@@ -397,6 +497,7 @@ mod tests {
             &outside_project.to_string_lossy(),
             Some("11.12.2"),
             true,
+            false,
         )
         .expect("outside preference");
         let serialized = fs::read_to_string(&store_path).expect("preference store");
@@ -411,6 +512,7 @@ mod tests {
             &inside.to_string_lossy(),
             Some("../11.12.2"),
             true,
+            false,
         )
         .is_err());
 
@@ -436,6 +538,8 @@ mod tests {
                 project_key: format!("{index:064x}"),
                 selected_version: Some("11.12.2".into()),
                 pending: index % 2 == 0,
+                favorite: false,
+                last_launched_at: None,
                 updated_at: now - Duration::seconds(index as i64),
             })
             .collect();
@@ -455,6 +559,7 @@ mod tests {
             &mpr.to_string_lossy(),
             Some("11.13.0"),
             true,
+            false,
         )
         .expect("remember bounded preference");
         assert_eq!(
@@ -464,6 +569,89 @@ mod tests {
                 .len(),
             MAX_RECORDS
         );
+    }
+
+    #[test]
+    fn migrates_legacy_preferences_and_preserves_launch_metadata() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let project_directory = temporary.path().join("Orders");
+        fs::create_dir(&project_directory).expect("project directory");
+        let mpr = project_directory.join("Orders.mpr");
+        fs::write(&mpr, b"fixture").expect("project fixture");
+        let store_path = temporary.path().join("config/project-launches.json");
+        let config = config(temporary.path());
+        fs::create_dir_all(store_path.parent().expect("store parent")).expect("store parent");
+        fs::write(
+            &store_path,
+            br#"{"schemaVersion":"1.0.0","records":[{"projectKey":"0000000000000000000000000000000000000000000000000000000000000000","selectedVersion":"11.12.2","pending":true,"updatedAt":"2026-01-01T00:00:00Z"}]}"#,
+        )
+        .expect("legacy store");
+
+        let migrated = load_store(&store_path).expect("legacy preferences");
+        assert_eq!(migrated.schema_version, STORE_SCHEMA_VERSION);
+        assert!(!migrated.records[0].favorite);
+        assert!(migrated.records[0].last_launched_at.is_none());
+
+        remember_at(
+            &store_path,
+            &config,
+            &mpr.to_string_lossy(),
+            Some("11.12.2"),
+            true,
+            false,
+        )
+        .expect("remember preference");
+        set_favorite_at(&store_path, &config, &mpr.to_string_lossy(), true)
+            .expect("favorite preference");
+        remember_at(
+            &store_path,
+            &config,
+            &mpr.to_string_lossy(),
+            Some("11.12.2"),
+            false,
+            true,
+        )
+        .expect("completed launch");
+
+        let mut projects = vec![project(&mpr)];
+        apply_preferences_at(&store_path, &config, &mut projects).expect("apply preference");
+        assert!(projects[0].favorite);
+        assert!(projects[0].last_launched_at.is_some());
+        assert!(!projects[0].launch_pending);
+
+        let records = load_store(&store_path)
+            .expect("current preference store")
+            .records;
+        assert_eq!(records.len(), 2);
+        assert!(records[0].favorite);
+        assert!(records[0].last_launched_at.is_some());
+    }
+
+    #[test]
+    fn removes_favorites_that_are_no_longer_discovered() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let orders_directory = temporary.path().join("Orders");
+        let inventory_directory = temporary.path().join("Inventory");
+        fs::create_dir(&orders_directory).expect("orders directory");
+        fs::create_dir(&inventory_directory).expect("inventory directory");
+        let orders = orders_directory.join("Orders.mpr");
+        let inventory = inventory_directory.join("Inventory.mpr");
+        fs::write(&orders, b"fixture").expect("orders fixture");
+        fs::write(&inventory, b"fixture").expect("inventory fixture");
+        let store_path = temporary.path().join("config/project-launches.json");
+        let config = config(temporary.path());
+
+        set_favorite_at(&store_path, &config, &orders.to_string_lossy(), true)
+            .expect("favorite orders");
+        set_favorite_at(&store_path, &config, &inventory.to_string_lossy(), true)
+            .expect("favorite inventory");
+        let mut projects = vec![project(&orders)];
+        apply_preferences_at(&store_path, &config, &mut projects).expect("apply favorites");
+
+        let records = load_store(&store_path).expect("pruned store").records;
+        assert_eq!(records.len(), 1);
+        assert!(projects[0].favorite);
+        assert!(!projects[0].last_launched_at.is_some());
     }
 
     #[cfg(unix)]

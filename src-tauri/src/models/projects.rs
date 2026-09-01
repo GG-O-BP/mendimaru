@@ -18,5 +18,22 @@ pub struct MendixProject {
     pub version: Option<String>,
     pub preferred_version: Option<String>,
     pub launch_pending: bool,
+    pub favorite: bool,
+    pub last_launched_at: Option<String>,
     pub last_modified: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectScanResult {
+    pub source_key: String,
+    pub projects: Vec<MendixProject>,
+    pub visited_entries: usize,
+    pub skipped_entries: usize,
+    pub error_count: usize,
+    pub errors: Vec<String>,
+    pub settings_bytes_read: u64,
+    pub truncated: bool,
+    pub duration_ms: u64,
+    pub watcher_active: bool,
 }

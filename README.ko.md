@@ -139,6 +139,8 @@ Linux WinBoat 모드에서는 Studio Pro 실행 버튼이 Windows 프로세스�
 
 Linux 공유 디렉터리는 WinBoat Compose의 `<host path>:/shared` 마운트와 연결됩니다. 프로젝트 목록은 이 디렉터리만 탐색하며 `.git`, `node_modules`, `deployment`, `.mendix-cache`, `.mendimaru` 같은 생성·캐시 디렉터리는 제외합니다.
 
+프로젝트 탐색은 UI backend 경로를 점유하지 않고 depth 8, 최대 100,000 entry, 10,000 프로젝트, `project-settings.user.json` 개별 256 KiB, 전체 16 MiB, 5초 제한 안에서 실행합니다. 더 큰 tree나 읽을 수 없는/일반 파일이 아닌 settings는 조용한 성공이 아니라 skipped/error 개수가 있는 부분 결과로 전달하며, UI는 처음 100개를 표시하고 더 보기를 제공합니다. watcher event는 debounce·합침되고, watcher를 쓸 수 없으면 30초 fallback(watcher 안전망 5분)으로 갱신합니다. 이전 워크스페이스 응답은 새 워크스페이스 결과를 덮어쓸 수 없습니다. 즐겨찾기와 최근 실행 시각은 해시된 프로젝트 identity만 저장하며, 더 이상 발견되지 않는 즐겨찾기는 자동 정리합니다.
+
 Projects 화면에서는 이 워크스페이스 밖의 `.mpr` 하나를 명시적으로 선택해 열 수도 있습니다. Mendimaru는 선택 경로를 canonicalize하고 파일 또는 상위 경로의 symlink를 거부한 뒤, `.mpr`의 직접 부모 디렉터리만 동일한 retained RemoteApp 연결의 쓰기 가능한 세션 단위 FreeRDP drive로 연결합니다. 프로젝트를 복사·동기화하거나 Compose에 추가하지 않으며 일반 프로젝트 목록에도 영구 등록하지 않습니다. Windows에서 redirected `.mpr`이 실제 파일로 보일 때까지 최대 30초 확인한 후 정확한 Studio Pro를 시작하므로 저장 내용은 원래 Linux 프로젝트에 반영됩니다.
 
 공유 이름은 경로 digest에서 만든 길이가 제한된 ASCII 값이며 호스트 디렉터리 이름을 노출하지 않습니다. GUI 선택 결과에는 해당 digest에서 만든 범위가 제한된 현재 프로세스 토큰만 전달하고, 원시 Linux 경로는 직렬화 선택·실행 DTO, operation history, session DTO, Windows report, 진단 또는 로그에 기록하지 않습니다. Studio Pro를 종료하면 retained FreeRDP 프로세스와 임시 drive도 종료됩니다. 앱이나 RemoteApp 연결이 먼저 끝나 임시 drive가 사라진 세션은 자동 재연결 가능으로 표시하지 않습니다. 해당 세션을 종료하거나 같은 `.mpr`을 다시 선택해 보호된 새 실행을 시작해야 합니다. 쉼표, 백슬래시, 줄바꿈, 비 UTF-8 경로, 파일시스템 루트, 홈 전체 또는 읽기 전용 프로젝트 디렉터리는 안전하게 표현하거나 범위를 제한할 수 없어 실행 전에 거부합니다.
