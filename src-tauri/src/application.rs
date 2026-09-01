@@ -185,8 +185,9 @@ pub(crate) async fn reconnect_session(
     session_id: &str,
 ) -> ApplicationResult<()> {
     let session = crate::platform::studio_session_status(config, session_id).await?;
+    let conflict_capability = CapabilityId::StudioStatus;
     let _guard = SessionActionGuard::begin_with_paths(paths, config, &session.version)
-        .map_err(session_conflict_error)?;
+        .map_err(move |message| session_conflict_error(message, conflict_capability))?;
     Ok(crate::platform::reconnect_studio_session(config, session_id).await?)
 }
 
@@ -196,8 +197,9 @@ pub(crate) async fn stop_session(
     session_id: &str,
 ) -> ApplicationResult<()> {
     let session = crate::platform::studio_session_status(config, session_id).await?;
+    let conflict_capability = CapabilityId::StudioStop;
     let _guard = SessionActionGuard::begin_with_paths(paths, config, &session.version)
-        .map_err(session_conflict_error)?;
+        .map_err(move |message| session_conflict_error(message, conflict_capability))?;
     Ok(crate::platform::stop_studio_session(config, session_id).await?)
 }
 
@@ -825,9 +827,9 @@ fn ensure_no_connected_remote_app_version(
     Ok(())
 }
 
-fn session_conflict_error(_message: String) -> CommandError {
+fn session_conflict_error(_message: String, capability: CapabilityId) -> CommandError {
     precondition_error(
-        CapabilityId::StudioStatus,
+        capability,
         "another action for this Studio Pro version is already running",
         true,
     )
@@ -908,7 +910,8 @@ mod tests {
     use super::{
         ensure_no_connected_remote_app_version, ensure_version_not_installed,
         exact_project_launch_path, invalidate_installed_versions_cache_after_mutation,
-        launch_project, operation, project, projects, SafeEnvironmentStatus,
+        launch_project, operation, project, projects, session_conflict_error,
+        SafeEnvironmentStatus,
     };
     #[cfg(target_os = "linux")]
     use super::{launch, resolve_project_reference};
@@ -941,6 +944,29 @@ mod tests {
             windows_studio_paths: Vec::new(),
             startup_timeout_seconds: 1,
         }
+    }
+
+    #[test]
+    fn session_action_conflicts_report_the_requested_capability() {
+        let stop = session_conflict_error("fixture conflict".into(), CapabilityId::StudioStop);
+        let reconnect =
+            session_conflict_error("fixture conflict".into(), CapabilityId::StudioStatus);
+
+        assert_eq!(
+            stop.details
+                .as_ref()
+                .expect("stop conflict details")
+                .capability,
+            Some(CapabilityId::StudioStop)
+        );
+        assert_eq!(
+            reconnect
+                .details
+                .as_ref()
+                .expect("reconnect conflict details")
+                .capability,
+            Some(CapabilityId::StudioStatus)
+        );
     }
 
     #[test]
