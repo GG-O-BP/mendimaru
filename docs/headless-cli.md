@@ -36,10 +36,10 @@ mendimaru operation status --operation-id OPERATION_ID
 mendimaru operation retry --operation-id OPERATION_ID
 ```
 
-`mendimaru --help` (or `mendimaru -h`) prints this command summary immediately
-and exits `0`. Help is handled before localization, configuration, capability
-snapshot creation, or backend access, so it also works while WinBoat and the
-guest are offline.
+`mendimaru --help` (or `mendimaru -h`) prints this command summary immediately,
+and `COMMAND --help` prints command-specific usage. Both exit `0`. Help is
+handled before localization, configuration, capability snapshot creation, or
+backend access, so it also works while WinBoat and the guest are offline.
 
 An unrecognized command never falls back to the desktop application. It fails
 immediately with exit code `2`, one machine-readable error envelope, a null
