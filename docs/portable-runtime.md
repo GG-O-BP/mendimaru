@@ -96,6 +96,11 @@ Logs are returned in bounded batches. When `truncated` is true, pass
 public artifacts use opaque `artifact_<random>` IDs and
 `mendimaru-cache://...` locations.
 
+Failure transitions record a stable diagnostic line containing the failure
+code, safe reason, last HTTP-readiness result, and WinBoat linked Studio
+session state. Repeated observations of the same failure do not duplicate that
+line.
+
 ## Cache and clean rebuilds
 
 The cache key includes the project content digest, exact Mendix version,
