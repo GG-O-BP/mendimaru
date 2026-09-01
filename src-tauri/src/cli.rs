@@ -828,19 +828,22 @@ async fn run_command(
                 return CommandOutput::data(orphan_studio_sessions(sessions, &owned));
             }
             #[cfg(target_os = "linux")]
-            let _ = refresh;
-            if let Some(session_id) = session_id {
-                if let Some(session) = keeper_session(&paths, session_id).await? {
-                    let mut output = CommandOutput::data(&session)?;
-                    output.studio_session_id = Some(session.session_id);
-                    return Ok(output);
-                }
-            } else {
-                let sessions = keeper_sessions(&paths).await?;
-                if !sessions.is_empty() || !*refresh {
-                    return CommandOutput::data(sessions);
+            {
+                if let Some(session_id) = session_id {
+                    if let Some(session) = keeper_session(&paths, session_id).await? {
+                        let mut output = CommandOutput::data(&session)?;
+                        output.studio_session_id = Some(session.session_id);
+                        return Ok(output);
+                    }
+                } else {
+                    let sessions = keeper_sessions(&paths).await?;
+                    if !sessions.is_empty() || !*refresh {
+                        return CommandOutput::data(sessions);
+                    }
                 }
             }
+            #[cfg(not(target_os = "linux"))]
+            let _ = refresh;
             if let Some(session_id) = session_id {
                 let session = crate::application::studio_session(&config, session_id).await?;
                 let mut output = CommandOutput::data(&session)?;
