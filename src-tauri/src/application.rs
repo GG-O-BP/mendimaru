@@ -259,6 +259,9 @@ pub(crate) async fn runtime_start(
                     "project build options are not accepted in studio-run-locally mode",
                 ));
             }
+            if let Some(studio_session_id) = studio_session_id {
+                crate::platform::studio_session_status(config, studio_session_id).await?;
+            }
             (None, crate::contracts::secure_identifier("session")?, None)
         }
         RuntimeMode::ExternalUrl => {
@@ -910,7 +913,7 @@ mod tests {
     use super::{
         ensure_no_connected_remote_app_version, ensure_version_not_installed,
         exact_project_launch_path, invalidate_installed_versions_cache_after_mutation,
-        launch_project, operation, project, projects, session_conflict_error,
+        launch_project, operation, project, projects, runtime_start, session_conflict_error,
         SafeEnvironmentStatus,
     };
     #[cfg(target_os = "linux")]
@@ -966,6 +969,32 @@ mod tests {
                 .expect("reconnect conflict details")
                 .capability,
             Some(CapabilityId::StudioStatus)
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn studio_run_locally_validates_the_studio_session_before_runtime_storage() {
+        crate::i18n::initialize("en-US").expect("localization");
+        let temporary = tempfile::tempdir().expect("temporary runtime root");
+        let cache = temporary.path().join("cache");
+        std::env::set_var("MENDIMARU_CACHE_DIR", &cache);
+        let result = tauri::async_runtime::block_on(runtime_start(
+            &config(temporary.path()),
+            None,
+            false,
+            crate::contracts::RuntimeMode::StudioRunLocally,
+            Some("not-a-studio-session"),
+            None,
+            std::time::Duration::from_secs(5),
+        ));
+        std::env::remove_var("MENDIMARU_CACHE_DIR");
+
+        let error = result.expect_err("the malformed Studio session is rejected");
+        assert_eq!(error.code, CommandErrorCode::InvalidRequest);
+        assert!(
+            !cache.join("winboat-runtime/sessions").exists(),
+            "rejected Runtime start must not create session storage"
         );
     }
 
