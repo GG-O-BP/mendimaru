@@ -52,6 +52,25 @@ fn real_binary_prints_root_help_without_a_capability_snapshot() {
 }
 
 #[test]
+fn real_binary_rejects_unknown_commands_immediately_without_backend_context() {
+    let output = run(&["status", "--json"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    let json: Value = serde_json::from_str(&stderr).expect("stderr is one JSON document");
+    assert_eq!(json["command"], "unknown");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["sessionId"], "session_unavailable");
+    assert_eq!(json["capabilitySnapshot"], Value::Null);
+    assert_eq!(json["error"]["code"], "invalid_request");
+    assert_eq!(json["error"]["retryable"], false);
+    assert!(json["error"]["message"]
+        .as_str()
+        .expect("message is a string")
+        .contains("'env status'"));
+}
+
+#[test]
 fn real_binary_emits_a_complete_platform_neutral_capability_snapshot() {
     let output = run(&["capabilities", "--json", "--backend", current_backend()]);
     assert!(

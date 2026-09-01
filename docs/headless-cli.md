@@ -41,6 +41,11 @@ and exits `0`. Help is handled before localization, configuration, capability
 snapshot creation, or backend access, so it also works while WinBoat and the
 guest are offline.
 
+An unrecognized command never falls back to the desktop application. It fails
+immediately with exit code `2`, one machine-readable error envelope, a null
+capability snapshot, and a safe command hint. For example, `mendimaru status`
+points the caller to `env status` or `studio status`.
+
 All commands default to one JSON result. `--json` selects that format
 explicitly. `--ndjson` emits zero or more structured progress events followed
 by one result for long-running install and retry commands. Global flags may be
