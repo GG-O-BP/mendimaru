@@ -47,6 +47,12 @@ and `httpReady`. `state=ready` always implies `httpReady=true` and a loopback
 again; a changed dynamic host port replaces the stored URL only after the new
 endpoint passes HTTP readiness.
 
+While `runtime status` and `runtime wait` poll for readiness, they use only the
+forwarded application HTTP endpoint. They do not repeatedly open RemoteApp or
+query Windows sessions; an authenticated Windows diagnosis runs once only after
+the bounded wait expires. Future readiness watchers must preserve this
+isolation so monitoring cannot disturb the interactive Studio session.
+
 ## Failure and recovery
 
 Compose application is transactional. If recreation, guest startup, binding
