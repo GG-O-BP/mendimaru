@@ -252,6 +252,12 @@ struct SessionKeeperIpcResponse {
 /// `None` means that the process should continue as the desktop application.
 pub fn dispatch_from_env() -> Option<i32> {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if matches!(
+        arguments.first().and_then(|value| value.to_str()),
+        Some("--help" | "-h")
+    ) {
+        return Some(write_cli_execution(root_help_execution()));
+    }
     if arguments.first().and_then(|value| value.to_str()) == Some("__runtime-supervisor") {
         return Some(crate::portable_runtime::supervisor_dispatch(
             &arguments[1..],
@@ -269,6 +275,16 @@ pub fn dispatch_from_env() -> Option<i32> {
         let _ = std::io::stderr().write_all(execution.stderr.as_bytes());
     }
     Some(execution.exit_code)
+}
+
+fn write_cli_execution(execution: CliExecution) -> i32 {
+    if !execution.stdout.is_empty() {
+        let _ = std::io::stdout().write_all(execution.stdout.as_bytes());
+    }
+    if !execution.stderr.is_empty() {
+        let _ = std::io::stderr().write_all(execution.stderr.as_bytes());
+    }
+    execution.exit_code
 }
 
 fn execute(arguments: &[OsString]) -> Option<CliExecution> {
@@ -324,6 +340,61 @@ fn execute(arguments: &[OsString]) -> Option<CliExecution> {
         ),
     })
 }
+
+fn root_help_execution() -> CliExecution {
+    CliExecution {
+        exit_code: EXIT_OK,
+        stdout: format!("{}\n", ROOT_HELP),
+        stderr: String::new(),
+    }
+}
+
+const ROOT_HELP: &str = "\
+Mendimaru headless CLI
+
+Usage: mendimaru [--json | --ndjson] [--backend ID] [--timeout-seconds SECONDS] COMMAND
+
+Commands:
+  capabilities                     Print the backend capability snapshot
+  env status                       Report the current environment status
+  env ensure                       Ensure required environment dependencies are ready
+  studio list                      List installed Studio Pro versions
+  studio install --version VERSION Install an exact Studio Pro version
+  studio uninstall --version VERSION
+                                    Uninstall an exact Studio Pro version
+  studio start --version VERSION  Start Studio Pro
+  studio status [--session-id ID] Report Studio sessions
+  studio stop --session-id ID      Stop a Studio session
+  runtime build --project-id ID   Build a portable Runtime package
+  runtime start [...]             Start Runtime (portable or Studio Run Locally)
+  runtime status --session-id ID  Report a Runtime session
+  runtime wait --session-id ID    Wait for Runtime readiness
+  runtime url --session-id ID     Print a readiness-verified Runtime URL
+  runtime stop --session-id ID    Stop a Runtime session
+  runtime logs --session-id ID    Read bounded Runtime diagnostic logs
+  browser doctor                  Check the browser test toolchain
+  browser install chromium        Install the pinned Chromium test browser
+  browser test [...]              Run a browser test suite
+  browser artifacts --session-id ID
+                                    Export retained browser test artifacts
+  project list                    List projects in the configured workspace
+  project version --project-id ID
+                                    Resolve a project's exact Studio version
+  operation list                  List persistent operations
+  operation status --operation-id ID
+                                    Inspect a persistent operation
+  operation retry --operation-id ID
+                                    Retry a safe terminal operation
+
+Global options:
+  --json                            Emit one JSON response document (default)
+  --ndjson                          Emit progress as newline-delimited JSON
+  --backend ID                      Select linux-winboat, windows-native, or mac-native
+  --timeout-seconds SECONDS         Bound a command from 1 through 3600 seconds
+  --help, -h                        Show this help
+
+Exit codes: 0 success, 1 operation failure, 2 invalid command, 3 backend unavailable.
+See docs/headless-cli.md for command-specific options and response schemas.";
 
 async fn run_command(
     command: &CliCommand,

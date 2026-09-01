@@ -32,6 +32,26 @@ fn mismatched_backend() -> &'static str {
 }
 
 #[test]
+fn real_binary_prints_root_help_without_a_capability_snapshot() {
+    for help in ["--help", "-h"] {
+        let output = run(&[help]);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty());
+        let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+        assert!(stdout.contains("Mendimaru headless CLI"));
+        assert!(stdout.contains("env status"));
+        assert!(stdout.contains("Exit codes: 0 success"));
+        assert!(!stdout.contains("capabilitySnapshot"));
+        assert!(!stdout.contains("snapshotId"));
+    }
+}
+
+#[test]
 fn real_binary_emits_a_complete_platform_neutral_capability_snapshot() {
     let output = run(&["capabilities", "--json", "--backend", current_backend()]);
     assert!(
