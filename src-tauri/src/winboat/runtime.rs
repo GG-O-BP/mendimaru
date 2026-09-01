@@ -382,10 +382,16 @@ pub(crate) async fn wait(config: &AppConfig, session_id: &str) -> BackendResult<
     }
 
     let code = diagnose_unready_runtime(config, &record).await;
+    let previous_failure = (record.state, record.failure_code);
     record.state = RuntimeState::Failed;
     record.http_ready = false;
     record.failure_code = Some(code);
-    append_log(&directory, diagnostic_log_message(code));
+    append_failure_diagnostic(
+        &directory,
+        &record,
+        previous_failure,
+        diagnostic_log_message(code),
+    );
     write_record(&directory, &record)
         .map_err(|_| record_error(&record, CapabilityId::RuntimeWait))?;
     Err(record_error(&record, CapabilityId::RuntimeWait))
@@ -544,10 +550,17 @@ async fn refresh(
     record: &mut SessionRecord,
 ) -> BackendResult<()> {
     if !guest_is_online(config).await {
+        let previous_failure = (record.state, record.failure_code);
         record.state = RuntimeState::Failed;
         record.http_ready = false;
         record.failure_code = Some(BackendErrorCode::RuntimeGuestOffline);
         record.studio_state = StudioProcessState::Unknown;
+        append_failure_diagnostic(
+            directory,
+            record,
+            previous_failure,
+            "Guest API health probe failed.",
+        );
         write_record(directory, record)
             .map_err(|_| record_error(record, CapabilityId::RuntimeStatus))?;
         return Ok(());
@@ -555,18 +568,34 @@ async fn refresh(
     let binding = match runtime_host_binding(config, record.guest_port).await {
         Ok(binding) => binding,
         Err(_) => {
+            let code = BackendErrorCode::RuntimePortForwardingInvalid;
+            let previous_failure = (record.state, record.failure_code);
             record.state = RuntimeState::Failed;
             record.http_ready = false;
-            record.failure_code = Some(BackendErrorCode::RuntimePortForwardingInvalid);
+            record.failure_code = Some(code);
+            append_failure_diagnostic(
+                directory,
+                record,
+                previous_failure,
+                "The loopback Runtime host binding could not be inspected.",
+            );
             write_record(directory, record)
                 .map_err(|_| record_error(record, CapabilityId::RuntimeStatus))?;
             return Ok(());
         }
     };
     if binding.host_ip != "127.0.0.1" || binding.guest_port != record.guest_port {
+        let code = BackendErrorCode::RuntimePortForwardingInvalid;
+        let previous_failure = (record.state, record.failure_code);
         record.state = RuntimeState::Failed;
         record.http_ready = false;
-        record.failure_code = Some(BackendErrorCode::RuntimePortForwardingInvalid);
+        record.failure_code = Some(code);
+        append_failure_diagnostic(
+            directory,
+            record,
+            previous_failure,
+            "The loopback Runtime host binding did not match the recorded guest port.",
+        );
         write_record(directory, record)
             .map_err(|_| record_error(record, CapabilityId::RuntimeStatus))?;
         return Ok(());
@@ -589,8 +618,15 @@ async fn refresh(
         observe_studio(config, record).await;
         if record.studio_state == StudioProcessState::Stopped && record.studio_session_id.is_some()
         {
+            let previous_failure = (record.state, record.failure_code);
             record.state = RuntimeState::Failed;
             record.failure_code = Some(BackendErrorCode::RuntimeExited);
+            append_failure_diagnostic(
+                directory,
+                record,
+                previous_failure,
+                "The linked Studio Pro session was absent from the authoritative session report.",
+            );
         } else {
             record.state = if record.studio_state == StudioProcessState::Running {
                 RuntimeState::Running
@@ -1154,6 +1190,34 @@ fn append_log(directory: &Path, message: &str) {
     }
 }
 
+fn append_failure_diagnostic(
+    directory: &Path,
+    record: &SessionRecord,
+    previous_failure: (RuntimeState, Option<BackendErrorCode>),
+    reason: &str,
+) {
+    let Some(code) = record.failure_code else {
+        return;
+    };
+    if previous_failure == (RuntimeState::Failed, Some(code)) {
+        return;
+    }
+    let code = serde_json::to_value(code)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "unknown".to_string());
+    let studio_session = record.studio_session_id.as_deref().unwrap_or("unspecified");
+    let studio_process = record
+        .studio_process_id
+        .map_or_else(|| "unspecified".to_string(), |pid| pid.to_string());
+    let message = format!(
+        "Runtime failure recorded: code={code}; reason={reason}; httpReady={}; \
+         studioSession={studio_session}; studioState={:?}; studioProcessId={studio_process}.",
+        record.http_ready, record.studio_state
+    );
+    append_log(directory, &message);
+}
+
 fn ensure_private_directory(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path)
         .map_err(|error| format!("could not create private directory: {error}"))?;
@@ -1182,14 +1246,18 @@ fn set_file_permissions(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        diagnostic_code, is_loopback_host, port_conflict_message, runtime_url,
-        valid_studio_session_id, validate_runtime_session_id, ComposeTransaction,
+        append_failure_diagnostic, diagnostic_code, is_loopback_host, port_conflict_message,
+        runtime_url, valid_studio_session_id, validate_runtime_session_id, ComposeTransaction,
+        SessionRecord,
     };
-    use crate::contracts::BackendErrorCode;
+    use crate::contracts::{
+        ArtifactKind, BackendErrorCode, BackendId, RuntimeMode, RuntimeState, StudioProcessState,
+    };
     #[cfg(unix)]
     use crate::models::{AppConfig, ContainerRuntime};
     #[cfg(unix)]
     use crate::process::CommandPolicy;
+    use chrono::Utc;
     #[cfg(unix)]
     use std::time::Duration;
 
@@ -1200,6 +1268,63 @@ mod tests {
         assert!(valid_studio_session_id("studio-4242-638908128000000000"));
         assert!(!valid_studio_session_id("studio-0-638908128000000000"));
         assert!(!valid_studio_session_id("studio-4242-1-extra"));
+    }
+
+    #[test]
+    fn runtime_failure_diagnostics_are_complete_and_transition_deduplicated() {
+        let temporary = tempfile::tempdir().expect("temporary Runtime directory");
+        let log = temporary.path().join("runtime.log");
+        std::fs::write(&log, "2026-09-01T00:00:00Z initialized\n").expect("initial log");
+        let mut record = SessionRecord {
+            schema_version: super::CONTRACT_SCHEMA_VERSION.to_string(),
+            session_id: format!("runtime_{}", "a".repeat(32)),
+            backend: BackendId::LinuxWinboat,
+            mode: RuntimeMode::StudioRunLocally,
+            studio_session_id: Some("studio-4242-638908128000000000".into()),
+            studio_state: StudioProcessState::Stopped,
+            studio_process_id: None,
+            state: RuntimeState::Starting,
+            http_ready: false,
+            host_port: 49152,
+            guest_port: 8080,
+            started_at: Utc::now(),
+            readiness_timeout_seconds: 5,
+            failure_code: None,
+            log_artifact: crate::contracts::ArtifactDescriptor::create(
+                "session",
+                BackendId::LinuxWinboat,
+                ArtifactKind::RuntimeLog,
+            )
+            .expect("log artifact"),
+            compose_changed: true,
+            original_compose_sha256: "a".repeat(64),
+            managed_compose_sha256: "b".repeat(64),
+            storage_mount_identity: vec!["fixture-storage".into()],
+        };
+        record.failure_code = Some(BackendErrorCode::RuntimeExited);
+
+        append_failure_diagnostic(
+            temporary.path(),
+            &record,
+            (record.state, record.failure_code),
+            "The linked Studio Pro session was absent from the authoritative session report.",
+        );
+        record.state = RuntimeState::Failed;
+        record.failure_code = Some(BackendErrorCode::RuntimeExited);
+        append_failure_diagnostic(
+            temporary.path(),
+            &record,
+            (record.state, record.failure_code),
+            "The linked Studio Pro session was absent from the authoritative session report.",
+        );
+
+        let content = std::fs::read_to_string(log).expect("Runtime diagnostic log");
+        assert_eq!(content.lines().count(), 2);
+        assert!(content.contains("code=runtime_exited"));
+        assert!(content.contains("httpReady=false"));
+        assert!(content.contains("studioSession=studio-4242-638908128000000000"));
+        assert!(content.contains("studioState=Stopped"));
+        assert!(content.contains("studioProcessId=unspecified"));
     }
 
     #[test]
