@@ -61,6 +61,7 @@ impl From<CommandFailure> for WindowsOperationFailure {
 
 const REMOTE_APP_START_ATTEMPTS: usize = 2;
 const REMOTE_APP_RETRY_DELAY_SECONDS: u64 = 2;
+const REMOTE_APP_ENDPOINT_READY_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub(super) struct WindowsOperationRequest<'a> {
     pub(super) script_path: &'a Path,
@@ -87,6 +88,7 @@ where
     connection_config.rdp_port = crate::config::runtime_host_port_async(config, 3389, "tcp")
         .await?
         .unwrap_or(config.rdp_port);
+    wait_for_remote_app_endpoint(&connection_config, REMOTE_APP_ENDPOINT_READY_TIMEOUT).await?;
     for attempt in 0..REMOTE_APP_START_ATTEMPTS {
         remove_stale_report(request.report_path).await?;
         let security = OperationSecurity::generate(request.script_sha256)
@@ -183,6 +185,33 @@ pub(super) async fn wait_for_followup_windows_operation(
     Ok((wait.report, wait.authenticated))
 }
 
+async fn wait_for_remote_app_endpoint(
+    config: &crate::models::AppConfig,
+    timeout: Duration,
+) -> Result<(), WindowsOperationFailure> {
+    let started = tokio::time::Instant::now();
+    loop {
+        if tokio::net::TcpStream::connect((config.rdp_host.as_str(), config.rdp_port))
+            .await
+            .is_ok()
+        {
+            return Ok(());
+        }
+        let elapsed = started.elapsed();
+        if elapsed >= timeout {
+            return Err(WindowsOperationFailure {
+                message: "the WinBoat RemoteApp endpoint was not ready before the deadline"
+                    .to_string(),
+                exit_code: None,
+                retryable: true,
+                failure_kind: Some(CommandFailureKind::Wait),
+            });
+        }
+        let remaining = timeout - elapsed;
+        tokio::time::sleep(remaining.min(Duration::from_millis(250))).await;
+    }
+}
+
 async fn remove_stale_report(report_path: &Path) -> Result<(), String> {
     let mut temporary = report_path.as_os_str().to_os_string();
     temporary.push(".tmp");
@@ -205,5 +234,47 @@ fn stop_remote_app(remote_app: &mut RemoteAppProcess) {
             let _ = remote_app.kill();
             let _ = remote_app.wait();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wait_for_remote_app_endpoint;
+    use crate::models::{AppConfig, ContainerRuntime};
+    use crate::process::CommandFailureKind;
+    use std::time::Duration;
+
+    fn endpoint_config(host: &str, port: u16) -> AppConfig {
+        AppConfig {
+            language_preference: "en-US".into(),
+            winboat_setup_pending: false,
+            winboat_executable: "missing-winboat".into(),
+            compose_file: "missing-compose.yml".into(),
+            container_runtime: ContainerRuntime::Docker,
+            container_name: "WinBoat".into(),
+            api_url: "http://127.0.0.1:9".into(),
+            rdp_host: host.into(),
+            rdp_port: port,
+            shared_directory: "/tmp/mendimaru-fixture".into(),
+            windows_shared_directory: r"\\host.lan\Data".into(),
+            freerdp_binary: "missing-freerdp".into(),
+            mendix_install_root: r"C:\Program Files\Mendix".into(),
+            mendix_data_root: r"C:\ProgramData\Mendix".into(),
+            windows_studio_paths: Vec::new(),
+            startup_timeout_seconds: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unready_remoteapp_endpoint_is_bounded_and_retryable() {
+        let error = wait_for_remote_app_endpoint(
+            &endpoint_config("127.0.0.1", 9),
+            Duration::from_millis(10),
+        )
+        .await
+        .expect_err("the closed fixture endpoint is not ready");
+
+        assert!(error.retryable);
+        assert_eq!(error.failure_kind, Some(CommandFailureKind::Wait));
     }
 }

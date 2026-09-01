@@ -152,6 +152,13 @@ Studio session ID must be an opaque process/start-time identity. A Runtime URL
 is withheld in both modes until HTTP readiness. WinBoat-specific fields remain
 optional in the common schema and native adapters never inspect Compose.
 
+Immediately after WinBoat recreation, Guest API health can precede RemoteApp
+readiness. Mendimaru therefore waits for a bounded RemoteApp endpoint window and
+classifies an endpoint or transient RemoteApp startup interruption as
+`external_process_interrupted` with `retryable: true`. A Studio launch timeout is
+also retryable; persistent Windows operation failures retain their authenticated
+exit-code diagnostics.
+
 On Linux, a detached per-session keeper owns the verified FreeRDP process after
 `studio start` returns. `studio status` and `studio stop` communicate with that
 keeper through a user-owned `0700` cache directory and `0600` Unix socket. This
