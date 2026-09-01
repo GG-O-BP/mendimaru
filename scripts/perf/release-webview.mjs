@@ -170,7 +170,7 @@ try {
       await elapsed(async () => {
         const projects = await client.invoke("get_projects");
         assert.equal(
-          projects.projects.length,
+          projectScanCount(projects),
           fixture.workspaceTiers.small.projectCount,
         );
       }),
@@ -183,7 +183,7 @@ try {
       await elapsed(async () => {
         const projects = await client.invoke("get_projects");
         assert.equal(
-          projects.projects.length,
+          projectScanCount(projects),
           fixture.workspaceTiers.large.projectCount,
         );
       }),
@@ -394,6 +394,11 @@ async function elapsed(action) {
   const started = performance.now();
   await action();
   return rounded(performance.now() - started);
+}
+
+function projectScanCount(projects) {
+  if (Array.isArray(projects)) return projects.length;
+  return projects.projects?.length;
 }
 
 async function waitFor(action, timeoutMs, label) {
