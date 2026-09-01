@@ -252,6 +252,9 @@ struct SessionKeeperIpcResponse {
 /// `None` means that the process should continue as the desktop application.
 pub fn dispatch_from_env() -> Option<i32> {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if arguments.is_empty() {
+        return None;
+    }
     if matches!(
         arguments.first().and_then(|value| value.to_str()),
         Some("--help" | "-h")
@@ -288,8 +291,11 @@ fn write_cli_execution(execution: CliExecution) -> i32 {
 }
 
 fn execute(arguments: &[OsString]) -> Option<CliExecution> {
-    if !is_headless_command(arguments.first()) {
+    if arguments.is_empty() {
         return None;
+    }
+    if !is_headless_command(arguments.first()) {
+        return Some(unknown_command_execution(arguments));
     }
     let parsed = match parse(arguments) {
         Ok(parsed) => parsed,
@@ -339,6 +345,34 @@ fn execute(arguments: &[OsString]) -> Option<CliExecution> {
             command_error_to_backend(error, context.snapshot.manifest.backend),
         ),
     })
+}
+
+fn unknown_command_execution(arguments: &[OsString]) -> CliExecution {
+    let error = BackendError::invalid_request(unknown_command_message(arguments));
+    bare_error_execution("unknown", error)
+}
+
+fn unknown_command_message(arguments: &[OsString]) -> String {
+    let values = arguments
+        .iter()
+        .filter_map(|value| value.to_str())
+        .collect::<Vec<_>>();
+    if values.contains(&"status") {
+        return "unknown command; try 'env status' for environment status or \
+                 'studio status' for Studio sessions"
+            .to_string();
+    }
+    if values.iter().any(|&value| {
+        matches!(
+            value,
+            "studio-status" | "studio_status" | "runtime-status" | "runtime_status"
+        )
+    }) {
+        return "unknown command; Studio sessions use 'studio status' and Runtime sessions use \
+                 'runtime status'"
+            .to_string();
+    }
+    "unknown command; run 'mendimaru --help' to list supported commands".to_string()
 }
 
 fn root_help_execution() -> CliExecution {
