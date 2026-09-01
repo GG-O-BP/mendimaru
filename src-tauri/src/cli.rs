@@ -51,6 +51,7 @@ enum CliCommand {
     },
     StudioStatus {
         session_id: Option<String>,
+        refresh: bool,
     },
     StudioStop {
         session_id: String,
@@ -144,6 +145,7 @@ struct ParsedCli {
     backend: Option<BackendId>,
     format: OutputFormat,
     timeout: Duration,
+    include_snapshot: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -155,7 +157,8 @@ struct SuccessEnvelope<'a> {
     platform: PlatformId,
     backend: BackendId,
     session_id: &'a str,
-    capability_snapshot: &'a CapabilitySnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    capability_snapshot: Option<&'a CapabilitySnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     operation_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -174,7 +177,8 @@ struct ErrorEnvelope<'a> {
     platform: PlatformId,
     backend: BackendId,
     session_id: &'a str,
-    capability_snapshot: &'a CapabilitySnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    capability_snapshot: Option<&'a CapabilitySnapshot>,
     error: &'a BackendError,
 }
 
@@ -339,13 +343,22 @@ fn execute(arguments: &[OsString]) -> Option<CliExecution> {
             }
         }
     });
+    let include_snapshot =
+        parsed.include_snapshot || matches!(parsed.command, CliCommand::Capabilities);
     Some(match result {
-        Ok(output) => success_execution(command_name, parsed.format, &context, output),
+        Ok(output) => success_execution(
+            command_name,
+            parsed.format,
+            &context,
+            output,
+            include_snapshot,
+        ),
         Err(error) => error_execution(
             command_name,
             parsed.format,
             &context,
             command_error_to_backend(error, context.snapshot.manifest.backend),
+            include_snapshot,
         ),
     })
 }
@@ -365,7 +378,7 @@ fn help_execution(arguments: &[OsString]) -> Option<CliExecution> {
                 help_requested = true;
                 break;
             }
-            "--json" | "--ndjson" => {}
+            "--json" | "--ndjson" | "--snapshot" => {}
             "--backend" | "--timeout-seconds" => option_value_expected = true,
             value if value.starts_with("--backend=") || value.starts_with("--timeout-seconds=") => {
             }
@@ -440,10 +453,11 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
              Starts Studio Pro. A project ID requires the exact declared version.",
         ),
         (Some("studio"), Some("status")) => Some(
-            "Usage: mendimaru studio status [--session-id STUDIO_SESSION_ID]\n\
+            "Usage: mendimaru studio status [--session-id STUDIO_SESSION_ID] [--refresh]\n\
              \n\
              Without --session-id, reports all Studio sessions. With it, reports\n\
-             one selected session. Linux first checks the trusted session keeper.",
+             one selected session. The default Linux summary checks the trusted\n\
+             session keeper; --refresh also queries the authoritative WinBoat guest.",
         ),
         (Some("studio"), Some("stop")) => Some(
             "Usage: mendimaru studio stop --session-id STUDIO_SESSION_ID\n\
@@ -611,7 +625,8 @@ Commands:
   studio uninstall --version VERSION
                                     Uninstall an exact Studio Pro version
   studio start --version VERSION  Start Studio Pro
-  studio status [--session-id ID] Report Studio sessions
+  studio status [--session-id ID] [--refresh]
+                                    Report Studio sessions
   studio stop --session-id ID      Stop a Studio session
   runtime build --project-id ID   Build a portable Runtime package
   runtime start [...]             Start Runtime (portable or Studio Run Locally)
@@ -639,6 +654,7 @@ Global options:
   --ndjson                          Emit progress as newline-delimited JSON
   --backend ID                      Select linux-winboat, windows-native, or mac-native
   --timeout-seconds SECONDS         Bound a command from 1 through 3600 seconds
+  --snapshot                         Include the immutable capability snapshot
   --help, -h                        Show this help
 
 Exit codes: 0 success, 1 operation failure, 2 invalid command, 3 backend unavailable.
@@ -795,8 +811,12 @@ async fn run_command(
                 progress: Vec::new(),
             })
         }
-        CliCommand::StudioStatus { session_id } => {
+        CliCommand::StudioStatus {
+            session_id,
+            refresh,
+        } => {
             #[cfg(target_os = "linux")]
+            let _ = refresh;
             if let Some(session_id) = session_id {
                 if let Some(session) = keeper_session(&paths, session_id).await? {
                     let mut output = CommandOutput::data(&session)?;
@@ -805,7 +825,7 @@ async fn run_command(
                 }
             } else {
                 let sessions = keeper_sessions(&paths).await?;
-                if !sessions.is_empty() {
+                if !sessions.is_empty() || !*refresh {
                     return CommandOutput::data(sessions);
                 }
             }
@@ -1532,6 +1552,8 @@ fn parse(arguments: &[OsString]) -> Result<ParsedCli, BackendError> {
     let mut backend = None;
     let mut timeout_seconds = DEFAULT_TIMEOUT_SECONDS;
     let mut timeout_seen = false;
+    let mut include_snapshot = false;
+    let mut snapshot_seen = false;
     let mut command_values = Vec::new();
     let mut index = 0;
     while index < values.len() {
@@ -1548,6 +1570,15 @@ fn parse(arguments: &[OsString]) -> Result<ParsedCli, BackendError> {
                 } else {
                     OutputFormat::Json
                 };
+            }
+            "--snapshot" => {
+                if snapshot_seen {
+                    return Err(BackendError::invalid_request(
+                        "--snapshot may only be provided once",
+                    ));
+                }
+                snapshot_seen = true;
+                include_snapshot = true;
             }
             "--backend" => {
                 if backend.is_some() {
@@ -1601,6 +1632,7 @@ fn parse(arguments: &[OsString]) -> Result<ParsedCli, BackendError> {
         backend,
         format,
         timeout: Duration::from_secs(timeout_seconds),
+        include_snapshot,
     })
 }
 
@@ -1836,9 +1868,10 @@ fn parse_studio_command(values: &[String]) -> Result<CliCommand, BackendError> {
             })
         }
         Some("status") => {
-            let (options, _) = parse_options(&values[1..], &["--session-id"], &[])?;
+            let (options, flags) = parse_options(&values[1..], &["--session-id"], &["--refresh"])?;
             Ok(CliCommand::StudioStatus {
                 session_id: options.get("--session-id").cloned(),
+                refresh: flags.contains("--refresh"),
             })
         }
         Some("stop") => Ok(CliCommand::StudioStop {
@@ -2004,6 +2037,7 @@ fn success_execution(
     format: OutputFormat,
     context: &ExecutionContext,
     output: CommandOutput,
+    include_snapshot: bool,
 ) -> CliExecution {
     let envelope = SuccessEnvelope {
         schema_version: CONTRACT_SCHEMA_VERSION,
@@ -2012,7 +2046,7 @@ fn success_execution(
         platform: context.snapshot.manifest.host_platform,
         backend: context.snapshot.manifest.backend,
         session_id: &context.session.session_id,
-        capability_snapshot: &context.snapshot,
+        capability_snapshot: include_snapshot.then_some(&context.snapshot),
         operation_id: output.operation_id.as_deref(),
         studio_session_id: output.studio_session_id.as_deref(),
         runtime_session_id: output.runtime_session_id.as_deref(),
@@ -2050,6 +2084,7 @@ fn error_execution(
     _format: OutputFormat,
     context: &ExecutionContext,
     error: BackendError,
+    include_snapshot: bool,
 ) -> CliExecution {
     let exit_code = exit_code(&error);
     let envelope = ErrorEnvelope {
@@ -2059,7 +2094,7 @@ fn error_execution(
         platform: context.snapshot.manifest.host_platform,
         backend: context.snapshot.manifest.backend,
         session_id: &context.session.session_id,
-        capability_snapshot: &context.snapshot,
+        capability_snapshot: include_snapshot.then_some(&context.snapshot),
         error: &error,
     };
     CliExecution {
@@ -2075,7 +2110,13 @@ fn context_error_execution(
     error: BackendError,
 ) -> CliExecution {
     match execution_context(None) {
-        Ok(context) => error_execution(command, format, &context, sanitize_backend_error(error)),
+        Ok(context) => error_execution(
+            command,
+            format,
+            &context,
+            sanitize_backend_error(error),
+            false,
+        ),
         Err(_) => bare_error_execution(command, sanitize_backend_error(error)),
     }
 }
@@ -2372,6 +2413,31 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_responses_omit_the_snapshot_until_requested() {
+        let snapshot = CapabilitySnapshot::capture(crate::platform::backend::manifest_for(
+            BackendId::LinuxWinboat,
+            "fixture-architecture",
+        ))
+        .expect("fake capability snapshot");
+        let context = ExecutionContext {
+            session: SessionDescriptor::create(snapshot.clone()).expect("fake session"),
+            snapshot,
+        };
+        let output =
+            || CommandOutput::data(json!({ "ready": true })).expect("fixture command output");
+        let omitted =
+            success_execution("env.status", OutputFormat::Json, &context, output(), false);
+        let document: Value = serde_json::from_str(&omitted.stdout).expect("lightweight JSON");
+        assert!(document.get("capabilitySnapshot").is_none());
+        assert!(omitted.stdout.len() < 300);
+
+        let included =
+            success_execution("env.status", OutputFormat::Json, &context, output(), true);
+        let document: Value = serde_json::from_str(&included.stdout).expect("snapshot JSON");
+        assert!(document["capabilitySnapshot"].is_object());
+    }
+
+    #[test]
     fn unrelated_arguments_continue_to_the_desktop_app() {
         assert_eq!(execute(&[]), None);
         assert!(execute(&args(&["project.mpr"])).is_some());
@@ -2412,15 +2478,21 @@ mod tests {
             PlatformId::Windows => "mac-native",
             PlatformId::Macos | PlatformId::Unsupported => "linux-winboat",
         };
-        let execution = execute(&args(&["capabilities", "--json", "--backend", mismatched]))
-            .expect("recognized CLI command");
+        let execution = execute(&args(&[
+            "capabilities",
+            "--json",
+            "--snapshot",
+            "--backend",
+            mismatched,
+        ]))
+        .expect("recognized CLI command");
         assert_eq!(execution.exit_code, EXIT_BACKEND_UNAVAILABLE);
         assert!(execution.stdout.is_empty());
         let json: Value = serde_json::from_str(&execution.stderr).expect("stderr JSON");
         assert_eq!(json["ok"], false);
         assert_eq!(json["error"]["code"], "backend_mismatch");
         assert_ne!(json["backend"], mismatched);
-        assert!(json["capabilitySnapshot"].is_object());
+        assert!(json.get("capabilitySnapshot").is_none());
     }
 
     #[test]
@@ -2429,6 +2501,7 @@ mod tests {
             args(&["env", "status", "--json"]),
             args(&["env", "ensure", "--timeout-seconds", "30"]),
             args(&["studio", "list"]),
+            args(&["studio", "status", "--refresh"]),
             args(&["studio", "install", "--version", "11.12.2", "--ndjson"]),
             args(&["studio", "uninstall", "--version=11.12.2"]),
             args(&[
@@ -2558,6 +2631,7 @@ mod tests {
                     "checks": [],
                 }))
                 .expect("fixture output"),
+                false,
             );
             let document: Value = serde_json::from_str(&execution.stdout).expect("CLI JSON");
             let keys = document

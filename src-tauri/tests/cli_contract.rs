@@ -97,6 +97,15 @@ fn real_binary_prints_subcommand_help_without_machine_readable_errors() {
 }
 
 #[test]
+fn real_binary_status_summary_is_lightweight_and_snapshot_opt_in() {
+    let snapshot = run(&["capabilities", "--json", "--snapshot"]);
+    assert_eq!(snapshot.status.code(), Some(0));
+    let document: Value = serde_json::from_slice(&snapshot.stdout).expect("snapshot response");
+    assert!(document["capabilitySnapshot"].is_object());
+    assert_eq!(document["data"], document["capabilitySnapshot"]);
+}
+
+#[test]
 fn real_binary_emits_a_complete_platform_neutral_capability_snapshot() {
     let output = run(&["capabilities", "--json", "--backend", current_backend()]);
     assert!(

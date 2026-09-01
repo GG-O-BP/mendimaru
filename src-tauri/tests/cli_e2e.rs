@@ -1498,6 +1498,7 @@ fn real_binary_runs_winboat_runtime_through_loopback_and_restores_compose() {
         "--json",
         "--timeout-seconds",
         "15",
+        "--snapshot",
     ]));
     assert_complete_envelope(&started, "runtime.start");
     assert!(started["data"].get("build").is_none());
@@ -1914,6 +1915,36 @@ fn windows_native_rejects_winboat_runtime_mode_without_reading_compose() {
     assert_eq!(fs::read(&compose).expect("Compose boundary marker"), marker);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_studio_status_summary_does_not_contact_the_backend() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let config_directory = temporary.path().join("config");
+    let workspace = temporary.path().join("workspace");
+    fs::create_dir_all(&config_directory).expect("config directory");
+    fs::create_dir_all(&workspace).expect("workspace directory");
+    fs::write(
+        config_directory.join("config.json"),
+        serde_json::to_vec_pretty(&fixture_config(&workspace)).expect("serialize config"),
+    )
+    .expect("write config fixture");
+
+    let started = std::time::Instant::now();
+    let output = run(&config_directory, &["studio", "status", "--json"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(started.elapsed() < Duration::from_secs(5));
+    let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
+    assert!(stdout.len() < 300, "summary was {} bytes", stdout.len());
+    let document: Value = serde_json::from_str(&stdout).expect("summary response is JSON");
+    assert_eq!(document["data"], Value::Array(Vec::new()));
+    assert!(document.get("capabilitySnapshot").is_none());
+}
+
 fn assert_complete_envelope(document: &Value, command: &str) {
     assert_eq!(document["schemaVersion"], "4.0.0");
     assert_eq!(document["command"], command);
@@ -1923,5 +1954,8 @@ fn assert_complete_envelope(document: &Value, command: &str) {
     assert!(document["sessionId"]
         .as_str()
         .is_some_and(|value| value.starts_with("session_")));
-    assert!(document["capabilitySnapshot"].is_object());
+    assert!(matches!(
+        document.get("capabilitySnapshot"),
+        None | Some(Value::Object(_))
+    ));
 }
