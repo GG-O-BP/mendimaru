@@ -11,6 +11,7 @@ import type {
   LocalizationBundle,
   MendixProject,
   OperationRecord,
+  ProjectScanResult,
   SettingsSavePreview,
   SettingsSaveResult,
   SettingsConnectionTestResult,
@@ -44,6 +45,7 @@ const commands = {
   getProjects: "get_projects",
   selectExternalProject: "select_external_project",
   setProjectLaunchPreference: "set_project_launch_preference",
+  setProjectFavorite: "set_project_favorite",
   startWinBoatWindows: "start_winboat_windows",
   openWinBoat: "open_winboat",
   beginWinBoatSetup: "begin_winboat_setup",
@@ -120,18 +122,25 @@ export const tauriApi = {
     invoke<DownloadableVersion>(commands.resolveDownloadableVersion, {
       version,
     }),
-  getProjects: () => invoke<MendixProject[]>(commands.getProjects),
+  getProjects: () => invoke<ProjectScanResult>(commands.getProjects),
   selectExternalProject: () =>
     invoke<MendixProject | null>(commands.selectExternalProject),
   setProjectLaunchPreference: (
     projectMprPath: string,
     selectedVersion: string | undefined,
     pending: boolean,
+    completedLaunch = false,
   ) =>
     invoke<void>(commands.setProjectLaunchPreference, {
       projectMprPath,
       selectedVersion: selectedVersion ?? null,
       pending,
+      completedLaunch,
+    }),
+  setProjectFavorite: (projectMprPath: string, favorite: boolean) =>
+    invoke<void>(commands.setProjectFavorite, {
+      projectMprPath,
+      favorite,
     }),
   startWinBoatWindows: () => invoke<void>(commands.startWinBoatWindows),
   openWinBoat: () => invoke<void>(commands.openWinBoat),
@@ -161,6 +170,12 @@ export const tauriApi = {
     handler: (progress: DownloadProgress) => void,
   ): Promise<UnlistenFn> =>
     listen<DownloadProgress>("studio-download-progress", (event) => {
+      handler(event.payload);
+    }),
+  onWorkspaceProjectsChanged: (
+    handler: (sourceKey: string) => void,
+  ): Promise<UnlistenFn> =>
+    listen<string>("workspace-projects-changed", (event) => {
       handler(event.payload);
     }),
 };

@@ -305,9 +305,9 @@ async function run() {
     report.measurements.projectScanMs = projectsTimed.elapsedMs;
     assertThreshold("projectsMs", projectsTimed.elapsedMs);
     recordAssertion(
-      projectsTimed.value.length === 1 &&
-        projectsTimed.value[0].name === "Orders" &&
-        projectsTimed.value[0].version === "11.12.2",
+      projectsTimed.value.projects.length === 1 &&
+        projectsTimed.value.projects[0].name === "Orders" &&
+        projectsTimed.value.projects[0].version === "11.12.2",
       "the real project scanner finds the isolated Orders fixture",
     );
 

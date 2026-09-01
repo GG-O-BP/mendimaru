@@ -319,9 +319,9 @@ try {
   report.measurements.projectScanMs = projectsTimed.elapsedMs;
   assertThreshold("projectsMs", projectsTimed.elapsedMs);
   recordAssertion(
-    projectsTimed.value.length === 1 &&
-      projectsTimed.value[0].name === "Orders" &&
-      projectsTimed.value[0].version === "11.12.2",
+    projectsTimed.value.projects.length === 1 &&
+      projectsTimed.value.projects[0].name === "Orders" &&
+      projectsTimed.value.projects[0].version === "11.12.2",
     "the real Linux project scanner finds the isolated Orders fixture",
   );
 
@@ -554,6 +554,29 @@ try {
     "the manual overview refresh performs exactly one additional Guest app discovery",
   );
 
+  await fs.mkdir(path.join(fixture.shared, "Live"), { mode: 0o700 });
+  await fs.writeFile(
+    path.join(fixture.shared, "Live", "Live.mpr"),
+    "fixture\n",
+  );
+  await fs.writeFile(
+    path.join(fixture.shared, "Live", "project-settings.user.json"),
+    '{"settingsParts":[{"type":"Mendix.Core, Version=11.12.2.0, Culture=neutral"}]}',
+  );
+  await execute("document.querySelector('[data-testid=nav-projects]').click()");
+  await waitFor(
+    async () =>
+      await execute(
+        "return document.body.innerText.includes('Live') && document.body.innerText.includes('Orders');",
+      ),
+    5_000,
+    "watcher-backed workspace changes did not refresh the project list",
+  );
+  recordAssertion(
+    true,
+    "file watcher changes appear in the project list without manual refresh",
+  );
+
   for (const [name, shortcut, heading, expectedText] of [
     ["projectsNavigationMs", "Control+2", "Projects", "Orders"],
     ["operationsNavigationMs", "Control+3", "Operation center", "11.12.2"],
@@ -623,6 +646,15 @@ try {
 
   const nextShared = path.join(temporary, "shared-next");
   await fs.mkdir(nextShared, { mode: 0o700 });
+  await fs.mkdir(path.join(nextShared, "Inventory"), { mode: 0o700 });
+  await fs.writeFile(
+    path.join(nextShared, "Inventory", "Inventory.mpr"),
+    "fixture\n",
+  );
+  await fs.writeFile(
+    path.join(nextShared, "Inventory", "project-settings.user.json"),
+    '{"settingsParts":[{"type":"Mendix.Core, Version=11.12.2.0, Culture=neutral"}]}',
+  );
   const nextConfig = { ...currentConfig, sharedDirectory: nextShared };
   const preview = await invoke("preview_settings_save", {
     config: nextConfig,
@@ -703,6 +735,22 @@ try {
     updatedEnvironment.sharedMountMatches,
     true,
     "environment status reflects the applied shared mount",
+  );
+  const swappedProjects = await invoke("get_projects");
+  recordAssertion(
+    swappedProjects.projects.length === 1 &&
+      swappedProjects.projects[0].name === "Inventory" &&
+      !swappedProjects.projects.some((project) => project.name === "Orders"),
+    "the real Tauri app replaces the old workspace project after Settings applies a new root",
+  );
+  await execute("document.querySelector('[data-testid=nav-projects]').click()");
+  await waitFor(
+    async () =>
+      await execute(
+        "return document.body.innerText.includes('Inventory') && !document.body.innerText.includes('Orders');",
+      ),
+    5_000,
+    "the real project view did not replace the old workspace project",
   );
 
   await delay(1_750);

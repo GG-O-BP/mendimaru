@@ -60,7 +60,12 @@ export function Workspace({
     hasBusyPrefix,
     onWarning,
   });
-  const projects = useProjects(t, onWarning, runAction);
+  const projects = useProjects({
+    t,
+    sharedDirectory: environment.config?.sharedDirectory ?? "",
+    onWarning,
+    runAction,
+  });
   const operations = useOperations({
     t,
     notify,

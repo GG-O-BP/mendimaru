@@ -138,6 +138,8 @@ Linux WinBoat モードでは、Studio Pro の起動ボタンは Windows プロ�
 
 Linux 共有ディレクトリは、WinBoat の Compose ファイルにある `<host path>:/shared` マウントに接続されます。プロジェクト一覧はこのディレクトリだけを走査し、`.git`、`node_modules`、`deployment`、`.mendix-cache`、`.mendimaru` などの生成ディレクトリやキャッシュディレクトリを除外します。
 
+プロジェクト検出は UI backend の経路を占有せず、深さ 8、最大 100,000 entry、10,000 プロジェクト、`project-settings.user.json` ごと 256 KiB、全体 16 MiB、5 秒の制限内で実行します。より大きなツリーや読み取れない・通常ファイルではない settings は、静かな成功ではなく skipped/error 数を含む部分結果になり、UI は最初の 100 件を表示して追加読み込みを提供します。watcher イベントは debounce・統合され、watcher を利用できない場合は 30 秒の fallback（watcher 安全網は 5 分）で更新します。古いワークスペースの応答が新しい結果を上書きすることはありません。お気に入りと最終起動時刻はハッシュ化したプロジェクト identity のみ保存し、検出されなくなったお気に入りは自動的に整理します。
+
 Projects 画面では、このワークスペース外の `.mpr` を一つ明示的に選択して開くこともできます。Mendimaru は選択パスを canonicalize し、ファイルまたは親パスの symlink を拒否してから、`.mpr` の直接の親ディレクトリだけを、同じ retained RemoteApp 接続の書き込み可能なセッション単位 FreeRDP drive として接続します。プロジェクトのコピー、同期、Compose への追加、通常のプロジェクト一覧への永続登録は行いません。Windows から redirected `.mpr` が実ファイルとして見えるまで最大 30 秒確認してから、正確な Studio Pro を起動するため、保存内容は元の Linux プロジェクトへ反映されます。
 
 共有名はパス digest から生成した長さ制限付き ASCII 値で、ホストディレクトリ名を公開しません。GUI 選択結果には、その digest から生成した範囲制限付きの現在プロセストークンだけを渡します。生の Linux パスは直列化された選択・起動 DTO、operation history、session DTO、Windows report、診断、ログに記録しません。Studio Pro を終了すると retained FreeRDP プロセスと一時 drive も終了します。アプリまたは RemoteApp 接続が先に終了して一時 drive が失われたセッションを、自動的に再接続可能とは表示しません。そのセッションを停止するか、同じ `.mpr` を再選択して新しい保護された起動を開始してください。コンマ、バックスラッシュ、改行、非 UTF-8 パス、ファイルシステムのルート、ホーム全体、読み取り専用プロジェクトディレクトリは、安全に表現または範囲制限できないため起動前に拒否します。

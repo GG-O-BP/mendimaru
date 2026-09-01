@@ -35,6 +35,7 @@ interface ProjectLauncherDependencies {
     afterLaunch?: () => Promise<void>,
   ) => Promise<void>;
   notify: (kind: ToastKind, title: string, detail?: string) => void;
+  onProjectLaunched: (project: MendixProject) => void;
 }
 
 interface LaunchOverride {
@@ -70,6 +71,7 @@ export function useProjectLauncher({
   cancelDownload,
   launchVersion,
   notify,
+  onProjectLaunched,
 }: ProjectLauncherDependencies) {
   const [assistant, setAssistant] =
     useState<ProjectLaunchAssistantState | null>(null);
@@ -108,6 +110,7 @@ export function useProjectLauncher({
       project: MendixProject,
       selectedVersion: string | undefined,
       pending: boolean,
+      completedLaunch = false,
     ) => {
       setOverrides((current) => {
         const next = new Map(current);
@@ -120,6 +123,7 @@ export function useProjectLauncher({
           project.mprPath,
           selectedVersion,
           pending,
+          completedLaunch,
         ),
       );
       preferenceWrites.current = write.catch(() => undefined);
@@ -142,16 +146,17 @@ export function useProjectLauncher({
     async (project: MendixProject, version: StudioVersion) => {
       await launchVersion(version, project.mprPath, project.name, async () => {
         try {
-          await remember(project, version.version, false);
+          await remember(project, version.version, false, true);
         } catch (error) {
           reportPreferenceError(error);
         }
+        onProjectLaunched(project);
         setAssistant((current) =>
           current?.project.mprPath === project.mprPath ? null : current,
         );
       });
     },
-    [launchVersion, remember, reportPreferenceError],
+    [launchVersion, onProjectLaunched, remember, reportPreferenceError],
   );
 
   const resolveForAssistant = useCallback(
