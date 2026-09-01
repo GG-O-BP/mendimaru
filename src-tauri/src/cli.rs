@@ -844,7 +844,20 @@ async fn run_command(
             #[cfg(not(target_os = "linux"))]
             let stopped_by_keeper = false;
             if !stopped_by_keeper {
-                crate::application::stop_session(&paths, &config, session_id).await?;
+                if let Err(error) =
+                    crate::application::stop_session(&paths, &config, session_id).await
+                {
+                    let sessions = crate::application::studio_sessions(&config).await;
+                    return complete_stopped_session_if_absent(error, sessions, session_id).map(
+                        |()| CommandOutput {
+                            data: json!({ "completed": true }),
+                            operation_id: None,
+                            studio_session_id: Some(session_id.clone()),
+                            runtime_session_id: None,
+                            progress: Vec::new(),
+                        },
+                    );
+                }
             }
             Ok(CommandOutput {
                 data: json!({ "completed": true }),
@@ -971,6 +984,27 @@ async fn run_command(
             })
         }
     }
+}
+
+fn complete_stopped_session_if_absent(
+    error: CommandError,
+    sessions: Result<Vec<crate::contracts::StudioSessionStatus>, CommandError>,
+    session_id: &str,
+) -> Result<(), CommandError> {
+    if matches!(error.code, CommandErrorCode::InvalidRequest) {
+        return Err(error);
+    }
+    let sessions = match sessions {
+        Ok(sessions) => sessions,
+        Err(_) => return Err(error),
+    };
+    if sessions
+        .iter()
+        .any(|session| session.session_id == session_id)
+    {
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -1455,13 +1489,7 @@ async fn request_keeper_stop(paths: &AppPaths, session_id: &str) -> Result<bool,
     let Some(response) = request_session_keeper(&socket_path, "stop").await? else {
         return Ok(false);
     };
-    if response.ok && response.session.is_none() {
-        Ok(true)
-    } else {
-        Err(keeper_command_error(
-            "the session keeper could not stop the selected session".to_string(),
-        ))
-    }
+    Ok(response.ok && response.session.is_none())
 }
 
 #[cfg(target_os = "linux")]
@@ -2410,6 +2438,94 @@ mod tests {
         assert_eq!(execution.exit_code, 0);
         assert!(execution.stdout.contains("Usage: mendimaru env status"));
         assert!(execution.stderr.is_empty());
+    }
+
+    #[test]
+    fn a_failed_stop_becomes_success_only_after_authoritative_absence() {
+        let stopped_session = serde_json::from_value(json!({
+            "schemaVersion": CONTRACT_SCHEMA_VERSION,
+            "sessionId": "studio-4242-638908128000000000",
+            "version": "11.12.2",
+            "state": "running",
+            "processId": 4242,
+            "connection": "connected",
+            "reconnectable": false
+        }))
+        .expect("Studio session fixture");
+        let other_session = serde_json::from_value(json!({
+            "schemaVersion": CONTRACT_SCHEMA_VERSION,
+            "sessionId": "studio-9000-638908128000000000",
+            "version": "11.12.2",
+            "state": "running",
+            "processId": 9000,
+            "connection": "connected",
+            "reconnectable": false
+        }))
+        .expect("other Studio session fixture");
+        let session_id = "studio-4242-638908128000000000";
+
+        complete_stopped_session_if_absent(
+            CommandError::new(CommandErrorCode::OperationFailed, "fixture failure".into()),
+            Ok(vec![other_session]),
+            session_id,
+        )
+        .expect("an absent target is idempotently complete");
+
+        let retained = complete_stopped_session_if_absent(
+            CommandError::new(CommandErrorCode::OperationFailed, "fixture failure".into()),
+            Ok(vec![stopped_session]),
+            session_id,
+        )
+        .expect_err("a live target remains a failure");
+        assert_eq!(retained.message, "fixture failure");
+
+        complete_stopped_session_if_absent(
+            CommandError::new(CommandErrorCode::OperationFailed, "fixture failure".into()),
+            Err(CommandError::new(
+                CommandErrorCode::OperationFailed,
+                "status failed".into(),
+            )),
+            session_id,
+        )
+        .expect_err("an unverifiable target remains a failure");
+
+        complete_stopped_session_if_absent(
+            CommandError::new(CommandErrorCode::InvalidRequest, "invalid session".into()),
+            Ok(Vec::new()),
+            session_id,
+        )
+        .expect_err("an invalid request is never converted to stop success");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_unconfirmed_keeper_stop_remains_fallback_eligible() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+
+        let root = tempfile::tempdir().expect("temporary app root");
+        let directory = root.path().join("cache").join("cli-sessions");
+        std::fs::create_dir_all(&directory).expect("session socket directory");
+        let session_id = "studio-4242-638908128000000000";
+        let socket_path = directory.join(session_socket_name(session_id));
+        let listener = UnixListener::bind(&socket_path).expect("fixture keeper socket");
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("keeper client connects");
+            let mut reader = BufReader::new(stream);
+            let mut request = String::new();
+            reader.read_line(&mut request).expect("read keeper request");
+            let mut stream = reader.into_inner();
+            stream
+                .write_all(b"{\"ok\":false,\"session\":null}\n")
+                .expect("write unconfirmed keeper response");
+        });
+        let paths = AppPaths::for_tests(root.path().join("config"), root.path().join("cache"));
+
+        let stopped = request_keeper_stop(&paths, session_id)
+            .await
+            .expect("an unconfirmed keeper response is not a CLI transport error");
+        assert!(!stopped);
+        server.join().expect("fixture keeper server completes");
     }
 
     #[test]

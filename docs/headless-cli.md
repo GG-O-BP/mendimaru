@@ -115,6 +115,12 @@ versions and process identities. For a selected session, `studio status
 --session-id ID` checks the keeper first and falls back to an authoritative
 lookup only when that keeper record is unavailable.
 
+`studio stop` is idempotent when Mendimaru can authoritatively observe that the
+requested session is already gone. If a keeper stop report races with final
+cleanup, the CLI verifies the authoritative session list once; an absent target
+returns `ok: true` and exit `0`, while a still-running target or an unverifiable
+status query preserves the original failure.
+
 Poll at an interval larger than the command duration, retain the previous
 terminal error, and stop after a bounded number of attempts. Keep `--snapshot`
 out of polling requests; retrieve it separately with `capabilities` when a
