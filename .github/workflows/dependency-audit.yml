@@ -1,0 +1,83 @@
+name: Dependency audit
+
+on:
+  schedule:
+    - cron: "17 18 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  audit:
+    name: Audit npm and RustSec policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Run dependency audit action
+        uses: ./actions/dependency-audit
+
+  scheduled-update:
+    name: Open scheduled dependency update PR
+    if: github.event_name == 'schedule'
+    needs: audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Update compatible Cargo dependencies
+        run: cargo update --manifest-path src-tauri/Cargo.toml
+
+      - name: Install pinned cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.2
+
+      - name: Verify updated RustSec policy
+        run: |
+          cargo audit --file src-tauri/Cargo.lock --json > /tmp/cargo-audit.json
+          node scripts/verify-rustsec-policy.mjs --report /tmp/cargo-audit.json
+
+      - name: Test compatible dependency update
+        run: npm run check:portable
+
+      - name: Create dependency update pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: deps/scheduled-cargo-update
+        run: |
+          if git diff --quiet -- src-tauri/Cargo.lock; then
+            echo 'No compatible Cargo dependency updates are available.'
+            exit 0
+          fi
+          git config user.name 'mendimaru-dependency-bot'
+          git config user.email 'noreply@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add src-tauri/Cargo.lock
+          git commit -m 'chore(deps): update Cargo lockfile'
+          git push --force-with-lease origin "$BRANCH"
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title 'chore(deps): update Cargo lockfile' \
+            --body 'Scheduled compatible Cargo dependency update. Created by the weekly dependency audit workflow.' \
+            || true

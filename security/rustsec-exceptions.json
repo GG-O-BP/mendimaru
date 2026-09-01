@@ -1,0 +1,264 @@
+{
+  "schemaVersion": 1,
+  "cargoAuditVersion": "0.22.2",
+  "reviewedAt": "2026-09-02",
+  "policy": {
+    "vulnerabilities": "deny",
+    "unsound": "deny-unless-explicit-bounded-reachability",
+    "unmaintained": "deny-unless-owned-unexpired-exception",
+    "yanked": "deny",
+    "unknownWarnings": "deny",
+    "staleExceptions": "deny"
+  },
+  "exceptions": [
+    {
+      "advisoryId": "RUSTSEC-2024-0370",
+      "kind": "unmaintained",
+      "package": {
+        "name": "proc-macro-error",
+        "version": "1.0.4"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["glib-macros v0.18.5 and gtk3-macros v0.18.2"],
+      "reason": "Build-time transitive dependency of the retained GTK3 stack; no runtime API use.",
+      "upstreamUrl": "https://gitlab.com/CreepySkeleton/proc-macro-error/-/issues/20",
+      "remediationPlan": "Upgrade the Tauri/urlpattern stack past the retained proc-macro-error crate, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2024-0411",
+      "kind": "unmaintained",
+      "package": {
+        "name": "gdkwayland-sys",
+        "version": "0.18.2"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri v2.11.5 / wry v0.55.1 Linux WebKitGTK stack"],
+      "reason": "Transitive Linux WebKitGTK dependency retained by the current Tauri desktop stack; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/gtk-rs/gtk3-rs/commit/508a69b63a3c5bf73790e0e59101a955847f30d6",
+      "remediationPlan": "Upgrade Tauri/wry when it removes GTK3, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2024-0412",
+      "kind": "unmaintained",
+      "package": {
+        "name": "gdk",
+        "version": "0.18.2"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri v2.11.5 / wry v0.55.1 Linux WebKitGTK stack"],
+      "reason": "Transitive Linux WebKitGTK dependency retained by the current Tauri desktop stack; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/gtk-rs/gtk3-rs/commit/508a69b63a3c5bf73790e0e59101a955847f30d6",
+      "remediationPlan": "Upgrade Tauri/wry when it removes GTK3, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2024-0413",
+      "kind": "unmaintained",
+      "package": {
+        "name": "atk",
+        "version": "0.18.2"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri v2.11.5 / wry v0.55.1 Linux WebKitGTK stack"],
+      "reason": "Transitive Linux WebKitGTK dependency retained by the current Tauri desktop stack; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/gtk-rs/gtk3-rs/commit/508a69b63a3c5bf73790e0e59101a955847f30d6",
+      "remediationPlan": "Upgrade Tauri/wry when it removes GTK3, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2024-0414",
+      "kind": "unmaintained",
+      "package": {
+        "name": "gdkx11-sys",
+        "version": "0.18.2"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri v2.11.5 / wry v0.55.1 Linux WebKitGTK stack"],
+      "reason": "Transitive Linux WebKitGTK dependency retained by the current Tauri desktop stack; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/gtk-rs/gtk3-rs/commit/508a69b63a3c5bf73790e0e59101a955847f30d6",
+      "remediationPlan": "Upgrade Tauri/wry when it removes GTK3, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2024-0415",
+      "kind": "unmaintained",
+      "package": {
+        "name": "gtk",
+        "version": "0.18.2"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri v2.11.5 / wry v0.55.1 Linux WebKitGTK stack"],
+      "reason": "Transitive Linux WebKitGTK dependency retained by the current Tauri desktop stack; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/gtk-rs/gtk3-rs/commit/508a69b63a3c5bf73790e0e59101a955847f30d6",
+      "remediationPlan": "Upgrade Tauri/wry when it removes GTK3, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2024-0416",
+      "kind": "unmaintained",
+      "package": {
+        "name": "atk-sys",
+        "version": "0.18.2"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri v2.11.5 / wry v0.55.1 Linux WebKitGTK stack"],
+      "reason": "Transitive Linux WebKitGTK dependency retained by the current Tauri desktop stack; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/gtk-rs/gtk3-rs/commit/508a69b63a3c5bf73790e0e59101a955847f30d6",
+      "remediationPlan": "Upgrade Tauri/wry when it removes GTK3, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2024-0417",
+      "kind": "unmaintained",
+      "package": {
+        "name": "gdkx11",
+        "version": "0.18.2"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri v2.11.5 / wry v0.55.1 Linux WebKitGTK stack"],
+      "reason": "Transitive Linux WebKitGTK dependency retained by the current Tauri desktop stack; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/gtk-rs/gtk3-rs/commit/508a69b63a3c5bf73790e0e59101a955847f30d6",
+      "remediationPlan": "Upgrade Tauri/wry when it removes GTK3, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2024-0418",
+      "kind": "unmaintained",
+      "package": {
+        "name": "gdk-sys",
+        "version": "0.18.2"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri v2.11.5 / wry v0.55.1 Linux WebKitGTK stack"],
+      "reason": "Transitive Linux WebKitGTK dependency retained by the current Tauri desktop stack; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/gtk-rs/gtk3-rs/commit/508a69b63a3c5bf73790e0e59101a955847f30d6",
+      "remediationPlan": "Upgrade Tauri/wry when it removes GTK3, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2024-0419",
+      "kind": "unmaintained",
+      "package": {
+        "name": "gtk3-macros",
+        "version": "0.18.2"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri v2.11.5 / wry v0.55.1 Linux WebKitGTK stack"],
+      "reason": "Transitive Linux WebKitGTK dependency retained by the current Tauri desktop stack; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/gtk-rs/gtk3-rs/commit/508a69b63a3c5bf73790e0e59101a955847f30d6",
+      "remediationPlan": "Upgrade Tauri/wry when it removes GTK3, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2024-0420",
+      "kind": "unmaintained",
+      "package": {
+        "name": "gtk-sys",
+        "version": "0.18.2"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri v2.11.5 / wry v0.55.1 Linux WebKitGTK stack"],
+      "reason": "Transitive Linux WebKitGTK dependency retained by the current Tauri desktop stack; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/gtk-rs/gtk3-rs/commit/508a69b63a3c5bf73790e0e59101a955847f30d6",
+      "remediationPlan": "Upgrade Tauri/wry when it removes GTK3, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2025-0075",
+      "kind": "unmaintained",
+      "package": {
+        "name": "unic-char-range",
+        "version": "0.9.0"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["urlpattern v0.3.0 via tauri-utils v2.9.3"],
+      "reason": "Transitive Unicode identifier dependency retained by urlpattern/Tauri; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/rustsec/advisory-db/issues/2414",
+      "remediationPlan": "Upgrade Tauri/urlpattern past unic-ucd-ident 0.9, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2025-0080",
+      "kind": "unmaintained",
+      "package": {
+        "name": "unic-common",
+        "version": "0.9.0"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["urlpattern v0.3.0 via tauri-utils v2.9.3"],
+      "reason": "Transitive Unicode identifier dependency retained by urlpattern/Tauri; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/rustsec/advisory-db/issues/2414",
+      "remediationPlan": "Upgrade Tauri/urlpattern past unic-ucd-ident 0.9, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2025-0081",
+      "kind": "unmaintained",
+      "package": {
+        "name": "unic-char-property",
+        "version": "0.9.0"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["urlpattern v0.3.0 via tauri-utils v2.9.3"],
+      "reason": "Transitive Unicode identifier dependency retained by urlpattern/Tauri; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/rustsec/advisory-db/issues/2414",
+      "remediationPlan": "Upgrade Tauri/urlpattern past unic-ucd-ident 0.9, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2025-0098",
+      "kind": "unmaintained",
+      "package": {
+        "name": "unic-ucd-version",
+        "version": "0.9.0"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["urlpattern v0.3.0 via tauri-utils v2.9.3"],
+      "reason": "Transitive Unicode identifier dependency retained by urlpattern/Tauri; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/rustsec/advisory-db/issues/2414",
+      "remediationPlan": "Upgrade Tauri/urlpattern past unic-ucd-ident 0.9, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2025-0100",
+      "kind": "unmaintained",
+      "package": {
+        "name": "unic-ucd-ident",
+        "version": "0.9.0"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["urlpattern v0.3.0 via tauri-utils v2.9.3"],
+      "reason": "Transitive Unicode identifier dependency retained by urlpattern/Tauri; no direct Mendimaru API use.",
+      "upstreamUrl": "https://github.com/rustsec/advisory-db/issues/2414",
+      "remediationPlan": "Upgrade Tauri/urlpattern past unic-ucd-ident 0.9, then remove this exception.",
+      "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2024-0429",
+      "kind": "unsound",
+      "exceptionClass": "bounded-reachability",
+      "package": {
+        "name": "glib",
+        "version": "0.18.5"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri v2.11.5 / wry v0.55.1 Linux WebKitGTK stack"],
+      "reason": "The unsound VariantStrIter API is not referenced by Mendimaru source; the crate remains a transitive Tauri/WebKitGTK dependency.",
+      "reachability": {
+        "status": "not-reachable",
+        "evidence": "A source search at the pinned review commit finds no VariantStrIter or variant_str_iter reference outside generated/locked dependencies.",
+        "checkedCommit": "fe911c62879f0215bc073635b4d9e0ef0236bb9b"
+      },
+      "upstreamUrl": "https://github.com/gtk-rs/gtk-rs-core/pull/1343",
+      "remediationPlan": "Upgrade glib to >=0.20 through Tauri/wry; remove this exception immediately if a source reference to VariantStrIter is introduced.",
+      "expiresAt": "2026-10-01"
+    }
+  ],
+  "advisoryDatabase": {
+    "advisoryCount": 1236,
+    "lastCommit": "4b27756fe154d080be5c91a7486e4fbd5cfc3b3a",
+    "lastUpdated": "2026-09-01T21:23:55+02:00"
+  }
+}

@@ -32,8 +32,23 @@ env:
   RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
 
 jobs:
+  dependency-audit:
+    name: Dependency security audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Run dependency audit action
+        uses: ./actions/dependency-audit
+
   verify-windows:
     name: Verify Windows release candidate
+    needs: dependency-audit
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -62,18 +77,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Run lint, formatting, builds, tests, and npm audit
+      - name: Run lint, formatting, builds, and tests
         run: |
           npm run check:portable
           npm run test:e2e:windows:powershell
           npm run lint:rust:all-features
-          npm run test:security
-
-      - name: Install pinned cargo-audit
-        run: cargo install cargo-audit --locked --version 0.22.2
-
-      - name: Audit Rust dependency lockfile
-        run: cargo audit --file src-tauri/Cargo.lock
 
       - name: Run actual Tauri, WebView2, IPC, Windows, and performance E2E
         run: npm run test:e2e:windows
