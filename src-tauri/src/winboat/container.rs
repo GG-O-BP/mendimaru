@@ -653,6 +653,10 @@ pub(super) async fn guest_is_online_at(api_url: &str) -> bool {
         .is_ok_and(|response| response.status().is_success())
 }
 
+pub(crate) async fn guest_is_online_at_url(api_url: &str) -> bool {
+    guest_is_online_at(api_url).await
+}
+
 pub(super) fn http_client(timeout: Duration) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(timeout)

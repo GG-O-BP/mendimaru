@@ -76,6 +76,43 @@ pub(crate) fn normalize_and_validate(config: &mut AppConfig) -> Result<(), Strin
     {
         return Err(crate::tr!("error-winboat-connection-empty"));
     }
+    if !config
+        .container_name
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_alphanumeric())
+        || !config.container_name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '-')
+        })
+    {
+        return Err(crate::tr!("error-settings-container-name"));
+    }
+    if !config.freerdp_binary.starts_with('/') {
+        return Err(crate::tr!("error-settings-linux-absolute-path"));
+    }
+    if config.rdp_port == 0 {
+        return Err(crate::tr!("error-settings-port-range"));
+    }
+    if !is_loopback_host(&config.rdp_host) {
+        return Err(crate::tr!("error-settings-loopback-host"));
+    }
+    let api_url = reqwest::Url::parse(&config.api_url)
+        .map_err(|_| crate::tr!("error-settings-loopback-url"))?;
+    if !matches!(api_url.scheme(), "http" | "https")
+        || !api_url.username().is_empty()
+        || api_url
+            .password()
+            .is_some_and(|password| !password.is_empty())
+        || !api_url.host_str().is_some_and(is_loopback_host)
+    {
+        return Err(crate::tr!("error-settings-loopback-url"));
+    }
+    if !is_windows_absolute_path(&config.windows_shared_directory)
+        || !is_windows_absolute_path(&config.mendix_install_root)
+        || !is_windows_absolute_path(&config.mendix_data_root)
+    {
+        return Err(crate::tr!("error-settings-windows-absolute-path"));
+    }
     if config.startup_timeout_seconds == 0 || config.startup_timeout_seconds > 900 {
         return Err(crate::tr!(
             "error-startup-timeout-range",
@@ -84,6 +121,29 @@ pub(crate) fn normalize_and_validate(config: &mut AppConfig) -> Result<(), Strin
         ));
     }
     Ok(())
+}
+
+pub(crate) fn is_loopback_host(host: &str) -> bool {
+    let host = host.trim().to_ascii_lowercase();
+    if matches!(host.as_str(), "localhost" | "::1" | "[::1]") {
+        return true;
+    }
+    let octets: Vec<_> = host.split('.').collect();
+    octets.len() == 4
+        && octets[0] == "127"
+        && octets[1..].iter().all(|octet| octet.parse::<u8>().is_ok())
+}
+
+fn is_windows_absolute_path(path: &str) -> bool {
+    let path = path.trim();
+    if path.len() < 3 {
+        return false;
+    }
+    let bytes = path.as_bytes();
+    if bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        return matches!(bytes[2], b'\\' | b'/') && !path[3..].contains('\0');
+    }
+    path.starts_with(r"\\") && !path.contains('\0')
 }
 
 fn canonical_display_path(path: &Path) -> std::io::Result<std::path::PathBuf> {
@@ -163,5 +223,55 @@ mod tests {
 
         let mut missing_workspace = config(&temporary.path().join("missing-workspace"));
         assert!(normalize_and_validate(&mut missing_workspace).is_err());
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    use super::normalize_and_validate;
+    use crate::models::{AppConfig, ContainerRuntime};
+    use tempfile::tempdir;
+
+    fn config(workspace: &std::path::Path) -> AppConfig {
+        AppConfig {
+            language_preference: "system".into(),
+            winboat_setup_pending: false,
+            winboat_executable: "/opt/winboat/winboat".into(),
+            compose_file: "/home/dev/.winboat/docker-compose.yml".into(),
+            container_runtime: ContainerRuntime::Docker,
+            container_name: "WinBoat".into(),
+            api_url: "http://127.0.0.1:47280".into(),
+            rdp_host: "127.0.0.1".into(),
+            rdp_port: 47300,
+            shared_directory: workspace.to_string_lossy().to_string(),
+            windows_shared_directory: r"\\host.lan\Data".into(),
+            freerdp_binary: "/usr/bin/xfreerdp3".into(),
+            mendix_install_root: r"C:\Program Files\Mendix".into(),
+            mendix_data_root: r"C:\ProgramData\Mendix".into(),
+            windows_studio_paths: Vec::new(),
+            startup_timeout_seconds: 180,
+        }
+    }
+
+    #[test]
+    fn validates_advanced_winboat_connection_fields() {
+        crate::i18n::initialize("en-US").expect("localization initializes");
+        let workspace = tempdir().expect("workspace");
+        let mut valid = config(workspace.path());
+        normalize_and_validate(&mut valid).expect("advanced settings are valid");
+
+        let mut invalid = valid;
+        invalid.container_name = "Bad Name".into();
+        invalid.api_url = "http://user:secret@192.168.1.10:47280".into();
+        invalid.rdp_host = "192.168.1.10".into();
+        invalid.rdp_port = 0;
+        invalid.windows_shared_directory = "Data".into();
+        invalid.freerdp_binary = "xfreerdp3".into();
+        invalid.mendix_install_root = "C:Mendix".into();
+        invalid.startup_timeout_seconds = 901;
+
+        let error =
+            normalize_and_validate(&mut invalid).expect_err("advanced settings are rejected");
+        assert!(!error.is_empty());
     }
 }

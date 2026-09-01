@@ -8,6 +8,8 @@ import {
   LoaderCircle,
   Plus,
   RefreshCw,
+  RotateCcw,
+  SlidersHorizontal,
   Trash2,
 } from "lucide-react";
 import type {
@@ -17,8 +19,13 @@ import type {
   EnvironmentDiagnosticAction,
   EnvironmentDiagnosticId,
 } from "../../domain/types";
-import type { Translate } from "../../i18n";
+import type { MessageKey, Translate } from "../../i18n";
 import { PageTitle } from "../../shared/components/LayoutPrimitives";
+import {
+  ADVANCED_SETTING_FIELDS,
+  validateAdvancedSettings,
+  type AdvancedSettingField,
+} from "./advancedSettings";
 import { diagnosticText } from "./environmentDiagnostics";
 
 export type PathField = "sharedDirectory" | "composeFile" | "winboatExecutable";
@@ -38,6 +45,13 @@ export interface SettingsPageModel {
   onApplyNow: (value: boolean) => void;
   onSave: () => void;
   onRedetect: () => void;
+  onDetectField: (field: AdvancedSettingField) => void;
+  onRestoreAdvancedDefaults: () => void;
+  onTestConnection: () => void;
+  connectionTest: {
+    online: boolean;
+    endpoint: string;
+  } | null;
   onDiagnosticAction: (
     action: EnvironmentDiagnosticAction,
     id: EnvironmentDiagnosticId,
@@ -45,6 +59,18 @@ export interface SettingsPageModel {
   onCopyDiagnosticReport: () => void;
   onExportDiagnosticReport: () => void;
 }
+
+const ADVANCED_LABEL_KEYS: Record<AdvancedSettingField, MessageKey> = {
+  containerName: "settings-advanced-container-name",
+  apiUrl: "settings-advanced-api-url",
+  rdpHost: "settings-advanced-rdp-host",
+  rdpPort: "settings-advanced-rdp-port",
+  windowsSharedDirectory: "settings-advanced-windows-shared-directory",
+  freerdpBinary: "settings-advanced-freerdp-binary",
+  mendixInstallRoot: "settings-advanced-mendix-install-root",
+  mendixDataRoot: "settings-advanced-mendix-data-root",
+  startupTimeoutSeconds: "settings-advanced-startup-timeout-seconds",
+};
 
 export function SettingsPage({
   t,
@@ -54,6 +80,7 @@ export function SettingsPage({
   model: SettingsPageModel;
 }) {
   const { config } = model;
+  const advancedErrors = validateAdvancedSettings(config, t);
   return (
     <div
       className="settings-page"
@@ -210,6 +237,83 @@ export function SettingsPage({
               </select>
             </label>
           </>
+        )}
+        {!model.nativeWindows && (
+          <details
+            className="advanced-settings"
+            data-testid="advanced-settings"
+          >
+            <summary>
+              <SlidersHorizontal size={16} aria-hidden="true" />
+              <span>
+                <strong>{t("settings-advanced-title")}</strong>
+                <small>{t("settings-advanced-description")}</small>
+              </span>
+            </summary>
+            <div className="advanced-settings-body">
+              <div className="advanced-settings-actions">
+                <button
+                  type="button"
+                  className="button secondary compact"
+                  onClick={model.onRestoreAdvancedDefaults}
+                  disabled={model.isBusy("restore-advanced-defaults")}
+                >
+                  <RotateCcw size={15} />
+                  {t("action-restore-defaults")}
+                </button>
+                <button
+                  type="button"
+                  className="button secondary compact"
+                  onClick={model.onTestConnection}
+                  disabled={
+                    Object.keys(advancedErrors).length > 0 ||
+                    model.isBusy("test-settings-connection")
+                  }
+                >
+                  {model.isBusy("test-settings-connection") ? (
+                    <LoaderCircle size={15} className="spin" />
+                  ) : (
+                    <RefreshCw size={15} />
+                  )}
+                  {t("action-test-connection")}
+                </button>
+              </div>
+              <p className="advanced-settings-warning">
+                <AlertTriangle size={15} aria-hidden="true" />
+                {t("settings-advanced-warning")}
+              </p>
+              <div className="advanced-field-list">
+                {ADVANCED_SETTING_FIELDS.map((field) => (
+                  <AdvancedSettingInput
+                    key={field}
+                    field={field}
+                    value={config[field]}
+                    label={t(ADVANCED_LABEL_KEYS[field])}
+                    error={advancedErrors[field]}
+                    busy={model.isBusy(`detect-setting-${field}`)}
+                    onChange={(value) =>
+                      model.onChange({ ...config, [field]: value })
+                    }
+                    onDetect={() => model.onDetectField(field)}
+                    detectLabel={t("action-auto-detect")}
+                  />
+                ))}
+              </div>
+              {model.connectionTest && (
+                <p
+                  className={`connection-test-result ${
+                    model.connectionTest.online ? "online" : "offline"
+                  }`}
+                  data-testid="connection-test-result"
+                >
+                  {model.connectionTest.online
+                    ? t("settings-connection-online")
+                    : t("settings-connection-offline")}
+                  <small>{model.connectionTest.endpoint}</small>
+                </p>
+              )}
+            </div>
+          </details>
         )}
       </section>
 
@@ -426,6 +530,66 @@ function PathInput({
           {browseLabel}
         </button>
       </div>
+    </label>
+  );
+}
+
+function AdvancedSettingInput({
+  field,
+  label,
+  value,
+  error,
+  busy,
+  detectLabel,
+  onChange,
+  onDetect,
+}: {
+  field: AdvancedSettingField;
+  label: string;
+  value: string | number;
+  error?: string;
+  busy: boolean;
+  detectLabel: string;
+  onChange: (value: string | number) => void;
+  onDetect: () => void;
+}) {
+  const numeric =
+    field === "rdpPort" || field === "startupTimeoutSeconds" ? true : false;
+  return (
+    <label
+      className={`advanced-field ${error ? "invalid" : ""}`}
+      data-testid={`advanced-${field}`}
+    >
+      <span>{label}</span>
+      <div>
+        <input
+          type={numeric ? "number" : "text"}
+          value={value}
+          min={numeric ? 1 : undefined}
+          max={
+            field === "rdpPort"
+              ? 65_535
+              : field === "startupTimeoutSeconds"
+                ? 900
+                : undefined
+          }
+          step={numeric ? 1 : undefined}
+          aria-invalid={Boolean(error)}
+          onChange={(event) =>
+            onChange(numeric ? Number(event.target.value) : event.target.value)
+          }
+          spellCheck={false}
+        />
+        <button type="button" onClick={onDetect} disabled={busy}>
+          {busy ? <LoaderCircle size={14} className="spin" /> : null}
+          {detectLabel}
+        </button>
+      </div>
+      {error && (
+        <small className="field-error" role="alert">
+          {error}
+        </small>
+      )}
     </label>
   );
 }

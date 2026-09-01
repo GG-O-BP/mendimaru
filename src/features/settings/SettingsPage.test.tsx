@@ -16,7 +16,7 @@ const config: AppConfig = {
   rdpPort: 47300,
   sharedDirectory: "/home/dev/Mendix",
   windowsSharedDirectory: String.raw`\\host.lan\Data`,
-  freerdpBinary: "xfreerdp3",
+  freerdpBinary: "/usr/bin/xfreerdp3",
   mendixInstallRoot: String.raw`C:\Program Files\Mendix`,
   mendixDataRoot: String.raw`C:\ProgramData\Mendix`,
   windowsStudioPaths: [],
@@ -58,6 +58,10 @@ function model(overrides: Partial<SettingsPageModel> = {}): SettingsPageModel {
     onApplyNow: vi.fn(),
     onSave: vi.fn(),
     onRedetect: vi.fn(),
+    onDetectField: vi.fn(),
+    onRestoreAdvancedDefaults: vi.fn(),
+    onTestConnection: vi.fn(),
+    connectionTest: null,
     onDiagnosticAction: vi.fn(),
     onCopyDiagnosticReport: vi.fn(),
     onExportDiagnosticReport: vi.fn(),
@@ -67,7 +71,12 @@ function model(overrides: Partial<SettingsPageModel> = {}): SettingsPageModel {
 
 describe("SettingsPage environment diagnostics", () => {
   it("keeps success, warning, and failure checks independent", () => {
-    render(<SettingsPage t={t} model={model()} />);
+    render(
+      <SettingsPage
+        t={t}
+        model={model({ config: { ...config, freerdpBinary: "xfreerdp3" } })}
+      />,
+    );
 
     expect(screen.getAllByRole("listitem")).toHaveLength(3);
     expect(screen.getByText("diagnostic-detected:29.7.2")).toBeVisible();
@@ -117,5 +126,72 @@ describe("SettingsPage environment diagnostics", () => {
     );
     expect(onCopyDiagnosticReport).toHaveBeenCalledOnce();
     expect(onExportDiagnosticReport).toHaveBeenCalledOnce();
+  });
+});
+
+describe("SettingsPage advanced WinBoat settings", () => {
+  it("keeps advanced controls collapsed until they are needed", () => {
+    render(<SettingsPage t={t} model={model()} />);
+
+    const advanced = screen.getByTestId("advanced-settings");
+    expect(advanced).toHaveProperty("open", false);
+    expect(screen.queryByTestId("advanced-apiUrl")).not.toBeVisible();
+  });
+
+  it("shows field errors and blocks connection tests until the draft is valid", () => {
+    render(
+      <SettingsPage
+        t={t}
+        model={model({ config: { ...config, freerdpBinary: "xfreerdp3" } })}
+      />,
+    );
+    const advanced = screen.getByTestId("advanced-settings");
+    fireEvent.click(advanced.querySelector("summary")!);
+
+    expect(
+      screen.getByText("error-settings-linux-absolute-path"),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "action-test-connection" }),
+    ).toBeDisabled();
+  });
+
+  it("supports field-level detection, default restoration, and a non-mutating connection test", () => {
+    const onDetectField = vi.fn();
+    const onRestoreAdvancedDefaults = vi.fn();
+    const onTestConnection = vi.fn();
+    render(
+      <SettingsPage
+        t={t}
+        model={model({
+          onDetectField,
+          onRestoreAdvancedDefaults,
+          onTestConnection,
+          connectionTest: { online: true, endpoint: "http://127.0.0.1:47280" },
+        })}
+      />,
+    );
+    fireEvent.click(
+      screen.getByTestId("advanced-settings").querySelector("summary")!,
+    );
+
+    fireEvent.click(
+      screen
+        .getByTestId("advanced-containerName")
+        .querySelector('button[type="button"]')!,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "action-restore-defaults" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "action-test-connection" }),
+    );
+
+    expect(onDetectField).toHaveBeenCalledWith("containerName");
+    expect(onRestoreAdvancedDefaults).toHaveBeenCalledOnce();
+    expect(onTestConnection).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("connection-test-result")).toHaveTextContent(
+      "settings-connection-online",
+    );
   });
 });

@@ -1,5 +1,7 @@
 use super::{load_command_config, CommandResult};
-use crate::models::{AppConfig, SettingsSavePreview, SettingsSaveResult};
+use crate::models::{
+    AppConfig, SettingsConnectionTestResult, SettingsSavePreview, SettingsSaveResult,
+};
 use tauri::AppHandle;
 
 #[tauri::command]
@@ -31,6 +33,11 @@ pub(crate) fn redetect_config(app: AppHandle) -> CommandResult<AppConfig> {
 }
 
 #[tauri::command]
+pub(crate) fn detect_settings() -> CommandResult<AppConfig> {
+    Ok(crate::config::detect_config()?)
+}
+
+#[tauri::command]
 pub(crate) fn preview_settings_save(
     config: AppConfig,
     apply_mount: bool,
@@ -46,4 +53,19 @@ pub(crate) async fn save_config(
     compose_revision: Option<String>,
 ) -> CommandResult<SettingsSaveResult> {
     crate::settings::save_settings(&app, config, apply_mount, compose_revision).await
+}
+
+#[tauri::command]
+pub(crate) async fn test_settings_connection(
+    mut config: AppConfig,
+) -> CommandResult<SettingsConnectionTestResult> {
+    if crate::platform::is_windows_native() {
+        return Err(crate::tr!("error-winboat-not-required").into());
+    }
+    crate::config::normalize_and_validate(&mut config)?;
+    let endpoint = config.api_url.clone();
+    Ok(SettingsConnectionTestResult {
+        online: crate::winboat::guest_is_online_at_url(&endpoint).await,
+        endpoint,
+    })
 }

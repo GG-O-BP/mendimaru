@@ -3,7 +3,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { errorText } from "../../api/errors";
 import { tauriApi } from "../../api/tauri";
 import type { AppConfig, EnvironmentStatus } from "../../domain/types";
+import type { SettingsConnectionTestResult } from "../../domain/types";
 import type { PathField } from "./SettingsPage";
+import {
+  ADVANCED_SETTING_FIELDS,
+  type AdvancedSettingField,
+} from "./advancedSettings";
 import type { SettingsDraftDependencies } from "./dependencies";
 import { configsEqual } from "./environmentState";
 import type { EnvironmentRefreshOptions } from "./useEnvironmentStatus";
@@ -31,6 +36,8 @@ export function useSettingsDraft({
     status: "loading",
   });
   const [applyMountNow, setApplyMountNow] = useState(true);
+  const [connectionTest, setConnectionTest] =
+    useState<SettingsConnectionTestResult | null>(null);
 
   useEffect(() => {
     if (settings.status !== "loading") return undefined;
@@ -257,6 +264,65 @@ export function useSettingsDraft({
     [applyConfig, notify, onWarning, refreshStatus, runAction, t],
   );
 
+  const detectAdvancedSetting = useCallback(
+    (field: AdvancedSettingField) =>
+      runAction(`detect-setting-${field}`, async () => {
+        const detected = await tauriApi.detectSettings();
+        setSettings((current) =>
+          current.status === "ready"
+            ? {
+                ...current,
+                draft: { ...current.draft, [field]: detected[field] },
+              }
+            : current,
+        );
+        setConnectionTest(null);
+      }),
+    [runAction],
+  );
+
+  const restoreAdvancedDefaults = useCallback(
+    () =>
+      runAction("restore-advanced-defaults", async () => {
+        const detected = await tauriApi.detectSettings();
+        setSettings((current) =>
+          current.status === "ready"
+            ? {
+                ...current,
+                draft: Object.fromEntries(
+                  Object.entries(current.draft).map(([key, value]) => [
+                    key,
+                    ADVANCED_SETTING_FIELDS.includes(
+                      key as AdvancedSettingField,
+                    )
+                      ? detected[key as AdvancedSettingField]
+                      : value,
+                  ]),
+                ) as AppConfig,
+              }
+            : current,
+        );
+        setConnectionTest(null);
+      }),
+    [runAction],
+  );
+
+  const testConnection = useCallback(() => {
+    if (settings.status !== "ready") return Promise.resolve();
+    const draft = settings.draft;
+    return runAction("test-settings-connection", async () => {
+      const result = await tauriApi.testSettingsConnection(draft);
+      setConnectionTest(result);
+      notify(
+        result.online ? "success" : "error",
+        result.online
+          ? t("settings-connection-online")
+          : t("settings-connection-offline"),
+        result.endpoint,
+      );
+    });
+  }, [notify, runAction, settings, t]);
+
   const updateLanguagePreference = useCallback(
     (preference: string) => {
       updateConfigPair((config) => ({
@@ -289,6 +355,10 @@ export function useSettingsDraft({
     removeStudioPath,
     saveSettings,
     redetectSettings,
+    detectAdvancedSetting,
+    restoreAdvancedDefaults,
+    testConnection,
+    connectionTest,
     updateLanguagePreference,
   };
 }
