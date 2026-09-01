@@ -36,6 +36,11 @@ mendimaru operation status --operation-id OPERATION_ID
 mendimaru operation retry --operation-id OPERATION_ID
 ```
 
+`mendimaru --help` (or `mendimaru -h`) prints this command summary immediately
+and exits `0`. Help is handled before localization, configuration, capability
+snapshot creation, or backend access, so it also works while WinBoat and the
+guest are offline.
+
 All commands default to one JSON result. `--json` selects that format
 explicitly. `--ndjson` emits zero or more structured progress events followed
 by one result for long-running install and retry commands. Global flags may be
