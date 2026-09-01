@@ -10,7 +10,7 @@ use super::scripts::{
 use crate::models::{AppConfig, StudioInstallPhase, StudioInstallProgress};
 use crate::platform::validate_version;
 use crate::process::CancellationToken;
-use crate::projects::{linux_path_to_windows_share, scan_projects};
+use crate::projects::{linux_path_to_windows_share, validate_project_selection};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::fs::OpenOptions;
@@ -43,11 +43,15 @@ pub async fn launch_studio(
         .find(|installed| installed.version == version)
         .ok_or_else(|| crate::tr!("error-studio-install-not-found", version = version))?;
 
-    let project_argument = if let Some(project_path) = project_mpr_path {
-        validate_project_argument(config, project_path)?
-    } else {
-        None
-    };
+    let project_access = project_mpr_path
+        .map(|project_path| {
+            let selection = validate_project_selection(config, Path::new(project_path))?;
+            super::project_access::prepare(config, &selection)
+        })
+        .transpose()?;
+    let project_argument = project_access
+        .as_ref()
+        .map(|lease| lease.guest_project_path());
     let label = format!("Studio Pro {}", selected.version);
     let operation_directory = secure_shared_directory(config, ".mendimaru/operations")?;
     let report_path = operation_directory.join(format!("{operation_id}.json"));
@@ -65,11 +69,14 @@ pub async fn launch_studio(
     )?;
     let script = launch_studio_script(
         &selected.executable_path,
-        project_argument.as_deref(),
+        project_argument,
         &windows_report_path,
         &windows_control_path,
         &config.mendix_install_root,
         version,
+        project_access
+            .as_ref()
+            .map_or(0, |lease| lease.readiness_timeout_seconds()),
     );
     let command = write_command_script(config, operation_id, &script)?;
     let operation = crate::tr!("operation-studio-launch");
@@ -87,6 +94,7 @@ pub async fn launch_studio(
                 operation: &operation,
                 keep_remote_app_alive: true,
                 cancellation: None,
+                project_access: project_access.as_ref(),
             },
             |report| {
                 if report.state == WindowsOperationState::Running && report.sessions.len() == 1 {
@@ -150,15 +158,17 @@ pub async fn launch_studio(
     let security = outcome.security.take().ok_or_else(|| {
         WindowsOperationFailure::from("RemoteApp operation security was not retained".to_string())
     })?;
-    super::sessions::register_launch_client(
-        version,
-        &outcome.report.sessions,
+    super::sessions::register_launch_client(super::sessions::LaunchClientRegistration {
+        config,
+        expected_version: version,
+        report: &outcome.report.sessions,
         client,
         report_path,
         control_path,
         security,
-        outcome.authenticated,
-    )?;
+        previous_report: outcome.authenticated,
+        project_access,
+    })?;
     Ok(())
 }
 
@@ -197,6 +207,7 @@ async fn abort_incomplete_launch(
             operation: "cleaning up incomplete Studio Pro launch",
             keep_remote_app_alive: false,
             cancellation: None,
+            project_access: None,
         },
         |_| {},
     )
@@ -329,6 +340,7 @@ where
             operation: &operation,
             keep_remote_app_alive: false,
             cancellation: Some(&cancellation),
+            project_access: None,
         },
         |report| {
             let phase = match report.state {
@@ -476,6 +488,7 @@ pub async fn launch_uninstaller(
             operation: &operation,
             keep_remote_app_alive: false,
             cancellation: None,
+            project_access: None,
         },
         |_| {},
     )
@@ -509,36 +522,6 @@ pub fn open_linux_folder(path: &str) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| crate::tr!("error-file-manager-open", error = error))
-}
-
-fn validate_project_argument(
-    config: &AppConfig,
-    requested_path: &str,
-) -> Result<Option<String>, String> {
-    let requested = Path::new(requested_path);
-    if !requested.is_file()
-        || !requested
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("mpr"))
-    {
-        return Err(crate::tr!("error-project-not-found"));
-    }
-    let projects = scan_projects(config)?;
-    let project = projects
-        .into_iter()
-        .find(|project| paths_refer_to_same_location(&project.mpr_path, requested_path))
-        .ok_or_else(|| crate::tr!("error-project-not-shared"))?;
-    Ok(Some(project.windows_path))
-}
-
-fn paths_refer_to_same_location(left: &str, right: &str) -> bool {
-    let left_path = Path::new(left);
-    let right_path = Path::new(right);
-    match (left_path.canonicalize(), right_path.canonicalize()) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => left_path == right_path,
-    }
 }
 
 pub(super) struct PreparedCommand {

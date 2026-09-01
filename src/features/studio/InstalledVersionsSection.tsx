@@ -327,6 +327,8 @@ function reconnectTitle(t: Translate, session: StudioSessionStatus) {
       return t("session-reconnect-already-connected");
     case "window-unavailable":
       return t("session-reconnect-window-unavailable");
+    case "project-reselection-required":
+      return t("session-reconnect-project-reselection-required");
     default:
       return t("session-reconnect-unsupported");
   }

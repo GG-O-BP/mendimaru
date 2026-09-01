@@ -58,6 +58,8 @@ export function ProjectsView({
     studioLaunchReady: studio.launchReady,
     studioSessionsLoading: studio.sessionsLoading,
     connectedRemoteAppVersion: launcher.connectedRemoteAppVersion,
+    supportsExternalSelection: requiresWinboat,
+    externalSelectionBusy: projects.externalSelectionBusy,
     isLaunching: studio.isLaunching,
     isBusy,
     launchKeyFor: launcher.launchKeyFor,
@@ -67,6 +69,11 @@ export function ProjectsView({
     onRefresh: () => void projects.refresh(),
     onOpenWorkspace: () => void projects.openFolder(config.sharedDirectory),
     onOpenFolder: (path) => void projects.openFolder(path),
+    onSelectExternal: () => {
+      void projects.selectExternalProject().then((project) => {
+        if (project) launcher.launchProject(project);
+      });
+    },
     onLaunch: launcher.launchProject,
   };
 

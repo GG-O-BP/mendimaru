@@ -17,7 +17,9 @@ pub(crate) use localization::{
     format_localized_bytes, format_localized_dates, format_localized_numbers, get_localization,
     set_language_preference,
 };
-pub(crate) use projects::{get_projects, open_folder, set_project_launch_preference};
+pub(crate) use projects::{
+    get_projects, open_folder, select_external_project, set_project_launch_preference,
+};
 pub(crate) use studio::{
     cancel_studio_download, clear_operation_history, fetch_downloadable_versions,
     get_downloadable_versions_cache, get_installed_versions, get_installed_versions_cache,

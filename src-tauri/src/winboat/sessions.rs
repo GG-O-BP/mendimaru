@@ -4,6 +4,7 @@ use super::operation::{
     run_windows_operation, wait_for_followup_windows_operation, WindowsOperationFailure,
     WindowsOperationOutcome, WindowsOperationRequest, WindowsStudioSessionReport,
 };
+use super::project_access::{self, ProjectAccessLease};
 use super::remote_app::RemoteAppProcess;
 use super::scripts::{studio_sessions_script, StudioSessionScriptMode};
 use super::security::{authenticated_envelope, AuthenticatedPayload, OperationSecurity};
@@ -37,6 +38,12 @@ struct RegisteredClient {
     process: RemoteAppProcess,
     status: StudioSessionStatus,
     control: RegisteredControl,
+    project_access: Option<RegisteredProjectAccess>,
+}
+
+struct RegisteredProjectAccess {
+    config: AppConfig,
+    _lease: ProjectAccessLease,
 }
 
 struct RegisteredControl {
@@ -83,7 +90,7 @@ pub(crate) async fn list(
         false,
     )
     .await?;
-    let sessions = normalize_sessions(&studios, outcome.outcome.report.sessions)?;
+    let sessions = normalize_sessions(config, &studios, outcome.outcome.report.sessions)?;
     trace_session_query(started_at.elapsed(), sessions.len(), false);
     Ok(sessions)
 }
@@ -108,6 +115,14 @@ pub(crate) async fn reconnect(
             "error-studio-session-already-connected"
         )));
     }
+    if project_access::protected_session_ids(config)
+        .map_err(failure)?
+        .contains(session_id)
+    {
+        return Err(failure(crate::tr!(
+            "error-project-session-reselection-required"
+        )));
+    }
     if !registered_client_sessions().is_empty() {
         return Err(failure(
             "another connected Studio Pro session must be closed before reconnecting",
@@ -126,7 +141,7 @@ pub(crate) async fn reconnect(
         true,
     )
     .await?;
-    let sessions = normalize_sessions(&studios, execution.outcome.report.sessions.clone())?;
+    let sessions = normalize_sessions(config, &studios, execution.outcome.report.sessions.clone())?;
     let exact = sessions
         .into_iter()
         .find(|session| session.session_id == session_id && session.reconnectable);
@@ -167,6 +182,7 @@ pub(crate) async fn reconnect(
             next_sequence: 1,
             cleanup_report: true,
         },
+        None,
     )?;
     Ok(())
 }
@@ -197,19 +213,37 @@ pub(crate) async fn stop(
         false,
     )
     .await?;
+    project_access::forget_protected_session(config, session_id);
     disconnect_client(session_id);
     Ok(())
 }
 
+pub(super) struct LaunchClientRegistration<'a> {
+    pub(super) config: &'a AppConfig,
+    pub(super) expected_version: &'a str,
+    pub(super) report: &'a [WindowsStudioSessionReport],
+    pub(super) client: RemoteAppProcess,
+    pub(super) report_path: PathBuf,
+    pub(super) control_path: PathBuf,
+    pub(super) security: OperationSecurity,
+    pub(super) previous_report: AuthenticatedPayload,
+    pub(super) project_access: Option<ProjectAccessLease>,
+}
+
 pub(super) fn register_launch_client(
-    expected_version: &str,
-    report: &[WindowsStudioSessionReport],
-    client: RemoteAppProcess,
-    report_path: PathBuf,
-    control_path: PathBuf,
-    security: OperationSecurity,
-    previous_report: AuthenticatedPayload,
+    registration: LaunchClientRegistration<'_>,
 ) -> Result<(), WindowsOperationFailure> {
+    let LaunchClientRegistration {
+        config,
+        expected_version,
+        report,
+        client,
+        report_path,
+        control_path,
+        security,
+        previous_report,
+        project_access: project_access_lease,
+    } = registration;
     let Some(session) = report.first() else {
         let mut client = client;
         let _ = client.kill();
@@ -255,7 +289,20 @@ pub(super) fn register_launch_client(
         reconnectable: false,
         reconnect_unavailable: Some(StudioReconnectUnavailable::AlreadyConnected),
     };
-    register_client(
+    if let Some(lease) = project_access_lease.as_ref() {
+        project_access::remember_protected_session(
+            config,
+            &session.session_id,
+            expected_version,
+            lease,
+        )
+        .map_err(failure)?;
+    }
+    let protected = project_access_lease.map(|lease| RegisteredProjectAccess {
+        config: config.clone(),
+        _lease: lease,
+    });
+    let result = register_client(
         &session.session_id,
         client,
         status,
@@ -267,7 +314,12 @@ pub(super) fn register_launch_client(
             next_sequence: 1,
             cleanup_report: false,
         },
-    )
+        protected,
+    );
+    if result.is_err() {
+        project_access::forget_protected_session(config, &session.session_id);
+    }
+    result
 }
 
 fn terminate_client(mut client: RemoteAppProcess) {
@@ -276,6 +328,7 @@ fn terminate_client(mut client: RemoteAppProcess) {
 }
 
 fn normalize_sessions(
+    config: &AppConfig,
     studios: &[StudioVersion],
     sessions: Vec<WindowsStudioSessionReport>,
 ) -> Result<Vec<StudioSessionStatus>, WindowsOperationFailure> {
@@ -287,6 +340,7 @@ fn normalize_sessions(
         .map(|studio| studio.version.as_str())
         .collect::<HashSet<_>>();
     let mut identifiers = HashSet::new();
+    let protected = project_access::protected_session_ids(config).map_err(failure)?;
     let mut normalized = Vec::with_capacity(sessions.len());
     for session in sessions {
         let identity = parse_session_id(&session.session_id)?;
@@ -316,6 +370,12 @@ fn normalize_sessions(
                 false,
                 Some(StudioReconnectUnavailable::AlreadyConnected),
             )
+        } else if protected.contains(&session.session_id) {
+            (
+                StudioConnectionState::Disconnected,
+                false,
+                Some(StudioReconnectUnavailable::ProjectReselectionRequired),
+            )
         } else if session.has_window {
             (StudioConnectionState::Disconnected, true, None)
         } else {
@@ -338,6 +398,7 @@ fn normalize_sessions(
             reconnect_unavailable,
         });
     }
+    project_access::retain_live_protected_sessions(config, &identifiers).map_err(failure)?;
     normalized.sort_by_key(|session| std::cmp::Reverse(session.started_at));
     Ok(normalized)
 }
@@ -388,6 +449,7 @@ async fn execute(
             operation: &operation,
             keep_remote_app_alive,
             cancellation: None,
+            project_access: None,
         },
         |_| {},
     )
@@ -492,7 +554,7 @@ pub(crate) fn registered_client_sessions() -> Vec<StudioSessionStatus> {
 }
 
 fn retain_live_clients(clients: &mut HashMap<String, RegisteredClient>) {
-    clients.retain(|_, client| {
+    clients.retain(|session_id, client| {
         match client.process.try_wait() {
             Ok(Some(_)) => return false,
             Err(_) => return true,
@@ -501,6 +563,7 @@ fn retain_live_clients(clients: &mut HashMap<String, RegisteredClient>) {
         match read_session_active(&mut client.control) {
             Ok(false) => {
                 terminate_client_process(&mut client.process);
+                forget_registered_project_session(session_id, client);
                 false
             }
             Ok(true) | Err(_) => true,
@@ -597,6 +660,7 @@ pub(crate) async fn stop_registered_client(
 
     let result = stop_registered_client_inner(session_id, &mut client).await;
     if result.is_ok() {
+        forget_registered_project_session(session_id, &client);
         if let Ok(mut stopping) = stopping_sessions() {
             stopping.remove(session_id);
         }
@@ -724,6 +788,7 @@ fn register_client(
     client: RemoteAppProcess,
     status: StudioSessionStatus,
     control: RegisteredControl,
+    project_access: Option<RegisteredProjectAccess>,
 ) -> Result<(), WindowsOperationFailure> {
     let mut clients = match clients() {
         Ok(clients) => clients,
@@ -738,12 +803,19 @@ fn register_client(
             process: client,
             status,
             control,
+            project_access,
         },
     ) {
         let _ = previous.process.kill();
         let _ = previous.process.wait();
     }
     Ok(())
+}
+
+fn forget_registered_project_session(session_id: &str, client: &RegisteredClient) {
+    if let Some(access) = client.project_access.as_ref() {
+        project_access::forget_protected_session(&access.config, session_id);
+    }
 }
 
 fn disconnect_client(session_id: &str) {
@@ -864,7 +936,7 @@ mod tests {
         datetime_ticks, list, normalize_sessions, parse_session_id, read_session_active, reconnect,
         safe_project_name, stop, write_stop_control, RegisteredControl, SessionIdentity,
     };
-    use crate::models::StudioVersion;
+    use crate::models::{AppConfig, ContainerRuntime, StudioVersion};
     use crate::winboat::operation::WindowsStudioSessionReport;
     use crate::winboat::security::{
         authenticate_report, authenticated_report_fixture, OperationSecurity,
@@ -879,6 +951,27 @@ mod tests {
             install_root: format!(r"C:\Program Files\Mendix\{version}"),
             source: "fixture".into(),
             removable: true,
+        }
+    }
+
+    fn config(workspace: &std::path::Path) -> AppConfig {
+        AppConfig {
+            language_preference: "system".into(),
+            winboat_setup_pending: false,
+            winboat_executable: "winboat".into(),
+            compose_file: "compose.yml".into(),
+            container_runtime: ContainerRuntime::Docker,
+            container_name: "WinBoat".into(),
+            api_url: "http://127.0.0.1:47280".into(),
+            rdp_host: "127.0.0.1".into(),
+            rdp_port: 47300,
+            shared_directory: workspace.to_string_lossy().to_string(),
+            windows_shared_directory: r"\\host.lan\Data".into(),
+            freerdp_binary: "xfreerdp3".into(),
+            mendix_install_root: r"C:\Program Files\Mendix".into(),
+            mendix_data_root: r"C:\ProgramData\Mendix".into(),
+            windows_studio_paths: Vec::new(),
+            startup_timeout_seconds: 180,
         }
     }
 
@@ -897,7 +990,9 @@ mod tests {
             .expect("earlier start time");
         let earlier_ticks = datetime_ticks(earlier).expect("earlier Windows ticks");
 
+        let workspace = tempfile::tempdir().expect("workspace");
         let sessions = normalize_sessions(
+            &config(workspace.path()),
             &[studio("11.13.0"), studio("10.24.9")],
             vec![
                 WindowsStudioSessionReport {
@@ -947,18 +1042,70 @@ mod tests {
             has_window: true,
         };
 
+        let workspace = tempfile::tempdir().expect("workspace");
+        let config = config(workspace.path());
         assert!(normalize_sessions(
+            &config,
             &[studio("11.13.0")],
             vec![fixture(format!("studio-4242-{}", ticks + 1), "11.13.0")]
         )
         .is_err());
         assert!(normalize_sessions(
+            &config,
             &[studio("11.13.0")],
             vec![fixture(format!("studio-4242-{ticks}"), "11.12.2")]
         )
         .is_err());
         assert!(!safe_project_name(r"C:\Users\dev\secret"));
         assert!(safe_project_name("Orders"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn external_project_session_requires_reselection_after_the_drive_is_lost() {
+        let workspace = tempfile::tempdir().expect("workspace");
+        let outside = tempfile::tempdir().expect("outside");
+        let project_directory = outside.path().join("Orders");
+        std::fs::create_dir(&project_directory).expect("project directory");
+        let mpr = project_directory.join("Orders.mpr");
+        std::fs::write(&mpr, b"mpr").expect("project");
+        let config = config(workspace.path());
+        let selection =
+            crate::projects::validate_project_selection(&config, &mpr).expect("selection");
+        let lease =
+            crate::winboat::project_access::prepare(&config, &selection).expect("access lease");
+        let started = Utc
+            .with_ymd_and_hms(2026, 8, 31, 3, 0, 0)
+            .single()
+            .expect("start time");
+        let ticks = datetime_ticks(started).expect("Windows ticks");
+        let session_id = format!("studio-4242-{ticks}");
+        crate::winboat::project_access::remember_protected_session(
+            &config,
+            &session_id,
+            "11.13.0",
+            &lease,
+        )
+        .expect("protected metadata");
+
+        let sessions = normalize_sessions(
+            &config,
+            &[studio("11.13.0")],
+            vec![WindowsStudioSessionReport {
+                session_id,
+                version: "11.13.0".into(),
+                process_id: 4242,
+                started_at: started.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+                project_name: Some("Orders".into()),
+                has_window: true,
+            }],
+        )
+        .expect("normalized session");
+        assert!(!sessions[0].reconnectable);
+        assert_eq!(
+            sessions[0].reconnect_unavailable,
+            Some(crate::contracts::StudioReconnectUnavailable::ProjectReselectionRequired)
+        );
     }
 
     #[test]

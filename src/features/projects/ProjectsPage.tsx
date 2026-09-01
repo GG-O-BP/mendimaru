@@ -1,5 +1,6 @@
 import {
   FolderKanban,
+  FolderInput,
   FolderOpen,
   HardDrive,
   LoaderCircle,
@@ -29,6 +30,8 @@ export interface ProjectsPageModel {
   studioLaunchReady: boolean;
   studioSessionsLoading: boolean;
   connectedRemoteAppVersion?: string;
+  supportsExternalSelection: boolean;
+  externalSelectionBusy: boolean;
   isLaunching: boolean;
   isBusy: (key: string) => boolean;
   launchKeyFor: (project: MendixProject) => string;
@@ -38,6 +41,7 @@ export interface ProjectsPageModel {
   onRefresh: () => void;
   onOpenWorkspace: () => void;
   onOpenFolder: (path: string) => void;
+  onSelectExternal: () => void;
   onLaunch: (project: MendixProject) => void;
 }
 
@@ -109,6 +113,13 @@ export function ProjectsPage({
                 version: model.connectedRemoteAppVersion,
               })}
             </span>
+          </div>
+        )}
+
+        {model.supportsExternalSelection && (
+          <div className="project-session-notice" role="note">
+            <strong>{t("external-project-share-title")}</strong>
+            <span>{t("external-project-share-detail")}</span>
           </div>
         )}
 
@@ -272,6 +283,26 @@ function ProjectTools({
       >
         <RefreshCw size={16} />
       </button>
+      {model.supportsExternalSelection && (
+        <button
+          type="button"
+          className="button secondary compact"
+          onClick={model.onSelectExternal}
+          disabled={
+            !model.studioLaunchReady ||
+            Boolean(model.connectedRemoteAppVersion) ||
+            model.isLaunching ||
+            model.externalSelectionBusy
+          }
+        >
+          {model.externalSelectionBusy ? (
+            <LoaderCircle size={16} className="spin" />
+          ) : (
+            <FolderInput size={16} />
+          )}
+          {t("action-open-external-project")}
+        </button>
+      )}
     </div>
   );
 }

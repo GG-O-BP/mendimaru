@@ -16,6 +16,7 @@ pub(super) fn launch_studio_script(
     windows_control_path: &str,
     install_root: &str,
     version: &str,
+    project_ready_timeout_seconds: u64,
 ) -> String {
     LAUNCH_STUDIO_TEMPLATE
         .replace("__EXECUTABLE_PATH__", &powershell_literal(executable_path))
@@ -30,6 +31,10 @@ pub(super) fn launch_studio_script(
         )
         .replace("__INSTALL_ROOT__", &powershell_literal(install_root))
         .replace("__VERSION__", &powershell_literal(version))
+        .replace(
+            "__PROJECT_READY_TIMEOUT_SECONDS__",
+            &project_ready_timeout_seconds.to_string(),
+        )
         .replace("__SECURITY_PREAMBLE__", OPERATION_SECURITY_PREAMBLE)
 }
 
@@ -328,6 +333,7 @@ mod tests {
             "launch.control.json",
             "install-root",
             "11.1.0",
+            30,
         );
         let install = install_script(
             "setup.exe",
@@ -368,6 +374,7 @@ mod tests {
             r"\\host.lan\Data\launch.control.json",
             r"C:\Program Files\Mendix",
             "11.13.0",
+            30,
         );
         let abort = abort_studio_launch_script(
             r"C:\Program Files\Mendix\11.13.0\modeler\studiopro.exe",

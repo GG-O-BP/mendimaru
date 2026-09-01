@@ -1,6 +1,7 @@
 mod client;
 mod container;
 mod operation;
+mod project_access;
 mod remote_app;
 #[cfg(target_os = "linux")]
 pub(crate) mod runtime;
@@ -195,6 +196,7 @@ mod tests {
                 operation: "running a WinBoat security probe",
                 keep_remote_app_alive: false,
                 cancellation: None,
+                project_access: None,
             },
             |_| {},
         ));
@@ -359,6 +361,9 @@ mod tests {
         let localized = localize_windows_reason("MENDIMARU_STUDIO_SESSION_ENDED");
         assert!(localized.contains("already ended"));
         assert!(!localized.contains("MENDIMARU_STUDIO_SESSION_ENDED"));
+        let localized = localize_windows_reason("MENDIMARU_PROJECT_NOT_READY");
+        assert!(localized.contains("temporary project share"));
+        assert!(!localized.contains("MENDIMARU_PROJECT_NOT_READY"));
     }
 
     #[test]
@@ -370,6 +375,7 @@ mod tests {
             r"\\host.lan\Data\.mendimaru\operations\launch.control.json",
             r"C:\Program Files\Mendix",
             "11.13.0",
+            30,
         );
 
         assert!(script.contains("MainWindowHandle -ne [IntPtr]::Zero"));
@@ -386,6 +392,12 @@ mod tests {
         assert!(script.contains("$record.ParentProcessId -eq $LaunchProcessId"));
         assert!(script.contains("$current.StartTime.ToUniversalTime().Ticks"));
         assert!(script.contains("Read-MendimaruStudioStopRequest"));
+        assert!(script.contains("MENDIMARU_PROJECT_NOT_READY"));
+        assert!(script.contains("$projectReadyTimeoutSeconds = 30"));
+        assert!(
+            script.find("MENDIMARU_PROJECT_NOT_READY")
+                < script.find("Start-Process -FilePath $executable")
+        );
         assert!(script.contains("[string]$request.action -cne 'studio.stop'"));
         assert!(script.contains("Remove-Item -LiteralPath $controlPath"));
         assert!(!script.contains("$studioProcesses.Count -gt 0"));

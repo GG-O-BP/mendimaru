@@ -128,6 +128,13 @@ replay-protected request for the exact PID and process start tick through the
 retained connection and waits for Windows to report that process gone; killing
 only the local FreeRDP client never counts as a successful stop.
 
+External host project selection remains GUI-only. The headless CLI continues to
+resolve opaque project IDs from a fresh configured-workspace scan and accepts no
+raw host path option. An external-project Studio session whose temporary drive
+has ended is reported as non-reconnectable; callers must use the GUI to select
+the `.mpr` again rather than attempting to recover a host path from operation
+history.
+
 ## Interruption and retry
 
 Install, uninstall, and launch use the same atomic host-only operation history

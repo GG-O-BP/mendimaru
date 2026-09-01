@@ -138,6 +138,12 @@ Linux WinBoat モードでは、Studio Pro の起動ボタンは Windows プロ�
 
 Linux 共有ディレクトリは、WinBoat の Compose ファイルにある `<host path>:/shared` マウントに接続されます。プロジェクト一覧はこのディレクトリだけを走査し、`.git`、`node_modules`、`deployment`、`.mendix-cache`、`.mendimaru` などの生成ディレクトリやキャッシュディレクトリを除外します。
 
+Projects 画面では、このワークスペース外の `.mpr` を一つ明示的に選択して開くこともできます。Mendimaru は選択パスを canonicalize し、ファイルまたは親パスの symlink を拒否してから、`.mpr` の直接の親ディレクトリだけを、同じ retained RemoteApp 接続の書き込み可能なセッション単位 FreeRDP drive として接続します。プロジェクトのコピー、同期、Compose への追加、通常のプロジェクト一覧への永続登録は行いません。Windows から redirected `.mpr` が実ファイルとして見えるまで最大 30 秒確認してから、正確な Studio Pro を起動するため、保存内容は元の Linux プロジェクトへ反映されます。
+
+共有名はパス digest から生成した長さ制限付き ASCII 値で、ホストディレクトリ名を公開しません。GUI 選択結果には、その digest から生成した範囲制限付きの現在プロセストークンだけを渡します。生の Linux パスは直列化された選択・起動 DTO、operation history、session DTO、Windows report、診断、ログに記録しません。Studio Pro を終了すると retained FreeRDP プロセスと一時 drive も終了します。アプリまたは RemoteApp 接続が先に終了して一時 drive が失われたセッションを、自動的に再接続可能とは表示しません。そのセッションを停止するか、同じ `.mpr` を再選択して新しい保護された起動を開始してください。コンマ、バックスラッシュ、改行、非 UTF-8 パス、ファイルシステムのルート、ホーム全体、読み取り専用プロジェクトディレクトリは、安全に表現または範囲制限できないため起動前に拒否します。
+
+ネイティブ FreeRDP プロセスには、選択したディレクトリを読み取る権限が必要です。sandbox／Flatpak の FreeRDP wrapper を使う場合は、パッケージシステムのファイルシステム権限でそのディレクトリだけを明示的に許可し、もう一度選択してください。Mendimaru は解決のためにホーム全体を共有しません。Windows セッションへ書き込み可能な drive を提供するため、現在のディストリビューションでセキュリティ修正済みの FreeRDP 3 を使用してください。
+
 共有ディレクトリを変更すると、既存の Compose ファイルを `*.mendimaru.bak` としてバックアップします。設定画面で変更をすぐに適用するよう選択すると、`/storage` 仮想ディスクとインストール済みの Windows アプリを維持したまま WinBoat コンテナを再作成します。
 
 ## Backend capability contract

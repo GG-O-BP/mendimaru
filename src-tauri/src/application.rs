@@ -15,7 +15,7 @@ use crate::models::{
 use crate::operations::{OperationTracker, SessionActionGuard};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 pub(crate) type ApplicationResult<T> = Result<T, CommandError>;
@@ -464,7 +464,27 @@ pub(crate) async fn launch(
     crate::platform::validate_version(&version)
         .map_err(|_| invalid_request("the Studio Pro version is invalid"))?;
     ensure_no_connected_remote_app(CapabilityId::StudioStart)?;
-    let protected_project = project_mpr_path.is_some();
+    let resolved_project_path = project_mpr_path
+        .map(resolve_project_reference)
+        .transpose()
+        .map_err(CommandError::from)?;
+    let project_selection = resolved_project_path
+        .as_deref()
+        .map(|path| crate::projects::validate_project_selection(config, path))
+        .transpose()
+        .map_err(|message| CommandError::new(CommandErrorCode::InvalidRequest, message))?;
+    let project_mpr_path = project_selection
+        .as_ref()
+        .map(|selection| {
+            selection.mpr_path().to_str().ok_or_else(|| {
+                CommandError::new(
+                    CommandErrorCode::InvalidRequest,
+                    crate::tr!("error-project-path-encoding"),
+                )
+            })
+        })
+        .transpose()?;
+    let protected_project = project_selection.is_some();
     let tracker = OperationTracker::begin_with_paths(
         paths,
         config,
@@ -481,6 +501,15 @@ pub(crate) async fn launch(
         .map_err(CommandError::from);
     complete_operation(tracker, result)?;
     Ok(operation_id)
+}
+
+fn resolve_project_reference(reference: &str) -> Result<PathBuf, String> {
+    let path = Path::new(reference);
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    crate::projects::external_selection_path(reference)
+        .ok_or_else(|| crate::tr!("error-project-path-absolute"))
 }
 
 pub(crate) async fn launch_project(
@@ -878,8 +907,9 @@ fn precondition_error(capability: CapabilityId, message: &str, retryable: bool) 
 mod tests {
     use super::{
         ensure_no_connected_remote_app_version, ensure_version_not_installed,
-        exact_project_launch_path, invalidate_installed_versions_cache_after_mutation,
-        launch_project, operation, project, projects, SafeEnvironmentStatus,
+        exact_project_launch_path, invalidate_installed_versions_cache_after_mutation, launch,
+        launch_project, operation, project, projects, resolve_project_reference,
+        SafeEnvironmentStatus,
     };
     use crate::app_paths::AppPaths;
     use crate::contracts::CapabilityId;
@@ -1088,6 +1118,61 @@ mod tests {
             .config_directory()
             .join("operation-history.json")
             .exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unsupported_external_project_path_creates_no_operation_record() {
+        crate::i18n::initialize("en-US").expect("localization");
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let workspace = temporary.path().join("workspace");
+        fs::create_dir(&workspace).expect("workspace");
+        let external = temporary.path().join("unsafe,project");
+        fs::create_dir(&external).expect("external directory");
+        let mpr = external.join("Orders.mpr");
+        fs::write(&mpr, b"mpr fixture").expect("mpr fixture");
+        let config = config(&workspace);
+        let paths = AppPaths::for_tests(
+            temporary.path().join("config"),
+            temporary.path().join("cache"),
+        );
+
+        let error = tauri::async_runtime::block_on(launch(
+            &paths,
+            &config,
+            "11.12.2".to_string(),
+            Some(mpr.to_string_lossy().as_ref()),
+            None,
+        ))
+        .expect_err("unsupported path must fail");
+        assert_eq!(error.code, CommandErrorCode::InvalidRequest);
+        assert!(!paths
+            .config_directory()
+            .join("operation-history.json")
+            .exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn external_project_selection_is_resolved_by_an_opaque_current_process_token() {
+        crate::i18n::initialize("en-US").expect("localization");
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let workspace = temporary.path().join("workspace");
+        fs::create_dir(&workspace).expect("workspace");
+        let external = temporary.path().join("Secret Customer");
+        fs::create_dir(&external).expect("external directory");
+        let mpr = external.join("Orders.mpr");
+        fs::write(&mpr, b"mpr fixture").expect("mpr fixture");
+        let config = config(&workspace);
+
+        let selected =
+            crate::projects::inspect_selected_project(&config, &mpr).expect("external selection");
+        let resolved = resolve_project_reference(&selected.mpr_path).expect("launch reference");
+        assert_eq!(
+            resolved.canonicalize().expect("canonical launch reference"),
+            mpr.canonicalize().expect("canonical fixture")
+        );
+        assert!(resolve_project_reference("external-project_invalid").is_err());
     }
 
     #[test]

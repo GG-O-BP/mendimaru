@@ -683,6 +683,7 @@ async fn guest_port_diagnostic(config: &AppConfig, guest_port: u16) -> Option<&'
             operation: "diagnosing the Mendix Runtime port",
             keep_remote_app_alive: false,
             cancellation: None,
+            project_access: None,
         },
         |_| {},
     )

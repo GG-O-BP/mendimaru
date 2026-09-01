@@ -114,6 +114,7 @@ export function useProjectLauncher({
         next.set(project.mprPath, { selectedVersion, pending });
         return next;
       });
+      if (project.location === "explicit-host-selection") return;
       const write = preferenceWrites.current.then(() =>
         tauriApi.setProjectLaunchPreference(
           project.mprPath,

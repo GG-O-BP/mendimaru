@@ -70,6 +70,7 @@ pub fn run() {
             fetch_downloadable_versions,
             resolve_downloadable_version,
             get_projects,
+            select_external_project,
             set_project_launch_preference,
             start_winboat_windows,
             open_winboat,

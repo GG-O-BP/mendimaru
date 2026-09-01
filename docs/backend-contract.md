@@ -128,6 +128,20 @@ surface was implemented, both production adapters reported `studio.status` and
 `studio.stop` as unsupported and emitted no successful status payload, so its
 initial supported shape was introduced in `1.0.0` and is unchanged in `2.0.0`.
 
+Linux GUI project launches classify their internal selection as either
+`ConfiguredWorkspace` or `ExplicitHostSelection`. The WinBoat adapter resolves
+that selection through a `ProjectAccessProvider` before spawning Studio. Every
+provider returns the same lease semantics: a guest project path, provider kind,
+bounded non-secret share identity when applicable, cleanup ownership, and
+reconnect policy. The first external provider adds one FreeRDP drive redirect
+to the same retained RemoteApp connection; the common application, launch
+assistant, operation record, and session DTO do not contain UNC or drive
+details. A future capability-advertised WinBoat provider can implement the same
+lease contract without changing those callers, and provider failures are not
+silently downgraded after side effects begin. The GUI selection and launch
+reference use a bounded current-process digest token instead of serializing the
+raw external host path.
+
 `ArtifactDescriptor` links every artifact to a session and backend. Local
 location, media type, digest, size, and backend diagnostic reference are
 optional. This keeps platform paths out of the portable required shape while

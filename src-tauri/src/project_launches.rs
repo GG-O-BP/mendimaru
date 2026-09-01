@@ -1,7 +1,6 @@
 use crate::models::{AppConfig, MendixProject};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -118,26 +117,9 @@ fn remember_at(
 }
 
 fn project_key(config: &AppConfig, project_mpr_path: &str) -> Result<String, String> {
-    let workspace = fs::canonicalize(&config.shared_directory)
-        .map_err(|error| format!("could not resolve the project workspace: {error}"))?;
-    let project = fs::canonicalize(project_mpr_path)
-        .map_err(|error| format!("could not resolve the Mendix project: {error}"))?;
-    let metadata = fs::metadata(&project)
-        .map_err(|error| format!("could not inspect the Mendix project: {error}"))?;
-    if !metadata.is_file()
-        || !project.starts_with(&workspace)
-        || !project
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("mpr"))
-    {
-        return Err("the project launch preference is outside the configured workspace".into());
-    }
-    let mut identity = project.to_string_lossy().to_string();
-    if cfg!(target_os = "windows") {
-        identity.make_ascii_lowercase();
-    }
-    Ok(format!("{:x}", Sha256::digest(identity.as_bytes())))
+    let selection =
+        crate::projects::validate_project_selection(config, Path::new(project_mpr_path))?;
+    Ok(selection.project_digest())
 }
 
 fn load_store(path: &Path) -> Result<ProjectLaunchStore, String> {
@@ -361,6 +343,7 @@ mod tests {
                 .to_string(),
             mpr_path: path.to_string_lossy().to_string(),
             windows_path: r"\\host.lan\Data\Orders\Orders.mpr".into(),
+            location: crate::models::ProjectLocation::ConfiguredWorkspace,
             version: None,
             preferred_version: None,
             launch_pending: false,
@@ -396,23 +379,29 @@ mod tests {
         assert!(projects[0].launch_pending);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
-    fn rejects_outside_projects_invalid_versions_and_oversized_or_forged_stores() {
+    fn accepts_hashed_outside_projects_but_rejects_invalid_versions_and_forged_stores() {
         let workspace = tempfile::tempdir().expect("workspace");
         let outside = tempfile::tempdir().expect("outside");
-        let outside_project = outside.path().join("Outside.mpr");
+        let outside_directory = outside.path().join("Outside");
+        fs::create_dir(&outside_directory).expect("outside directory");
+        let outside_project = outside_directory.join("Outside.mpr");
         fs::write(&outside_project, b"fixture").expect("outside fixture");
         let store_path = workspace.path().join("project-launches.json");
         let config = config(workspace.path());
 
-        assert!(remember_at(
+        remember_at(
             &store_path,
             &config,
             &outside_project.to_string_lossy(),
             Some("11.12.2"),
             true,
         )
-        .is_err());
+        .expect("outside preference");
+        let serialized = fs::read_to_string(&store_path).expect("preference store");
+        assert!(!serialized.contains("Outside"));
+        assert!(!serialized.contains(&outside_project.to_string_lossy().to_string()));
 
         let inside = workspace.path().join("Inside.mpr");
         fs::write(&inside, b"fixture").expect("inside fixture");

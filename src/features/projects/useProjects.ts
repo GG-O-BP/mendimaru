@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { errorText } from "../../api/errors";
 import { tauriApi } from "../../api/tauri";
 import type { MendixProject } from "../../domain/types";
@@ -11,6 +11,8 @@ export function useProjects(
 ) {
   const [projects, setProjects] = useState<MendixProject[]>([]);
   const [search, setSearch] = useState("");
+  const [externalSelectionBusy, setExternalSelectionBusy] = useState(false);
+  const externalSelectionLock = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -42,6 +44,21 @@ export function useProjects(
     [runAction],
   );
 
+  const selectExternalProject = useCallback(async () => {
+    if (externalSelectionLock.current) return null;
+    externalSelectionLock.current = true;
+    setExternalSelectionBusy(true);
+    try {
+      return await tauriApi.selectExternalProject();
+    } catch (error) {
+      onWarning(errorText(error, t));
+      return null;
+    } finally {
+      externalSelectionLock.current = false;
+      setExternalSelectionBusy(false);
+    }
+  }, [onWarning, t]);
+
   return {
     projects,
     filteredProjects,
@@ -49,5 +66,7 @@ export function useProjects(
     setSearch,
     refresh,
     openFolder,
+    selectExternalProject,
+    externalSelectionBusy,
   };
 }

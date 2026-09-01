@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   fetchDownloadableVersions: vi.fn(),
   resolveDownloadableVersion: vi.fn(),
   getProjects: vi.fn(),
+  selectExternalProject: vi.fn(),
   setProjectLaunchPreference: vi.fn(),
   startWinBoatWindows: vi.fn(),
   openWinBoat: vi.fn(),
@@ -84,6 +85,7 @@ vi.mock("./api/tauri", () => ({
     fetchDownloadableVersions: mocks.fetchDownloadableVersions,
     resolveDownloadableVersion: mocks.resolveDownloadableVersion,
     getProjects: mocks.getProjects,
+    selectExternalProject: mocks.selectExternalProject,
     setProjectLaunchPreference: mocks.setProjectLaunchPreference,
     startWinBoatWindows: mocks.startWinBoatWindows,
     openWinBoat: mocks.openWinBoat,
@@ -184,6 +186,7 @@ const project: MendixProject = {
   directory: String.raw`C:\Users\dev\Mendix\Orders`,
   mprPath: String.raw`C:\Users\dev\Mendix\Orders\Orders.mpr`,
   windowsPath: String.raw`C:\Users\dev\Mendix\Orders\Orders.mpr`,
+  location: "configured-workspace",
   version: "11.12.2",
   launchPending: false,
   lastModified: "2026-08-14T03:00:00Z",
@@ -255,6 +258,7 @@ beforeEach(() => {
     }),
   );
   mocks.getProjects.mockResolvedValue([project]);
+  mocks.selectExternalProject.mockResolvedValue(null);
   mocks.setProjectLaunchPreference.mockResolvedValue(undefined);
   mocks.launchStudioPro.mockResolvedValue(undefined);
   mocks.reconnectStudioSession.mockImplementation(async (sessionId: string) => {
@@ -657,6 +661,110 @@ describe("native Windows application E2E", () => {
         project.mprPath,
       );
     });
+  });
+
+  it("selects an external Linux project, explains the session share, and opens the original path", async () => {
+    const linuxConfig: AppConfig = {
+      ...config,
+      winboatExecutable: "/opt/winboat/winboat",
+      composeFile: "/home/dev/.winboat/docker-compose.yml",
+      containerName: "WinBoat",
+      apiUrl: "http://127.0.0.1:47280",
+      rdpHost: "127.0.0.1",
+      rdpPort: 47300,
+      sharedDirectory: "/home/dev/Mendix",
+      windowsSharedDirectory: String.raw`\\host.lan\Data`,
+      freerdpBinary: "xfreerdp3",
+    };
+    const externalProject: MendixProject = {
+      name: "External Orders",
+      directory: "",
+      mprPath:
+        "external-project_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      windowsPath: "",
+      location: "explicit-host-selection",
+      version: "11.12.2",
+      launchPending: false,
+      lastModified: "2026-08-31T03:00:00Z",
+    };
+    mocks.getConfig.mockResolvedValue(linuxConfig);
+    mocks.getEnvironmentStatus.mockResolvedValue({
+      ...status,
+      platform: {
+        ...status.platform,
+        kind: "linux-winboat",
+        requiresWinboat: true,
+      },
+      winboatAvailable: true,
+      winboatInitialized: true,
+      composeAvailable: true,
+      freerdpAvailable: true,
+      containerStatus: "running",
+    });
+    mocks.selectExternalProject.mockResolvedValueOnce(externalProject);
+
+    render(<App />);
+    await screen.findByText("route-linux");
+    fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+    expect(
+      await screen.findByText("external-project-share-title"),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "action-open-external-project" }),
+    );
+
+    await waitFor(() => expect(mocks.selectExternalProject).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(mocks.launchStudioPro).toHaveBeenCalledWith(
+        "11.12.2",
+        externalProject.mprPath,
+      ),
+    );
+    expect(mocks.setProjectLaunchPreference).not.toHaveBeenCalled();
+    expect(mocks.getProjects).toHaveBeenCalledTimes(1);
+  });
+
+  it("does nothing when external project selection is cancelled", async () => {
+    const linuxConfig: AppConfig = {
+      ...config,
+      winboatExecutable: "/opt/winboat/winboat",
+      composeFile: "/home/dev/.winboat/docker-compose.yml",
+      containerName: "WinBoat",
+      apiUrl: "http://127.0.0.1:47280",
+      rdpHost: "127.0.0.1",
+      rdpPort: 47300,
+      sharedDirectory: "/home/dev/Mendix",
+      windowsSharedDirectory: String.raw`\\host.lan\Data`,
+      freerdpBinary: "xfreerdp3",
+    };
+    mocks.getConfig.mockResolvedValue(linuxConfig);
+    mocks.getEnvironmentStatus.mockResolvedValue({
+      ...status,
+      platform: {
+        ...status.platform,
+        kind: "linux-winboat",
+        requiresWinboat: true,
+      },
+      winboatAvailable: true,
+      winboatInitialized: true,
+      composeAvailable: true,
+      freerdpAvailable: true,
+      containerStatus: "running",
+    });
+    mocks.selectExternalProject.mockResolvedValueOnce(null);
+
+    render(<App />);
+    await screen.findByText("route-linux");
+    fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "action-open-external-project",
+      }),
+    );
+
+    await waitFor(() => expect(mocks.selectExternalProject).toHaveBeenCalled());
+    expect(mocks.launchStudioPro).not.toHaveBeenCalled();
+    expect(mocks.setProjectLaunchPreference).not.toHaveBeenCalled();
   });
 
   it("blocks another project and Studio mutation while a WinBoat RemoteApp is connected", async () => {

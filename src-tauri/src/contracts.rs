@@ -612,6 +612,7 @@ pub enum StudioConnectionState {
 pub enum StudioReconnectUnavailable {
     AlreadyConnected,
     WindowUnavailable,
+    ProjectReselectionRequired,
     Unsupported,
 }
 
@@ -967,6 +968,7 @@ mod tests {
             [
                 StudioReconnectUnavailable::AlreadyConnected,
                 StudioReconnectUnavailable::WindowUnavailable,
+                StudioReconnectUnavailable::ProjectReselectionRequired,
                 StudioReconnectUnavailable::Unsupported,
             ],
         );
