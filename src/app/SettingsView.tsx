@@ -31,6 +31,11 @@ export function SettingsView({
         onApplyNow: environment.setApplyMountNow,
         onSave: environment.saveSettings,
         onRedetect: () => void environment.redetectSettings(),
+        onDetectField: (field) => void environment.detectAdvancedSetting(field),
+        onRestoreAdvancedDefaults: () =>
+          void environment.restoreAdvancedDefaults(),
+        onTestConnection: () => void environment.testConnection(),
+        connectionTest: environment.connectionTest,
         onDiagnosticAction: (action, id) =>
           void environment.runDiagnosticAction(action, id),
         onCopyDiagnosticReport: () => void environment.copyDiagnosticReport(),

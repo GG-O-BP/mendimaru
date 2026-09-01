@@ -73,3 +73,10 @@ pub struct SettingsSavePreview {
     pub container_will_recreate: bool,
     pub compose_revision: String,
 }
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsConnectionTestResult {
+    pub online: bool,
+    pub endpoint: String,
+}

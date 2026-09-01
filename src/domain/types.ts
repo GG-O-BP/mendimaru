@@ -287,6 +287,11 @@ export interface SettingsSaveResult {
   containerRecreated: boolean;
 }
 
+export interface SettingsConnectionTestResult {
+  online: boolean;
+  endpoint: string;
+}
+
 export interface SettingsSavePreview {
   serviceName: string;
   currentSharedDirectory?: string;

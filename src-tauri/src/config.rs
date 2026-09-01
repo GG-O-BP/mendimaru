@@ -57,7 +57,17 @@ pub fn detect_config() -> Result<AppConfig, String> {
         shared_directory: home.to_string_lossy().to_string(),
         windows_shared_directory: r"\\host.lan\Data".to_string(),
         freerdp_binary: find_binary(&["xfreerdp3", "xfreerdp"])
-            .unwrap_or_else(|| "xfreerdp3".to_string()),
+            .or_else(|| {
+                [
+                    "/usr/bin/xfreerdp3",
+                    "/usr/bin/xfreerdp",
+                    "/usr/local/bin/xfreerdp",
+                ]
+                .into_iter()
+                .find(|candidate| Path::new(candidate).is_file())
+                .map(str::to_string)
+            })
+            .unwrap_or_else(|| "/usr/bin/xfreerdp3".to_string()),
         mendix_install_root: r"C:\Program Files\Mendix".to_string(),
         mendix_data_root: r"C:\ProgramData\Mendix".to_string(),
         windows_studio_paths: Vec::new(),

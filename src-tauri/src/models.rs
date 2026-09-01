@@ -8,7 +8,10 @@ mod operation;
 mod projects;
 mod studio;
 
-pub use config::{AppConfig, ContainerRuntime, SettingsSavePreview, SettingsSaveResult};
+pub use config::{
+    AppConfig, ContainerRuntime, SettingsConnectionTestResult, SettingsSavePreview,
+    SettingsSaveResult,
+};
 pub use download::{DownloadProgress, DownloadState};
 pub use environment::{
     environment_diagnostic_report, ContainerStatus, EnvironmentDiagnostic,

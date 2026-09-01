@@ -16,6 +16,8 @@ const api = vi.hoisted(() => ({
   completeWinBoatSetup: vi.fn(),
   previewSettingsSave: vi.fn(),
   saveConfig: vi.fn(),
+  detectSettings: vi.fn(),
+  testSettingsConnection: vi.fn(),
   redetectConfig: vi.fn(),
 }));
 
@@ -34,7 +36,7 @@ const config: AppConfig = {
   rdpPort: 47300,
   sharedDirectory: "/home/dev/Mendix",
   windowsSharedDirectory: String.raw`\\host.lan\Data`,
-  freerdpBinary: "xfreerdp3",
+  freerdpBinary: "/usr/bin/xfreerdp3",
   mendixInstallRoot: String.raw`C:\Program Files\Mendix`,
   mendixDataRoot: String.raw`C:\ProgramData\Mendix`,
   windowsStudioPaths: [],
@@ -82,6 +84,11 @@ describe("useEnvironment initialization", () => {
       '{"schemaVersion":"1.0.0"}',
     );
     api.exportEnvironmentDiagnosticReport.mockResolvedValue(true);
+    api.detectSettings.mockResolvedValue(config);
+    api.testSettingsConnection.mockResolvedValue({
+      online: true,
+      endpoint: config.apiUrl,
+    });
   });
 
   it("finishes loading when React StrictMode replays mount effects", async () => {
@@ -147,6 +154,42 @@ describe("useEnvironment initialization", () => {
       "success",
       "toast-diagnostic-report-exported",
     );
+  });
+
+  it("updates one advanced draft field and tests the draft without saving it", async () => {
+    const detected = { ...config, apiUrl: "http://127.0.0.1:47282" };
+    api.detectSettings.mockResolvedValue(detected);
+    api.testSettingsConnection.mockResolvedValue({
+      online: true,
+      endpoint: detected.apiUrl,
+    });
+    const { result } = renderHook(
+      () =>
+        useEnvironment({
+          t,
+          notify: vi.fn(),
+          requestConfirmation: vi.fn(),
+          runAction: async (_key, action) => action(),
+          isBusy: () => false,
+          onWarning: vi.fn(),
+        }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(() => result.current.detectAdvancedSetting("apiUrl"));
+    await act(() => result.current.testConnection());
+
+    expect(result.current.draftConfig?.apiUrl).toBe(detected.apiUrl);
+    expect(result.current.config?.apiUrl).toBe(config.apiUrl);
+    expect(api.testSettingsConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ apiUrl: detected.apiUrl }),
+    );
+    expect(api.saveConfig).not.toHaveBeenCalled();
+    expect(result.current.connectionTest).toEqual({
+      online: true,
+      endpoint: detected.apiUrl,
+    });
   });
 
   it("previews the exact Compose service, mount diff, and recreate scope before saving", async () => {

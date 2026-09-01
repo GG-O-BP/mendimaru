@@ -7,7 +7,10 @@ mod studio;
 use crate::models::{AppConfig, CommandError, CommandErrorCode};
 use tauri::AppHandle;
 
-pub(crate) use configuration::{get_config, preview_settings_save, redetect_config, save_config};
+pub(crate) use configuration::{
+    detect_settings, get_config, preview_settings_save, redetect_config, save_config,
+    test_settings_connection,
+};
 pub(crate) use environment::{
     begin_winboat_setup, complete_winboat_setup, export_environment_diagnostic_report,
     get_capabilities, get_environment_diagnostic_report, get_environment_status, open_winboat,

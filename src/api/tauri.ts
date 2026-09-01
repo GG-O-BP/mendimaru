@@ -13,6 +13,7 @@ import type {
   OperationRecord,
   SettingsSavePreview,
   SettingsSaveResult,
+  SettingsConnectionTestResult,
   StudioSessionStatus,
   StudioVersion,
   StudioVersionCatalog,
@@ -25,9 +26,11 @@ const commands = {
   formatLocalizedDates: "format_localized_dates",
   formatLocalizedNumbers: "format_localized_numbers",
   formatLocalizedBytes: "format_localized_bytes",
+  detectSettings: "detect_settings",
   redetectConfig: "redetect_config",
   previewSettingsSave: "preview_settings_save",
   saveConfig: "save_config",
+  testSettingsConnection: "test_settings_connection",
   getCapabilities: "get_capabilities",
   getEnvironmentStatus: "get_environment_status",
   getEnvironmentDiagnosticReport: "get_environment_diagnostic_report",
@@ -69,6 +72,7 @@ export const tauriApi = {
     invoke<string[]>(commands.formatLocalizedNumbers, { values }),
   formatBytes: (values: number[]) =>
     invoke<string[]>(commands.formatLocalizedBytes, { values }),
+  detectSettings: () => invoke<AppConfig>(commands.detectSettings),
   redetectConfig: () => invoke<AppConfig>(commands.redetectConfig),
   previewSettingsSave: (config: AppConfig, applyMount: boolean) =>
     invoke<SettingsSavePreview | null>(commands.previewSettingsSave, {
@@ -84,6 +88,10 @@ export const tauriApi = {
       config,
       applyMount,
       composeRevision: composeRevision ?? null,
+    }),
+  testSettingsConnection: (config: AppConfig) =>
+    invoke<SettingsConnectionTestResult>(commands.testSettingsConnection, {
+      config,
     }),
   getCapabilities: (backend?: BackendId) =>
     invoke<CapabilitySnapshot>(commands.getCapabilities, {
