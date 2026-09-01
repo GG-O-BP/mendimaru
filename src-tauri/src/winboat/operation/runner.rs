@@ -181,17 +181,7 @@ where
         }
 
         if started.elapsed() >= timeout {
-            return Err(WindowsOperationWaitError {
-                message: crate::tr!(
-                    "error-operation-timeout",
-                    operation = operation,
-                    minutes = crate::i18n::format_number(timeout_seconds / 60)
-                ),
-                retryable: false,
-                user_retryable: false,
-                exit_code: None,
-                failure_kind: Some(CommandFailureKind::Timeout),
-            });
+            return Err(operation_timeout_error(timeout_seconds, operation));
         }
 
         if let Some((exited_at, status)) = remote_app_exited_at {
@@ -205,34 +195,63 @@ where
                     continue;
                 }
                 return match last_report_state {
-                    Some(state) => Err(WindowsOperationWaitError {
-                        message: crate::tr!(
-                            "error-remoteapp-ended",
-                            operation = operation,
-                            state = localize_operation_state(state),
-                            status = status
-                        ),
-                        retryable: false,
-                        user_retryable: false,
-                        exit_code: None,
-                        failure_kind: None,
-                    }),
-                    None => Err(WindowsOperationWaitError {
-                        message: crate::tr!(
-                            "error-operation-not-started",
-                            operation = operation,
-                            status = status
-                        ),
-                        retryable: true,
-                        user_retryable: true,
-                        exit_code: None,
-                        failure_kind: None,
-                    }),
+                    Some(state) => Err(remote_app_ended_after_progress(state, status, operation)),
+                    None => Err(remote_app_ended_before_progress(status, operation)),
                 };
             }
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+fn operation_timeout_error(timeout_seconds: u64, operation: &str) -> WindowsOperationWaitError {
+    WindowsOperationWaitError {
+        message: crate::tr!(
+            "error-operation-timeout",
+            operation = operation,
+            minutes = crate::i18n::format_number(timeout_seconds / 60)
+        ),
+        retryable: true,
+        user_retryable: true,
+        exit_code: None,
+        failure_kind: Some(CommandFailureKind::Timeout),
+    }
+}
+
+fn remote_app_ended_after_progress(
+    state: WindowsOperationState,
+    status: std::process::ExitStatus,
+    operation: &str,
+) -> WindowsOperationWaitError {
+    WindowsOperationWaitError {
+        message: crate::tr!(
+            "error-remoteapp-ended",
+            operation = operation,
+            state = localize_operation_state(state),
+            status = status
+        ),
+        retryable: true,
+        user_retryable: true,
+        exit_code: None,
+        failure_kind: Some(CommandFailureKind::Wait),
+    }
+}
+
+fn remote_app_ended_before_progress(
+    status: std::process::ExitStatus,
+    operation: &str,
+) -> WindowsOperationWaitError {
+    WindowsOperationWaitError {
+        message: crate::tr!(
+            "error-operation-not-started",
+            operation = operation,
+            status = status
+        ),
+        retryable: true,
+        user_retryable: true,
+        exit_code: None,
+        failure_kind: Some(CommandFailureKind::Wait),
     }
 }
 
@@ -291,9 +310,13 @@ fn failed_operation(report: &WindowsOperationReport, operation: &str) -> Windows
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::{failed_operation, is_bounded_regular_report};
+    use super::{
+        failed_operation, is_bounded_regular_report, operation_timeout_error,
+        remote_app_ended_after_progress, remote_app_ended_before_progress,
+    };
     use crate::winboat::operation::{WindowsOperationReport, WindowsOperationState};
     use std::os::unix::fs::symlink;
+    use std::os::unix::process::ExitStatusExt;
 
     #[test]
     fn refuses_symlinked_and_oversized_operation_reports() {
@@ -333,5 +356,34 @@ mod tests {
         assert_eq!(error.exit_code, Some(1603));
         assert!(!error.retryable);
         assert!(error.user_retryable);
+    }
+
+    #[test]
+    fn transient_remoteapp_startup_failures_are_retryable_and_classified() {
+        let timeout = operation_timeout_error(90, "starting Studio Pro");
+        assert!(timeout.retryable);
+        assert!(timeout.user_retryable);
+        assert_eq!(
+            timeout.failure_kind,
+            Some(crate::process::CommandFailureKind::Timeout)
+        );
+
+        let before_progress = remote_app_ended_before_progress(
+            std::process::ExitStatus::from_raw(1),
+            "starting Studio Pro",
+        );
+        let after_progress = remote_app_ended_after_progress(
+            WindowsOperationState::Running,
+            std::process::ExitStatus::from_raw(1),
+            "starting Studio Pro",
+        );
+        for error in [before_progress, after_progress] {
+            assert!(error.retryable);
+            assert!(error.user_retryable);
+            assert_eq!(
+                error.failure_kind,
+                Some(crate::process::CommandFailureKind::Wait)
+            );
+        }
     }
 }
