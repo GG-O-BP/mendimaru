@@ -15,7 +15,7 @@ mendimaru studio list
 mendimaru studio install --version VERSION [--force-redownload]
 mendimaru studio uninstall --version VERSION
 mendimaru studio start --version VERSION [--project-id PROJECT_ID]
-mendimaru studio status [--session-id STUDIO_SESSION_ID]
+mendimaru studio status [--session-id STUDIO_SESSION_ID] [--refresh]
 mendimaru studio stop --session-id STUDIO_SESSION_ID
 mendimaru project list
 mendimaru project version --project-id PROJECT_ID
@@ -57,6 +57,9 @@ placed anywhere in the command:
 - `--timeout-seconds N` accepts 1 through 3600 seconds and defaults to 300.
   Reaching the timeout cancels the in-process future. `Ctrl+C` uses the same
   cancellation boundary.
+- `--snapshot` opts in to the immutable capability snapshot in that response.
+  It is omitted by default; `capabilities` still returns the full snapshot as
+  its `data` payload.
 - `--json` and `--ndjson` are mutually exclusive.
 
 The CLI accepts version strings and opaque IDs only. It has no project-path,
@@ -72,9 +75,10 @@ executed `browser test` with failed assertions or diagnostic policy violations
 is the deliberate exception: it writes its complete result to stdout and exits
 `1`, so failure artifacts remain agent-readable. The result envelope includes
 the schema version, normalized command name, host platform, selected backend,
-invocation session ID, and immutable capability snapshot. Mutation successes
-also include their persistent operation ID; Studio session commands include the
-Studio session ID when one was selected.
+invocation session ID, and command data. The immutable capability snapshot is
+not duplicated into ordinary responses; pass `--snapshot` when a caller needs
+it. Mutation successes also include their persistent operation ID; Studio
+session commands include the Studio session ID when one was selected.
 
 Runtime lifecycle results include an independent `runtimeSessionId`. Runtime
 status, build artifacts, and bounded log batches validate against
@@ -100,6 +104,21 @@ Responses validate against
 progress events validate against
 [`cli-event.schema.json`](../schemas/cli-event.schema.json). Backend errors use
 [`backend-error.schema.json`](../schemas/backend-error.schema.json).
+
+## Polling and lightweight status
+
+Use the default `studio status` summary for polling. On Linux it returns the
+trusted keeper-owned session set without opening RDP or enumerating the Windows
+guest. Use `studio status --refresh` when an authoritative guest-wide query is
+required; that operation can take longer because it verifies exact installed
+versions and process identities. For a selected session, `studio status
+--session-id ID` checks the keeper first and falls back to an authoritative
+lookup only when that keeper record is unavailable.
+
+Poll at an interval larger than the command duration, retain the previous
+terminal error, and stop after a bounded number of attempts. Keep `--snapshot`
+out of polling requests; retrieve it separately with `capabilities` when a
+workflow actually needs backend feature negotiation.
 
 ## Projects and exact versions
 

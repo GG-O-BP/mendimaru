@@ -25,6 +25,7 @@ const PROFILE_RANDOM_BYTES: usize = 16;
 const NAVIGATION_TIMEOUT: Duration = Duration::from_secs(60);
 const SECURITY_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const PROBE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const HANDLER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 const CLEANUP_RETRY_DELAY: Duration = Duration::from_millis(100);
 const CLEANUP_RETRIES: usize = 50;
@@ -159,6 +160,53 @@ impl BrowserSession {
         shutdown_resources(browser, handler_task, profile).await
     }
 
+    async fn cleanup_for_probe(mut self) -> Result<(), String> {
+        let mut browser = self.browser.take();
+        let handler_task = self.handler_task.take();
+        let profile = self.profile.take();
+
+        #[cfg(target_os = "linux")]
+        let profile_path = profile.as_ref().map(|profile| profile.path().to_path_buf());
+        let browser_stopped = match browser.as_mut() {
+            Some(browser) => {
+                let _ = browser.force_kill();
+                matches!(
+                    timeout(PROBE_SHUTDOWN_TIMEOUT, browser.wait_for_exit()).await,
+                    Ok(Ok(()))
+                )
+            }
+            None => true,
+        };
+        drop(browser);
+
+        #[cfg(target_os = "linux")]
+        let descendants_stopped = match profile_path.as_deref() {
+            Some(profile_path) => {
+                terminate_profile_processes(profile_path, PROBE_SHUTDOWN_TIMEOUT).await
+            }
+            None => true,
+        };
+        #[cfg(not(target_os = "linux"))]
+        let descendants_stopped = true;
+        #[cfg(target_os = "linux")]
+        let browser_stopped = browser_stopped || descendants_stopped;
+
+        if let Some(handler_task) = handler_task {
+            handler_task.abort();
+            let _ = timeout(HANDLER_SHUTDOWN_TIMEOUT, handler_task).await;
+        }
+        let profile_removed = match profile {
+            Some(profile) => profile.cleanup().await,
+            None => true,
+        };
+
+        if browser_stopped && descendants_stopped && profile_removed {
+            Ok(())
+        } else {
+            Err(crate::tr!("error-browser-cleanup"))
+        }
+    }
+
     #[cfg(all(test, target_os = "linux"))]
     fn profile_path(&self) -> PathBuf {
         self.profile
@@ -202,7 +250,7 @@ pub(super) async fn sandbox_available() -> bool {
     let Ok(session) = BrowserSession::new().await else {
         return false;
     };
-    session.cleanup().await.is_ok()
+    session.cleanup_for_probe().await.is_ok()
 }
 
 async fn shutdown_resources(

@@ -10,8 +10,7 @@
     "ok",
     "platform",
     "backend",
-    "sessionId",
-    "capabilitySnapshot"
+    "sessionId"
   ],
   "properties": {
     "schemaVersion": { "const": "4.0.0" },
