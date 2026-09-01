@@ -907,10 +907,11 @@ fn precondition_error(capability: CapabilityId, message: &str, retryable: bool) 
 mod tests {
     use super::{
         ensure_no_connected_remote_app_version, ensure_version_not_installed,
-        exact_project_launch_path, invalidate_installed_versions_cache_after_mutation, launch,
-        launch_project, operation, project, projects, resolve_project_reference,
-        SafeEnvironmentStatus,
+        exact_project_launch_path, invalidate_installed_versions_cache_after_mutation,
+        launch_project, operation, project, projects, SafeEnvironmentStatus,
     };
+    #[cfg(target_os = "linux")]
+    use super::{launch, resolve_project_reference};
     use crate::app_paths::AppPaths;
     use crate::contracts::CapabilityId;
     use crate::models::{

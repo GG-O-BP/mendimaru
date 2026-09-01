@@ -445,10 +445,9 @@ fn extract_project_version(settings_path: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        extract_project_version, inspect_selected_project, linux_path_to_windows_share,
-        scan_projects, validate_project_selection,
-    };
+    use super::{extract_project_version, linux_path_to_windows_share, scan_projects};
+    #[cfg(target_os = "linux")]
+    use super::{inspect_selected_project, validate_project_selection};
     use crate::models::{AppConfig, ContainerRuntime, ProjectLocation};
     use std::fs;
 
