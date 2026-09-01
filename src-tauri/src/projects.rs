@@ -717,13 +717,11 @@ mod tests {
     use super::{
         extract_project_version, extract_project_version_bounded, linux_path_to_windows_share,
         scan_projects, scan_projects_with_limits, Duration, ScanLimits, ScanReport,
-        MAX_SETTINGS_BYTES,
     };
     #[cfg(target_os = "linux")]
     use super::{inspect_selected_project, validate_project_selection};
     use crate::models::{AppConfig, ContainerRuntime, ProjectLocation};
     use std::fs;
-    use std::io::{Seek, SeekFrom, Write};
     use std::sync::{atomic::AtomicBool, Arc};
 
     fn config_for(path: &std::path::Path) -> AppConfig {
@@ -805,7 +803,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rejects_oversized_sparse_symlink_and_special_settings_files() {
+        use super::MAX_SETTINGS_BYTES;
         use std::ffi::CString;
+        use std::io::{Seek, SeekFrom, Write};
 
         let temporary = tempfile::tempdir().expect("temp dir");
         let project = temporary.path().join("Orders");
