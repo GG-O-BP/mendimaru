@@ -25,6 +25,7 @@ const PROFILE_RANDOM_BYTES: usize = 16;
 const NAVIGATION_TIMEOUT: Duration = Duration::from_secs(60);
 const SECURITY_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(target_os = "linux")]
 const PROBE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const HANDLER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 const CLEANUP_RETRY_DELAY: Duration = Duration::from_millis(100);
@@ -160,6 +161,7 @@ impl BrowserSession {
         shutdown_resources(browser, handler_task, profile).await
     }
 
+    #[cfg(target_os = "linux")]
     async fn cleanup_for_probe(mut self) -> Result<(), String> {
         let mut browser = self.browser.take();
         let handler_task = self.handler_task.take();
