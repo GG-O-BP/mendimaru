@@ -96,6 +96,25 @@ const parseErrorEnvelope = {
 };
 delete parseErrorEnvelope.data;
 validate(schemas[4].$id, parseErrorEnvelope, "CLI parse-error envelope");
+const stopErrorEnvelope = {
+  ...response,
+  command: "studio.stop",
+  ok: false,
+  error: {
+    schemaVersion: "4.0.0",
+    code: "precondition_failed",
+    message: "a required precondition was not satisfied",
+    backend: manifest.backend,
+    capability: "studio.stop",
+    retryable: true,
+  },
+};
+delete stopErrorEnvelope.data;
+assert(
+  stopErrorEnvelope.error.capability === stopErrorEnvelope.command,
+  "studio.stop error capability does not match its command",
+);
+validate(schemas[4].$id, stopErrorEnvelope, "CLI Studio stop error envelope");
 validate(
   schemas[4].$id,
   {
