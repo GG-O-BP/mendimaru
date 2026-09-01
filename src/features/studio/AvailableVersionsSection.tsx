@@ -5,7 +5,10 @@ import {
   EmptyState,
   SectionHeader,
 } from "../../shared/components/LayoutPrimitives";
-import { useLocalizedNumbers } from "../../shared/hooks/useLocalizedValues";
+import {
+  useLocalizedDates,
+  useLocalizedNumbers,
+} from "../../shared/hooks/useLocalizedValues";
 import { CatalogTools } from "./CatalogTools";
 import { InstallationProgress } from "./InstallationProgress";
 import type { CatalogModel, InstallationModel } from "./types";
@@ -30,6 +33,7 @@ export function AvailableVersionsSection({
     [catalog.loadedCount, catalog.totalCount ?? 0],
     localization,
   );
+  const [fetchedAtLabel] = useLocalizedDates([catalog.fetchedAt], localization);
   const filtering = Boolean(
     catalog.search || catalog.supportFilters.lts || catalog.supportFilters.mts,
   );
@@ -45,6 +49,21 @@ export function AvailableVersionsSection({
         meta={catalogSummary(t, catalog, loadedCountLabel, availableTotalLabel)}
         action={<CatalogTools t={t} catalog={catalog} />}
       />
+
+      <p
+        className={`catalog-cache ${catalog.cacheFresh ? "fresh" : "stale"}`}
+        data-testid="catalog-cache-status"
+      >
+        {catalog.fetchedAt
+          ? catalog.cacheFresh
+            ? t("catalog-cache-fresh", {
+                time: fetchedAtLabel || catalog.fetchedAt,
+              })
+            : t("catalog-cache-stale", {
+                time: fetchedAtLabel || catalog.fetchedAt,
+              })
+          : t("catalog-cache-pending")}
+      </p>
 
       {installation.progress && (
         <InstallationProgress

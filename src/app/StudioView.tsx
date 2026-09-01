@@ -1,5 +1,10 @@
+import { useMemo } from "react";
 import type { LocalizationBundle } from "../domain/types";
 import type { EnvironmentController } from "../features/settings/useEnvironment";
+import {
+  catalogCacheIsFresh,
+  selectUpdateCandidateVersions,
+} from "../features/studio/selectors";
 import { StudioPage } from "../features/studio/StudioPage";
 import type { useStudio } from "../features/studio/useStudio";
 import type { Translate } from "../i18n";
@@ -17,6 +22,15 @@ export function StudioView({
   studio: ReturnType<typeof useStudio>;
   isBusy: (key: string) => boolean;
 }) {
+  const updateCandidates = useMemo(
+    () =>
+      selectUpdateCandidateVersions(studio.catalog, studio.installedVersions),
+    [studio.catalog, studio.installedVersions],
+  );
+  const catalogFresh = useMemo(
+    () => catalogCacheIsFresh(studio.catalog),
+    [studio.catalog],
+  );
   const connectedRemoteAppVersion = environment.status?.platform.requiresWinboat
     ? studio.sessions.find((session) => session.connection === "connected")
         ?.version
@@ -50,6 +64,8 @@ export function StudioView({
       catalog={{
         versions: studio.filteredCatalog,
         totalCount: studio.catalog.totalCount,
+        fetchedAt: studio.catalog.fetchedAt,
+        cacheFresh: catalogFresh,
         loadedCount: studio.catalog.versions.length,
         search: studio.search,
         supportFilters: studio.supportFilters,
@@ -57,6 +73,8 @@ export function StudioView({
         error: studio.catalogError,
         hasMore: studio.hasMore,
         installedSet: studio.installedSet,
+        installedVersions: studio.installedVersions,
+        updateCandidates,
         installedVersionsLoaded: studio.installedLoaded,
         studioSessionsLoading: studio.sessionsLoading,
         connectedRemoteAppVersion,
