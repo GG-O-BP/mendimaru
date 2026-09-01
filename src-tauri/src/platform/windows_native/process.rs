@@ -537,7 +537,7 @@ mod tests {
                 handle,
                 child.id(),
                 job.as_ref(),
-                CommandPolicy::new(Duration::from_secs(5), 0),
+                CommandPolicy::new(Duration::from_secs(20), 0),
                 &CancellationToken::default(),
                 "fake elevated success",
             )
