@@ -15,7 +15,7 @@ mendimaru studio list
 mendimaru studio install --version VERSION [--force-redownload]
 mendimaru studio uninstall --version VERSION
 mendimaru studio start --version VERSION [--project-id PROJECT_ID]
-mendimaru studio status [--session-id STUDIO_SESSION_ID] [--refresh]
+mendimaru studio status [--session-id STUDIO_SESSION_ID] [--refresh | --orphans]
 mendimaru studio stop --session-id STUDIO_SESSION_ID
 mendimaru project list
 mendimaru project version --project-id PROJECT_ID
@@ -114,6 +114,11 @@ required; that operation can take longer because it verifies exact installed
 versions and process identities. For a selected session, `studio status
 --session-id ID` checks the keeper first and falls back to an authoritative
 lookup only when that keeper record is unavailable.
+
+`studio status --orphans` performs the authoritative query and returns only
+Studio Pro sessions not owned by a Mendimaru keeper. Each returned opaque ID can
+be inspected and explicitly passed to `studio stop`; exact Windows PID/start
+tick verification still protects unrelated user-started processes.
 
 `studio stop` is idempotent when Mendimaru can authoritatively observe that the
 requested session is already gone. If a keeper stop report races with final

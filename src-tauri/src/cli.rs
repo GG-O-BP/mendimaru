@@ -52,6 +52,7 @@ enum CliCommand {
     StudioStatus {
         session_id: Option<String>,
         refresh: bool,
+        orphan_filter: bool,
     },
     StudioStop {
         session_id: String,
@@ -453,11 +454,12 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
              Starts Studio Pro. A project ID requires the exact declared version.",
         ),
         (Some("studio"), Some("status")) => Some(
-            "Usage: mendimaru studio status [--session-id STUDIO_SESSION_ID] [--refresh]\n\
+            "Usage: mendimaru studio status [--session-id STUDIO_SESSION_ID] [--refresh] [--orphans]\n\
              \n\
              Without --session-id, reports all Studio sessions. With it, reports\n\
              one selected session. The default Linux summary checks the trusted\n\
-             session keeper; --refresh also queries the authoritative WinBoat guest.",
+             session keeper; --refresh queries the authoritative WinBoat guest;\n\
+             --orphans returns only sessions not owned by a keeper.",
         ),
         (Some("studio"), Some("stop")) => Some(
             "Usage: mendimaru studio stop --session-id STUDIO_SESSION_ID\n\
@@ -627,6 +629,7 @@ Commands:
   studio start --version VERSION  Start Studio Pro
   studio status [--session-id ID] [--refresh]
                                     Report Studio sessions
+  studio status --orphans         Report authoritative sessions not owned by Mendimaru keepers
   studio stop --session-id ID      Stop a Studio session
   runtime build --project-id ID   Build a portable Runtime package
   runtime start [...]             Start Runtime (portable or Studio Run Locally)
@@ -814,7 +817,16 @@ async fn run_command(
         CliCommand::StudioStatus {
             session_id,
             refresh,
+            orphan_filter,
         } => {
+            if *orphan_filter {
+                #[cfg(target_os = "linux")]
+                let owned = keeper_sessions(&paths).await?;
+                #[cfg(not(target_os = "linux"))]
+                let owned = Vec::new();
+                let sessions = crate::application::studio_sessions(&config).await?;
+                return CommandOutput::data(orphan_studio_sessions(sessions, &owned));
+            }
             #[cfg(target_os = "linux")]
             let _ = refresh;
             if let Some(session_id) = session_id {
@@ -984,6 +996,20 @@ async fn run_command(
             })
         }
     }
+}
+
+fn orphan_studio_sessions(
+    authoritative: Vec<crate::contracts::StudioSessionStatus>,
+    owned: &[crate::contracts::StudioSessionStatus],
+) -> Vec<crate::contracts::StudioSessionStatus> {
+    authoritative
+        .into_iter()
+        .filter(|session| {
+            !owned
+                .iter()
+                .any(|keeper| keeper.session_id == session.session_id)
+        })
+        .collect()
 }
 
 fn complete_stopped_session_if_absent(
@@ -1896,10 +1922,18 @@ fn parse_studio_command(values: &[String]) -> Result<CliCommand, BackendError> {
             })
         }
         Some("status") => {
-            let (options, flags) = parse_options(&values[1..], &["--session-id"], &["--refresh"])?;
+            let (options, flags) =
+                parse_options(&values[1..], &["--session-id"], &["--refresh", "--orphans"])?;
+            let orphan_filter = flags.contains("--orphans");
+            if orphan_filter && options.contains_key("--session-id") {
+                return Err(BackendError::invalid_request(
+                    "--session-id cannot be combined with --orphans",
+                ));
+            }
             Ok(CliCommand::StudioStatus {
                 session_id: options.get("--session-id").cloned(),
                 refresh: flags.contains("--refresh"),
+                orphan_filter,
             })
         }
         Some("stop") => Ok(CliCommand::StudioStop {
@@ -2441,6 +2475,27 @@ mod tests {
     }
 
     #[test]
+    fn orphan_status_keeps_only_sessions_outside_the_trusted_keepers() {
+        fn session(id: &str) -> crate::contracts::StudioSessionStatus {
+            serde_json::from_value(json!({
+                "schemaVersion": CONTRACT_SCHEMA_VERSION,
+                "sessionId": id,
+                "version": "11.12.2",
+                "state": "running",
+                "processId": 4242,
+                "connection": "disconnected",
+                "reconnectable": false
+            }))
+            .expect("Studio session fixture")
+        }
+        let owned = session("studio-4242-638908128000000000");
+        let orphan = session("studio-9000-638908128000000000");
+
+        let orphans = orphan_studio_sessions(vec![owned.clone(), orphan.clone()], &[owned]);
+        assert_eq!(orphans, vec![orphan]);
+    }
+
+    #[test]
     fn a_failed_stop_becomes_success_only_after_authoritative_absence() {
         let stopped_session = serde_json::from_value(json!({
             "schemaVersion": CONTRACT_SCHEMA_VERSION,
@@ -2618,6 +2673,7 @@ mod tests {
             args(&["env", "ensure", "--timeout-seconds", "30"]),
             args(&["studio", "list"]),
             args(&["studio", "status", "--refresh"]),
+            args(&["studio", "status", "--orphans"]),
             args(&["studio", "install", "--version", "11.12.2", "--ndjson"]),
             args(&["studio", "uninstall", "--version=11.12.2"]),
             args(&[
