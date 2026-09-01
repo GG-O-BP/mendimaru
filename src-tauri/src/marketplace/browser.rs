@@ -17,7 +17,8 @@ const E2E_MARKETPLACE_URL: &str = "MENDIMARU_E2E_MARKETPLACE_URL";
 const ELEMENT_TIMEOUT: Duration = Duration::from_secs(30);
 const DATAGRID_SELECTOR: &str = "div.widget-datagrid-content";
 const DATAGRID_ROW_SELECTOR: &str =
-    "div.widget-datagrid-content div.widget-datagrid-grid-body div.tr[role=row] a.mx-name-actionButton_VersionName1";
+    "div.widget-datagrid-content div.widget-datagrid-grid-body div.tr[role=row] a.mx-name-actionButton_VersionName1, \
+     div.widget-datagrid-content div.widget-datagrid-grid-body div.tr[role=row] a.mx-name-pDSLink1";
 const BUILD_NUMBER_SELECTOR: &str = "span.mx-text.pds-heading--sm.pds-mb-0";
 
 pub(super) static SCRAPE_LOCK: Mutex<()> = Mutex::const_new(());
