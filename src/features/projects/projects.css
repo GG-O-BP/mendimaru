@@ -86,6 +86,30 @@
   color: #5e4712;
 }
 
+.external-project-share-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px;
+  color: var(--ink);
+  background: var(--cyan-soft);
+  border: 1px solid #93c6c7;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.external-project-share-notice > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.external-project-share-notice strong {
+  color: var(--ink-strong);
+}
+
 .project-flag {
   display: grid;
   width: 34px;

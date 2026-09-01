@@ -1,4 +1,10 @@
-import { AlertTriangle, Download, LoaderCircle, Search } from "lucide-react";
+import {
+  AlertTriangle,
+  Download,
+  FolderInput,
+  LoaderCircle,
+  Search,
+} from "lucide-react";
 import { useEffect, useId, useRef } from "react";
 import type { LocalizationBundle } from "../../domain/types";
 import type { Translate } from "../../i18n";
@@ -116,6 +122,16 @@ export function ProjectLaunchAssistant({
               {t("studio-connected-session-blocks-detail", {
                 version: launcher.connectedRemoteAppVersion,
               })}
+            </span>
+          </div>
+        )}
+
+        {state.project.location === "explicit-host-selection" && (
+          <div className="external-project-share-notice" role="status">
+            <FolderInput size={18} aria-hidden="true" />
+            <span>
+              <strong>{t("external-project-share-title")}</strong>
+              {t("external-project-share-detail")}
             </span>
           </div>
         )}

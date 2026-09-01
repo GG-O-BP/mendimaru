@@ -1,6 +1,7 @@
 use super::{load_command_config, CommandResult};
-use crate::models::MendixProject;
+use crate::models::{CommandError, CommandErrorCode, MendixProject};
 use tauri::AppHandle;
+use tauri_plugin_dialog::DialogExt;
 
 #[tauri::command]
 pub(crate) fn get_projects(app: AppHandle) -> CommandResult<Vec<MendixProject>> {
@@ -25,6 +26,32 @@ pub(crate) fn set_project_launch_preference(
         selected_version.as_deref(),
         pending,
     )?)
+}
+
+#[tauri::command]
+pub(crate) fn select_external_project(app: AppHandle) -> CommandResult<Option<MendixProject>> {
+    if !cfg!(target_os = "linux") {
+        return Err(CommandError::new(
+            CommandErrorCode::UnsupportedCapability,
+            crate::tr!("error-external-project-linux-only"),
+        ));
+    }
+    let config = load_command_config(&app)?;
+    let selection = app
+        .dialog()
+        .file()
+        .add_filter("Mendix project", &["mpr"])
+        .blocking_pick_file();
+    let Some(selection) = selection else {
+        return Ok(None);
+    };
+    let path = selection
+        .into_path()
+        .map_err(|error| crate::tr!("error-project-path-encoding-detail", error = error))?;
+    let mut project = crate::projects::inspect_selected_project(&config, &path)
+        .map_err(|message| CommandError::new(CommandErrorCode::InvalidRequest, message))?;
+    crate::project_launches::apply_preferences(&app, &config, std::slice::from_mut(&mut project))?;
+    Ok(Some(project))
 }
 
 #[tauri::command]

@@ -21,7 +21,7 @@ pub use marketplace::{DownloadableVersion, StudioVersionCatalog};
 pub use operation::{
     OperationError, OperationKind, OperationRecord, OperationStage, OperationState,
 };
-pub use projects::MendixProject;
+pub use projects::{MendixProject, ProjectLocation};
 pub use studio::{
     InstalledVersionsCache, StudioInstallPhase, StudioInstallProgress, StudioVersion, WinApp,
 };
@@ -32,7 +32,7 @@ mod tests {
         CommandError, CommandErrorCode, ContainerRuntime, ContainerStatus, DownloadState,
         EnvironmentDiagnosticAction, EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId,
         EnvironmentDiagnosticStatus, HostPlatform, OperationKind, OperationStage, OperationState,
-        TextDirection,
+        ProjectLocation, TextDirection,
     };
     use std::collections::BTreeSet;
 
@@ -128,6 +128,13 @@ mod tests {
                 EnvironmentDiagnosticAction::StartWinboat,
                 EnvironmentDiagnosticAction::OpenWinboat,
                 EnvironmentDiagnosticAction::OpenSettings,
+            ],
+        );
+        assert_registry(
+            "projectLocation",
+            [
+                ProjectLocation::ConfiguredWorkspace,
+                ProjectLocation::ExplicitHostSelection,
             ],
         );
         assert_registry(

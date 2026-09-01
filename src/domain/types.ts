@@ -211,11 +211,14 @@ export interface MendixProject {
   directory: string;
   mprPath: string;
   windowsPath: string;
+  location: ProjectLocation;
   version?: string;
   preferredVersion?: string;
   launchPending: boolean;
   lastModified?: string;
 }
+
+export type ProjectLocation = keyof typeof enumValues.projectLocation;
 
 export interface DownloadProgress {
   version: string;

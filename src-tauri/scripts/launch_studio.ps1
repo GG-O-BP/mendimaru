@@ -4,6 +4,7 @@ $projectPath = '__PROJECT_PATH__'
 $resultPath = '__RESULT_PATH__'
 $controlPath = '__CONTROL_PATH__'
 $installRoot = '__INSTALL_ROOT__'
+$projectReadyTimeoutSeconds = __PROJECT_READY_TIMEOUT_SECONDS__
 $process = $null
 
 __SECURITY_PREAMBLE__
@@ -204,6 +205,32 @@ function Get-ReadyStudioProcess {
 
 try {
     Write-LaunchResult 'starting' 'Studio Pro is starting.' $null $executable $null @()
+    if (-not [string]::IsNullOrWhiteSpace($projectPath)) {
+        if (-not [IO.Path]::GetExtension($projectPath).Equals(
+            '.mpr',
+            [StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw 'MENDIMARU_PROJECT_INVALID'
+        }
+        $projectDeadline = (Get-Date).AddSeconds($projectReadyTimeoutSeconds)
+        $projectReady = $false
+        do {
+            try {
+                if (Test-Path -LiteralPath $projectPath -PathType Leaf) {
+                    $projectItem = Get-Item -LiteralPath $projectPath -Force -ErrorAction Stop
+                    $projectReady = -not $projectItem.PSIsContainer
+                }
+            } catch {
+                $projectReady = $false
+            }
+            if (-not $projectReady) {
+                Start-Sleep -Milliseconds 250
+            }
+        } while (-not $projectReady -and (Get-Date) -lt $projectDeadline)
+        if (-not $projectReady) {
+            throw 'MENDIMARU_PROJECT_NOT_READY'
+        }
+    }
     $baseline = [Collections.Generic.HashSet[string]]::new(
         [StringComparer]::Ordinal
     )

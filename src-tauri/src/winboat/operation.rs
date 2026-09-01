@@ -3,6 +3,7 @@ mod report;
 mod runner;
 
 use super::container::ensure_private_operation_transport;
+use super::project_access::ProjectAccessLease;
 use super::remote_app::{spawn_powershell_file, RemoteAppProcess};
 use super::security::{AuthenticatedPayload, OperationSecurity};
 use crate::models::AppConfig;
@@ -70,6 +71,7 @@ pub(super) struct WindowsOperationRequest<'a> {
     pub(super) operation: &'a str,
     pub(super) keep_remote_app_alive: bool,
     pub(super) cancellation: Option<&'a CancellationToken>,
+    pub(super) project_access: Option<&'a ProjectAccessLease>,
 }
 
 pub(super) async fn run_windows_operation<F>(
@@ -93,8 +95,15 @@ where
         let script_path = request.script_path.to_path_buf();
         let label = request.label.to_string();
         let spawn_security = security.clone();
+        let project_access = request.project_access.cloned();
         let mut remote_app = tokio::task::spawn_blocking(move || {
-            spawn_powershell_file(&spawn_config, &script_path, &label, &spawn_security)
+            spawn_powershell_file(
+                &spawn_config,
+                &script_path,
+                &label,
+                &spawn_security,
+                project_access.as_ref(),
+            )
         })
         .await
         .map_err(|error| {

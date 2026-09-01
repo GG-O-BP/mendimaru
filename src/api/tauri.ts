@@ -39,6 +39,7 @@ const commands = {
   fetchDownloadableVersions: "fetch_downloadable_versions",
   resolveDownloadableVersion: "resolve_downloadable_version",
   getProjects: "get_projects",
+  selectExternalProject: "select_external_project",
   setProjectLaunchPreference: "set_project_launch_preference",
   startWinBoatWindows: "start_winboat_windows",
   openWinBoat: "open_winboat",
@@ -112,6 +113,8 @@ export const tauriApi = {
       version,
     }),
   getProjects: () => invoke<MendixProject[]>(commands.getProjects),
+  selectExternalProject: () =>
+    invoke<MendixProject | null>(commands.selectExternalProject),
   setProjectLaunchPreference: (
     projectMprPath: string,
     selectedVersion: string | undefined,

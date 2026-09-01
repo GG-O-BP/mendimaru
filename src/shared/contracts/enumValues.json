@@ -114,7 +114,12 @@
   "studioReconnectUnavailable": {
     "already-connected": true,
     "window-unavailable": true,
+    "project-reselection-required": true,
     "unsupported": true
+  },
+  "projectLocation": {
+    "configured-workspace": true,
+    "explicit-host-selection": true
   },
   "runtimeState": {
     "starting": true,

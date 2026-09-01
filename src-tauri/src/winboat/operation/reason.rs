@@ -96,6 +96,8 @@ pub(in crate::winboat) fn localize_windows_reason(reason: &str) -> String {
         "MENDIMARU_STUDIO_SESSION_REPORT_FAILED" => {
             crate::tr!("error-script-studio-session-report-failed")
         }
+        "MENDIMARU_PROJECT_NOT_READY" => crate::tr!("error-script-project-not-ready"),
+        "MENDIMARU_PROJECT_INVALID" => crate::tr!("error-script-project-invalid"),
         "MENDIMARU_PATH_INVALID" => crate::tr!("error-script-path-invalid"),
         _ => reason.to_string(),
     }

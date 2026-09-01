@@ -1,3 +1,4 @@
+use super::project_access::ProjectAccessLease;
 use super::security::{secure_powershell_launcher, OperationSecurity};
 use crate::models::AppConfig;
 use crate::process::{self, CommandPolicy};
@@ -107,6 +108,7 @@ pub(super) fn spawn_powershell_file(
     script_path: &Path,
     label: &str,
     security: &OperationSecurity,
+    project_access: Option<&ProjectAccessLease>,
 ) -> Result<RemoteAppProcess, String> {
     let windows_script_path = linux_path_to_windows_share(
         Path::new(&config.shared_directory),
@@ -119,7 +121,13 @@ pub(super) fn spawn_powershell_file(
     if arguments.encode_utf16().count() * 2 >= 16_000 {
         return Err(crate::tr!("error-remoteapp-command-too-long"));
     }
-    spawn_remote_app(config, HEADLESS_CONSOLE_HOST, Some(&arguments), label)
+    spawn_remote_app(
+        config,
+        HEADLESS_CONSOLE_HOST,
+        Some(&arguments),
+        label,
+        project_access,
+    )
 }
 
 pub(super) fn powershell_encoded_arguments(encoded_command: &str) -> String {
@@ -148,6 +156,7 @@ fn spawn_remote_app(
     executable_path: &str,
     app_arguments: Option<&str>,
     label: &str,
+    project_access: Option<&ProjectAccessLease>,
 ) -> Result<RemoteAppProcess, String> {
     let (username, password) = container_credentials(config)?;
     let safe_label: String = label
@@ -161,7 +170,7 @@ fn spawn_remote_app(
     }
     let trust_store = app_freerdp_config_directory()?;
     let certificate_policy = certificate_policy(config, &trust_store)?;
-    let arguments = [
+    let mut arguments = vec![
         format!("/u:{username}"),
         format!("/p:{password}"),
         format!("/v:{}", config.rdp_host),
@@ -177,8 +186,15 @@ fn spawn_remote_app(
         "-wallpaper".to_string(),
         "/scale-desktop:100".to_string(),
         format!("/wm-class:mendimaru-{}", css_slug(&safe_label)),
-        remote_app,
     ];
+    if let Some(argument) = project_access
+        .map(ProjectAccessLease::freerdp_drive_argument)
+        .transpose()?
+        .flatten()
+    {
+        arguments.push(argument);
+    }
+    arguments.push(remote_app);
 
     // FreeRDP 3 can parse one argument per line from stdin. This keeps the
     // Windows password out of the process list and out of application logs.
