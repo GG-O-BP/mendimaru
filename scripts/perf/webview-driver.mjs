@@ -425,9 +425,15 @@ async function terminateLinuxApplications(application, expectedRoot) {
     if (matches.length === 0) return;
     for (const { pid } of matches) {
       try {
-        process.kill(pid, signal);
+        process.kill(-pid, signal);
       } catch (error) {
-        if (error.code !== "ESRCH") throw error;
+        if (error.code !== "ESRCH") {
+          try {
+            process.kill(pid, signal);
+          } catch (directError) {
+            if (directError.code !== "ESRCH") throw error;
+          }
+        }
       }
     }
     await delay(signal === "SIGTERM" ? 500 : 100);
