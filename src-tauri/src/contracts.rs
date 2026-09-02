@@ -767,6 +767,8 @@ pub struct UiWaitRequest {
 pub struct BrowserTestRequest {
     pub session_id: String,
     pub base_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_mirror_url: Option<String>,
     pub suite_path: String,
     pub runtime_context: BrowserRuntimeContext,
     pub policy: BrowserTestPolicy,
