@@ -2,6 +2,7 @@ mod client;
 mod container;
 mod operation;
 mod project_access;
+mod project_locks;
 mod remote_app;
 #[cfg(target_os = "linux")]
 pub(crate) mod runtime;
@@ -23,7 +24,8 @@ pub use container::{
 pub(crate) use operation::WindowsOperationFailure;
 pub(crate) use sessions::stop as stop_studio_session;
 pub(crate) use sessions::{
-    close_all_registered_clients, registered_client_sessions, stop_registered_client,
+    cleanup_dead_session_lock, close_all_registered_clients, registered_client_sessions,
+    stop_registered_client,
 };
 pub(crate) use sessions::{list as studio_sessions, reconnect as reconnect_studio_session};
 pub(crate) use staging::stage_installer;

@@ -126,6 +126,11 @@ cleanup, the CLI verifies the authoritative session list once; an absent target
 returns `ok: true` and exit `0`, while a still-running target or an unverifiable
 status query preserves the original failure.
 
+The same confirmed-dead transition removes a Mendix `.mpr.lock` only when it is
+a direct, bounded, exactly shaped JSON file whose `ProcessId` matches the exact
+Studio session that was just observed absent. Locks for other processes and
+malformed, linked, oversized, or ambiguous files are deliberately retained.
+
 Poll at an interval larger than the command duration, retain the previous
 terminal error, and stop after a bounded number of attempts. Keep `--snapshot`
 out of polling requests; retrieve it separately with `capabilities` when a
