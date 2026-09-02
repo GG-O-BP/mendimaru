@@ -814,7 +814,7 @@ function validateRequest(value) {
 }
 
 function validateOptionalAssetMirrorUrl(value) {
-  if (value === undefined) return undefined;
+  if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") {
     throw new RunnerError(
       "invalid_request",
