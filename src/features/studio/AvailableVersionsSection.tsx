@@ -5,10 +5,7 @@ import {
   EmptyState,
   SectionHeader,
 } from "../../shared/components/LayoutPrimitives";
-import {
-  useLocalizedDates,
-  useLocalizedNumbers,
-} from "../../shared/hooks/useLocalizedValues";
+import { useLocalizedNumbers } from "../../shared/hooks/useLocalizedValues";
 import { CatalogTools } from "./CatalogTools";
 import { InstallationProgress } from "./InstallationProgress";
 import type { CatalogModel, InstallationModel } from "./types";
@@ -33,7 +30,9 @@ export function AvailableVersionsSection({
     [catalog.loadedCount, catalog.totalCount ?? 0],
     localization,
   );
-  const [fetchedAtLabel] = useLocalizedDates([catalog.fetchedAt], localization);
+  const fetchedAtLabel = catalog.fetchedAt
+    ? new Date(catalog.fetchedAt).toLocaleString(localization.locale)
+    : null;
   const filtering = Boolean(
     catalog.search || catalog.supportFilters.lts || catalog.supportFilters.mts,
   );
