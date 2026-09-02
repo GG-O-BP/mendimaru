@@ -367,6 +367,7 @@ pub(crate) async fn browser_test_url(
     let request = BrowserTestRequest {
         session_id: crate::contracts::secure_identifier("session")?,
         base_url: normalize_browser_url(base_url)?,
+        asset_mirror_url: None,
         suite_path: suite_path.to_string(),
         runtime_context: BrowserRuntimeContext {
             host_platform: manifest.host_platform,
@@ -418,9 +419,21 @@ pub(crate) async fn browser_test_runtime(
             .then(|| studio_version.clone())
             .flatten()
     });
+    #[cfg(target_os = "linux")]
+    let (asset_mirror_url, _asset_mirror_guard) = if status.mode == RuntimeMode::StudioRunLocally {
+        let mirror = crate::winboat::AssetMirrorServer::start(Path::new(&config.shared_directory))
+            .await
+            .map_err(|message| precondition_error(CapabilityId::BrowserTest, &message, true))?;
+        (Some(mirror.url().to_string()), Some(mirror))
+    } else {
+        (None, None)
+    };
+    #[cfg(not(target_os = "linux"))]
+    let asset_mirror_url = None;
     let request = BrowserTestRequest {
         session_id: crate::contracts::secure_identifier("session")?,
         base_url,
+        asset_mirror_url,
         suite_path: suite_path.to_string(),
         runtime_context: BrowserRuntimeContext {
             host_platform: manifest.host_platform,

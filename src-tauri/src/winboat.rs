@@ -1,3 +1,4 @@
+mod asset_mirror;
 mod client;
 mod container;
 mod operation;
@@ -11,6 +12,8 @@ mod security;
 mod sessions;
 mod staging;
 mod studio;
+
+pub(crate) use asset_mirror::AssetMirrorServer;
 mod version_cache;
 
 use crate::models::{AppConfig, StudioVersion};
