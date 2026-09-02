@@ -782,7 +782,7 @@ async function captureFailureArtifacts({
 
 function validateRequest(value) {
   assertPlainObject(value, "invalid browser runner request");
-  assertExactKeys(
+  assertAllowedKeys(
     value,
     [
       "schemaVersion",
