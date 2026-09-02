@@ -86,7 +86,6 @@ fn valid_lock_session_id(value: &str) -> bool {
 mod tests {
     use super::remove_dead_process_lock;
     use std::fs;
-    use std::os::unix::fs::symlink;
     use std::path::Path;
     use std::process;
 
@@ -117,8 +116,11 @@ mod tests {
         assert!(temporary.path().join("malformed.mpr.lock").exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn preserves_links_and_unexpected_files() {
+        use std::os::unix::fs::symlink;
+
         let temporary = tempfile::tempdir().expect("temporary project");
         let target = temporary.path().join("target.mpr.lock");
         fs::write(
@@ -134,6 +136,21 @@ mod tests {
             remove_dead_process_lock(temporary.path(), 4242).expect("safe lock cleanup succeeds");
         assert_eq!(removed, 1);
         assert!(link.symlink_metadata().is_ok());
+        assert!(temporary.path().join("large.mpr.lock").exists());
+    }
+
+    #[test]
+    fn preserves_oversized_locks() {
+        let temporary = tempfile::tempdir().expect("temporary project");
+        fs::write(
+            temporary.path().join("large.mpr.lock"),
+            r#"{"SessionId":"f205dd03-790d-43fa-a77d-be3b6b7ff1b7","ProcessId":4242}"#.repeat(8),
+        )
+        .expect("large lock");
+
+        let removed =
+            remove_dead_process_lock(temporary.path(), 4242).expect("safe lock cleanup succeeds");
+        assert_eq!(removed, 0);
         assert!(temporary.path().join("large.mpr.lock").exists());
     }
 
