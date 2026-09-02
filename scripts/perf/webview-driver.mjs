@@ -426,13 +426,15 @@ async function terminateLinuxApplications(application, expectedRoot) {
     for (const { pid } of matches) {
       try {
         process.kill(-pid, signal);
+      } catch {
+        // A detached process may no longer be a process-group leader; its
+        // direct PID is always killed below.
+      }
+      try {
+        process.kill(pid, signal);
       } catch (error) {
         if (error.code !== "ESRCH") {
-          try {
-            process.kill(pid, signal);
-          } catch (directError) {
-            if (directError.code !== "ESRCH") throw error;
-          }
+          throw error;
         }
       }
     }
