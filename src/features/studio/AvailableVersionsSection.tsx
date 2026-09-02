@@ -30,6 +30,9 @@ export function AvailableVersionsSection({
     [catalog.loadedCount, catalog.totalCount ?? 0],
     localization,
   );
+  const fetchedAtLabel = catalog.fetchedAt
+    ? new Date(catalog.fetchedAt).toLocaleString(localization.locale)
+    : null;
   const filtering = Boolean(
     catalog.search || catalog.supportFilters.lts || catalog.supportFilters.mts,
   );
@@ -45,6 +48,21 @@ export function AvailableVersionsSection({
         meta={catalogSummary(t, catalog, loadedCountLabel, availableTotalLabel)}
         action={<CatalogTools t={t} catalog={catalog} />}
       />
+
+      <p
+        className={`catalog-cache ${catalog.cacheFresh ? "fresh" : "stale"}`}
+        data-testid="catalog-cache-status"
+      >
+        {catalog.fetchedAt
+          ? catalog.cacheFresh
+            ? t("catalog-cache-fresh", {
+                time: fetchedAtLabel || catalog.fetchedAt,
+              })
+            : t("catalog-cache-stale", {
+                time: fetchedAtLabel || catalog.fetchedAt,
+              })
+          : t("catalog-cache-pending")}
+      </p>
 
       {installation.progress && (
         <InstallationProgress
