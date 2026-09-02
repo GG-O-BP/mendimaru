@@ -128,6 +128,28 @@ compare paths rather than platform-specific host setup.
 
 ## Authentication and secret boundary
 
+### WinBoat UNC widget assets
+
+Mendix Studio Pro 11.12.3 can emit protocol-relative imports such as
+`//host.lan/Data/<project>/deployment/web/widgets/...` when a project resides
+on the WinBoat SMB share. Linux does not resolve `host.lan`, and a normal user
+process must not modify `/etc/hosts` or bind privileged port 80.
+
+When a browser suite targets a Linux WinBoat Runtime session, Mendimaru starts
+an ephemeral loopback-only asset mirror and installs a Chromium route for
+`http(s)://host.lan/Data/**`. Requests are fulfilled only from
+`<shared-directory>/<project>/deployment/web/**`. Query-bearing paths,
+non-GET/HEAD requests, traversal, symlinks, directories, and files over 64 MiB
+are rejected. The mirror is destroyed with the browser run and never exposes a
+LAN listener, project paths, or model files.
+
+This makes Studio Run Locally E2E work without administrator privileges. A
+system-wide `curl http://host.lan/...` installation remains a deployment
+decision: an administrator can separately provide loopback name resolution and
+a socket-activated port-80 proxy with the same path restrictions. Mendimaru
+does not silently change host name resolution or acquire privileged socket
+capabilities.
+
 Test credentials are never CLI arguments or suite literals. A suite may read
 only environment variables named `MENDIMARU_TEST_<NAME>`:
 

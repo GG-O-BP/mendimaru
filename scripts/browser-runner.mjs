@@ -151,6 +151,7 @@ async function run(rawRequest) {
     request.outputDirectory,
   );
   const baseUrl = validateBaseUrl(request.baseUrl);
+  const assetMirrorUrl = validateOptionalAssetMirrorUrl(request.assetMirrorUrl);
   const { secrets, storageState } = await collectSecrets(suite);
   const startedAt = new Date().toISOString();
   let browser;
@@ -174,6 +175,7 @@ async function run(rawRequest) {
       const result = await runTest({
         browser,
         baseUrl,
+        assetMirrorUrl,
         files,
         index,
         outputDirectory,
@@ -300,6 +302,7 @@ async function run(rawRequest) {
 async function runTest({
   browser,
   baseUrl,
+  assetMirrorUrl,
   files,
   index,
   outputDirectory,
@@ -340,6 +343,9 @@ async function runTest({
       : {}),
   };
   const context = await browser.newContext(contextOptions);
+  if (assetMirrorUrl) {
+    await installHostLanAssetRoute(context, assetMirrorUrl);
+  }
   await context.addInitScript((style) => {
     const apply = () => {
       if (globalThis.document.getElementById("mendimaru-private-style")) return;
@@ -776,12 +782,13 @@ async function captureFailureArtifacts({
 
 function validateRequest(value) {
   assertPlainObject(value, "invalid browser runner request");
-  assertExactKeys(
+  assertAllowedKeys(
     value,
     [
       "schemaVersion",
       "sessionId",
       "baseUrl",
+      "assetMirrorUrl",
       "outputDirectory",
       "runtimeContext",
       "policy",
@@ -800,7 +807,56 @@ function validateRequest(value) {
   }
   validateRuntimeContext(value.runtimeContext);
   validatePolicy(value.policy);
+  if (value.assetMirrorUrl !== undefined) {
+    validateOptionalAssetMirrorUrl(value.assetMirrorUrl);
+  }
   return value;
+}
+
+function validateOptionalAssetMirrorUrl(value) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") {
+    throw new RunnerError(
+      "invalid_request",
+      "invalid browser asset mirror URL",
+    );
+  }
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new RunnerError(
+      "invalid_request",
+      "invalid browser asset mirror URL",
+    );
+  }
+  if (
+    url.protocol !== "http:" ||
+    url.hostname !== "127.0.0.1" ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  ) {
+    throw new RunnerError(
+      "invalid_request",
+      "invalid browser asset mirror URL",
+    );
+  }
+  return url;
+}
+
+async function installHostLanAssetRoute(context, mirrorUrl) {
+  await context.route(/^https?:\/\/host\.lan\/Data\//i, async (route) => {
+    const original = new URL(route.request().url());
+    const mirrored = new URL(
+      `${original.pathname}${original.search}`,
+      mirrorUrl,
+    );
+    const response = await route.fetch({ url: mirrored.toString() });
+    await route.fulfill({ response });
+  });
 }
 
 function validateRuntimeContext(value) {

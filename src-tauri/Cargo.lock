@@ -2786,6 +2786,7 @@ dependencies = [
  "icu_locale",
  "libc",
  "notify",
+ "percent-encoding",
  "regex",
  "reqwest 0.12.28",
  "rust-embed",

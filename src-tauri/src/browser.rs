@@ -249,6 +249,7 @@ struct RunnerRequest<'a> {
     schema_version: &'static str,
     session_id: &'a str,
     base_url: &'a str,
+    asset_mirror_url: Option<&'a str>,
     output_directory: &'a Path,
     runtime_context: &'a crate::contracts::BrowserRuntimeContext,
     policy: &'a crate::contracts::BrowserTestPolicy,
@@ -517,6 +518,7 @@ pub(crate) async fn test(
         schema_version: CONTRACT_SCHEMA_VERSION,
         session_id: &request.session_id,
         base_url: &request.base_url,
+        asset_mirror_url: request.asset_mirror_url.as_deref(),
         output_directory: &staging,
         runtime_context: &request.runtime_context,
         policy: &request.policy,
@@ -530,6 +532,7 @@ pub(crate) async fn test(
             false,
         )
     })?;
+
     let value = invoke_runner(
         "run",
         Some(&runner_request),
@@ -797,6 +800,7 @@ async fn invoke_runner(
         .wait_with_output()
         .await
         .map_err(|_| browser_error(backend, capability, BackendErrorCode::OperationFailed, true))?;
+
     if output.stdout.len() > MAX_RUNNER_OUTPUT_BYTES
         || output.stdout.iter().filter(|b| **b == b'\n').count() != 1
     {
@@ -2065,6 +2069,7 @@ mod tests {
         BrowserTestRequest {
             session_id: format!("session_{}", "ab".repeat(16)),
             base_url: "http://127.0.0.1:8080".to_string(),
+            asset_mirror_url: None,
             suite_path: suite_path.to_string_lossy().to_string(),
             runtime_context: BrowserRuntimeContext {
                 host_platform: PlatformId::Linux,
