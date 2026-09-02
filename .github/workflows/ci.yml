@@ -143,31 +143,13 @@ jobs:
   security:
     name: Dependency security audit
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Check out source
         uses: actions/checkout@v6
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22.22.2
-          cache: npm
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Audit npm dependency tree
-        run: npm audit --audit-level=high
-
-      - name: Install pinned cargo-audit
-        run: cargo install cargo-audit --locked --version 0.22.2
-
-      - name: Audit Rust dependency lockfile
-        run: cargo audit --file src-tauri/Cargo.lock
+      - name: Run dependency audit action
+        uses: ./actions/dependency-audit
 
   windows-native-e2e:
     name: Actual Windows Tauri dev E2E

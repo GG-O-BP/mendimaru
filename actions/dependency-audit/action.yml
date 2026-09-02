@@ -1,0 +1,65 @@
+name: Audit npm and RustSec policy
+description: Run both dependency audits and upload raw plus policy artifacts
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: 22.22.2
+        cache: npm
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install frontend dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Prepare audit artifacts
+      shell: bash
+      run: mkdir -p artifacts/dependency-audit
+
+    - name: Audit npm dependency tree
+      id: npm-audit
+      shell: bash
+      run: |
+        set +e
+        npm audit --audit-level=high --json > artifacts/dependency-audit/npm.json
+        status=$?
+        printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
+        test "$status" -eq 0
+
+    - name: Install pinned cargo-audit
+      if: ${{ always() }}
+      shell: bash
+      run: cargo install cargo-audit --locked --version 0.22.2
+
+    - name: Audit Rust dependency lockfile and policy
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        cargo audit --file src-tauri/Cargo.lock --json > artifacts/dependency-audit/cargo-audit.json
+        node scripts/verify-rustsec-policy.mjs \
+          --report artifacts/dependency-audit/cargo-audit.json \
+          --output artifacts/dependency-audit/rustsec-policy.json
+
+    - name: Write audit summary
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        {
+          echo '## Dependency audit'
+          echo '- npm high-or-worse audit: '"${{ steps.npm-audit.outputs.status == '0' && 'pass' || 'fail' }}"
+          node scripts/verify-rustsec-policy.mjs \
+            --report artifacts/dependency-audit/cargo-audit.json \
+            --output artifacts/dependency-audit/rustsec-policy.json >> "$GITHUB_STEP_SUMMARY" || true
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload dependency audit artifacts
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: mendimaru-dependency-audit
+        path: artifacts/dependency-audit
+        if-no-files-found: error
