@@ -164,11 +164,11 @@ try {
   );
 
   await fixture.setWorkspace(fixture.smallWorkspace);
-  await client.invoke("get_projects");
+  await scanProjectsAfterWorkspaceChange(client);
   for (let sample = 0; sample < sampling.sampleCount; sample += 1) {
     smallWorkspaceScanMs.push(
       await elapsed(async () => {
-        const projects = await client.invoke("get_projects");
+        const projects = await scanProjectsAfterWorkspaceChange(client);
         assert.equal(
           projectScanCount(projects),
           fixture.workspaceTiers.small.projectCount,
@@ -177,11 +177,11 @@ try {
     );
   }
   await fixture.setWorkspace(fixture.largeWorkspace);
-  await client.invoke("get_projects");
+  await scanProjectsAfterWorkspaceChange(client);
   for (let sample = 0; sample < sampling.sampleCount; sample += 1) {
     largeWorkspaceScanMs.push(
       await elapsed(async () => {
-        const projects = await client.invoke("get_projects");
+        const projects = await scanProjectsAfterWorkspaceChange(client);
         assert.equal(
           projectScanCount(projects),
           fixture.workspaceTiers.large.projectCount,
@@ -399,6 +399,20 @@ async function elapsed(action) {
 function projectScanCount(projects) {
   if (Array.isArray(projects)) return projects.length;
   return projects.projects?.length;
+}
+
+async function scanProjectsAfterWorkspaceChange(client) {
+  let lastError;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      return await client.invoke("get_projects");
+    } catch (error) {
+      lastError = error;
+      if (!error?.message?.includes("workspace scan superseded")) throw error;
+      await delay(100);
+    }
+  }
+  throw lastError;
 }
 
 async function waitFor(action, timeoutMs, label) {

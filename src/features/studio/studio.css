@@ -300,6 +300,19 @@
   background: var(--navy);
 }
 
+.catalog-cache {
+  margin: -8px 0 12px;
+  font-size: 11px;
+}
+
+.catalog-cache.fresh {
+  color: var(--muted);
+}
+
+.catalog-cache.stale {
+  color: #6a4a04;
+}
+
 .badges {
   display: inline-flex;
   flex-wrap: wrap;
@@ -340,4 +353,27 @@
   color: #773f38;
   background: var(--danger-soft);
   border-color: #e4b3aa;
+}
+
+.badges em.update {
+  color: #075b65;
+  background: white;
+  border-color: var(--cyan);
+}
+
+.release-notes-link {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  margin-inline-start: 5px;
+  place-items: center;
+  color: var(--muted);
+  vertical-align: middle;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.release-notes-link:hover {
+  color: var(--ink);
+  border-color: var(--cyan);
 }

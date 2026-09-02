@@ -1,6 +1,13 @@
-import { CheckCircle2, Download, LoaderCircle, RefreshCw } from "lucide-react";
+import {
+  CheckCircle2,
+  Download,
+  FileText,
+  LoaderCircle,
+  RefreshCw,
+} from "lucide-react";
 import type { LocalizationBundle } from "../../domain/types";
 import type { Translate } from "../../i18n";
+import { safeReleaseNotesUrl } from "./selectors";
 import { useLocalizedDates } from "../../shared/hooks/useLocalizedValues";
 import type { CatalogModel } from "./types";
 
@@ -46,6 +53,7 @@ export function VersionCatalogTable({
               releaseDate={releaseDates[index] || version.releaseDate || "—"}
               online={online}
               alreadyInstalled={catalog.installedSet.has(version.version)}
+              isUpdateCandidate={catalog.updateCandidates.has(version.version)}
               installedVersionsLoaded={catalog.installedVersionsLoaded}
               studioSessionsLoading={catalog.studioSessionsLoading}
               connectedRemoteAppVersion={catalog.connectedRemoteAppVersion}
@@ -66,6 +74,7 @@ function VersionRow({
   releaseDate,
   online,
   alreadyInstalled,
+  isUpdateCandidate,
   installedVersionsLoaded,
   studioSessionsLoading,
   connectedRemoteAppVersion,
@@ -78,6 +87,7 @@ function VersionRow({
   releaseDate: string;
   online: boolean;
   alreadyInstalled: boolean;
+  isUpdateCandidate: boolean;
   installedVersionsLoaded: boolean;
   studioSessionsLoading: boolean;
   connectedRemoteAppVersion?: string;
@@ -85,6 +95,7 @@ function VersionRow({
   installationBusy: boolean;
   onInstall: CatalogModel["onInstall"];
 }) {
+  const releaseNotesUrl = safeReleaseNotesUrl(version.releaseNotesUrl);
   const availability = !installedVersionsLoaded
     ? "checking"
     : alreadyInstalled
@@ -103,7 +114,11 @@ function VersionRow({
         </div>
       </td>
       <td className="support-cell">
-        <VersionBadges t={t} version={version} />
+        <VersionBadges
+          t={t}
+          version={version}
+          isUpdateCandidate={isUpdateCandidate}
+        />
       </td>
       <td className="release-cell">{releaseDate}</td>
       <td>
@@ -175,6 +190,21 @@ function VersionRow({
             <RefreshCw size={15} />
           </button>
         )}
+        {releaseNotesUrl && (
+          <a
+            className="release-notes-link"
+            href={releaseNotesUrl}
+            aria-label={t("release-notes-for", { version: version.version })}
+            title={t("release-notes-for", { version: version.version })}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <FileText size={14} />
+            <span className="sr-only">
+              {t("release-notes-for", { version: version.version })}
+            </span>
+          </a>
+        )}
       </td>
     </tr>
   );
@@ -183,9 +213,11 @@ function VersionRow({
 function VersionBadges({
   t,
   version,
+  isUpdateCandidate,
 }: {
   t: Translate;
   version: CatalogModel["versions"][number];
+  isUpdateCandidate: boolean;
 }) {
   return (
     <span className="badges">
@@ -193,6 +225,9 @@ function VersionBadges({
       {version.isLts && <em className="lts">LTS</em>}
       {version.isMts && <em className="mts">MTS</em>}
       {version.isBeta && <em className="beta">{t("badge-beta")}</em>}
+      {isUpdateCandidate && (
+        <em className="update">{t("badge-update-available")}</em>
+      )}
     </span>
   );
 }

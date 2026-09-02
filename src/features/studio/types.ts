@@ -37,6 +37,8 @@ export interface InstalledVersionsModel {
 export interface CatalogModel {
   versions: DownloadableVersion[];
   totalCount?: number;
+  fetchedAt?: string;
+  cacheFresh: boolean;
   loadedCount: number;
   search: string;
   supportFilters: VersionSupportFilters;
@@ -44,6 +46,8 @@ export interface CatalogModel {
   error: string | null;
   hasMore: boolean;
   installedSet: Set<string>;
+  installedVersions: StudioVersion[];
+  updateCandidates: Set<string>;
   installedVersionsLoaded: boolean;
   studioSessionsLoading: boolean;
   connectedRemoteAppVersion?: string;

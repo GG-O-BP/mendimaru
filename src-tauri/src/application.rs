@@ -913,11 +913,11 @@ mod tests {
     use super::{
         ensure_no_connected_remote_app_version, ensure_version_not_installed,
         exact_project_launch_path, invalidate_installed_versions_cache_after_mutation,
-        launch_project, operation, project, projects, runtime_start, session_conflict_error,
+        launch_project, operation, project, projects, session_conflict_error,
         SafeEnvironmentStatus,
     };
     #[cfg(target_os = "linux")]
-    use super::{launch, resolve_project_reference};
+    use super::{launch, resolve_project_reference, runtime_start};
     use crate::app_paths::AppPaths;
     use crate::contracts::CapabilityId;
     use crate::models::{

@@ -425,9 +425,17 @@ async function terminateLinuxApplications(application, expectedRoot) {
     if (matches.length === 0) return;
     for (const { pid } of matches) {
       try {
+        process.kill(-pid, signal);
+      } catch {
+        // A detached process may no longer be a process-group leader; its
+        // direct PID is always killed below.
+      }
+      try {
         process.kill(pid, signal);
       } catch (error) {
-        if (error.code !== "ESRCH") throw error;
+        if (error.code !== "ESRCH") {
+          throw error;
+        }
       }
     }
     await delay(signal === "SIGTERM" ? 500 : 100);
