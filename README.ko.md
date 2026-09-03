@@ -29,7 +29,7 @@ Mendix Studio Pro 버전을 탐지·설치·실행·제거하는 Tauri GUI 앱�
 
 ### 환경 진단
 
-설정 화면은 WinBoat 실행 파일, Compose 구조, 컨테이너 런타임 daemon, FreeRDP, 공유 워크스페이스와 마운트, 컨테이너 상태, Guest API, loopback RDP 포트 및 Marketplace 브라우저를 독립적으로 검사합니다. 실패한 항목에는 재탐지, Windows 시작, WinBoat 열기 또는 관련 설정 이동처럼 명시적으로 안전한 다음 행동만 제공합니다. 진단 보고서는 JSON으로 복사하거나 내보낼 수 있으며, 허용된 상태 필드만 포함하고 설정 경로, 자격 증명, token 및 명령 payload는 제외합니다.
+설정 화면은 WinBoat 실행 파일, Compose 구조, 컨테이너 런타임 daemon, FreeRDP, 공유 워크스페이스와 마운트, 컨테이너 상태, Guest API, 게스트 시계 오차, loopback RDP 포트 및 Marketplace 브라우저를 독립적으로 검사합니다. 실패한 항목에는 재탐지, Windows 시작, WinBoat 열기 또는 관련 설정 이동처럼 명시적으로 안전한 다음 행동만 제공합니다. 진단 보고서는 JSON으로 복사하거나 내보낼 수 있으며, 허용된 상태 필드만 포함하고 설정 경로, 자격 증명, token 및 명령 payload는 제외합니다. 게스트 시간 동기화는 [WinBoat 시계 동기화 가이드](docs/winboat-clock-sync.md)를 참고하세요.
 
 ### 영속 작업 이력
 

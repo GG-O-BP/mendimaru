@@ -19,4 +19,20 @@ describe("environment diagnostic process failures", () => {
     expect(text.detail).toBe("diagnostic-process-timeout");
     expect(text.action).toBe("diagnostic-action-open-settings");
   });
+
+  it("renders the stable guest clock skew recovery message", () => {
+    const text = diagnosticText(
+      {
+        id: "guest-clock",
+        status: "failure",
+        action: "redetect",
+        errorCode: "guest-clock-skew-exceeded",
+      },
+      t,
+    );
+
+    expect(text.title).toBe("diagnostic-guest-clock-title");
+    expect(text.detail).toBe("diagnostic-clock-skew-exceeded");
+    expect(text.action).toBe("diagnostic-action-redetect");
+  });
 });

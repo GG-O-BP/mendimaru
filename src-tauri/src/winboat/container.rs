@@ -8,8 +8,10 @@ use crate::models::{
     EnvironmentDiagnosticStatus, EnvironmentStatus,
 };
 use crate::process::{self, CommandFailure, CommandFailureKind, CommandOutput, CommandPolicy};
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::net::{IpAddr, TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
@@ -55,6 +57,7 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     let winboat_initialized = compose_available && container_status.exists();
     let mut guest_online = false;
     let mut guest_error_code = None;
+    let mut guest_clock = None;
     let mut rdp_reachable = false;
     let mut rdp_error_code = None;
     if winboat_initialized && container_status.is_running() {
@@ -80,10 +83,15 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
         };
         let rdp_host = config.rdp_host.clone();
         let (guest_probe, rdp_probe) = tokio::join!(
-            guest_is_online_at(&api_url),
+            guest_api_probe(&api_url),
             tokio::task::spawn_blocking(move || tcp_endpoint_reachable(&rdp_host, rdp_port)),
         );
-        guest_online = guest_probe && guest_error_code.is_none();
+        guest_online = guest_probe.online && guest_error_code.is_none();
+        guest_clock = if guest_online {
+            guest_probe.clock
+        } else {
+            None
+        };
         match rdp_probe {
             Ok(reachable) => rdp_reachable = reachable && rdp_error_code.is_none(),
             Err(_) => {
@@ -103,6 +111,7 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
         container_error_code: inspection.error_code,
         guest_online,
         guest_error_code,
+        guest_clock,
         rdp_reachable,
         rdp_error_code,
         browser,
@@ -149,11 +158,44 @@ struct LinuxDiagnosticState {
     container_error_code: Option<EnvironmentDiagnosticErrorCode>,
     guest_online: bool,
     guest_error_code: Option<EnvironmentDiagnosticErrorCode>,
+    guest_clock: Option<GuestClockProbe>,
     rdp_reachable: bool,
     rdp_error_code: Option<EnvironmentDiagnosticErrorCode>,
     browser: ToolProbe,
     browser_sandbox_available: bool,
 }
+
+/// Result of the bounded Guest API health probe, including the guest clock
+/// observation derived from the HTTP response.
+#[derive(Debug, Clone, Default)]
+struct GuestApiProbe {
+    online: bool,
+    clock: Option<GuestClockProbe>,
+}
+
+/// Guest clock observation derived from the Guest API HTTP `Date` header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuestClockProbe {
+    /// The guest responded, but its clock could not be measured.
+    Unmeasurable,
+    /// Guest-minus-host skew in whole seconds.
+    Measured(i64),
+}
+
+impl GuestClockProbe {
+    fn skew_seconds(self) -> Option<i64> {
+        match self {
+            Self::Unmeasurable => None,
+            Self::Measured(skew_seconds) => Some(skew_seconds),
+        }
+    }
+}
+
+const GUEST_CLOCK_SKEW_SUCCESS_SECONDS: i64 = 5;
+const GUEST_CLOCK_SKEW_WARNING_SECONDS: i64 = 60;
+const HOST_CLOCKSOURCE_PATH: &str =
+    "/sys/devices/system/clocksource/clocksource0/current_clocksource";
+const MAX_HOST_CLOCKSOURCE_BYTES: u64 = 64;
 
 impl LinuxDiagnosticState {
     fn ready(&self) -> bool {
@@ -172,8 +214,8 @@ impl LinuxDiagnosticState {
 fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagnostic> {
     use EnvironmentDiagnosticAction::{OpenSettings, OpenWinboat, Redetect, StartWinboat};
     use EnvironmentDiagnosticId::{
-        Compose, Container, ContainerRuntime, Freerdp, GuestApi, MarketplaceBrowser, Rdp,
-        SharedDirectory, SharedMount, Winboat,
+        Compose, Container, ContainerRuntime, Freerdp, GuestApi, GuestClock, MarketplaceBrowser,
+        Rdp, SharedDirectory, SharedMount, Winboat,
     };
     use EnvironmentDiagnosticStatus::{Failure, Success, Warning};
 
@@ -291,6 +333,13 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
             state.guest_error_code,
         ),
         diagnostic(
+            GuestClock,
+            guest_clock_status(state),
+            observed_guest_clock(state),
+            guest_clock_action(state),
+            guest_clock_error_code(state),
+        ),
+        diagnostic(
             Rdp,
             if state.rdp_reachable {
                 Success
@@ -328,6 +377,85 @@ fn observed_tool(probe: &ToolProbe) -> Option<String> {
         .version
         .clone()
         .or_else(|| probe.available.then(|| "detected-but-unusable".to_string()))
+}
+
+fn guest_clock_status(state: &LinuxDiagnosticState) -> EnvironmentDiagnosticStatus {
+    use EnvironmentDiagnosticStatus::{Failure, Success, Warning};
+
+    if !state.guest_online {
+        return if state.container_status.is_running() {
+            Failure
+        } else {
+            Warning
+        };
+    }
+    match state.guest_clock {
+        None | Some(GuestClockProbe::Unmeasurable) => Warning,
+        Some(GuestClockProbe::Measured(skew_seconds)) => {
+            let magnitude = skew_seconds.unsigned_abs();
+            if magnitude <= GUEST_CLOCK_SKEW_SUCCESS_SECONDS.unsigned_abs() {
+                Success
+            } else if magnitude <= GUEST_CLOCK_SKEW_WARNING_SECONDS.unsigned_abs() {
+                Warning
+            } else {
+                Failure
+            }
+        }
+    }
+}
+
+fn observed_guest_clock(state: &LinuxDiagnosticState) -> Option<String> {
+    if !state.guest_online {
+        return None;
+    }
+    let mut observed = match state.guest_clock.and_then(GuestClockProbe::skew_seconds) {
+        Some(skew_seconds) => format!("skew={skew_seconds}s"),
+        None => "skew=unavailable".to_string(),
+    };
+    if let Some(clocksource) = read_host_clocksource() {
+        observed.push_str("; host-clocksource=");
+        observed.push_str(&clocksource);
+    }
+    Some(observed)
+}
+
+fn guest_clock_action(state: &LinuxDiagnosticState) -> Option<EnvironmentDiagnosticAction> {
+    use EnvironmentDiagnosticAction::{OpenWinboat, Redetect, StartWinboat};
+
+    if !state.guest_online {
+        return Some(if state.container_status.is_running() {
+            OpenWinboat
+        } else {
+            StartWinboat
+        });
+    }
+    (guest_clock_status(state) != EnvironmentDiagnosticStatus::Success).then_some(Redetect)
+}
+
+fn guest_clock_error_code(state: &LinuxDiagnosticState) -> Option<EnvironmentDiagnosticErrorCode> {
+    (guest_clock_status(state) == EnvironmentDiagnosticStatus::Failure)
+        .then_some(EnvironmentDiagnosticErrorCode::GuestClockSkewExceeded)
+}
+
+fn read_host_clocksource() -> Option<String> {
+    let file = std::fs::File::open(HOST_CLOCKSOURCE_PATH).ok()?;
+    let mut value = String::new();
+    file.take(MAX_HOST_CLOCKSOURCE_BYTES)
+        .read_to_string(&mut value)
+        .ok()?;
+    sanitized_host_clocksource(&value)
+}
+
+fn sanitized_host_clocksource(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()
+        && value.len() <= 32
+        && value.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '-' | '_')
+        }))
+    .then(|| value.to_string())
 }
 
 fn observed_browser(probe: &ToolProbe, sandbox_available: bool) -> Option<String> {
@@ -643,14 +771,55 @@ pub async fn guest_is_online(config: &AppConfig) -> bool {
 }
 
 pub(super) async fn guest_is_online_at(api_url: &str) -> bool {
+    guest_api_probe(api_url).await.online
+}
+
+async fn guest_api_probe(api_url: &str) -> GuestApiProbe {
     let Ok(client) = http_client(Duration::from_secs(2)) else {
-        return false;
+        return GuestApiProbe::default();
     };
-    client
-        .get(format!("{api_url}/health"))
-        .send()
-        .await
-        .is_ok_and(|response| response.status().is_success())
+    let requested_at = Utc::now();
+    let Ok(response) = client.get(format!("{api_url}/health")).send().await else {
+        return GuestApiProbe::default();
+    };
+    let responded_at = Utc::now();
+    if !response.status().is_success() {
+        return GuestApiProbe::default();
+    }
+    GuestApiProbe {
+        online: true,
+        clock: Some(guest_clock_from_response(
+            response.headers().get(reqwest::header::DATE),
+            requested_at,
+            responded_at,
+        )),
+    }
+}
+
+/// Derives guest-minus-host clock skew from the Guest API HTTP `Date` header.
+/// The Go guest server generates the header from the Windows guest system
+/// clock, while the host midpoint bounds the measurement by request latency.
+fn guest_clock_from_response(
+    date_header: Option<&reqwest::header::HeaderValue>,
+    requested_at: DateTime<Utc>,
+    responded_at: DateTime<Utc>,
+) -> GuestClockProbe {
+    let Some(date) = date_header
+        .and_then(|value| value.to_str().ok())
+        .and_then(parse_http_date)
+    else {
+        return GuestClockProbe::Unmeasurable;
+    };
+    let elapsed_milliseconds = (responded_at - requested_at).num_milliseconds();
+    let host_midpoint = requested_at + chrono::TimeDelta::milliseconds(elapsed_milliseconds / 2);
+    GuestClockProbe::Measured((date - host_midpoint).num_seconds())
+}
+
+fn parse_http_date(value: &str) -> Option<DateTime<Utc>> {
+    let normalized = value.trim().replace(" GMT", " +0000");
+    DateTime::parse_from_rfc2822(&normalized)
+        .ok()
+        .map(|date| date.with_timezone(&Utc))
 }
 
 pub(crate) async fn guest_is_online_at_url(api_url: &str) -> bool {
@@ -902,7 +1071,8 @@ fn is_loopback_host(value: &str) -> bool {
 mod tests {
     use super::{
         build_linux_diagnostics, compose_up_with_policy, environment_status, extract_version,
-        is_loopback_host, parse_container_inspection, probe_tool_with_policy, LinuxDiagnosticState,
+        guest_clock_from_response, is_loopback_host, parse_container_inspection, parse_http_date,
+        probe_tool_with_policy, sanitized_host_clocksource, GuestClockProbe, LinuxDiagnosticState,
         RuntimeContainerInspection, ToolProbe,
     };
     use crate::models::{
@@ -910,6 +1080,7 @@ mod tests {
         EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
     };
     use crate::process::CommandPolicy;
+    use chrono::{DateTime, Utc};
     use std::time::Duration;
 
     #[test]
@@ -964,6 +1135,7 @@ mod tests {
             container_error_code: None,
             guest_online: true,
             guest_error_code: None,
+            guest_clock: Some(GuestClockProbe::Measured(0)),
             rdp_reachable: true,
             rdp_error_code: None,
             browser: ToolProbe {
@@ -982,10 +1154,15 @@ mod tests {
         let diagnostics = build_linux_diagnostics(&state);
 
         assert!(state.ready());
-        assert_eq!(diagnostics.len(), 10);
+        assert_eq!(diagnostics.len(), 11);
         assert!(diagnostics
             .iter()
             .all(|diagnostic| diagnostic.status == EnvironmentDiagnosticStatus::Success));
+        let guest_clock = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.id == EnvironmentDiagnosticId::GuestClock)
+            .expect("guest clock diagnostic");
+        assert_eq!(guest_clock.error_code, None);
         assert_eq!(
             diagnostics
                 .iter()
@@ -1039,6 +1216,148 @@ mod tests {
                 .find(|diagnostic| diagnostic.id == EnvironmentDiagnosticId::Freerdp)
                 .map(|diagnostic| diagnostic.status),
             Some(EnvironmentDiagnosticStatus::Success)
+        );
+    }
+
+    #[test]
+    fn guest_clock_skew_uses_bounded_thresholds() {
+        for (skew_seconds, expected) in [
+            (0, EnvironmentDiagnosticStatus::Success),
+            (5, EnvironmentDiagnosticStatus::Success),
+            (-5, EnvironmentDiagnosticStatus::Success),
+            (6, EnvironmentDiagnosticStatus::Warning),
+            (-6, EnvironmentDiagnosticStatus::Warning),
+            (60, EnvironmentDiagnosticStatus::Warning),
+            (61, EnvironmentDiagnosticStatus::Failure),
+            (-36_000, EnvironmentDiagnosticStatus::Failure),
+        ] {
+            let mut state = healthy_state();
+            state.guest_clock = Some(GuestClockProbe::Measured(skew_seconds));
+            let diagnostics = build_linux_diagnostics(&state);
+            let guest_clock = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.id == EnvironmentDiagnosticId::GuestClock)
+                .expect("guest clock diagnostic");
+            assert_eq!(guest_clock.status, expected, "skew {skew_seconds}s");
+            assert_eq!(
+                guest_clock.error_code,
+                (expected == EnvironmentDiagnosticStatus::Failure)
+                    .then_some(EnvironmentDiagnosticErrorCode::GuestClockSkewExceeded),
+                "skew {skew_seconds}s"
+            );
+        }
+    }
+
+    #[test]
+    fn guest_clock_unmeasurable_and_offline_paths_have_recovery_actions() {
+        let mut unmeasurable = healthy_state();
+        unmeasurable.guest_clock = Some(GuestClockProbe::Unmeasurable);
+        let diagnostic = build_linux_diagnostics(&unmeasurable)
+            .into_iter()
+            .find(|diagnostic| diagnostic.id == EnvironmentDiagnosticId::GuestClock)
+            .expect("guest clock diagnostic");
+        assert_eq!(diagnostic.status, EnvironmentDiagnosticStatus::Warning);
+        assert_eq!(
+            diagnostic.action,
+            Some(EnvironmentDiagnosticAction::Redetect)
+        );
+        assert_eq!(diagnostic.error_code, None);
+        assert!(
+            diagnostic
+                .observed
+                .as_deref()
+                .is_some_and(|observed| observed.starts_with("skew=unavailable")),
+            "observed should describe the unavailable measurement: {:?}",
+            diagnostic.observed
+        );
+
+        let mut offline = healthy_state();
+        offline.guest_online = false;
+        offline.guest_clock = None;
+        let diagnostic = build_linux_diagnostics(&offline)
+            .into_iter()
+            .find(|diagnostic| diagnostic.id == EnvironmentDiagnosticId::GuestClock)
+            .expect("guest clock diagnostic");
+        assert_eq!(diagnostic.status, EnvironmentDiagnosticStatus::Failure);
+        assert_eq!(
+            diagnostic.action,
+            Some(EnvironmentDiagnosticAction::OpenWinboat)
+        );
+        assert_eq!(diagnostic.observed, None);
+    }
+
+    #[test]
+    fn guest_clock_observes_measured_skew_and_a_safe_host_clocksource() {
+        let mut state = healthy_state();
+        state.guest_clock = Some(GuestClockProbe::Measured(-36_000));
+        let diagnostic = build_linux_diagnostics(&state)
+            .into_iter()
+            .find(|diagnostic| diagnostic.id == EnvironmentDiagnosticId::GuestClock)
+            .expect("guest clock diagnostic");
+        let observed = diagnostic
+            .observed
+            .as_deref()
+            .expect("measured skew is observable");
+        assert!(
+            observed.starts_with("skew=-36000s"),
+            "unexpected observed value: {observed}"
+        );
+        if let Some((_, clocksource)) = observed.rsplit_once("; host-clocksource=") {
+            assert!(
+                sanitized_host_clocksource(clocksource).is_some(),
+                "host clocksource must remain sanitized: {clocksource}"
+            );
+        }
+    }
+
+    #[test]
+    fn host_clocksource_accepts_only_bounded_safe_names() {
+        assert_eq!(sanitized_host_clocksource("tsc\n"), Some("tsc".to_string()));
+        assert_eq!(
+            sanitized_host_clocksource("kvm-clock"),
+            Some("kvm-clock".to_string())
+        );
+        assert_eq!(sanitized_host_clocksource(""), None);
+        assert_eq!(sanitized_host_clocksource("hpet; rm -rf /"), None);
+        assert_eq!(sanitized_host_clocksource(&"x".repeat(33)), None);
+        assert_eq!(sanitized_host_clocksource("UPPER"), None);
+    }
+
+    #[test]
+    fn parses_http_dates_from_the_guest_server() {
+        let parsed = parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT").expect("HTTP date parses");
+        assert_eq!(parsed.to_rfc3339(), "1994-11-06T08:49:37+00:00");
+        assert!(parse_http_date("not-a-date").is_none());
+        assert!(parse_http_date("").is_none());
+    }
+
+    #[test]
+    fn guest_clock_skew_uses_the_host_midpoint() {
+        let requested_at = DateTime::parse_from_rfc3339("2026-09-01T04:48:18Z")
+            .expect("request time")
+            .with_timezone(&Utc);
+        let responded_at = requested_at + chrono::TimeDelta::milliseconds(200);
+        let header = reqwest::header::HeaderValue::from_str("Sun, 06 Nov 1994 08:49:37 GMT")
+            .expect("date header");
+
+        let guest_ahead = guest_clock_from_response(Some(&header), requested_at, responded_at);
+        assert_eq!(
+            guest_ahead,
+            GuestClockProbe::Measured(
+                (parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT").expect("guest time")
+                    - (requested_at + chrono::TimeDelta::milliseconds(100)))
+                .num_seconds()
+            )
+        );
+
+        let missing = guest_clock_from_response(None, requested_at, responded_at);
+        assert_eq!(missing, GuestClockProbe::Unmeasurable);
+
+        let invalid =
+            reqwest::header::HeaderValue::from_str("invalid").expect("invalid header value");
+        assert_eq!(
+            guest_clock_from_response(Some(&invalid), requested_at, responded_at),
+            GuestClockProbe::Unmeasurable
         );
     }
 
@@ -1192,7 +1511,7 @@ mod tests {
         let config = crate::config::detect_config().expect("live configuration is detected");
         let status = tauri::async_runtime::block_on(environment_status(&config));
         assert!(status.ready, "live environment diagnostics: {status:#?}");
-        assert_eq!(status.diagnostics.len(), 10);
+        assert_eq!(status.diagnostics.len(), 11);
         let ids = status
             .diagnostics
             .iter()
@@ -1208,15 +1527,17 @@ mod tests {
             EnvironmentDiagnosticId::SharedMount,
             EnvironmentDiagnosticId::Container,
             EnvironmentDiagnosticId::GuestApi,
+            EnvironmentDiagnosticId::GuestClock,
             EnvironmentDiagnosticId::Rdp,
             EnvironmentDiagnosticId::MarketplaceBrowser,
         ] {
             assert!(ids.contains(&expected), "missing {expected:?}");
         }
-        assert!(status
-            .diagnostics
-            .iter()
-            .all(|diagnostic| diagnostic.status == EnvironmentDiagnosticStatus::Success));
+        assert!(status.diagnostics.iter().all(|diagnostic| {
+            diagnostic.status == EnvironmentDiagnosticStatus::Success
+                || (diagnostic.id == EnvironmentDiagnosticId::GuestClock
+                    && diagnostic.status == EnvironmentDiagnosticStatus::Warning)
+        }));
 
         let report = environment_diagnostic_report(&status).expect("report serializes");
         for sensitive in [

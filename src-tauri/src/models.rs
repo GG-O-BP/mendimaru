@@ -112,6 +112,7 @@ mod tests {
                 EnvironmentDiagnosticId::SharedMount,
                 EnvironmentDiagnosticId::Container,
                 EnvironmentDiagnosticId::GuestApi,
+                EnvironmentDiagnosticId::GuestClock,
                 EnvironmentDiagnosticId::Rdp,
                 EnvironmentDiagnosticId::MarketplaceBrowser,
             ],
@@ -147,6 +148,7 @@ mod tests {
                 EnvironmentDiagnosticErrorCode::ExternalProcessTimeout,
                 EnvironmentDiagnosticErrorCode::ExternalProcessCancelled,
                 EnvironmentDiagnosticErrorCode::ExternalProcessInterrupted,
+                EnvironmentDiagnosticErrorCode::GuestClockSkewExceeded,
             ],
         );
         assert_registry(

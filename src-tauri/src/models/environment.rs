@@ -71,6 +71,7 @@ pub enum EnvironmentDiagnosticId {
     SharedMount,
     Container,
     GuestApi,
+    GuestClock,
     Rdp,
     MarketplaceBrowser,
 }
@@ -99,6 +100,7 @@ pub enum EnvironmentDiagnosticErrorCode {
     ExternalProcessTimeout,
     ExternalProcessCancelled,
     ExternalProcessInterrupted,
+    GuestClockSkewExceeded,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
