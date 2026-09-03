@@ -62,6 +62,27 @@ query Windows sessions; an authenticated Windows diagnosis runs once only after
 the bounded wait expires. Future readiness watchers must preserve this
 isolation so monitoring cannot disturb the interactive Studio session.
 
+## Runtime cache records and contract upgrades
+
+Runtime records are private host state and follow the backend contract schema
+exactly. A record is eligible for port reuse only when its schema version,
+opaque session identity, backend, and mode match the currently running adapter.
+This is the same identity boundary used when loading a record for status, link,
+wait, or stop; readiness scanning never relaxes it.
+
+Mendimaru does not silently migrate or delete an older cache record. If an
+active-port scan finds an incompatible non-stopped record, it preserves the
+original JSON as `session.invalidated.json`, writes a private
+`invalidation.json` audit marker with the reason and observation time, and
+excludes that record from reuse. A new current-schema session may then use the
+port. Corrupt records that cannot be parsed remain excluded rather than being
+interpreted through a weaker schema.
+
+When the contract schema version changes, update this policy and the
+upgrade-scenario fixtures together. In particular, verify that incompatible
+records are quarantined auditable, stopped records are never reused, and a
+current-schema launch still succeeds with an older non-stopped record present.
+
 ## Failure and recovery
 
 Compose application is transactional. If recreation, guest startup, binding
