@@ -12,7 +12,7 @@ pub use config::{
     AppConfig, ContainerRuntime, SettingsConnectionTestResult, SettingsSavePreview,
     SettingsSaveResult,
 };
-pub use download::{DownloadProgress, DownloadState};
+pub use download::{DownloadProgress, DownloadState, InstallQueueItem, InstallQueueState};
 pub use environment::{
     environment_diagnostic_report, ContainerStatus, EnvironmentDiagnostic,
     EnvironmentDiagnosticAction, EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId,
@@ -34,8 +34,8 @@ mod tests {
     use super::{
         CommandError, CommandErrorCode, ContainerRuntime, ContainerStatus, DownloadState,
         EnvironmentDiagnosticAction, EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId,
-        EnvironmentDiagnosticStatus, HostPlatform, OperationKind, OperationStage, OperationState,
-        ProjectLocation, TextDirection,
+        EnvironmentDiagnosticStatus, HostPlatform, InstallQueueState, OperationKind,
+        OperationStage, OperationState, ProjectLocation, TextDirection,
     };
     use std::collections::BTreeSet;
 
@@ -176,6 +176,18 @@ mod tests {
                 OperationKind::Install,
                 OperationKind::Uninstall,
                 OperationKind::Launch,
+            ],
+        );
+        assert_registry(
+            "installQueueState",
+            [
+                InstallQueueState::Queued,
+                InstallQueueState::Downloading,
+                InstallQueueState::Staging,
+                InstallQueueState::Installing,
+                InstallQueueState::Succeeded,
+                InstallQueueState::Failed,
+                InstallQueueState::Cancelled,
             ],
         );
         assert_registry(

@@ -107,6 +107,38 @@ impl SecureDirectory {
         self.directory.open_with(name, &options)
     }
 
+    /// Opens a stable-named resumable payload for reading and appending.
+    ///
+    /// Unlike `SecureTemporaryFile`, this file survives drops so an
+    /// interrupted transfer can resume later. The name is validated, symlink
+    /// following is disabled, and the resulting descriptor must reference a
+    /// direct regular file.
+    pub(crate) fn open_or_create_payload(&self, name: &str) -> Result<tokio::fs::File, String> {
+        validate_direct_name(name)?;
+        let mut options = OpenOptions::new();
+        options
+            .read(true)
+            .append(true)
+            .create(true)
+            .follow(FollowSymlinks::No);
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = self
+            .directory
+            .open_with(name, &options)
+            .map_err(|error| format!("could not open secure payload: {error}"))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| format!("could not inspect secure payload: {error}"))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("the secure payload must be a direct regular file".to_string());
+        }
+        Ok(tokio::fs::File::from_std(file.into_std()))
+    }
+
     fn retain_temporary_file(
         &self,
         name: String,

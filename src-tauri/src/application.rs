@@ -5,7 +5,7 @@ use crate::contracts::{
     RuntimeBuildRequest, RuntimeBuildResult, RuntimeLogBatch, RuntimeMode, RuntimeStartRequest,
     RuntimeStatus, StudioSessionStatus,
 };
-use crate::downloads::{DownloadManager, InstallError};
+use crate::downloads::{DownloadCancellation, InstallError};
 use crate::models::{
     AppConfig, CommandError, CommandErrorCode, DownloadProgress, DownloadState,
     EnvironmentDiagnosticAction, EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId,
@@ -600,15 +600,36 @@ pub(crate) async fn uninstall(
 pub(crate) async fn install<F>(
     paths: &AppPaths,
     config: &AppConfig,
-    manager: &DownloadManager,
     version: String,
     force_redownload: bool,
     retry_of: Option<String>,
-    mut on_progress: F,
+    cancellation: &DownloadCancellation,
+    on_progress: F,
 ) -> ApplicationResult<String>
 where
     F: FnMut(&DownloadProgress) + Send,
 {
+    execute_install(
+        paths,
+        config,
+        version,
+        force_redownload,
+        retry_of,
+        cancellation,
+        on_progress,
+    )
+    .await
+}
+
+pub(crate) async fn execute_install(
+    paths: &AppPaths,
+    config: &AppConfig,
+    version: String,
+    force_redownload: bool,
+    retry_of: Option<String>,
+    cancellation: &DownloadCancellation,
+    mut on_progress: impl FnMut(&DownloadProgress) + Send,
+) -> Result<String, CommandError> {
     crate::platform::validate_version(&version)
         .map_err(|_| invalid_request("the Studio Pro version is invalid"))?;
     ensure_no_connected_remote_app(CapabilityId::StudioInstall)?;
@@ -631,10 +652,10 @@ where
     let result = crate::downloads::download_and_launch(
         paths,
         config,
-        manager,
         version,
         &operation_id,
         force_redownload,
+        cancellation,
         |progress| {
             let _ = tracker.progress(
                 operation_stage(progress),
@@ -705,7 +726,7 @@ pub(crate) fn operation(
 pub(crate) async fn retry<F>(
     paths: &AppPaths,
     config: &AppConfig,
-    manager: &DownloadManager,
+    cancellation: &DownloadCancellation,
     operation_id: &str,
     on_progress: F,
 ) -> ApplicationResult<String>
@@ -720,10 +741,10 @@ where
             install(
                 paths,
                 config,
-                manager,
                 source.target_version,
                 false,
                 retry_of,
+                cancellation,
                 on_progress,
             )
             .await

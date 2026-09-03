@@ -7,8 +7,13 @@ import {
 } from "../../shared/components/LayoutPrimitives";
 import { useLocalizedNumbers } from "../../shared/hooks/useLocalizedValues";
 import { CatalogTools } from "./CatalogTools";
+import { InstallQueuePanel } from "./InstallQueuePanel";
 import { InstallationProgress } from "./InstallationProgress";
-import type { CatalogModel, InstallationModel } from "./types";
+import type {
+  CatalogModel,
+  InstallQueueModel,
+  InstallationModel,
+} from "./types";
 import { useCatalogLoadMore } from "./useCatalogLoadMore";
 import { VersionCatalogTable } from "./VersionCatalogTable";
 
@@ -18,12 +23,14 @@ export function AvailableVersionsSection({
   online,
   catalog,
   installation,
+  queue,
 }: {
   t: Translate;
   localization: LocalizationBundle;
   online: boolean;
   catalog: CatalogModel;
   installation: InstallationModel;
+  queue: InstallQueueModel;
 }) {
   const loadMoreSentinel = useCatalogLoadMore(catalog);
   const [loadedCountLabel, availableTotalLabel] = useLocalizedNumbers(
@@ -74,6 +81,17 @@ export function AvailableVersionsSection({
           onCancel={installation.onCancel}
         />
       )}
+
+      <InstallQueuePanel
+        t={t}
+        localization={localization}
+        items={queue.items}
+        onCancel={queue.onCancel}
+        onDiscard={queue.onDiscard}
+        onRetry={queue.onRetry}
+        onMove={queue.onMove}
+        onRemove={queue.onRemove}
+      />
 
       {catalog.error && (
         <div className="inline-error">

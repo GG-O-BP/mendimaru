@@ -7,6 +7,7 @@ import type {
   DownloadableVersion,
   DownloadProgress,
   EnvironmentStatus,
+  InstallQueueItem,
   InstalledVersionsCache,
   LocalizationBundle,
   MendixProject,
@@ -56,6 +57,12 @@ const commands = {
   uninstallStudioPro: "uninstall_studio_pro",
   installStudioPro: "install_studio_pro",
   cancelStudioDownload: "cancel_studio_download",
+  enqueueInstallQueueItem: "enqueue_install_queue_item",
+  getInstallQueue: "get_install_queue",
+  cancelInstallQueueItem: "cancel_install_queue_item",
+  retryInstallQueueItem: "retry_install_queue_item",
+  moveInstallQueueItem: "move_install_queue_item",
+  removeInstallQueueItem: "remove_install_queue_item",
   getOperations: "get_operations",
   retryOperation: "retry_operation",
   clearOperationHistory: "clear_operation_history",
@@ -161,6 +168,20 @@ export const tauriApi = {
   installStudioPro: (version: string, forceRedownload = false) =>
     invoke<void>(commands.installStudioPro, { version, forceRedownload }),
   cancelStudioDownload: () => invoke<boolean>(commands.cancelStudioDownload),
+  enqueueInstallStudioPro: (version: string, forceRedownload = false) =>
+    invoke<InstallQueueItem>(commands.enqueueInstallQueueItem, {
+      version,
+      forceRedownload,
+    }),
+  getInstallQueue: () => invoke<InstallQueueItem[]>(commands.getInstallQueue),
+  cancelInstallQueueItem: (itemId: string, keepPartial: boolean) =>
+    invoke<boolean>(commands.cancelInstallQueueItem, { itemId, keepPartial }),
+  retryInstallQueueItem: (itemId: string) =>
+    invoke<InstallQueueItem>(commands.retryInstallQueueItem, { itemId }),
+  moveInstallQueueItem: (itemId: string, up: boolean) =>
+    invoke<void>(commands.moveInstallQueueItem, { itemId, up }),
+  removeInstallQueueItem: (itemId: string) =>
+    invoke<void>(commands.removeInstallQueueItem, { itemId }),
   getOperations: () => invoke<OperationRecord[]>(commands.getOperations),
   retryOperation: (id: string) => invoke<void>(commands.retryOperation, { id }),
   clearOperationHistory: () => invoke<number>(commands.clearOperationHistory),
@@ -170,6 +191,12 @@ export const tauriApi = {
     handler: (progress: DownloadProgress) => void,
   ): Promise<UnlistenFn> =>
     listen<DownloadProgress>("studio-download-progress", (event) => {
+      handler(event.payload);
+    }),
+  onInstallQueueChanged: (
+    handler: (items: InstallQueueItem[]) => void,
+  ): Promise<UnlistenFn> =>
+    listen<InstallQueueItem[]>("install-queue-changed", (event) => {
       handler(event.payload);
     }),
   onWorkspaceProjectsChanged: (

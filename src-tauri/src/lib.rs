@@ -29,12 +29,14 @@ mod studio_trace;
 mod winboat;
 
 use commands::*;
-use downloads::DownloadManager;
+use downloads::InstallQueue;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     studio_trace::enable_desktop();
     let builder = tauri::Builder::default()
+        .manage(InstallQueue::new())
         .setup(|app| {
             #[cfg(feature = "e2e")]
             crate::e2e::require_isolated_root().map_err(std::io::Error::other)?;
@@ -43,9 +45,17 @@ pub fn run() {
                 i18n::set_language(&config.language_preference).map_err(std::io::Error::other)?;
                 let _ = operations::list(app.handle(), &config);
             }
+            let queue = app.state::<InstallQueue>();
+            queue.set_app(app.handle().clone());
+            if let Ok(paths) = app_paths::AppPaths::from_app(app.handle()) {
+                if let Err(error) =
+                    queue.restore(paths.config_directory().join("install-queue.json"))
+                {
+                    eprintln!("install queue restore failed: {error}");
+                }
+            }
             Ok(())
         })
-        .manage(DownloadManager::default())
         .plugin(tauri_plugin_dialog::init());
     #[cfg(feature = "e2e")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
@@ -85,7 +95,13 @@ pub fn run() {
             stop_studio_session,
             uninstall_studio_pro,
             install_studio_pro,
+            enqueue_install_queue_item,
             cancel_studio_download,
+            get_install_queue,
+            cancel_install_queue_item,
+            retry_install_queue_item,
+            move_install_queue_item,
+            remove_install_queue_item,
             get_operations,
             retry_operation,
             clear_operation_history,

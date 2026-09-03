@@ -417,5 +417,21 @@
   "operation-reason-external-process-timeout": true,
   "operation-reason-external-process-cancelled": true,
   "operation-reason-external-process-interrupted": true,
-  "operation-reason-unknown": true
+  "operation-reason-unknown": true,
+  "install-queue-title": true,
+  "install-queue-state-queued": true,
+  "install-queue-state-downloading": true,
+  "install-queue-state-staging": true,
+  "install-queue-state-installing": true,
+  "install-queue-state-succeeded": true,
+  "install-queue-state-failed": true,
+  "install-queue-state-cancelled": true,
+  "install-queue-move-up": true,
+  "install-queue-move-down": true,
+  "install-queue-cancel-keep": true,
+  "install-queue-cancel-discard": true,
+  "install-queue-remove": true,
+  "toast-queue-cancel-requested": true,
+  "toast-queue-discard-requested": true,
+  "toast-queue-retry-requested": true
 }

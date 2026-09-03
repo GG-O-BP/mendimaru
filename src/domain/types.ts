@@ -247,6 +247,22 @@ export interface DownloadProgress {
   message: string;
 }
 
+export type InstallQueueState = keyof typeof enumValues.installQueueState;
+
+export interface InstallQueueItem {
+  id: string;
+  version: string;
+  forceRedownload: boolean;
+  retryOf?: string;
+  state: InstallQueueState;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  percentage?: number;
+  message?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type OperationKind = keyof typeof enumValues.operationKind;
 export type OperationState = keyof typeof enumValues.operationState;
 export type OperationStage = keyof typeof enumValues.operationStage;

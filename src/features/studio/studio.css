@@ -377,3 +377,94 @@
   color: var(--ink);
   border-color: var(--cyan);
 }
+
+.install-queue {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-block-end: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft, rgba(127, 127, 127, 0.06));
+}
+
+.install-queue h4 {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.install-queue ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.install-queue-item {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel, white);
+}
+
+.install-queue-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.install-queue-summary svg {
+  color: var(--cyan);
+}
+
+.install-queue-state {
+  padding: 1px 7px;
+  font-size: 0.72rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+}
+
+.install-queue-state.downloading,
+.install-queue-state.staging,
+.install-queue-state.installing {
+  color: #075b65;
+  border-color: var(--cyan);
+}
+
+.install-queue-state.succeeded {
+  color: #176047;
+  border-color: #b3d8c7;
+}
+
+.install-queue-state.failed,
+.install-queue-state.cancelled {
+  color: #773f38;
+  border-color: #e4b3aa;
+}
+
+.install-queue-progress-label {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.install-queue-item progress {
+  width: 100%;
+  height: 6px;
+}
+
+.install-queue-message {
+  margin: 0;
+  color: #773f38;
+  font-size: 0.78rem;
+}
+
+.install-queue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

@@ -57,8 +57,10 @@ export function VersionCatalogTable({
               installedVersionsLoaded={catalog.installedVersionsLoaded}
               studioSessionsLoading={catalog.studioSessionsLoading}
               connectedRemoteAppVersion={catalog.connectedRemoteAppVersion}
-              installing={catalog.isBusy(`install-${version.version}`)}
-              installationBusy={catalog.isInstalling}
+              installing={
+                catalog.isBusy(`install-${version.version}`) ||
+                catalog.queuedVersions.has(version.version)
+              }
               onInstall={catalog.onInstall}
             />
           ))}
@@ -79,7 +81,6 @@ function VersionRow({
   studioSessionsLoading,
   connectedRemoteAppVersion,
   installing,
-  installationBusy,
   onInstall,
 }: {
   t: Translate;
@@ -92,7 +93,6 @@ function VersionRow({
   studioSessionsLoading: boolean;
   connectedRemoteAppVersion?: string;
   installing: boolean;
-  installationBusy: boolean;
   onInstall: CatalogModel["onInstall"];
 }) {
   const releaseNotesUrl = safeReleaseNotesUrl(version.releaseNotesUrl);
@@ -143,7 +143,7 @@ function VersionRow({
             studioSessionsLoading ||
             Boolean(connectedRemoteAppVersion) ||
             alreadyInstalled ||
-            installationBusy
+            installing
           }
           title={
             connectedRemoteAppVersion
@@ -176,7 +176,7 @@ function VersionRow({
               !online ||
               studioSessionsLoading ||
               Boolean(connectedRemoteAppVersion) ||
-              installationBusy
+              installing
             }
             title={
               connectedRemoteAppVersion

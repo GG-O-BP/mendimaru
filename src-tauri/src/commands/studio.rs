@@ -1,12 +1,12 @@
 use super::{load_command_config, CommandResult};
 use crate::app_paths::AppPaths;
 use crate::contracts::StudioSessionStatus;
-use crate::downloads::{DownloadManager, DOWNLOAD_EVENT};
+use crate::downloads::InstallQueue;
 use crate::models::{
-    CommandError, CommandErrorCode, DownloadableVersion, InstalledVersionsCache, OperationRecord,
-    StudioVersion, StudioVersionCatalog,
+    CommandError, CommandErrorCode, DownloadableVersion, InstallQueueItem, InstalledVersionsCache,
+    OperationRecord, StudioVersion, StudioVersionCatalog,
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 pub(crate) async fn get_installed_versions(app: AppHandle) -> CommandResult<Vec<StudioVersion>> {
@@ -101,31 +101,79 @@ pub(crate) async fn uninstall_studio_pro(app: AppHandle, version: String) -> Com
 
 #[tauri::command]
 pub(crate) async fn install_studio_pro(
-    app: AppHandle,
-    manager: State<'_, DownloadManager>,
+    queue: State<'_, InstallQueue>,
     version: String,
     force_redownload: bool,
 ) -> CommandResult<()> {
-    let config = load_command_config(&app)?;
-    let paths = AppPaths::from_app(&app)?;
-    crate::application::install(
-        &paths,
-        &config,
-        &manager,
-        version,
-        force_redownload,
-        None,
-        |progress| {
-            let _ = app.emit(DOWNLOAD_EVENT, progress.clone());
-        },
-    )
-    .await
-    .map(|_| ())
+    let item = queue
+        .enqueue(version.clone(), force_redownload, false, None)
+        .map_err(|message| CommandError::new(CommandErrorCode::InvalidRequest, message))?;
+    wait_for_queue_success(&queue, &item.id).await
 }
 
 #[tauri::command]
-pub(crate) fn cancel_studio_download(manager: State<'_, DownloadManager>) -> bool {
-    crate::downloads::cancel_download(&manager)
+pub(crate) fn enqueue_install_queue_item(
+    queue: State<'_, InstallQueue>,
+    version: String,
+    force_redownload: bool,
+) -> CommandResult<InstallQueueItem> {
+    queue
+        .enqueue(version, force_redownload, false, None)
+        .map_err(|message| CommandError::new(CommandErrorCode::InvalidRequest, message))
+}
+
+#[tauri::command]
+pub(crate) fn cancel_studio_download(queue: State<'_, InstallQueue>) -> bool {
+    queue.cancel_current(true)
+}
+
+#[tauri::command]
+pub(crate) fn get_install_queue(
+    queue: State<'_, InstallQueue>,
+) -> CommandResult<Vec<InstallQueueItem>> {
+    Ok(queue.list())
+}
+
+#[tauri::command]
+pub(crate) fn cancel_install_queue_item(
+    queue: State<'_, InstallQueue>,
+    item_id: String,
+    keep_partial: bool,
+) -> CommandResult<bool> {
+    queue
+        .cancel(&item_id, keep_partial)
+        .map_err(|message| CommandError::new(CommandErrorCode::InvalidRequest, message))
+}
+
+#[tauri::command]
+pub(crate) fn retry_install_queue_item(
+    queue: State<'_, InstallQueue>,
+    item_id: String,
+) -> CommandResult<InstallQueueItem> {
+    queue
+        .retry(&item_id)
+        .map_err(|message| CommandError::new(CommandErrorCode::InvalidRequest, message))
+}
+
+#[tauri::command]
+pub(crate) fn move_install_queue_item(
+    queue: State<'_, InstallQueue>,
+    item_id: String,
+    up: bool,
+) -> CommandResult<()> {
+    queue
+        .move_item(&item_id, up)
+        .map_err(|message| CommandError::new(CommandErrorCode::InvalidRequest, message))
+}
+
+#[tauri::command]
+pub(crate) fn remove_install_queue_item(
+    queue: State<'_, InstallQueue>,
+    item_id: String,
+) -> CommandResult<()> {
+    queue
+        .remove(&item_id)
+        .map_err(|message| CommandError::new(CommandErrorCode::InvalidRequest, message))
 }
 
 #[tauri::command]
@@ -153,16 +201,50 @@ pub(crate) fn open_operation_logs(app: AppHandle) -> CommandResult<()> {
 #[tauri::command]
 pub(crate) async fn retry_operation(
     app: AppHandle,
-    manager: State<'_, DownloadManager>,
+    queue: State<'_, InstallQueue>,
     id: String,
 ) -> CommandResult<()> {
     let config = load_command_config(&app)?;
     let paths = AppPaths::from_app(&app)?;
-    crate::application::retry(&paths, &config, &manager, &id, |progress| {
-        let _ = app.emit(DOWNLOAD_EVENT, progress.clone());
-    })
-    .await
-    .map(|_| ())
+    let source = crate::operations::retry_source_with_paths(&paths, &config, &id)
+        .map_err(operation_history_error)?;
+    if matches!(source.kind, crate::models::OperationKind::Install) {
+        let item = queue
+            .enqueue(
+                source.target_version.clone(),
+                false,
+                true,
+                Some(source.id.clone()),
+            )
+            .map_err(|message| CommandError::new(CommandErrorCode::InvalidRequest, message))?;
+        return wait_for_queue_success(&queue, &item.id).await;
+    }
+    let cancellation = crate::downloads::DownloadCancellation::new();
+    crate::application::retry(&paths, &config, &cancellation, &id, |_| {})
+        .await
+        .map(|_| ())
+}
+
+async fn wait_for_queue_success(
+    queue: &State<'_, InstallQueue>,
+    item_id: &str,
+) -> CommandResult<()> {
+    let completed = queue.wait_for_terminal(item_id).await;
+    match completed.state {
+        crate::models::InstallQueueState::Succeeded => Ok(()),
+        crate::models::InstallQueueState::Cancelled => Err(CommandError::new(
+            CommandErrorCode::DownloadCancelled,
+            completed
+                .message
+                .unwrap_or_else(|| crate::tr!("error-download-cancelled")),
+        )),
+        _ => Err(CommandError::new(
+            CommandErrorCode::InstallFailed,
+            completed
+                .message
+                .unwrap_or_else(|| "the Studio Pro installation failed".to_string()),
+        )),
+    }
 }
 
 fn operation_history_error(message: String) -> CommandError {

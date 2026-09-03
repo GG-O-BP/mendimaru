@@ -79,6 +79,7 @@ export function StudioView({
         studioSessionsLoading: studio.sessionsLoading,
         connectedRemoteAppVersion,
         isInstalling: studio.isInstalling,
+        queuedVersions: studio.installQueue.activeVersions,
         isBusy,
         onSearch: studio.setSearch,
         onToggleSupportFilter: studio.toggleSupportFilter,
@@ -90,6 +91,16 @@ export function StudioView({
         progress: studio.downloadProgress,
         isInstalling: studio.isInstalling,
         onCancel: () => void studio.cancelDownload(),
+      }}
+      queue={{
+        items: studio.installQueue.items,
+        activeVersions: studio.installQueue.activeVersions,
+        onCancel: (itemId) => void studio.installQueue.cancelItem(itemId, true),
+        onDiscard: (itemId) =>
+          void studio.installQueue.cancelItem(itemId, false),
+        onRetry: (itemId) => void studio.installQueue.retryItem(itemId),
+        onMove: (itemId, up) => void studio.installQueue.moveItem(itemId, up),
+        onRemove: (itemId) => void studio.installQueue.removeItem(itemId),
       }}
     />
   );

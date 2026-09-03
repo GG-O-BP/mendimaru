@@ -1,8 +1,10 @@
 use crate::marketplace;
 mod cache;
 mod progress;
+mod queue;
 pub(crate) mod storage;
 pub(crate) use progress::DOWNLOAD_EVENT;
+pub use queue::InstallQueue;
 
 use crate::app_paths::AppPaths;
 use crate::contracts::BackendError;
@@ -15,7 +17,7 @@ use progress::{
     CHECKING_PROGRESS, DOWNLOAD_PROGRESS_END, DOWNLOAD_PROGRESS_START, PREPARING_PROGRESS,
     STAGING_PROGRESS_START,
 };
-use reqwest::header::{ETAG, LAST_MODIFIED};
+use reqwest::header::{CONTENT_RANGE, ETAG, IF_RANGE, LAST_MODIFIED, RANGE};
 use reqwest::{redirect, Url};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -25,11 +27,42 @@ pub(crate) const MAX_INSTALLER_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_DOWNLOAD_REDIRECTS: usize = 5;
 const MENDIX_ARTIFACT_HOST: &str = "artifacts.rnd.mendix.com";
 
+/// Cooperative cancellation for one queued install. `discard_partial` lets a
+/// user choose between retaining a resumable payload and deleting it.
 #[derive(Default)]
-pub struct DownloadManager {
-    busy: AtomicBool,
-    cancellation: CancellationToken,
-    cancellable: AtomicBool,
+pub struct DownloadCancellation {
+    token: CancellationToken,
+    discard_partial: AtomicBool,
+    requested: AtomicBool,
+}
+
+impl DownloadCancellation {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self, discard_partial: bool) -> bool {
+        if self.token.is_cancelled() {
+            return false;
+        }
+        self.discard_partial
+            .store(discard_partial, Ordering::SeqCst);
+        self.requested.store(true, Ordering::SeqCst);
+        self.token.cancel();
+        true
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.token.is_cancelled()
+    }
+
+    pub fn token_clone(&self) -> CancellationToken {
+        self.token.clone()
+    }
+
+    fn should_discard_partial(&self) -> bool {
+        self.discard_partial.load(Ordering::SeqCst)
+    }
 }
 
 #[derive(Debug)]
@@ -51,49 +84,16 @@ impl From<BackendError> for InstallError {
     }
 }
 
-impl DownloadManager {
-    pub fn cancel(&self) -> bool {
-        if self.busy.load(Ordering::SeqCst) && self.cancellable.load(Ordering::SeqCst) {
-            self.cancellation.cancel();
-            true
-        } else {
-            false
-        }
-    }
-
-    fn begin(&self) -> Result<DownloadGuard<'_>, String> {
-        self.busy
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .map_err(|_| crate::tr!("error-download-busy"))?;
-        self.cancellation.reset();
-        self.cancellable.store(false, Ordering::SeqCst);
-        Ok(DownloadGuard { manager: self })
-    }
-}
-
-struct DownloadGuard<'a> {
-    manager: &'a DownloadManager,
-}
-
-impl Drop for DownloadGuard<'_> {
-    fn drop(&mut self) {
-        self.manager.busy.store(false, Ordering::SeqCst);
-        self.manager.cancellation.reset();
-        self.manager.cancellable.store(false, Ordering::SeqCst);
-    }
-}
-
 pub async fn download_and_launch(
     paths: &AppPaths,
     config: &AppConfig,
-    manager: &DownloadManager,
     version: String,
     operation_id: &str,
     force_redownload: bool,
+    cancellation: &DownloadCancellation,
     mut on_progress: impl FnMut(&crate::models::DownloadProgress) + Send,
 ) -> Result<(), InstallError> {
     crate::platform::validate_version(&version)?;
-    let _guard = manager.begin()?;
     emit_progress(
         DownloadProgressUpdate {
             version: &version,
@@ -177,20 +177,22 @@ pub async fn download_and_launch(
         );
         sha256
     } else {
-        manager.cancellable.store(true, Ordering::SeqCst);
+        if force_redownload {
+            cache::discard_partial(&installer_cache)
+                .map_err(|error| crate::tr!("error-installer-cache-remove", error = error))?;
+        }
         let sha256 = download_file(
-            manager,
+            cancellation,
             &version,
             &download_url,
             &installer_cache,
             &mut on_progress,
         )
         .await?;
-        manager.cancellable.store(false, Ordering::SeqCst);
         sha256
     };
 
-    if manager.cancellation.is_cancelled() {
+    if cancellation.is_cancelled() {
         return Err(InstallError::Cancelled(crate::tr!(
             "error-download-cancelled"
         )));
@@ -223,18 +225,16 @@ pub async fn download_and_launch(
             return Err(error.into());
         }
     }
-    manager.cancellable.store(true, Ordering::SeqCst);
     let installation = crate::platform::install_studio(
         config,
         &version,
         operation_id,
         &installer_path,
         &installer_sha256,
-        manager.cancellation.clone(),
+        cancellation.token_clone(),
         |progress| emit_install_progress(&version, progress, &mut on_progress),
     )
     .await;
-    manager.cancellable.store(false, Ordering::SeqCst);
     installation?;
     emit_progress(
         DownloadProgressUpdate {
@@ -252,12 +252,8 @@ pub async fn download_and_launch(
     Ok(())
 }
 
-pub fn cancel_download(manager: &DownloadManager) -> bool {
-    manager.cancel()
-}
-
 async fn download_file<F>(
-    manager: &DownloadManager,
+    cancellation: &DownloadCancellation,
     version: &str,
     url: &str,
     destination: &cache::InstallerCache,
@@ -267,7 +263,7 @@ where
     F: FnMut(&crate::models::DownloadProgress),
 {
     download_file_with_progress(
-        manager,
+        cancellation,
         version,
         url,
         destination,
@@ -291,7 +287,7 @@ where
 }
 
 async fn download_file_with_progress<F>(
-    manager: &DownloadManager,
+    cancellation: &DownloadCancellation,
     version: &str,
     url: &str,
     destination: &cache::InstallerCache,
@@ -301,13 +297,6 @@ async fn download_file_with_progress<F>(
 where
     F: FnMut(DownloadState, u64, Option<u64>, Option<f64>, String),
 {
-    on_progress(
-        DownloadState::Connecting,
-        0,
-        None,
-        Some(DOWNLOAD_PROGRESS_START),
-        crate::tr!("progress-connecting"),
-    );
     let parsed_url = Url::parse(url).map_err(|_| crate::tr!("error-download-source-untrusted"))?;
     policy.validate(&parsed_url)?;
     let redirect_policy = policy.redirect_policy();
@@ -318,16 +307,84 @@ where
         .redirect(redirect_policy)
         .build()
         .map_err(|error| crate::tr!("error-download-client-create", error = error))?;
-    let response = client
+
+    let resume = cache::load_partial(destination, version, url, policy.maximum_bytes).await;
+    let start = resume
+        .as_ref()
+        .map(|state| state.payload_bytes)
+        .unwrap_or(0);
+    if resume.is_none() {
+        let _ = cache::discard_partial(destination);
+    }
+    let validator = resume
+        .as_ref()
+        .and_then(|state| state.validator().map(str::to_string));
+
+    let mut request = client
         .get(parsed_url)
         .header("Referer", "https://marketplace.mendix.com/")
-        .header("Accept", "application/octet-stream,*/*")
+        .header("Accept", "application/octet-stream,*/*");
+    if start > 0 {
+        request = request.header(RANGE, format!("bytes={start}-"));
+        if let Some(validator) = validator.as_deref() {
+            request = request.header(IF_RANGE, validator);
+        }
+    }
+    let response = request
         .send()
         .await
         .map_err(|error| crate::tr!("error-download-start", error = error))?
         .error_for_status()
         .map_err(|error| crate::tr!("error-download-server", error = error))?;
-    let total = response.content_length();
+
+    let mut remote_metadata = remote_metadata_from(&response);
+    let resume_offset = match response.status() {
+        reqwest::StatusCode::PARTIAL_CONTENT => {
+            let Some((range_start, range_total)) = parse_content_range(&response) else {
+                let _ = cache::discard_partial(destination);
+                return Box::pin(download_file_with_progress(
+                    cancellation,
+                    version,
+                    url,
+                    destination,
+                    policy,
+                    on_progress,
+                ))
+                .await;
+            };
+            if range_start > start || range_total.is_some_and(|total| total > policy.maximum_bytes)
+            {
+                let _ = cache::discard_partial(destination);
+                return Box::pin(download_file_with_progress(
+                    cancellation,
+                    version,
+                    url,
+                    destination,
+                    policy,
+                    on_progress,
+                ))
+                .await;
+            }
+            if let Some(total) = range_total {
+                remote_metadata.content_length = Some(total);
+            }
+            range_start
+        }
+        _ => {
+            if start > 0 {
+                on_progress(
+                    DownloadState::Connecting,
+                    0,
+                    None,
+                    Some(DOWNLOAD_PROGRESS_START),
+                    crate::tr!("progress-download-restarted"),
+                );
+                let _ = cache::discard_partial(destination);
+            }
+            0
+        }
+    };
+    let total = remote_metadata.content_length;
     if total.is_some_and(|size| size > policy.maximum_bytes) {
         return Err(crate::tr!(
             "error-installer-download-too-large",
@@ -335,27 +392,98 @@ where
         )
         .into());
     }
-    let remote_metadata = RemoteMetadata {
-        content_length: total,
-        etag: response
-            .headers()
-            .get(ETAG)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_string),
-        last_modified: response
-            .headers()
-            .get(LAST_MODIFIED)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_string),
-    };
-    let mut stream = response.bytes_stream();
-    let mut partial = destination
-        .create_payload()
-        .map_err(|error| crate::tr!("error-temp-installer-create", error = error))?;
-    let mut downloaded = 0_u64;
+    if resume_offset > 0 {
+        on_progress(
+            DownloadState::Connecting,
+            resume_offset,
+            total,
+            Some(DOWNLOAD_PROGRESS_START),
+            crate::tr!("progress-download-resumed"),
+        );
+    } else {
+        on_progress(
+            DownloadState::Connecting,
+            0,
+            None,
+            Some(DOWNLOAD_PROGRESS_START),
+            crate::tr!("progress-connecting"),
+        );
+    }
 
-    while let Some(chunk) = stream.next().await {
-        if manager.cancellation.is_cancelled() {
+    let mut payload = destination
+        .open_partial_payload()
+        .map_err(|error| crate::tr!("error-temp-installer-create", error = error))?;
+    let payload_len = payload
+        .metadata()
+        .await
+        .map_err(|error| crate::tr!("error-installer-write", error = error))?
+        .len();
+    if payload_len != resume_offset {
+        payload
+            .set_len(resume_offset)
+            .await
+            .map_err(|error| crate::tr!("error-installer-write", error = error))?;
+        payload
+            .flush()
+            .await
+            .map_err(|error| crate::tr!("error-installer-flush", error = error))?;
+    }
+
+    let mut received: u64 = 0;
+    let mut stream = response.bytes_stream();
+    let result = loop {
+        let chunk = stream.next().await;
+        let Some(chunk) = chunk else {
+            break Ok(());
+        };
+        let bytes = match chunk {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                break Err(Interrupted::Network(crate::tr!(
+                    "error-download-data-read",
+                    error = error
+                )));
+            }
+        };
+        if cancellation.is_cancelled() {
+            break Err(Interrupted::Cancelled);
+        }
+        let next_size = resume_offset
+            .checked_add(received)
+            .and_then(|size| size.checked_add(bytes.len() as u64))
+            .filter(|size| *size <= policy.maximum_bytes);
+        let Some(next_size) = next_size else {
+            break Err(Interrupted::TooLarge);
+        };
+        if let Err(error) = payload.write_all(&bytes).await {
+            break Err(Interrupted::Network(crate::tr!(
+                "error-installer-write",
+                error = error
+            )));
+        }
+        received = next_size - resume_offset;
+        on_progress(
+            DownloadState::Downloading,
+            next_size,
+            total,
+            overall_download_percentage(next_size, total),
+            crate::tr!("progress-downloading"),
+        );
+    };
+
+    let downloaded = resume_offset + received;
+    match result {
+        Err(Interrupted::Cancelled) => {
+            persist_partial(
+                destination,
+                version,
+                url,
+                &mut payload,
+                downloaded,
+                &remote_metadata,
+                cancellation.should_discard_partial(),
+            )
+            .await;
             on_progress(
                 DownloadState::Cancelled,
                 downloaded,
@@ -367,54 +495,50 @@ where
                 "error-download-cancelled"
             )));
         }
-        let bytes = match chunk {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                return Err(crate::tr!("error-download-data-read", error = error).into());
-            }
-        };
-        let next_size = downloaded
-            .checked_add(bytes.len() as u64)
-            .filter(|size| *size <= policy.maximum_bytes)
-            .ok_or_else(|| {
-                InstallError::Other(crate::tr!(
-                    "error-installer-download-too-large",
-                    limit = policy.maximum_bytes
-                ))
-            })?;
-        partial
-            .file_mut()
-            .write_all(&bytes)
-            .await
-            .map_err(|error| crate::tr!("error-installer-write", error = error))?;
-        downloaded = next_size;
-        on_progress(
-            DownloadState::Downloading,
-            downloaded,
-            total,
-            overall_download_percentage(downloaded, total),
-            crate::tr!("progress-downloading"),
-        );
+        Err(Interrupted::Network(message)) => {
+            persist_partial(
+                destination,
+                version,
+                url,
+                &mut payload,
+                downloaded,
+                &remote_metadata,
+                false,
+            )
+            .await;
+            return Err(InstallError::Other(message));
+        }
+        Err(Interrupted::TooLarge) => {
+            let _ = cache::discard_partial(destination);
+            return Err(InstallError::Other(crate::tr!(
+                "error-installer-download-too-large",
+                limit = policy.maximum_bytes
+            )));
+        }
+        Ok(()) => {}
     }
-    partial
-        .file_mut()
+
+    payload
         .flush()
         .await
         .map_err(|error| crate::tr!("error-installer-flush", error = error))?;
-    partial
-        .file_mut()
+    payload
         .sync_all()
         .await
         .map_err(|error| crate::tr!("error-installer-flush", error = error))?;
-    let validated = match cache::validate_temporary_download(&mut partial, total).await {
+    let mut payload = payload;
+    let validated = match cache::validate_partial_payload(&mut payload, total).await {
         Ok(validated) => validated,
         Err(error) => {
-            return Err(crate::tr!("error-installer-download-invalid", reason = error).into())
+            let _ = cache::discard_partial(destination);
+            return Err(crate::tr!("error-installer-download-invalid", reason = error).into());
         }
     };
     let metadata = cache::metadata_for_download(version, url, &validated, remote_metadata);
-    cache::commit(destination, &mut partial, &metadata)
+    cache::commit_named(destination, &destination.partial_payload_name(), &metadata)
         .await
+        .map_err(|error| crate::tr!("error-installer-finalize", error = error))?;
+    cache::discard_partial(destination)
         .map_err(|error| crate::tr!("error-installer-finalize", error = error))?;
     on_progress(
         DownloadState::Downloaded,
@@ -424,6 +548,83 @@ where
         crate::tr!("progress-downloaded"),
     );
     Ok(validated.sha256)
+}
+
+enum Interrupted {
+    Cancelled,
+    Network(String),
+    TooLarge,
+}
+
+fn remote_metadata_from(response: &reqwest::Response) -> RemoteMetadata {
+    RemoteMetadata {
+        content_length: response.content_length(),
+        etag: response
+            .headers()
+            .get(ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string),
+        last_modified: response
+            .headers()
+            .get(LAST_MODIFIED)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string),
+    }
+}
+
+fn parse_content_range(response: &reqwest::Response) -> Option<(u64, Option<u64>)> {
+    let value = response.headers().get(CONTENT_RANGE)?.to_str().ok()?.trim();
+    let value = value.strip_prefix("bytes ")?.trim();
+    let (range, total) = value.split_once('/')?;
+    let total = if total.trim() == "*" {
+        None
+    } else {
+        Some(total.trim().parse::<u64>().ok()?)
+    };
+    let (start, _end) = range.trim().split_once('-')?;
+    Some((start.trim().parse::<u64>().ok()?, total))
+}
+
+async fn persist_partial(
+    destination: &cache::InstallerCache,
+    version: &str,
+    url: &str,
+    payload: &mut tokio::fs::File,
+    payload_bytes: u64,
+    remote: &RemoteMetadata,
+    discard: bool,
+) {
+    if discard {
+        let _ = cache::discard_partial(destination);
+        return;
+    }
+    let actual_bytes = payload
+        .metadata()
+        .await
+        .ok()
+        .map(|metadata| metadata.len())
+        .unwrap_or(payload_bytes);
+    if actual_bytes == 0 {
+        let _ = cache::discard_partial(destination);
+        return;
+    }
+    if let (Err(_), Err(_)) = (payload.flush().await, payload.sync_all().await) {
+        return;
+    }
+    let state = cache::PartialDownloadState {
+        schema_version: 1,
+        version: version.to_string(),
+        source_url: url.to_string(),
+        payload_bytes: actual_bytes,
+        total_bytes: remote.content_length,
+        etag: remote.etag.clone(),
+        last_modified: remote.last_modified.clone(),
+    };
+    if state.validator().is_none() {
+        let _ = cache::discard_partial(destination);
+        return;
+    }
+    let _ = cache::save_partial(destination, &state).await;
 }
 
 #[derive(Clone)]
@@ -513,8 +714,8 @@ fn download_user_agent() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        cache, download_file_with_progress, download_user_agent, DownloadManager, DownloadPolicy,
-        InstallError,
+        cache, download_file_with_progress, download_user_agent, DownloadCancellation,
+        DownloadPolicy, InstallError,
     };
     use crate::models::DownloadState;
     use std::io::{Read, Write};
@@ -653,7 +854,7 @@ mod tests {
         states: &mut Vec<DownloadState>,
     ) -> Result<(), InstallError> {
         download_file_with_progress(
-            &DownloadManager::default(),
+            &DownloadCancellation::new(),
             "11.12.2",
             url,
             destination,
@@ -680,6 +881,109 @@ mod tests {
             temporary_names.is_empty(),
             "temporary cache files remain: {temporary_names:?}"
         );
+    }
+
+    fn assert_no_partial_files(directory: &Path) {
+        let partial_names = std::fs::read_dir(directory)
+            .expect("read cache directory")
+            .map(|entry| {
+                entry
+                    .expect("cache entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .filter(|name| name.ends_with(".partial") || name.ends_with(".partial.json"))
+            .collect::<Vec<_>>();
+        assert!(
+            partial_names.is_empty(),
+            "partial files remain: {partial_names:?}"
+        );
+    }
+
+    enum ResumeStep {
+        /// Send a truncated 200 response with the first `bytes` of the body.
+        Truncated { bytes: usize },
+        /// Answer a Range request with 206 and the remainder of the body.
+        Partial,
+        /// Answer with a complete 200 response (origin changed or no Range).
+        Full,
+    }
+
+    type CapturedRequests = std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>;
+
+    fn serve_resume_sequence(
+        body: Vec<u8>,
+        steps: Vec<ResumeStep>,
+    ) -> (String, CapturedRequests, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind resume fixture");
+        let address = listener.local_addr().expect("resume fixture address");
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = std::sync::Arc::clone(&requests);
+        let handle = std::thread::spawn(move || {
+            for step in steps {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                    .expect("set resume timeout");
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 4096];
+                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    let read = stream.read(&mut buffer).expect("read resume request");
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                }
+                captured
+                    .lock()
+                    .expect("capture resume request")
+                    .push(request.clone());
+                let total = body.len();
+                match step {
+                    ResumeStep::Truncated { bytes } => {
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {total}\r\nETag: \"resume-v1\"\r\nConnection: close\r\n\r\n"
+                        );
+                        let _ = stream.write_all(&body[..bytes]);
+                        let _ = stream.flush();
+                    }
+                    ResumeStep::Partial => {
+                        let request_text = String::from_utf8_lossy(&request).to_ascii_lowercase();
+                        let start = request_text
+                            .lines()
+                            .find_map(|line| line.strip_prefix("range: bytes="))
+                            .and_then(|value| value.trim().parse::<usize>().ok())
+                            .unwrap_or(0);
+                        let remaining = &body[start..];
+                        let end = total - 1;
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 206 Partial Content\r\nContent-Type: application/octet-stream\r\nContent-Range: bytes {start}-{end}/{total}\r\nContent-Length: {}\r\nETag: \"resume-v1\"\r\nConnection: close\r\n\r\n",
+                            remaining.len()
+                        );
+                        let _ = stream.write_all(remaining);
+                        let _ = stream.flush();
+                    }
+                    ResumeStep::Full => {
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {total}\r\nETag: \"resume-v2\"\r\nConnection: close\r\n\r\n"
+                        );
+                        let _ = stream.write_all(&body);
+                        let _ = stream.flush();
+                    }
+                }
+            }
+        });
+        (
+            format!("http://{address}/Mendix-11.12.2-Setup.exe"),
+            requests,
+            handle,
+        )
     }
 
     #[test]
@@ -737,15 +1041,19 @@ mod tests {
         );
         let destination =
             cache::InstallerCache::open(&paths, "11.12.2").expect("host-private installer cache");
-        let mut partial = destination.create_payload().expect("private payload");
+        let mut partial = destination.open_partial_payload().expect("private payload");
 
         partial
-            .file_mut()
             .write_all(b"private bytes")
             .await
             .expect("write private payload");
 
-        assert!(partial.path().starts_with(paths.cache_directory()));
+        let partial_path = destination.partial_payload_name();
+        assert!(paths
+            .cache_directory()
+            .join("installers")
+            .join(partial_path)
+            .starts_with(paths.cache_directory()));
         assert_eq!(
             std::fs::read(&sentinel).expect("read sentinel"),
             b"unchanged"
@@ -955,10 +1263,10 @@ mod tests {
         original_server.finish();
 
         let replacement_server = serve_once(pe_fixture(), None);
-        let manager = DownloadManager::default();
-        manager.cancellation.cancel();
+        let cancellation = DownloadCancellation::new();
+        cancellation.cancel(false);
         let result = download_file_with_progress(
-            &manager,
+            &cancellation,
             "11.12.2",
             &replacement_server.url,
             &destination,
@@ -974,6 +1282,110 @@ mod tests {
             cache::CacheInspection::Valid(_)
         ));
         assert_no_temporary_files(temporary.path());
+    }
+
+    #[tokio::test]
+    async fn interrupted_download_resumes_from_the_verified_partial() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let destination = cache::InstallerCache::open_for_tests(temporary.path(), "11.12.2")
+            .expect("installer cache");
+        let body = pe_fixture();
+        let split = body.len() / 3;
+        let (url, requests, server) = serve_resume_sequence(
+            body,
+            vec![ResumeStep::Truncated { bytes: split }, ResumeStep::Partial],
+        );
+
+        let first = download_file_with_progress(
+            &DownloadCancellation::new(),
+            "11.12.2",
+            &url,
+            &destination,
+            DownloadPolicy::fixture(&url, u64::MAX),
+            |_, _, _, _, _| {},
+        )
+        .await;
+        assert!(matches!(first, Err(InstallError::Other(_))));
+
+        let partial_path = temporary.path().join("Mendix-11.12.2-Setup.exe.partial");
+        assert_eq!(
+            std::fs::metadata(&partial_path)
+                .expect("partial payload")
+                .len(),
+            split as u64
+        );
+
+        let second = download_file_with_progress(
+            &DownloadCancellation::new(),
+            "11.12.2",
+            &url,
+            &destination,
+            DownloadPolicy::fixture(&url, u64::MAX),
+            |_, _, _, _, _| {},
+        )
+        .await;
+        second.expect("resumed download completes");
+        server.join().expect("resume fixture completes");
+
+        let resume_request = {
+            let captured = requests.lock().expect("captured requests");
+            assert_eq!(captured.len(), 2);
+            String::from_utf8_lossy(&captured[1]).to_ascii_lowercase()
+        };
+        assert!(resume_request.contains(&format!("range: bytes={split}-")));
+        assert!(resume_request.contains("if-range: \"resume-v1\""));
+        assert!(matches!(
+            cache::inspect(&destination, "11.12.2", &url).await,
+            cache::CacheInspection::Valid(_)
+        ));
+        assert_no_partial_files(temporary.path());
+        assert_no_temporary_files(temporary.path());
+    }
+
+    #[tokio::test]
+    async fn changed_installer_restarts_the_download_from_the_beginning() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let destination = cache::InstallerCache::open_for_tests(temporary.path(), "11.12.2")
+            .expect("installer cache");
+        let body = pe_fixture();
+        let split = body.len() / 2;
+        let (url, requests, server) = serve_resume_sequence(
+            body,
+            vec![ResumeStep::Truncated { bytes: split }, ResumeStep::Full],
+        );
+
+        let first = download_file_with_progress(
+            &DownloadCancellation::new(),
+            "11.12.2",
+            &url,
+            &destination,
+            DownloadPolicy::fixture(&url, u64::MAX),
+            |_, _, _, _, _| {},
+        )
+        .await;
+        assert!(matches!(first, Err(InstallError::Other(_))));
+
+        download_file_with_progress(
+            &DownloadCancellation::new(),
+            "11.12.2",
+            &url,
+            &destination,
+            DownloadPolicy::fixture(&url, u64::MAX),
+            |_, _, _, _, _| {},
+        )
+        .await
+        .expect("full restart completes");
+        server.join().expect("restart fixture completes");
+
+        {
+            let captured = requests.lock().expect("captured requests");
+            assert_eq!(captured.len(), 2);
+        }
+        assert!(matches!(
+            cache::inspect(&destination, "11.12.2", &url).await,
+            cache::CacheInspection::Valid(_)
+        ));
+        assert_no_partial_files(temporary.path());
     }
 
     #[tokio::test]

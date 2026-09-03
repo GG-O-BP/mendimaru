@@ -1,6 +1,7 @@
 import type {
   DownloadableVersion,
   DownloadProgress,
+  InstallQueueItem,
   StudioSessionStatus,
   StudioVersion,
 } from "../../domain/types";
@@ -52,6 +53,7 @@ export interface CatalogModel {
   studioSessionsLoading: boolean;
   connectedRemoteAppVersion?: string;
   isInstalling: boolean;
+  queuedVersions: Set<string>;
   isBusy: (key: string) => boolean;
   onSearch: (value: string) => void;
   onToggleSupportFilter: (value: VersionSupportFilter) => void;
@@ -64,4 +66,14 @@ export interface InstallationModel {
   progress: DownloadProgress | null;
   isInstalling: boolean;
   onCancel: () => void;
+}
+
+export interface InstallQueueModel {
+  items: InstallQueueItem[];
+  activeVersions: Set<string>;
+  onCancel: (itemId: string) => void;
+  onDiscard: (itemId: string) => void;
+  onRetry: (itemId: string) => void;
+  onMove: (itemId: string, up: boolean) => void;
+  onRemove: (itemId: string) => void;
 }
