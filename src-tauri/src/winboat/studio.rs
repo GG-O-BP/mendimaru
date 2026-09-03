@@ -324,7 +324,7 @@ pub async fn launch_studio(
             None,
         )
         .await;
-        let mut error = WindowsOperationFailure::from(error.message);
+        let mut error = WindowsOperationFailure::from(error);
         error.retryable = recovery.retryable();
         return Err(error);
     }
@@ -522,7 +522,7 @@ async fn prepare_studio_runtime_session(
 ) -> Result<String, WindowsOperationFailure> {
     super::runtime::prepare_studio_session(config, project_mpr_path, 3_600)
         .await
-        .map_err(|error| WindowsOperationFailure::from(error.message))
+        .map_err(WindowsOperationFailure::from)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -895,6 +895,7 @@ fn ensure_no_registered_remote_app() -> Result<(), WindowsOperationFailure> {
             exit_code: None,
             retryable: false,
             failure_kind: None,
+            backend_error_code: None,
         });
     }
     Ok(())

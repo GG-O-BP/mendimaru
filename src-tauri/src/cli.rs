@@ -2254,7 +2254,7 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
     BackendError {
         schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
         code,
-        message: safe_error_message(code).to_string(),
+        message: safe_error_message_for_backend(code, Some(backend)).to_string(),
         backend: Some(backend),
         capability: None,
         reason: None,
@@ -2279,7 +2279,7 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
     BackendError {
         schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
         code: error.code,
-        message: safe_error_message(error.code).to_string(),
+        message: safe_error_message_for_backend(error.code, error.backend).to_string(),
         backend: error.backend,
         capability: error.capability,
         reason: None,
@@ -2335,6 +2335,17 @@ fn safe_error_message(code: BackendErrorCode) -> &'static str {
             "the original WinBoat Compose configuration could not be recovered"
         }
     }
+}
+
+fn safe_error_message_for_backend(
+    code: BackendErrorCode,
+    backend: Option<BackendId>,
+) -> &'static str {
+    if code == BackendErrorCode::RuntimeSessionNotFound && backend == Some(BackendId::LinuxWinboat)
+    {
+        return "the WinBoat Runtime session was not found";
+    }
+    safe_error_message(code)
 }
 
 fn exit_code(error: &BackendError) -> i32 {
@@ -2485,6 +2496,58 @@ mod tests {
             assert!(!execution.stdout.contains("schemaVersion"));
             assert!(!execution.stdout.contains("snapshotId"));
         }
+    }
+
+    #[test]
+    fn sanitized_cli_errors_preserve_cause_codes_and_stable_existing_contracts() {
+        let mut cause = crate::contracts::BackendError::operation(
+            BackendId::LinuxWinboat,
+            CapabilityId::StudioStart,
+            "the WinBoat Runtime session was not found",
+        );
+        cause.code = crate::contracts::BackendErrorCode::RuntimeSessionNotFound;
+        cause.retryable = false;
+        let sanitized = command_error_to_backend(
+            crate::models::CommandError::from(cause),
+            BackendId::LinuxWinboat,
+        );
+        assert_eq!(
+            sanitized.code,
+            crate::contracts::BackendErrorCode::RuntimeSessionNotFound
+        );
+        assert_eq!(
+            sanitized.message,
+            "the WinBoat Runtime session was not found"
+        );
+        assert!(!sanitized.retryable);
+        assert_eq!(exit_code(&sanitized), EXIT_OPERATION_FAILED);
+
+        let portable = command_error_to_backend(
+            crate::models::CommandError::new(
+                crate::models::CommandErrorCode::RuntimeSessionNotFound,
+                "fixture".to_string(),
+            ),
+            BackendId::WindowsNative,
+        );
+        assert_eq!(
+            portable.message,
+            "the Portable Runtime session was not found"
+        );
+
+        let operation = command_error_to_backend(
+            crate::models::CommandError::new(
+                crate::models::CommandErrorCode::OperationFailed,
+                "fixture".to_string(),
+            ),
+            BackendId::LinuxWinboat,
+        );
+        assert_eq!(
+            operation.code,
+            crate::contracts::BackendErrorCode::OperationFailed
+        );
+        assert_eq!(operation.message, "the command could not be completed");
+        assert!(operation.retryable);
+        assert_eq!(exit_code(&operation), EXIT_OPERATION_FAILED);
     }
 
     #[test]

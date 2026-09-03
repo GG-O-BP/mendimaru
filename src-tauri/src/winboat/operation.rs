@@ -6,6 +6,7 @@ use super::container::ensure_private_operation_transport;
 use super::project_access::ProjectAccessLease;
 use super::remote_app::{spawn_powershell_file, RemoteAppProcess};
 use super::security::{AuthenticatedPayload, OperationSecurity};
+use crate::contracts::{BackendError, BackendErrorCode};
 use crate::models::AppConfig;
 use crate::process::{CancellationToken, CommandFailure, CommandFailureKind};
 use runner::{
@@ -27,6 +28,7 @@ pub(crate) struct WindowsOperationFailure {
     pub(crate) exit_code: Option<i32>,
     pub(crate) retryable: bool,
     pub(crate) failure_kind: Option<CommandFailureKind>,
+    pub(crate) backend_error_code: Option<BackendErrorCode>,
 }
 
 pub(super) struct WindowsOperationOutcome {
@@ -43,6 +45,7 @@ impl From<String> for WindowsOperationFailure {
             exit_code: None,
             retryable: false,
             failure_kind: None,
+            backend_error_code: None,
         }
     }
 }
@@ -55,6 +58,19 @@ impl From<CommandFailure> for WindowsOperationFailure {
             exit_code: None,
             retryable: true,
             failure_kind,
+            backend_error_code: None,
+        }
+    }
+}
+
+impl From<BackendError> for WindowsOperationFailure {
+    fn from(error: BackendError) -> Self {
+        Self {
+            message: error.message,
+            exit_code: None,
+            retryable: error.retryable,
+            failure_kind: None,
+            backend_error_code: Some(error.code),
         }
     }
 }
@@ -148,6 +164,7 @@ where
                     exit_code: error.exit_code,
                     retryable: error.retryable || error.user_retryable,
                     failure_kind: error.failure_kind,
+                    backend_error_code: None,
                 });
             }
         }
@@ -181,6 +198,7 @@ pub(super) async fn wait_for_followup_windows_operation(
         exit_code: error.exit_code,
         retryable: error.retryable || error.user_retryable,
         failure_kind: error.failure_kind,
+        backend_error_code: None,
     })?;
     Ok((wait.report, wait.authenticated))
 }
@@ -205,6 +223,7 @@ async fn wait_for_remote_app_endpoint(
                 exit_code: None,
                 retryable: true,
                 failure_kind: Some(CommandFailureKind::Wait),
+                backend_error_code: None,
             });
         }
         let remaining = timeout - elapsed;

@@ -655,18 +655,23 @@ fn winboat_operation_error(
     error: crate::winboat::WindowsOperationFailure,
 ) -> BackendError {
     let mut backend_error = BackendError::operation(backend, capability, error.message);
-    backend_error.code = match error.failure_kind {
-        Some(crate::process::CommandFailureKind::Timeout) => {
-            crate::contracts::BackendErrorCode::ExternalProcessTimeout
-        }
-        Some(crate::process::CommandFailureKind::Cancelled) => {
-            crate::contracts::BackendErrorCode::ExternalProcessCancelled
-        }
-        Some(
-            crate::process::CommandFailureKind::Wait | crate::process::CommandFailureKind::Cleanup,
-        ) => crate::contracts::BackendErrorCode::ExternalProcessInterrupted,
-        Some(crate::process::CommandFailureKind::Spawn) | None => {
-            crate::contracts::BackendErrorCode::OperationFailed
+    backend_error.code = if let Some(code) = error.backend_error_code {
+        code
+    } else {
+        match error.failure_kind {
+            Some(crate::process::CommandFailureKind::Timeout) => {
+                crate::contracts::BackendErrorCode::ExternalProcessTimeout
+            }
+            Some(crate::process::CommandFailureKind::Cancelled) => {
+                crate::contracts::BackendErrorCode::ExternalProcessCancelled
+            }
+            Some(
+                crate::process::CommandFailureKind::Wait
+                | crate::process::CommandFailureKind::Cleanup,
+            ) => crate::contracts::BackendErrorCode::ExternalProcessInterrupted,
+            Some(crate::process::CommandFailureKind::Spawn) | None => {
+                crate::contracts::BackendErrorCode::OperationFailed
+            }
         }
     };
     backend_error.retryable = error.retryable;
@@ -1169,6 +1174,45 @@ mod tests {
             capability.required_permissions,
             ["macos-accessibility", "macos-screen-recording"]
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn winboat_operation_failures_preserve_structured_backend_codes() {
+        let mut backend_error = BackendError::operation(
+            BackendId::LinuxWinboat,
+            CapabilityId::StudioStart,
+            "the WinBoat Runtime session was not found",
+        );
+        backend_error.code = BackendErrorCode::RuntimeSessionNotFound;
+        backend_error.retryable = false;
+        let failure = crate::winboat::WindowsOperationFailure::from(backend_error);
+        let mapped =
+            winboat_operation_error(BackendId::LinuxWinboat, CapabilityId::StudioStart, failure);
+        assert_eq!(mapped.code, BackendErrorCode::RuntimeSessionNotFound);
+        assert!(!mapped.retryable);
+
+        let command = crate::models::CommandError::from(mapped);
+        assert_eq!(
+            command.code,
+            crate::models::CommandErrorCode::RuntimeSessionNotFound
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn winboat_process_failure_kinds_remain_structured_without_backend_codes() {
+        let failure = crate::winboat::WindowsOperationFailure {
+            message: "the Windows operation timed out".to_string(),
+            exit_code: None,
+            retryable: true,
+            failure_kind: Some(crate::process::CommandFailureKind::Timeout),
+            backend_error_code: None,
+        };
+        let mapped =
+            winboat_operation_error(BackendId::LinuxWinboat, CapabilityId::StudioStart, failure);
+        assert_eq!(mapped.code, BackendErrorCode::ExternalProcessTimeout);
+        assert!(mapped.retryable);
     }
 
     #[test]

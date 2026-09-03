@@ -861,6 +861,7 @@ fn failure(message: impl Into<String>) -> WindowsOperationFailure {
         exit_code: None,
         retryable: false,
         failure_kind: None,
+        backend_error_code: None,
     }
 }
 

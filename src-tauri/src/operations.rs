@@ -1045,7 +1045,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_session_absence_is_retryable_only_after_recorded_recovery() {
+    fn operation_history_preserves_runtime_session_cause_and_backend_retry_policy() {
         let plain = CommandError::new(
             CommandErrorCode::RuntimeSessionNotFound,
             "fixture".to_string(),
