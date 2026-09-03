@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use tokio::process::Command as TokioCommand;
 
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use compose::snapshot_file;
 pub(crate) use compose::{
     apply_shared_mount, plan_shared_mount, restore_file_if_revision, verify_plan_revision,
     winboat_compose_service_name, AppliedSharedMount, ComposeError, ComposeErrorKind,
@@ -16,7 +18,8 @@ pub(crate) use compose::{
 pub use compose::{compose_file_is_valid, compose_shared_directory};
 #[cfg(target_os = "linux")]
 pub(crate) use compose::{
-    ensure_runtime_port_mapping, restore_file, runtime_port_mapping, snapshot_file, FileSnapshot,
+    ensure_runtime_port_mapping, prepare_runtime_compose_baseline, restore_file,
+    runtime_port_mapping, FileSnapshot, RuntimeComposeBaseline, RuntimePortMapping,
 };
 pub use store::{load_config, persist_config};
 pub(crate) use store::{load_config_from, restore_config, snapshot_config, ConfigSnapshot};
