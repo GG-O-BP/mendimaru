@@ -58,6 +58,29 @@ struct SessionRecord {
     storage_mount_identity: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionInvalidationMarker {
+    schema_version: String,
+    session_id: String,
+    reason: &'static str,
+    observed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionRecordEnvelope {
+    schema_version: String,
+    session_id: String,
+    #[serde(default = "default_runtime_backend")]
+    backend: BackendId,
+    mode: RuntimeMode,
+}
+
+const fn default_runtime_backend() -> BackendId {
+    BackendId::LinuxWinboat
+}
+
 struct ComposeTransaction {
     snapshot: FileSnapshot,
     committed: bool,
@@ -207,9 +230,15 @@ fn studio_launch_port(path: &Path) -> Result<Option<u16>, String> {
 fn active_runtime_session_for_port(
     guest_port: u16,
 ) -> Result<Option<(PathBuf, SessionRecord)>, String> {
-    let layout = layout()?;
-    let sessions = layout.join("sessions");
-    for entry in fs::read_dir(&sessions).map_err(|error| error.to_string())? {
+    active_runtime_session_in_root(&layout()?.join("sessions"), guest_port)
+}
+
+fn active_runtime_session_in_root(
+    sessions: &Path,
+    guest_port: u16,
+) -> Result<Option<(PathBuf, SessionRecord)>, String> {
+    let mut active = None;
+    for entry in fs::read_dir(sessions).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
         if !entry
             .file_type()
@@ -222,14 +251,75 @@ fn active_runtime_session_for_port(
         if !record_path.is_file() {
             continue;
         }
-        let Ok(record) = read_json_bounded::<SessionRecord>(&record_path, MAX_RECORD_BYTES) else {
+        let Ok(bytes) = read_direct_bounded(&record_path, MAX_RECORD_BYTES) else {
+            continue;
+        };
+        let directory = entry.path();
+        let file_name = entry.file_name();
+        let expected_session_id = file_name
+            .to_str()
+            .ok_or_else(|| "the Runtime session directory name is not valid UTF-8".to_string())?;
+        let Ok(envelope) = serde_json::from_slice::<SessionRecordEnvelope>(&bytes) else {
+            continue;
+        };
+        if let Some(reason) = runtime_record_incompatibility(&envelope, expected_session_id) {
+            quarantine_runtime_record(&directory, &envelope, reason)?;
+            continue;
+        }
+        let Ok(record) = serde_json::from_slice::<SessionRecord>(&bytes) else {
             continue;
         };
         if record.state != RuntimeState::Stopped && record.guest_port == guest_port {
-            return Ok(Some((entry.path(), record)));
+            active = active.or(Some((directory, record)));
         }
     }
-    Ok(None)
+    Ok(active)
+}
+
+fn runtime_record_incompatibility(
+    envelope: &SessionRecordEnvelope,
+    expected_session_id: &str,
+) -> Option<&'static str> {
+    if envelope.schema_version != CONTRACT_SCHEMA_VERSION {
+        Some("schema_version_mismatch")
+    } else if envelope.session_id != expected_session_id {
+        Some("session_identity_mismatch")
+    } else if envelope.backend != BackendId::LinuxWinboat {
+        Some("backend_mismatch")
+    } else if envelope.mode != RuntimeMode::StudioRunLocally {
+        Some("mode_mismatch")
+    } else {
+        None
+    }
+}
+
+fn quarantine_runtime_record(
+    directory: &Path,
+    envelope: &SessionRecordEnvelope,
+    reason: &'static str,
+) -> Result<(), String> {
+    let record_path = directory.join("session.json");
+    let preserved_path = directory.join("session.invalidated.json");
+    let marker_path = directory.join("invalidation.json");
+    if preserved_path.is_file() {
+        fs::remove_file(&record_path)
+            .map_err(|error| format!("could not finish Runtime record invalidation: {error}"))?;
+        return Ok(());
+    }
+    if !marker_path.is_file() {
+        let marker = SessionInvalidationMarker {
+            schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
+            session_id: envelope.session_id.clone(),
+            reason,
+            observed_at: Utc::now(),
+        };
+        let bytes = serde_json::to_vec(&marker)
+            .map_err(|error| format!("could not serialize Runtime invalidation: {error}"))?;
+        write_atomic_private(&marker_path, &bytes)?;
+    }
+    fs::rename(&record_path, &preserved_path)
+        .map_err(|error| format!("could not preserve incompatible Runtime record: {error}"))?;
+    Ok(())
 }
 
 fn project_launch_port(project_mpr_path: &Path) -> Result<Option<u16>, String> {
@@ -1589,9 +1679,10 @@ fn set_file_permissions(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        append_failure_diagnostic, diagnostic_code, is_loopback_host, port_conflict_message,
-        runtime_probe_url, runtime_url, studio_launch_port, valid_studio_session_id,
-        validate_runtime_session_id, ComposeTransaction, SessionRecord,
+        active_runtime_session_in_root, append_failure_diagnostic, diagnostic_code,
+        is_loopback_host, port_conflict_message, runtime_probe_url, runtime_url,
+        studio_launch_port, valid_studio_session_id, validate_runtime_session_id,
+        ComposeTransaction, SessionRecord,
     };
     use crate::contracts::CapabilityId;
     use crate::contracts::{
@@ -1602,6 +1693,8 @@ mod tests {
     #[cfg(unix)]
     use crate::process::CommandPolicy;
     use chrono::Utc;
+    use std::fs;
+    use std::path::Path;
     #[cfg(unix)]
     use std::time::Duration;
 
@@ -1612,6 +1705,152 @@ mod tests {
         assert!(valid_studio_session_id("studio-4242-638908128000000000"));
         assert!(!valid_studio_session_id("studio-0-638908128000000000"));
         assert!(!valid_studio_session_id("studio-4242-1-extra"));
+    }
+
+    #[test]
+    fn active_runtime_scanning_ignores_stopped_and_incompatible_records() {
+        let temporary = tempfile::tempdir().expect("temporary Runtime store");
+        let sessions = temporary.path().join("sessions");
+        fs::create_dir_all(&sessions).expect("Runtime session root");
+        let incompatible = write_runtime_fixture(
+            &sessions,
+            "runtime_2dc6d67e680e1fda66e95b01f2891075",
+            "3.0.0",
+            RuntimeState::Starting,
+            8_080,
+        );
+        let compatible = write_runtime_fixture(
+            &sessions,
+            &format!("runtime_{}", "b".repeat(32)),
+            super::CONTRACT_SCHEMA_VERSION,
+            RuntimeState::Starting,
+            8_080,
+        );
+        let stopped = write_runtime_fixture(
+            &sessions,
+            &format!("runtime_{}", "c".repeat(32)),
+            super::CONTRACT_SCHEMA_VERSION,
+            RuntimeState::Stopped,
+            8_080,
+        );
+
+        let active = active_runtime_session_in_root(&sessions, 8_080)
+            .expect("Runtime session scan succeeds")
+            .expect("a compatible active session is selected");
+
+        assert_eq!(active.1.session_id, compatible.1);
+        assert!(incompatible.0.join("session.invalidated.json").is_file());
+        assert!(incompatible.0.join("invalidation.json").is_file());
+        assert!(!incompatible.0.join("session.json").is_file());
+        assert!(stopped.0.join("session.json").is_file());
+    }
+
+    #[test]
+    fn incompatible_runtime_records_are_quarantined_with_an_audit_marker() {
+        let temporary = tempfile::tempdir().expect("temporary Runtime store");
+        let sessions = temporary.path().join("sessions");
+        fs::create_dir_all(&sessions).expect("Runtime session root");
+        let fixture = write_runtime_fixture(
+            &sessions,
+            &format!("runtime_{}", "d".repeat(32)),
+            "3.0.0",
+            RuntimeState::Starting,
+            8_080,
+        );
+
+        let active = active_runtime_session_in_root(&sessions, 8_080)
+            .expect("Runtime session scan succeeds");
+        assert!(active.is_none());
+
+        let marker: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(fixture.0.join("invalidation.json"))
+                .expect("Runtime invalidation marker"),
+        )
+        .expect("Runtime invalidation JSON");
+        assert_eq!(marker["schemaVersion"], super::CONTRACT_SCHEMA_VERSION);
+        assert_eq!(marker["sessionId"], fixture.1);
+        assert_eq!(marker["reason"], "schema_version_mismatch");
+        assert!(marker["observedAt"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()));
+        assert!(fs::read(fixture.0.join("session.invalidated.json")).is_ok());
+    }
+
+    #[test]
+    fn the_pre_030_runtime_record_shape_is_quarantined_without_weak_loading() {
+        let temporary = tempfile::tempdir().expect("temporary Runtime store");
+        let sessions = temporary.path().join("sessions");
+        fs::create_dir_all(&sessions).expect("Runtime session root");
+        let session_id = "runtime_2dc6d67e680e1fda66e95b01f2891075";
+        let directory = sessions.join(session_id);
+        fs::create_dir_all(&directory).expect("legacy Runtime session directory");
+        fs::write(
+            directory.join("session.json"),
+            r#"{
+  "schemaVersion": "3.0.0",
+  "sessionId": "runtime_2dc6d67e680e1fda66e95b01f2891075",
+  "mode": "studio-run-locally",
+  "studioSessionId": null,
+  "state": "starting",
+  "hostPort": 32768,
+  "guestPort": 8080,
+  "composeChanged": true
+}"#,
+        )
+        .expect("legacy Runtime record");
+
+        let active = active_runtime_session_in_root(&sessions, 8_080)
+            .expect("Runtime session scan succeeds");
+        assert!(active.is_none());
+        let preserved = fs::read_to_string(directory.join("session.invalidated.json"))
+            .expect("legacy record is preserved");
+        let preserved: serde_json::Value =
+            serde_json::from_str(&preserved).expect("legacy record remains JSON");
+        assert_eq!(preserved["schemaVersion"], "3.0.0");
+        assert!(!directory.join("session.json").exists());
+    }
+
+    fn write_runtime_fixture(
+        sessions: &Path,
+        session_id: &str,
+        schema_version: &str,
+        state: RuntimeState,
+        guest_port: u16,
+    ) -> (std::path::PathBuf, String) {
+        let record = SessionRecord {
+            schema_version: schema_version.to_string(),
+            session_id: session_id.to_string(),
+            backend: BackendId::LinuxWinboat,
+            mode: RuntimeMode::StudioRunLocally,
+            studio_session_id: None,
+            studio_state: StudioProcessState::Stopped,
+            studio_process_id: None,
+            state,
+            http_ready: false,
+            host_port: guest_port,
+            guest_port,
+            started_at: Utc::now(),
+            readiness_timeout_seconds: 3_600,
+            failure_code: None,
+            log_artifact: crate::contracts::ArtifactDescriptor::create(
+                "session",
+                BackendId::LinuxWinboat,
+                ArtifactKind::RuntimeLog,
+            )
+            .expect("Runtime log artifact"),
+            compose_changed: true,
+            original_compose_sha256: "a".repeat(64),
+            managed_compose_sha256: "b".repeat(64),
+            storage_mount_identity: vec!["fixture-storage".into()],
+        };
+        let directory = sessions.join(session_id);
+        fs::create_dir_all(&directory).expect("Runtime session directory");
+        fs::write(
+            directory.join("session.json"),
+            serde_json::to_vec(&record).expect("Runtime session JSON"),
+        )
+        .expect("Runtime session fixture");
+        (directory, session_id.to_string())
     }
 
     #[test]
