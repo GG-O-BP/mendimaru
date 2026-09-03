@@ -163,6 +163,9 @@ pub async fn download_and_launch(
         }
     };
     let installer_sha256 = if let Some((size, sha256)) = cached_installer {
+        // A completed cache supersedes any leftover partial from an
+        // interrupted force-redownload attempt.
+        let _ = cache::discard_partial(&installer_cache);
         emit_progress(
             DownloadProgressUpdate {
                 version: &version,
