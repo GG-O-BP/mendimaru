@@ -479,8 +479,8 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
         ),
         (Some("runtime"), Some("start")) => Some(
             "Usage: mendimaru runtime start --project-id PROJECT_ID [--clean] [--mode portable]\n\
-             Usage: mendimaru runtime start --mode studio-run-locally [--guest-port PORT]\n\
-                    [--studio-session-id STUDIO_SESSION_ID]\n\
+            Usage: mendimaru runtime start --mode studio-run-locally\n\
+                   [--studio-session-id STUDIO_SESSION_ID]\n\
              \n\
              Portable mode requires a project ID. Studio Run Locally uses the\n\
              Linux WinBoat adapter and optionally attaches to a live Studio session.",
@@ -1384,6 +1384,7 @@ async fn serve_session_keeper(
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
     let Ok(listener) = tokio::net::UnixListener::from_std(listener) else {
+        cleanup_linked_runtimes(session_id).await;
         crate::winboat::close_all_registered_clients().await;
         return;
     };
@@ -1391,6 +1392,7 @@ async fn serve_session_keeper(
         tokio::select! {
             accepted = listener.accept() => {
                 let Ok((stream, _)) = accepted else {
+                    cleanup_linked_runtimes(session_id).await;
                     crate::winboat::close_all_registered_clients().await;
                     return;
                 };
@@ -1435,6 +1437,7 @@ async fn serve_session_keeper(
                     ).await;
                 }
                 if should_stop {
+                    cleanup_linked_runtimes(session_id).await;
                     return;
                 }
             }
@@ -1443,11 +1446,23 @@ async fn serve_session_keeper(
                     .iter()
                     .any(|session| session.session_id == session_id)
                 {
+                    cleanup_linked_runtimes(session_id).await;
                     return;
                 }
             }
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+async fn cleanup_linked_runtimes(session_id: &str) {
+    let Ok(paths) = AppPaths::discover_for_cli() else {
+        return;
+    };
+    let Ok(config) = crate::application::load_config(&paths) else {
+        return;
+    };
+    let _ = crate::winboat::runtime::stop_for_studio_session(&config, session_id).await;
 }
 
 #[cfg(target_os = "linux")]
@@ -1827,12 +1842,7 @@ fn parse_runtime_command(values: &[String]) -> Result<CliCommand, BackendError> 
         Some("start") => {
             let (options, flags) = parse_options(
                 &values[1..],
-                &[
-                    "--project-id",
-                    "--mode",
-                    "--studio-session-id",
-                    "--guest-port",
-                ],
+                &["--project-id", "--mode", "--studio-session-id"],
                 &["--clean"],
             )?;
             let mode = options
@@ -1840,10 +1850,6 @@ fn parse_runtime_command(values: &[String]) -> Result<CliCommand, BackendError> 
                 .map(|value| parse_runtime_mode(value))
                 .transpose()?
                 .unwrap_or(RuntimeMode::Portable);
-            let guest_port = options
-                .get("--guest-port")
-                .map(|value| parse_guest_port(value))
-                .transpose()?;
             let project_id = options.get("--project-id").cloned();
             let studio_session_id = options.get("--studio-session-id").cloned();
             let clean = flags.contains("--clean");
@@ -1853,9 +1859,9 @@ fn parse_runtime_command(values: &[String]) -> Result<CliCommand, BackendError> 
                         "--project-id is required for portable Runtime mode",
                     ));
                 }
-                RuntimeMode::Portable if studio_session_id.is_some() || guest_port.is_some() => {
+                RuntimeMode::Portable if studio_session_id.is_some() => {
                     return Err(BackendError::invalid_request(
-                        "--studio-session-id and --guest-port require studio-run-locally mode",
+                        "--studio-session-id requires studio-run-locally mode",
                     ));
                 }
                 RuntimeMode::StudioRunLocally if project_id.is_some() || clean => {
@@ -1875,7 +1881,7 @@ fn parse_runtime_command(values: &[String]) -> Result<CliCommand, BackendError> 
                 clean,
                 mode,
                 studio_session_id,
-                guest_port,
+                guest_port: None,
             })
         }
         Some("status") => Ok(CliCommand::RuntimeStatus {
@@ -2079,16 +2085,6 @@ fn parse_runtime_mode(value: &str) -> Result<RuntimeMode, BackendError> {
             "unknown Runtime mode; expected portable or studio-run-locally",
         )),
     }
-}
-
-fn parse_guest_port(value: &str) -> Result<u16, BackendError> {
-    value
-        .parse::<u16>()
-        .ok()
-        .filter(|port| *port >= 1024)
-        .ok_or_else(|| {
-            BackendError::invalid_request("guest port must be an integer from 1024 through 65535")
-        })
 }
 
 fn execution_context(requested: Option<BackendId>) -> Result<ExecutionContext, BackendError> {

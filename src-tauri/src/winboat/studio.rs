@@ -80,6 +80,10 @@ pub async fn launch_studio(
     );
     let command = write_command_script(config, operation_id, &script)?;
     let operation = crate::tr!("operation-studio-launch");
+    let runtime_session_id =
+        super::runtime::prepare_studio_session(config, project_mpr_path, 3_600)
+            .await
+            .map_err(|error| WindowsOperationFailure::from(error.message))?;
     let mut completed = None;
     for attempt in 0..STUDIO_LAUNCH_ATTEMPTS {
         let mut launched_session = None;
@@ -110,6 +114,7 @@ pub async fn launch_studio(
             }
             Err(mut error) => {
                 let Some(session) = launched_session else {
+                    let _ = super::runtime::stop(config, &runtime_session_id).await;
                     return Err(error);
                 };
                 match abort_incomplete_launch(config, &selected, &session, operation_id, attempt)
@@ -122,9 +127,11 @@ pub async fn launch_studio(
                     }
                     Ok(()) => {
                         error.retryable = true;
+                        let _ = super::runtime::stop(config, &runtime_session_id).await;
                         return Err(error);
                     }
                     Err(abort_error) => {
+                        let _ = super::runtime::stop(config, &runtime_session_id).await;
                         error.message = format!(
                             "{} Incomplete launch cleanup also failed: {}",
                             error.message, abort_error.message
@@ -149,26 +156,55 @@ pub async fn launch_studio(
             let _ = client.kill();
             let _ = client.wait();
         }
+        let _ = super::runtime::stop(config, &runtime_session_id).await;
         return Err(crate::tr!("error-launch-path-missing").into());
     }
-    let client = outcome
-        .remote_app
-        .take()
-        .ok_or_else(|| WindowsOperationFailure::from("RemoteApp was not retained".to_string()))?;
-    let security = outcome.security.take().ok_or_else(|| {
-        WindowsOperationFailure::from("RemoteApp operation security was not retained".to_string())
-    })?;
-    super::sessions::register_launch_client(super::sessions::LaunchClientRegistration {
-        config,
-        expected_version: version,
-        report: &outcome.report.sessions,
-        client,
-        report_path,
-        control_path,
-        security,
-        previous_report: outcome.authenticated,
-        project_access,
-    })?;
+    let client = match outcome.remote_app.take() {
+        Some(client) => client,
+        None => {
+            let _ = super::runtime::stop(config, &runtime_session_id).await;
+            return Err(WindowsOperationFailure::from(
+                "RemoteApp was not retained".to_string(),
+            ));
+        }
+    };
+    let security = match outcome.security.take() {
+        Some(security) => security,
+        None => {
+            let _ = super::runtime::stop(config, &runtime_session_id).await;
+            return Err(WindowsOperationFailure::from(
+                "RemoteApp operation security was not retained".to_string(),
+            ));
+        }
+    };
+    let registration =
+        super::sessions::register_launch_client(super::sessions::LaunchClientRegistration {
+            config,
+            expected_version: version,
+            report: &outcome.report.sessions,
+            client,
+            report_path,
+            control_path,
+            security,
+            previous_report: outcome.authenticated,
+            project_access,
+        });
+    if let Err(error) = registration {
+        let _ = super::runtime::stop(config, &runtime_session_id).await;
+        return Err(error);
+    }
+    let Some(studio_session) = outcome.report.sessions.first() else {
+        let _ = super::runtime::stop(config, &runtime_session_id).await;
+        return Err(WindowsOperationFailure::from(
+            "Windows did not retain the launched Studio session identity".to_string(),
+        ));
+    };
+    if let Err(error) =
+        super::runtime::link_studio_session(&runtime_session_id, &studio_session.session_id)
+    {
+        let _ = super::runtime::stop(config, &runtime_session_id).await;
+        return Err(WindowsOperationFailure::from(error.message));
+    }
     Ok(())
 }
 

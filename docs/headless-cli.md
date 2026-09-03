@@ -21,7 +21,7 @@ mendimaru project list
 mendimaru project version --project-id PROJECT_ID
 mendimaru runtime build --project-id PROJECT_ID [--clean]
 mendimaru runtime start --project-id PROJECT_ID [--clean] [--mode portable]
-mendimaru runtime start --mode studio-run-locally [--guest-port PORT] [--studio-session-id STUDIO_SESSION_ID]
+mendimaru runtime start --mode studio-run-locally [--studio-session-id STUDIO_SESSION_ID]
 mendimaru runtime status --session-id RUNTIME_SESSION_ID
 mendimaru runtime wait --session-id RUNTIME_SESSION_ID
 mendimaru runtime url --session-id RUNTIME_SESSION_ID

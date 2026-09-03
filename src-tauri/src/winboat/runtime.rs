@@ -16,6 +16,7 @@ use crate::contracts::{
 use crate::models::AppConfig;
 use crate::projects::linux_path_to_windows_share;
 use chrono::{DateTime, Utc};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
@@ -95,6 +96,156 @@ pub(crate) fn session_exists(session_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+async fn studio_configured_port(config: &AppConfig, studio_session_id: &str) -> BackendResult<u16> {
+    let sessions = super::sessions::list(config).await.map_err(|_| {
+        runtime_error(
+            CapabilityId::RuntimeStart,
+            BackendErrorCode::RuntimePortForwardingInvalid,
+            true,
+            None,
+        )
+    })?;
+    let Some(session) = sessions
+        .into_iter()
+        .find(|session| session.session_id == studio_session_id)
+    else {
+        return Err(runtime_error(
+            CapabilityId::RuntimeStart,
+            BackendErrorCode::RuntimeSessionNotFound,
+            false,
+            None,
+        ));
+    };
+    let Some(project_name) = session.project_name.as_deref() else {
+        return Ok(DEFAULT_GUEST_PORT);
+    };
+    configured_project_ports(config, Some(project_name))
+}
+
+async fn configured_runtime_port(
+    config: &AppConfig,
+    studio_session_id: Option<&str>,
+) -> BackendResult<u16> {
+    match studio_session_id {
+        Some(studio_session_id) => studio_configured_port(config, studio_session_id).await,
+        None => Ok(DEFAULT_GUEST_PORT),
+    }
+}
+
+fn configured_project_ports(config: &AppConfig, project_name: Option<&str>) -> BackendResult<u16> {
+    let projects = crate::projects::scan_projects(config).map_err(|_| {
+        runtime_error(
+            CapabilityId::RuntimeStart,
+            BackendErrorCode::RuntimePortForwardingInvalid,
+            true,
+            None,
+        )
+    })?;
+    let candidates = projects
+        .into_iter()
+        .filter(|project| project_name.is_none_or(|name| project.name == name));
+    let mut ports = Vec::new();
+    for project in candidates {
+        let launch_path = Path::new(&project.directory).join(format!("{}.launch", project.name));
+        match studio_launch_port(&launch_path).map_err(|_| {
+            runtime_error(
+                CapabilityId::RuntimeStart,
+                BackendErrorCode::RuntimePortForwardingInvalid,
+                false,
+                None,
+            )
+        })? {
+            Some(port) => ports.push(port),
+            None => continue,
+        }
+    }
+    match ports.first() {
+        Some(port) if ports.iter().all(|value| value == port) => Ok(*port),
+        Some(_) => Err(runtime_error(
+            CapabilityId::RuntimeStart,
+            BackendErrorCode::RuntimePortForwardingInvalid,
+            false,
+            None,
+        )),
+        None => Ok(DEFAULT_GUEST_PORT),
+    }
+}
+
+fn studio_launch_port(path: &Path) -> Result<Option<u16>, String> {
+    const MAX_LAUNCH_BYTES: u64 = 128 * 1024;
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("could not inspect Studio launch settings: {error}")),
+    };
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > MAX_LAUNCH_BYTES
+    {
+        return Err("the Studio launch settings are invalid".to_string());
+    }
+    let content = String::from_utf8(read_direct_bounded(path, MAX_LAUNCH_BYTES)?)
+        .map_err(|_| "the Studio launch settings are not UTF-8".to_string())?;
+    let key_to_value = Regex::new(r#"key="MXCONSOLE_RUNTIME_PORT"[^>]*value="([0-9]{1,5})""#)
+        .map_err(|_| "could not parse Studio launch settings".to_string())?;
+    let value_to_key = Regex::new(r#"value="([0-9]{1,5})"[^>]*key="MXCONSOLE_RUNTIME_PORT""#)
+        .map_err(|_| "could not parse Studio launch settings".to_string())?;
+    let value = key_to_value
+        .captures(content.as_str())
+        .or_else(|| value_to_key.captures(content.as_str()))
+        .and_then(|captures| captures.get(1))
+        .map(|value| value.as_str().to_string());
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let port = value
+        .parse::<u16>()
+        .ok()
+        .filter(|port| (1024..=u16::MAX).contains(port))
+        .ok_or_else(|| "the Studio Runtime port is invalid".to_string())?;
+    Ok(Some(port))
+}
+
+fn active_runtime_session_for_port(
+    guest_port: u16,
+) -> Result<Option<(PathBuf, SessionRecord)>, String> {
+    let layout = layout()?;
+    let sessions = layout.join("sessions");
+    for entry in fs::read_dir(&sessions).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            continue;
+        }
+        let record_path = entry.path().join("session.json");
+        if !record_path.is_file() {
+            continue;
+        }
+        let Ok(record) = read_json_bounded::<SessionRecord>(&record_path, MAX_RECORD_BYTES) else {
+            continue;
+        };
+        if record.state != RuntimeState::Stopped && record.guest_port == guest_port {
+            return Ok(Some((entry.path(), record)));
+        }
+    }
+    Ok(None)
+}
+
+fn project_launch_port(project_mpr_path: &Path) -> Result<Option<u16>, String> {
+    let Some(project_name) = project_mpr_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+    else {
+        return Ok(None);
+    };
+    let launch_path = project_mpr_path
+        .parent()
+        .ok_or_else(|| "the Studio project path is invalid".to_string())?
+        .join(format!("{project_name}.launch"));
+    studio_launch_port(&launch_path)
+}
+
 pub(crate) async fn start(
     config: &AppConfig,
     request: &RuntimeStartRequest,
@@ -109,7 +260,10 @@ pub(crate) async fn start(
         ));
     }
 
-    let guest_port = request.guest_port.unwrap_or(DEFAULT_GUEST_PORT);
+    let guest_port = match request.studio_session_id.as_deref() {
+        Some(studio_session_id) => configured_runtime_port(config, Some(studio_session_id)).await?,
+        None => DEFAULT_GUEST_PORT,
+    };
     let compose_path = direct_compose_path(config, CapabilityId::RuntimeStart)?;
     let existing_mapping = runtime_port_mapping(&compose_path, guest_port).map_err(|_| {
         runtime_error(
@@ -120,12 +274,18 @@ pub(crate) async fn start(
         )
     })?;
     let mapping_is_prepared = existing_mapping.is_some_and(|mapping| {
-        mapping.host_ip == "127.0.0.1" && mapping.host_port.is_none() && mapping.protocol == "tcp"
+        mapping.host_ip == "127.0.0.1"
+            && mapping.host_port == Some(guest_port)
+            && mapping.protocol == "tcp"
     });
     let live_mapping_is_prepared = if mapping_is_prepared {
         runtime_host_binding(config, guest_port)
             .await
-            .is_ok_and(|binding| binding.host_ip == "127.0.0.1" && binding.guest_port == guest_port)
+            .is_ok_and(|binding| {
+                binding.host_ip == "127.0.0.1"
+                    && binding.host_port == guest_port
+                    && binding.guest_port == guest_port
+            })
     } else {
         false
     };
@@ -138,6 +298,125 @@ pub(crate) async fn start(
         ));
     }
 
+    if let Some((directory, mut record)) =
+        active_runtime_session_for_port(guest_port).map_err(|_| {
+            runtime_error(
+                CapabilityId::RuntimeStart,
+                BackendErrorCode::RuntimePortConflict,
+                true,
+                None,
+            )
+        })?
+    {
+        let unlinked = record.studio_session_id.is_none();
+        let same_session =
+            record.studio_session_id.as_deref() == request.studio_session_id.as_deref();
+        if !unlinked && !same_session {
+            return Err(runtime_error(
+                CapabilityId::RuntimeStart,
+                BackendErrorCode::RuntimePortConflict,
+                true,
+                None,
+            ));
+        }
+        if let Some(studio_session_id) = request.studio_session_id.as_deref() {
+            record.studio_session_id = Some(studio_session_id.to_string());
+        }
+        record.readiness_timeout_seconds = request.readiness_timeout_seconds;
+        write_record(&directory, &record)
+            .map_err(|_| record_error(&record, CapabilityId::RuntimeStart))?;
+        refresh(config, &directory, &mut record).await?;
+        return Ok(status_from_record(&record));
+    }
+
+    let (directory, mut record) = create_session(
+        config,
+        guest_port,
+        request.studio_session_id.as_deref(),
+        request.readiness_timeout_seconds,
+    )
+    .await?;
+    refresh(config, &directory, &mut record).await?;
+    Ok(status_from_record(&record))
+}
+
+pub(super) async fn prepare_studio_session(
+    config: &AppConfig,
+    project_mpr_path: Option<&str>,
+    readiness_timeout_seconds: u64,
+) -> BackendResult<String> {
+    if !guest_is_online(config).await {
+        return Err(runtime_error(
+            CapabilityId::RuntimeStart,
+            BackendErrorCode::RuntimeGuestOffline,
+            true,
+            None,
+        ));
+    }
+    let configured_port = match project_mpr_path {
+        Some(project_mpr_path) => {
+            project_launch_port(Path::new(project_mpr_path)).map_err(|_| {
+                runtime_error(
+                    CapabilityId::RuntimeStart,
+                    BackendErrorCode::RuntimePortForwardingInvalid,
+                    false,
+                    None,
+                )
+            })?
+        }
+        None => None,
+    };
+    let guest_port = configured_port.unwrap_or(DEFAULT_GUEST_PORT);
+    if let Some((_, record)) = active_runtime_session_for_port(guest_port).map_err(|_| {
+        runtime_error(
+            CapabilityId::RuntimeStart,
+            BackendErrorCode::RuntimePortConflict,
+            true,
+            None,
+        )
+    })? {
+        return Ok(record.session_id);
+    }
+    let (_, record) = create_session(config, guest_port, None, readiness_timeout_seconds).await?;
+    Ok(record.session_id)
+}
+
+pub(super) fn link_studio_session(
+    runtime_session_id: &str,
+    studio_session_id: &str,
+) -> BackendResult<()> {
+    let (directory, mut record) = load_session(runtime_session_id, CapabilityId::RuntimeStatus)?;
+    if record.state == RuntimeState::Stopped {
+        return Err(runtime_error(
+            CapabilityId::RuntimeStatus,
+            BackendErrorCode::RuntimeSessionNotFound,
+            false,
+            None,
+        ));
+    }
+    if record
+        .studio_session_id
+        .is_some_and(|current| current != studio_session_id)
+    {
+        return Err(runtime_error(
+            CapabilityId::RuntimeStatus,
+            BackendErrorCode::RuntimePortConflict,
+            false,
+            None,
+        ));
+    }
+    record.studio_session_id = Some(studio_session_id.to_string());
+    write_record(&directory, &record)
+        .map_err(|_| record_error(&record, CapabilityId::RuntimeStatus))
+}
+
+async fn create_session(
+    config: &AppConfig,
+    guest_port: u16,
+    studio_session_id: Option<&str>,
+    readiness_timeout_seconds: u64,
+) -> BackendResult<(PathBuf, SessionRecord)> {
+    let compose_path = direct_compose_path(config, CapabilityId::RuntimeStart)?;
     let session_id = secure_identifier("runtime")?;
     let layout = layout().map_err(|_| {
         runtime_error(
@@ -283,7 +562,10 @@ pub(crate) async fn start(
             ));
         }
     };
-    if binding.host_ip != "127.0.0.1" || binding.guest_port != guest_port {
+    if binding.host_ip != "127.0.0.1"
+        || binding.host_port != guest_port
+        || binding.guest_port != guest_port
+    {
         rollback_compose(
             config,
             transaction.snapshot(),
@@ -315,12 +597,12 @@ pub(crate) async fn start(
             Some(log_artifact.artifact_id.clone()),
         )
     })?;
-    let mut record = SessionRecord {
+    let record = SessionRecord {
         schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
         session_id,
         backend: BackendId::LinuxWinboat,
         mode: RuntimeMode::StudioRunLocally,
-        studio_session_id: request.studio_session_id.clone(),
+        studio_session_id: studio_session_id.map(str::to_string),
         studio_state: StudioProcessState::Unknown,
         studio_process_id: None,
         state: RuntimeState::Starting,
@@ -328,7 +610,7 @@ pub(crate) async fn start(
         host_port: binding.host_port,
         guest_port,
         started_at: Utc::now(),
-        readiness_timeout_seconds: request.readiness_timeout_seconds,
+        readiness_timeout_seconds: readiness_timeout_seconds,
         failure_code: None,
         log_artifact,
         compose_changed,
@@ -342,9 +624,8 @@ pub(crate) async fn start(
     );
     write_record(&directory, &record)
         .map_err(|_| record_error(&record, CapabilityId::RuntimeStart))?;
-    refresh(config, &directory, &mut record).await?;
     transaction.commit();
-    Ok(status_from_record(&record))
+    Ok((directory, record))
 }
 
 pub(crate) async fn status(config: &AppConfig, session_id: &str) -> BackendResult<RuntimeStatus> {
@@ -590,7 +871,10 @@ async fn refresh(
             return Ok(());
         }
     };
-    if binding.host_ip != "127.0.0.1" || binding.guest_port != record.guest_port {
+    if binding.host_ip != "127.0.0.1"
+        || binding.host_port != record.host_port
+        || binding.guest_port != record.guest_port
+    {
         let code = BackendErrorCode::RuntimePortForwardingInvalid;
         let previous_failure = (record.state, record.failure_code);
         record.state = RuntimeState::Failed;
@@ -748,6 +1032,48 @@ async fn rollback_compose(
         ));
     }
     Ok(())
+}
+
+pub(crate) async fn stop_for_studio_session(
+    config: &AppConfig,
+    studio_session_id: &str,
+) -> BackendResult<()> {
+    let sessions = layout()
+        .map_err(|_| {
+            runtime_error(
+                CapabilityId::RuntimeStop,
+                BackendErrorCode::RuntimeSessionNotFound,
+                false,
+                None,
+            )
+        })?
+        .join("sessions");
+    let mut result = Ok(());
+    for entry in std::fs::read_dir(&sessions).map_err(|_| {
+        runtime_error(
+            CapabilityId::RuntimeStop,
+            BackendErrorCode::RuntimeSessionNotFound,
+            false,
+            None,
+        )
+    })? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let record_path = entry.path().join("session.json");
+        let Ok(record) = read_json_bounded::<SessionRecord>(&record_path, MAX_RECORD_BYTES) else {
+            continue;
+        };
+        if record.state == RuntimeState::Stopped
+            || record.studio_session_id.as_deref() != Some(studio_session_id)
+        {
+            continue;
+        }
+        if let Err(error) = stop(config, &record.session_id).await {
+            result = Err(error);
+        }
+    }
+    result
 }
 
 async fn wait_for_guest(config: &AppConfig) -> Result<(), ()> {
@@ -1233,8 +1559,8 @@ fn set_file_permissions(path: &Path) -> Result<(), String> {
 mod tests {
     use super::{
         append_failure_diagnostic, diagnostic_code, is_loopback_host, port_conflict_message,
-        runtime_url, valid_studio_session_id, validate_runtime_session_id, ComposeTransaction,
-        SessionRecord,
+        runtime_url, studio_launch_port, valid_studio_session_id, validate_runtime_session_id,
+        ComposeTransaction, SessionRecord,
     };
     use crate::contracts::{
         ArtifactKind, BackendErrorCode, BackendId, RuntimeMode, RuntimeState, StudioProcessState,
@@ -1254,6 +1580,37 @@ mod tests {
         assert!(valid_studio_session_id("studio-4242-638908128000000000"));
         assert!(!valid_studio_session_id("studio-0-638908128000000000"));
         assert!(!valid_studio_session_id("studio-4242-1-extra"));
+    }
+
+    #[test]
+    fn reads_the_studio_launch_runtime_port_in_either_attribute_order() {
+        let temporary = tempfile::tempdir().expect("temporary launch directory");
+        let normal = temporary.path().join("Normal.launch");
+        let reversed = temporary.path().join("Reversed.launch");
+        std::fs::write(
+            &normal,
+            r#"<mapEntry key="MXCONSOLE_RUNTIME_PORT" value="18080"/>"#,
+        )
+        .expect("normal launch settings");
+        std::fs::write(
+            &reversed,
+            r#"<mapEntry value="18081" key="MXCONSOLE_RUNTIME_PORT"/>"#,
+        )
+        .expect("reversed launch settings");
+
+        assert_eq!(
+            studio_launch_port(&normal).expect("normal launch port"),
+            Some(18_080)
+        );
+        assert_eq!(
+            studio_launch_port(&reversed).expect("reversed launch port"),
+            Some(18_081)
+        );
+        assert_eq!(
+            studio_launch_port(&temporary.path().join("Absent.launch"))
+                .expect("absent launch port"),
+            None
+        );
     }
 
     #[test]

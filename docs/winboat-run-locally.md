@@ -10,11 +10,11 @@ mendimaru runtime wait --session-id RUNTIME_SESSION_ID --json
 mendimaru runtime url --session-id RUNTIME_SESSION_ID --json
 ```
 
-The default Windows guest Runtime port is `8080`. Use `--guest-port PORT` only
-when the Studio Pro project is explicitly configured to listen on another port.
-The option accepts 1024 through 65535. The Linux host port is never supplied by
-the caller: Compose asks Docker or Podman for a dynamic port and binds it to
-`127.0.0.1` only.
+The default Studio Pro Runtime port is `8080`. When `--studio-session-id` is
+supplied, Mendimaru reads `MXCONSOLE_RUNTIME_PORT` from that Studio project's
+bounded `.launch` settings. There is no manual Runtime-port CLI option. Compose
+always uses the same loopback address and port:
+`127.0.0.1:<port>:<port>/tcp`.
 
 ## Start and readiness sequence
 
@@ -23,12 +23,12 @@ the caller: Compose asks Docker or Podman for a dynamic port and binds it to
 1. Require a healthy WinBoat Guest API and a direct, bounded Compose file.
 2. Capture a private `0600` copy of the original Compose file and the current
    `/storage` mount identity.
-3. Replace any stale or public mapping for the guest Runtime port with
-   `127.0.0.1::<guest-port>/tcp`. Other ports and volumes are unchanged.
+3. Replace any stale, dynamic, or public mapping for the Studio Runtime port
+   with `127.0.0.1:<port>:<port>/tcp`. Other ports and volumes are unchanged.
 4. Recreate WinBoat only when the Compose mapping changed, wait for the guest,
    verify that `/storage` still identifies the same volume, and inspect the
-   container for the actual dynamic host port.
-5. Probe the resulting `http://127.0.0.1:<host-port>` URL. A TCP mapping alone
+   container for the expected fixed host port.
+5. Probe the resulting `http://127.0.0.1:<port>` URL. A TCP mapping alone
    is not readiness. The status remains `starting` or `running` and omits `url`
    until an HTTP response below 500 is received.
 
