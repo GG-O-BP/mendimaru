@@ -128,7 +128,7 @@ async fn configured_runtime_port(
 ) -> BackendResult<u16> {
     match studio_session_id {
         Some(studio_session_id) => studio_configured_port(config, studio_session_id).await,
-        None => Ok(DEFAULT_GUEST_PORT),
+        None => configured_project_ports(config, None),
     }
 }
 
@@ -262,7 +262,7 @@ pub(crate) async fn start(
 
     let guest_port = match request.studio_session_id.as_deref() {
         Some(studio_session_id) => configured_runtime_port(config, Some(studio_session_id)).await?,
-        None => DEFAULT_GUEST_PORT,
+        None => configured_runtime_port(config, None).await?,
     };
     let compose_path = direct_compose_path(config, CapabilityId::RuntimeStart)?;
     let existing_mapping = runtime_port_mapping(&compose_path, guest_port).map_err(|_| {
@@ -312,12 +312,7 @@ pub(crate) async fn start(
         let same_session =
             record.studio_session_id.as_deref() == request.studio_session_id.as_deref();
         if !unlinked && !same_session {
-            return Err(runtime_error(
-                CapabilityId::RuntimeStart,
-                BackendErrorCode::RuntimePortConflict,
-                true,
-                None,
-            ));
+            return Err(previous_session_conflict_error(CapabilityId::RuntimeStart));
         }
         if let Some(studio_session_id) = request.studio_session_id.as_deref() {
             record.studio_session_id = Some(studio_session_id.to_string());
@@ -398,12 +393,7 @@ pub(super) fn link_studio_session(
         .studio_session_id
         .is_some_and(|current| current != studio_session_id)
     {
-        return Err(runtime_error(
-            CapabilityId::RuntimeStatus,
-            BackendErrorCode::RuntimePortConflict,
-            false,
-            None,
-        ));
+        return Err(previous_session_conflict_error(CapabilityId::RuntimeStatus));
     }
     record.studio_session_id = Some(studio_session_id.to_string());
     write_record(&directory, &record)
@@ -496,6 +486,12 @@ async fn create_session(
                 CapabilityId::RuntimeStart,
             )
             .await?;
+            if code == BackendErrorCode::RuntimePortConflict {
+                return Err(host_allocation_conflict_error(
+                    CapabilityId::RuntimeStart,
+                    guest_port,
+                ));
+            }
             return Err(runtime_error(CapabilityId::RuntimeStart, code, true, None));
         }
         if wait_for_guest(config).await.is_err() {
@@ -610,7 +606,7 @@ async fn create_session(
         host_port: binding.host_port,
         guest_port,
         started_at: Utc::now(),
-        readiness_timeout_seconds: readiness_timeout_seconds,
+        readiness_timeout_seconds,
         failure_code: None,
         log_artifact,
         compose_changed,
@@ -898,7 +894,7 @@ async fn refresh(
         );
     }
 
-    let url = runtime_url(record.host_port);
+    let url = runtime_probe_url(record.host_port);
     record.http_ready = http_ready(&url).await;
     apply_http_only_readiness(record);
     write_record(directory, record).map_err(|_| record_error(record, CapabilityId::RuntimeStatus))
@@ -1303,6 +1299,34 @@ fn runtime_error(
     }
 }
 
+/// The port is owned by another active Mendimaru Runtime session. Users can
+/// resolve this safely by stopping that session or changing the project port.
+fn previous_session_conflict_error(capability: CapabilityId) -> BackendError {
+    let mut error = runtime_error(
+        capability,
+        BackendErrorCode::RuntimePortConflict,
+        true,
+        None,
+    );
+    error.message = "the Studio Runtime port is already owned by another active Mendimaru Runtime session; stop the previous session or change the project Runtime port".to_string();
+    error
+}
+
+/// The port is allocated outside Mendimaru's managed forwarding (another
+/// container or host process). Mendimaru never terminates an unknown owner.
+fn host_allocation_conflict_error(capability: CapabilityId, port: u16) -> BackendError {
+    let mut error = runtime_error(
+        capability,
+        BackendErrorCode::RuntimePortConflict,
+        true,
+        None,
+    );
+    error.message = format!(
+        "localhost:{port} is already allocated outside Mendimaru; stop the conflicting program or container, or change the Studio Pro Runtime port"
+    );
+    error
+}
+
 fn error_message(code: BackendErrorCode) -> &'static str {
     match code {
         BackendErrorCode::RuntimeGuestOffline => "the WinBoat guest is offline",
@@ -1351,6 +1375,13 @@ fn diagnostic_log_message(code: BackendErrorCode) -> &'static str {
 }
 
 fn runtime_url(host_port: u16) -> String {
+    format!("http://localhost:{host_port}")
+}
+
+/// Readiness stays pinned to the explicit IPv4 loopback address. The published
+/// `localhost` URL intentionally lets a browser fall back from `::1` to
+/// `127.0.0.1`, while backend probes avoid environment-dependent resolution.
+fn runtime_probe_url(host_port: u16) -> String {
     format!("http://127.0.0.1:{host_port}")
 }
 
@@ -1559,9 +1590,10 @@ fn set_file_permissions(path: &Path) -> Result<(), String> {
 mod tests {
     use super::{
         append_failure_diagnostic, diagnostic_code, is_loopback_host, port_conflict_message,
-        runtime_url, studio_launch_port, valid_studio_session_id, validate_runtime_session_id,
-        ComposeTransaction, SessionRecord,
+        runtime_probe_url, runtime_url, studio_launch_port, valid_studio_session_id,
+        validate_runtime_session_id, ComposeTransaction, SessionRecord,
     };
+    use crate::contracts::CapabilityId;
     use crate::contracts::{
         ArtifactKind, BackendErrorCode, BackendId, RuntimeMode, RuntimeState, StudioProcessState,
     };
@@ -1672,7 +1704,8 @@ mod tests {
 
     #[test]
     fn exposes_only_ipv4_loopback_urls_and_classifies_runtime_port_conflicts() {
-        assert_eq!(runtime_url(49152), "http://127.0.0.1:49152");
+        assert_eq!(runtime_url(8080), "http://localhost:8080");
+        assert_eq!(runtime_probe_url(8080), "http://127.0.0.1:8080");
         assert!(is_loopback_host("127.0.0.1"));
         assert!(is_loopback_host("::1"));
         assert!(!is_loopback_host("0.0.0.0"));
@@ -1680,6 +1713,96 @@ mod tests {
             "Bind for 0.0.0.0 failed: port is already allocated"
         ));
         assert!(!port_conflict_message("guest server is offline"));
+    }
+
+    #[test]
+    fn port_conflicts_explain_their_origin_and_safe_resolution() {
+        let previous = super::previous_session_conflict_error(CapabilityId::RuntimeStart);
+        assert_eq!(previous.code, BackendErrorCode::RuntimePortConflict);
+        assert!(previous.retryable);
+        assert!(previous
+            .message
+            .contains("another active Mendimaru Runtime session"));
+        assert!(previous.message.contains("stop the previous session"));
+
+        let external = super::host_allocation_conflict_error(CapabilityId::RuntimeStart, 18080);
+        assert_eq!(external.code, BackendErrorCode::RuntimePortConflict);
+        assert!(external.retryable);
+        assert!(external.message.contains("localhost:18080"));
+        assert!(external.message.contains("outside Mendimaru"));
+        assert!(external
+            .message
+            .contains("change the Studio Pro Runtime port"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sessionless_start_uses_consistent_workspace_launch_ports() {
+        let temporary = tempfile::tempdir().expect("temporary workspace");
+        let workspace = temporary.path().join("workspace");
+        let alpha = workspace.join("Alpha");
+        let beta = workspace.join("Beta");
+        std::fs::create_dir_all(&alpha).expect("alpha project directory");
+        std::fs::create_dir_all(&beta).expect("beta project directory");
+        std::fs::write(alpha.join("Alpha.mpr"), b"fixture").expect("alpha project");
+        std::fs::write(beta.join("Beta.mpr"), b"fixture").expect("beta project");
+        let config = AppConfig {
+            language_preference: "system".into(),
+            winboat_setup_pending: false,
+            winboat_executable: "winboat".into(),
+            compose_file: temporary
+                .path()
+                .join("compose.yml")
+                .to_string_lossy()
+                .to_string(),
+            container_runtime: ContainerRuntime::Docker,
+            container_name: "WinBoat".into(),
+            api_url: "http://127.0.0.1:47271".into(),
+            rdp_host: "127.0.0.1".into(),
+            rdp_port: 47273,
+            shared_directory: workspace.to_string_lossy().to_string(),
+            windows_shared_directory: r"\\host.lan\Data".into(),
+            freerdp_binary: "xfreerdp3".into(),
+            mendix_install_root: r"C:\Program Files\Mendix".into(),
+            mendix_data_root: r"C:\ProgramData\Mendix".into(),
+            windows_studio_paths: Vec::new(),
+            startup_timeout_seconds: 1,
+        };
+
+        assert_eq!(
+            super::configured_project_ports(&config, None).expect("default port"),
+            8080,
+            "no launch settings fall back to the Studio default"
+        );
+
+        std::fs::write(
+            alpha.join("Alpha.launch"),
+            r#"<mapEntry key="MXCONSOLE_RUNTIME_PORT" value="18080"/>"#,
+        )
+        .expect("alpha launch settings");
+        assert_eq!(
+            super::configured_project_ports(&config, None).expect("alpha port"),
+            18080
+        );
+
+        std::fs::write(
+            beta.join("Beta.launch"),
+            r#"<mapEntry key="MXCONSOLE_RUNTIME_PORT" value="18080"/>"#,
+        )
+        .expect("beta launch settings");
+        assert_eq!(
+            super::configured_project_ports(&config, None).expect("consistent ports"),
+            18080
+        );
+
+        std::fs::write(
+            beta.join("Beta.launch"),
+            r#"<mapEntry key="MXCONSOLE_RUNTIME_PORT" value="18081"/>"#,
+        )
+        .expect("conflicting launch settings");
+        let error = super::configured_project_ports(&config, None)
+            .expect_err("conflicting ports are rejected");
+        assert_eq!(error.code, BackendErrorCode::RuntimePortForwardingInvalid);
     }
 
     #[test]

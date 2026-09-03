@@ -19,7 +19,7 @@ Mendimaru is a Tauri GUI app for discovering, installing, launching, and removin
 - **Operations**: Review persistent install, removal, and launch progress, failures, and retryability
 - **Settings**: Configure a native Windows workspace and optional portable Studio paths, or the WinBoat environment on Linux
 - **Portable Runtime**: Build with the project's exact MxBuild and run isolated, readiness-gated web apps on Windows or Linux
-- **WinBoat Run Locally**: Forward a Windows guest Runtime to a dynamic Linux loopback port with readiness and Compose rollback
+- **WinBoat Run Locally**: Mirror a Windows guest Runtime to the same Linux `localhost` port with readiness and Compose rollback
 
 Mendimaru does not provide a dashboard, VM resource information, advanced download URLs, or manual build-number entry.
 

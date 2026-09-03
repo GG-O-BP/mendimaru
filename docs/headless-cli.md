@@ -157,7 +157,7 @@ in the Portable Runtime guide.
 
 On Linux, `--mode studio-run-locally` selects the WinBoat adapter and does not
 build a package or accept a project ID. It records the Windows guest port
-(default `8080`) separately from the dynamic Linux host port. The optional
+(default `8080`) and mirrors it to the same Linux loopback port. The optional
 Studio session ID must be an opaque process/start-time identity identifying a
 live Studio session. It is validated before a Runtime session ID, session
 record, Compose backup, or port-forwarding artifact is created. A Runtime URL

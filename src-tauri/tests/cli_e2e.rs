@@ -132,11 +132,17 @@ impl Drop for FixtureProcess {
 
 #[cfg(target_os = "linux")]
 fn start_browser_fixture() -> (FixtureProcess, u16) {
+    start_browser_fixture_on(0)
+}
+
+#[cfg(target_os = "linux")]
+fn start_browser_fixture_on(port: u16) -> (FixtureProcess, u16) {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("repository root");
     let mut child = Command::new("node")
         .arg(repository.join("tests/browser/fixture-server.mjs"))
+        .arg(port.to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -1232,9 +1238,13 @@ impl FixtureHttpServer {
     }
 
     fn start_with_response(response: &'static [u8]) -> Self {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind HTTP fixture");
+        Self::serve(listener, response)
+    }
+
+    fn serve(listener: std::net::TcpListener, response: &'static [u8]) -> Self {
         use std::sync::atomic::Ordering;
 
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind HTTP fixture");
         listener
             .set_nonblocking(true)
             .expect("nonblocking HTTP fixture");
@@ -1470,6 +1480,17 @@ exit 1
     fn set_runtime_binding(&self, port: u16, host_ip: &str, storage: &str) {
         fs::write(self.fake_state.join("runtime-port"), port.to_string())
             .expect("replace fake Runtime port");
+        fs::write(self.fake_state.join("runtime-guest-port"), port.to_string())
+            .expect("replace fake Runtime guest port");
+        fs::write(
+            self._temporary
+                .path()
+                .join("workspace/FixtureProject/FixtureProject.launch"),
+            format!(
+                "<launchConfiguration><mapAttribute><mapEntry key=\"MXCONSOLE_RUNTIME_PORT\" value=\"{port}\"/></mapAttribute></launchConfiguration>"
+            ),
+        )
+        .expect("replace fixture launch settings");
         write_fake_docker_inspection(
             &self.fake_state.join("inspect.json"),
             self.guest_api_port,
@@ -1562,8 +1583,6 @@ fn real_browser_tests_mirror_host_lan_assets_for_studio_runtime() {
         "start",
         "--mode",
         "studio-run-locally",
-        "--guest-port",
-        "8080",
         "--json",
         "--timeout-seconds",
         "15",
@@ -1625,6 +1644,10 @@ fn real_binary_runs_winboat_runtime_through_loopback_and_restores_compose() {
     let first_url = started["data"]["runtime"]["url"]
         .as_str()
         .expect("WinBoat Runtime URL");
+    assert_eq!(
+        first_url,
+        format!("http://localhost:{}", fixture.runtime_port)
+    );
     assert_http_ok(first_url);
     let serialized = serde_json::to_string(&started).expect("serialize start response");
     assert!(!serialized.contains(fixture.compose_path.to_string_lossy().as_ref()));
@@ -1874,8 +1897,10 @@ fn real_binary_never_reports_winboat_ready_before_http_responds() {
     assert_eq!(error["error"]["capability"], "browser.test");
     assert!(!unread_suite.exists());
 
-    let (_browser_fixture, browser_port) = start_browser_fixture();
-    fixture.set_runtime_binding(browser_port, "127.0.0.1", "winboat-storage");
+    // Fixed-port mirroring means the Runtime guest port cannot silently move
+    // to a new host port. Readiness appears when the same endpoint starts
+    // answering HTTP on the exact configured port.
+    let (_browser_fixture, _browser_port) = start_browser_fixture_on(unavailable_port);
     let ready = stdout_json(&fixture.run(&[
         "runtime",
         "wait",
