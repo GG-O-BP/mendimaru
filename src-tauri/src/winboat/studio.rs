@@ -80,10 +80,7 @@ pub async fn launch_studio(
     );
     let command = write_command_script(config, operation_id, &script)?;
     let operation = crate::tr!("operation-studio-launch");
-    let runtime_session_id =
-        super::runtime::prepare_studio_session(config, project_mpr_path, 3_600)
-            .await
-            .map_err(|error| WindowsOperationFailure::from(error.message))?;
+    let runtime_session_id = prepare_studio_runtime_session(config, project_mpr_path).await?;
     let mut completed = None;
     for attempt in 0..STUDIO_LAUNCH_ATTEMPTS {
         let mut launched_session = None;
@@ -114,7 +111,7 @@ pub async fn launch_studio(
             }
             Err(mut error) => {
                 let Some(session) = launched_session else {
-                    let _ = super::runtime::stop(config, &runtime_session_id).await;
+                    stop_runtime_session(config, &runtime_session_id).await;
                     return Err(error);
                 };
                 match abort_incomplete_launch(config, &selected, &session, operation_id, attempt)
@@ -127,11 +124,11 @@ pub async fn launch_studio(
                     }
                     Ok(()) => {
                         error.retryable = true;
-                        let _ = super::runtime::stop(config, &runtime_session_id).await;
+                        stop_runtime_session(config, &runtime_session_id).await;
                         return Err(error);
                     }
                     Err(abort_error) => {
-                        let _ = super::runtime::stop(config, &runtime_session_id).await;
+                        stop_runtime_session(config, &runtime_session_id).await;
                         error.message = format!(
                             "{} Incomplete launch cleanup also failed: {}",
                             error.message, abort_error.message
@@ -156,13 +153,13 @@ pub async fn launch_studio(
             let _ = client.kill();
             let _ = client.wait();
         }
-        let _ = super::runtime::stop(config, &runtime_session_id).await;
+        stop_runtime_session(config, &runtime_session_id).await;
         return Err(crate::tr!("error-launch-path-missing").into());
     }
     let client = match outcome.remote_app.take() {
         Some(client) => client,
         None => {
-            let _ = super::runtime::stop(config, &runtime_session_id).await;
+            stop_runtime_session(config, &runtime_session_id).await;
             return Err(WindowsOperationFailure::from(
                 "RemoteApp was not retained".to_string(),
             ));
@@ -171,7 +168,7 @@ pub async fn launch_studio(
     let security = match outcome.security.take() {
         Some(security) => security,
         None => {
-            let _ = super::runtime::stop(config, &runtime_session_id).await;
+            stop_runtime_session(config, &runtime_session_id).await;
             return Err(WindowsOperationFailure::from(
                 "RemoteApp operation security was not retained".to_string(),
             ));
@@ -190,22 +187,69 @@ pub async fn launch_studio(
             project_access,
         });
     if let Err(error) = registration {
-        let _ = super::runtime::stop(config, &runtime_session_id).await;
+        stop_runtime_session(config, &runtime_session_id).await;
         return Err(error);
     }
     let Some(studio_session) = outcome.report.sessions.first() else {
-        let _ = super::runtime::stop(config, &runtime_session_id).await;
+        stop_runtime_session(config, &runtime_session_id).await;
         return Err(WindowsOperationFailure::from(
             "Windows did not retain the launched Studio session identity".to_string(),
         ));
     };
-    if let Err(error) =
-        super::runtime::link_studio_session(&runtime_session_id, &studio_session.session_id)
+    if let Err(error) = link_studio_runtime_session(&runtime_session_id, &studio_session.session_id)
     {
-        let _ = super::runtime::stop(config, &runtime_session_id).await;
+        stop_runtime_session(config, &runtime_session_id).await;
         return Err(WindowsOperationFailure::from(error.message));
     }
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+async fn prepare_studio_runtime_session(
+    config: &AppConfig,
+    project_mpr_path: Option<&str>,
+) -> Result<String, WindowsOperationFailure> {
+    super::runtime::prepare_studio_session(config, project_mpr_path, 3_600)
+        .await
+        .map_err(|error| WindowsOperationFailure::from(error.message))
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn prepare_studio_runtime_session(
+    _config: &AppConfig,
+    _project_mpr_path: Option<&str>,
+) -> Result<String, WindowsOperationFailure> {
+    Err(WindowsOperationFailure::from(
+        "the WinBoat Studio Runtime adapter requires Linux".to_string(),
+    ))
+}
+
+#[cfg(target_os = "linux")]
+async fn stop_runtime_session(config: &AppConfig, runtime_session_id: &str) {
+    let _ = super::runtime::stop(config, runtime_session_id).await;
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn stop_runtime_session(_config: &AppConfig, _runtime_session_id: &str) {}
+
+#[cfg(target_os = "linux")]
+fn link_studio_runtime_session(
+    runtime_session_id: &str,
+    studio_session_id: &str,
+) -> Result<(), crate::contracts::BackendError> {
+    super::runtime::link_studio_session(runtime_session_id, studio_session_id)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn link_studio_runtime_session(
+    _runtime_session_id: &str,
+    _studio_session_id: &str,
+) -> Result<(), crate::contracts::BackendError> {
+    Err(crate::contracts::BackendError::operation(
+        crate::contracts::BackendId::LinuxWinboat,
+        crate::contracts::CapabilityId::RuntimeStart,
+        "the WinBoat Studio Runtime adapter requires Linux",
+    ))
 }
 
 async fn abort_incomplete_launch(
