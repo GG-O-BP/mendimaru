@@ -6,7 +6,8 @@ use super::scripts::runtime_port_probe_script;
 use super::studio::{secure_shared_directory, write_command_script};
 use crate::app_paths::AppPaths;
 use crate::config::{
-    ensure_runtime_port_mapping, restore_file, runtime_port_mapping, snapshot_file, FileSnapshot,
+    ensure_runtime_port_mapping, prepare_runtime_compose_baseline, restore_file,
+    runtime_port_mapping, FileSnapshot, RuntimeComposeBaseline, RuntimePortMapping,
 };
 use crate::contracts::{
     secure_identifier, ArtifactDescriptor, ArtifactKind, BackendError, BackendErrorCode, BackendId,
@@ -120,6 +121,25 @@ impl ComposeTransaction {
 }
 
 impl Drop for ComposeTransaction {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = restore_file(&self.snapshot);
+        }
+    }
+}
+
+struct ComposeBaselineGuard {
+    snapshot: FileSnapshot,
+    committed: bool,
+}
+
+impl ComposeBaselineGuard {
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for ComposeBaselineGuard {
     fn drop(&mut self) {
         if !self.committed {
             let _ = restore_file(&self.snapshot);
@@ -720,7 +740,12 @@ async fn create_session(
             None,
         )
     })?;
-    let original_compose = read_direct_bounded(&compose_path, MAX_COMPOSE_BYTES).map_err(|_| {
+    let RuntimeComposeBaseline {
+        previous,
+        snapshot,
+        bytes: original_compose,
+        removed_mappings,
+    } = prepare_runtime_compose_baseline(&compose_path, guest_port).map_err(|_| {
         runtime_error(
             CapabilityId::RuntimeStart,
             BackendErrorCode::RuntimePortForwardingInvalid,
@@ -728,6 +753,10 @@ async fn create_session(
             None,
         )
     })?;
+    let mut baseline_guard = ComposeBaselineGuard {
+        snapshot: previous,
+        committed: false,
+    };
     let original_compose_sha256 = format!("{:x}", Sha256::digest(&original_compose));
     write_private_file(&directory.join("compose.original.yml"), &original_compose).map_err(
         |_| {
@@ -739,14 +768,6 @@ async fn create_session(
             )
         },
     )?;
-    let snapshot = snapshot_file(&compose_path).map_err(|_| {
-        runtime_error(
-            CapabilityId::RuntimeStart,
-            BackendErrorCode::RuntimePortForwardingInvalid,
-            false,
-            None,
-        )
-    })?;
     let mut transaction = ComposeTransaction::new(snapshot);
     let storage_before = storage_mount_identity(config).await.map_err(|_| {
         runtime_error(
@@ -910,6 +931,9 @@ async fn create_session(
         managed_compose_sha256,
         storage_mount_identity: storage_after,
     };
+    if !removed_mappings.is_empty() {
+        append_log(&directory, &compose_baseline_diagnostic(&removed_mappings));
+    }
     append_log(
         &directory,
         "WinBoat Runtime forwarding prepared on loopback.",
@@ -917,6 +941,7 @@ async fn create_session(
     write_record(&directory, &record)
         .map_err(|_| record_error(&record, CapabilityId::RuntimeStart))?;
     transaction.commit();
+    baseline_guard.commit();
     Ok((directory, record))
 }
 
@@ -1070,6 +1095,18 @@ pub(crate) async fn stop(config: &AppConfig, session_id: &str) -> BackendResult<
         )
     })?;
     if storage_after != record.storage_mount_identity {
+        return Err(runtime_error(
+            CapabilityId::RuntimeStop,
+            BackendErrorCode::RuntimeComposeRecoveryFailed,
+            false,
+            Some(record.log_artifact.artifact_id.clone()),
+        ));
+    }
+    if runtime_port_mapping(&compose_path, record.guest_port)
+        .ok()
+        .flatten()
+        .is_some()
+    {
         return Err(runtime_error(
             CapabilityId::RuntimeStop,
             BackendErrorCode::RuntimeComposeRecoveryFailed,
@@ -1813,6 +1850,24 @@ fn write_atomic_compose(path: &Path, content: &[u8]) -> Result<(), String> {
     })
 }
 
+fn compose_baseline_diagnostic(removed: &[RuntimePortMapping]) -> String {
+    let dynamic = removed
+        .iter()
+        .filter(|mapping| mapping.host_port.is_none())
+        .count();
+    let public = removed
+        .iter()
+        .filter(|mapping| mapping.host_ip != "127.0.0.1")
+        .count();
+    let fixed = removed.len().saturating_sub(dynamic + public);
+    format!(
+        "WinBoat Runtime Compose baseline removed stale mappings: total={}, dynamic={}, public={}, fixed={fixed}.",
+        removed.len(),
+        dynamic,
+        public
+    )
+}
+
 fn append_log(directory: &Path, message: &str) {
     if message.contains('\n') || message.contains('\r') || message.len() > 512 {
         return;
@@ -1885,10 +1940,11 @@ fn set_file_permissions(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_runtime_session_in_root, append_failure_diagnostic, diagnostic_code,
-        forget_session_in_root, is_loopback_host, port_conflict_message, runtime_probe_url,
-        runtime_url, session_summaries_in_root, studio_launch_port, valid_studio_session_id,
-        validate_runtime_session_id, ComposeTransaction, SessionRecord,
+        active_runtime_session_in_root, append_failure_diagnostic, compose_baseline_diagnostic,
+        diagnostic_code, forget_session_in_root, is_loopback_host, port_conflict_message,
+        runtime_probe_url, runtime_url, session_summaries_in_root, studio_launch_port,
+        valid_studio_session_id, validate_runtime_session_id, ComposeBaselineGuard,
+        ComposeTransaction, SessionRecord,
     };
     use crate::contracts::CapabilityId;
     use crate::contracts::{
@@ -1911,6 +1967,29 @@ mod tests {
         assert!(valid_studio_session_id("studio-4242-638908128000000000"));
         assert!(!valid_studio_session_id("studio-0-638908128000000000"));
         assert!(!valid_studio_session_id("studio-4242-1-extra"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn compose_baseline_rollback_restores_the_user_original_on_failure() {
+        crate::i18n::initialize("en-US").expect("localization");
+        let temporary = tempfile::tempdir().expect("temporary Compose directory");
+        let compose = temporary.path().join("docker-compose.yml");
+        let original = "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - data:/storage\n    ports:\n      - 127.0.0.1::8080/tcp\nvolumes:\n  data: {}\n";
+        std::fs::write(&compose, original).expect("polluted Compose");
+        let baseline = crate::config::prepare_runtime_compose_baseline(&compose, 8_080)
+            .expect("clean Compose baseline");
+        let guard = ComposeBaselineGuard {
+            snapshot: baseline.previous,
+            committed: false,
+        };
+        drop(guard);
+        assert_eq!(
+            std::fs::read_to_string(&compose).expect("restored Compose"),
+            original
+        );
+        assert_eq!(baseline.removed_mappings.len(), 1);
+        assert!(compose_baseline_diagnostic(&baseline.removed_mappings).contains("dynamic=1"));
     }
 
     #[test]

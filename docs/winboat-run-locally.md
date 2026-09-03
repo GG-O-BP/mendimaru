@@ -24,10 +24,13 @@ browser-facing URL is always `http://localhost:<port>/`.
 `runtime start` performs these steps:
 
 1. Require a healthy WinBoat Guest API and a direct, bounded Compose file.
-2. Capture a private `0600` copy of the original Compose file and the current
-   `/storage` mount identity.
-3. Replace any stale, dynamic, or public mapping for the Studio Runtime port
-   with `127.0.0.1:<port>:<port>/tcp`. Other ports and volumes are unchanged.
+2. Remove any stale Studio Runtime-port mapping from the Compose baseline,
+   record the cleanup in the private Runtime diagnostic log, and capture that
+   clean baseline as a `0600` original. WinBoat system ports, unrelated user
+   ports, and the `/storage` mount identity remain unchanged.
+3. Replace the absent Studio Runtime port with
+   `127.0.0.1:<port>:<port>/tcp`. Until the Runtime session commits, a failure
+   restores the user's pre-sanitization bytes.
 4. Recreate WinBoat only when the Compose mapping changed, wait for the guest,
    verify that `/storage` still identifies the same volume, and inspect the
    container for the expected fixed host port.
@@ -113,7 +116,8 @@ PowerShell output do not enter the common contract or logs.
 
 `runtime stop` restores the exact original Compose file and recreates WinBoat,
 which terminates the guest Runtime and any active Studio process. It verifies
-the `/storage` identity again before recording `stopped`. This disruptive
+the `/storage` identity and verifies that the Studio Runtime-port mapping is
+actually absent before recording `stopped`. This disruptive
 boundary is intentional because Studio Pro does not expose a safe unattended
 Run Locally stop API yet. The managed Compose digest must still match; a
 concurrent user edit is preserved and stop returns

@@ -122,6 +122,100 @@ pub(crate) struct RuntimePortMapping {
     pub(crate) protocol: String,
 }
 
+pub(crate) struct RuntimeComposeBaseline {
+    pub(crate) previous: FileSnapshot,
+    pub(crate) snapshot: FileSnapshot,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) removed_mappings: Vec<RuntimePortMapping>,
+}
+
+pub(crate) fn prepare_runtime_compose_baseline(
+    compose_path: &Path,
+    guest_port: u16,
+) -> Result<RuntimeComposeBaseline, String> {
+    if !(1024..=u16::MAX).contains(&guest_port) {
+        return Err("the Mendix Runtime guest port must be from 1024 through 65535".to_string());
+    }
+    let previous = snapshot_file(compose_path)?;
+    let revision = previous.revision().ok_or_else(|| {
+        crate::tr!(
+            "error-compose-file-not-found",
+            path = compose_path.display()
+        )
+    })?;
+    let mut compose = parse_snapshot(&previous)?;
+    let (_, service) = winboat_runtime_service(&mut compose)?;
+    let Some(ports) = service
+        .as_mapping_mut()
+        .and_then(|mapping| mapping.get_mut(Value::String("ports".to_string())))
+        .and_then(Value::as_sequence_mut)
+    else {
+        let bytes = previous.content.clone().unwrap_or_default();
+        return Ok(RuntimeComposeBaseline {
+            previous,
+            snapshot: snapshot_file(compose_path)?,
+            bytes,
+            removed_mappings: Vec::new(),
+        });
+    };
+    let removed_mappings = ports
+        .iter()
+        .filter_map(parse_port_mapping)
+        .filter(|mapping| mapping.guest_port == guest_port)
+        .collect::<Vec<_>>();
+    if removed_mappings.is_empty() {
+        let bytes = previous.content.clone().unwrap_or_default();
+        return Ok(RuntimeComposeBaseline {
+            previous,
+            snapshot: snapshot_file(compose_path)?,
+            bytes,
+            removed_mappings,
+        });
+    }
+    ports.retain(|entry| {
+        parse_port_mapping(entry).is_none_or(|mapping| mapping.guest_port != guest_port)
+    });
+    write_compose(compose_path, &compose, &revision)?;
+    let snapshot = match snapshot_file(compose_path) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            let _ = restore_file(&previous);
+            return Err(error);
+        }
+    };
+    let bytes = snapshot.content.clone().unwrap_or_default();
+    Ok(RuntimeComposeBaseline {
+        previous,
+        snapshot,
+        bytes,
+        removed_mappings,
+    })
+}
+
+fn winboat_runtime_service(compose: &mut Value) -> Result<(String, &mut Value), String> {
+    let service_name = winboat_service_name(compose).map_err(String::from)?;
+    let service = service_value_named_mut(compose, &service_name)
+        .ok_or_else(|| crate::tr!("error-compose-windows-service-missing"))?;
+    let mapping = service
+        .as_mapping_mut()
+        .ok_or_else(|| crate::tr!("error-compose-windows-service-invalid"))?;
+    if mapping
+        .get(Value::String("network_mode".to_string()))
+        .and_then(Value::as_str)
+        .is_some_and(|mode| mode.eq_ignore_ascii_case("host"))
+    {
+        return Err("the WinBoat service uses host networking and cannot be isolated".to_string());
+    }
+    let volumes = mapping
+        .get(Value::String("volumes".to_string()))
+        .and_then(Value::as_sequence)
+        .ok_or_else(|| "the WinBoat service has no protected /storage volume".to_string())?;
+    if storage_mounts(volumes).is_empty() {
+        return Err("the WinBoat service has no protected /storage volume".to_string());
+    }
+    Ok((service_name, service))
+}
+
 pub fn compose_shared_directory(compose_file: &str) -> Option<String> {
     let compose = read_compose(Path::new(compose_file)).ok()?;
     let service_name = winboat_service_name(&compose).ok()?;
@@ -248,28 +342,15 @@ pub(crate) fn ensure_runtime_port_mapping(
         )
     })?;
     let mut compose = parse_snapshot(&snapshot)?;
-    let service_name = winboat_service_name(&compose).map_err(String::from)?;
-    let service = service_value_named_mut(&mut compose, &service_name)
-        .ok_or_else(|| crate::tr!("error-compose-windows-service-missing"))?;
+    let (_, service) = winboat_runtime_service(&mut compose)?;
     let mapping = service
         .as_mapping_mut()
         .ok_or_else(|| crate::tr!("error-compose-windows-service-invalid"))?;
-    if mapping
-        .get(Value::String("network_mode".to_string()))
-        .and_then(Value::as_str)
-        .is_some_and(|mode| mode.eq_ignore_ascii_case("host"))
-    {
-        return Err("the WinBoat service uses host networking and cannot be isolated".to_string());
-    }
-
-    let volumes = mapping
+    let storage_before = mapping
         .get(Value::String("volumes".to_string()))
         .and_then(Value::as_sequence)
-        .ok_or_else(|| "the WinBoat service has no protected /storage volume".to_string())?;
-    let storage_before = storage_mounts(volumes);
-    if storage_before.is_empty() {
-        return Err("the WinBoat service has no protected /storage volume".to_string());
-    }
+        .map(|volumes| storage_mounts(volumes))
+        .unwrap_or_default();
 
     let ports_key = Value::String("ports".to_string());
     if !mapping.contains_key(&ports_key) {
@@ -1025,9 +1106,9 @@ fn service_value_named_mut<'a>(
 mod tests {
     use super::{
         apply_shared_mount, compose_file_is_valid, ensure_runtime_port_mapping,
-        host_port_for_guest, plan_shared_mount, restore_file, restore_file_if_revision,
-        runtime_port_mapping, shared_mount_source, snapshot_file, update_shared_mount,
-        ComposeErrorKind,
+        host_port_for_guest, plan_shared_mount, prepare_runtime_compose_baseline, restore_file,
+        restore_file_if_revision, runtime_port_mapping, shared_mount_source, snapshot_file,
+        update_shared_mount, ComposeErrorKind,
     };
     use serde_yaml::Value;
     use std::fs;
@@ -1063,6 +1144,38 @@ mod tests {
         assert_eq!(host_port_for_guest(&ports, 7148), Some(47280));
         assert_eq!(host_port_for_guest(&ports, 3389), Some(47300));
         assert_eq!(host_port_for_guest(&ports, 8006), None);
+    }
+
+    #[test]
+    fn runtime_baseline_removes_only_stale_studio_port_mappings() {
+        for (mapping, expected_removed) in [
+            ("127.0.0.1::8080/tcp", 1),
+            ("0.0.0.0:8080:8080/tcp", 1),
+            ("127.0.0.1:8080:8080/tcp", 1),
+            ("127.0.0.1:32768:8081/tcp", 0),
+        ] {
+            let temporary = tempfile::tempdir().expect("temp dir");
+            let compose = temporary.path().join("docker-compose.yml");
+            let content = format!(
+                "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - winboat-data:/storage\n    ports:\n      - 127.0.0.1:47280:7148\n      - {mapping}\n      - 127.0.0.1:5900:5900/tcp\nvolumes:\n  winboat-data: {{}}\n"
+            );
+            fs::write(&compose, &content).expect("write polluted Compose");
+
+            let baseline =
+                prepare_runtime_compose_baseline(&compose, 8080).expect("prepare baseline");
+            assert_eq!(baseline.removed_mappings.len(), expected_removed);
+            let baseline_text = String::from_utf8(baseline.bytes).expect("baseline YAML");
+            assert!(!baseline_text.contains(":8080/tcp"));
+            assert!(!baseline_text.contains(":8080:"));
+            assert!(baseline_text.contains("127.0.0.1:47280:7148"));
+            assert!(baseline_text.contains("127.0.0.1:5900:5900/tcp"));
+            assert!(baseline_text.contains("winboat-data:/storage"));
+
+            assert!(ensure_runtime_port_mapping(&compose, 8080).expect("add managed mapping"));
+            assert!(fs::read_to_string(&compose)
+                .expect("managed Compose")
+                .contains("127.0.0.1:8080:8080/tcp"));
+        }
     }
 
     #[test]
