@@ -28,6 +28,7 @@ pub(super) enum ProjectAccessProviderKind {
 #[derive(Debug, Clone)]
 pub(super) struct ProjectAccessLease {
     guest_project_path: String,
+    host_project_directory: PathBuf,
     provider_kind: ProjectAccessProviderKind,
     share_identity: Option<String>,
     project_digest: String,
@@ -44,6 +45,10 @@ struct FreeRdpDrive {
 impl ProjectAccessLease {
     pub(super) fn guest_project_path(&self) -> &str {
         &self.guest_project_path
+    }
+
+    pub(super) fn host_project_directory(&self) -> &Path {
+        &self.host_project_directory
     }
 
     pub(super) const fn provider_kind(&self) -> ProjectAccessProviderKind {
@@ -107,6 +112,7 @@ impl ProjectAccessProvider for ConfiguredWorkspaceProvider {
         )?;
         Ok(ProjectAccessLease {
             guest_project_path,
+            host_project_directory: selection.directory().to_path_buf(),
             provider_kind: ProjectAccessProviderKind::ConfiguredWorkspace,
             share_identity: None,
             project_digest: selection.project_digest(),
@@ -145,6 +151,7 @@ impl ProjectAccessProvider for FreeRdpDriveProvider {
         let _ = drive.argument()?;
         Ok(ProjectAccessLease {
             guest_project_path,
+            host_project_directory: selection.directory().to_path_buf(),
             provider_kind: ProjectAccessProviderKind::FreeRdpDrive,
             share_identity: Some(share_name),
             project_digest,

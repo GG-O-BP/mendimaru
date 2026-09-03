@@ -31,7 +31,7 @@ The selected version and unfinished launch intent survive cancellation, installa
 
 ### Environment diagnostics
 
-Settings checks the WinBoat executable, Compose structure, container runtime daemon, FreeRDP, shared workspace and mount, container state, Guest API, loopback RDP port, and Marketplace browser independently. A failed check offers only an explicit safe next action such as redetection, starting Windows, opening WinBoat, or focusing the relevant setting. Diagnostic reports can be copied or exported as JSON; they contain allowlisted status fields and omit configured paths, credentials, tokens, and command payloads.
+Settings checks the WinBoat executable, Compose structure, container runtime daemon, FreeRDP, shared workspace and mount, container state, Guest API, guest clock skew, loopback RDP port, and Marketplace browser independently. A failed check offers only an explicit safe next action such as redetection, starting Windows, opening WinBoat, or focusing the relevant setting. Diagnostic reports can be copied or exported as JSON; they contain allowlisted status fields and omit configured paths, credentials, tokens, and command payloads. See the [WinBoat clock-sync guide](docs/winboat-clock-sync.md) for guest time synchronization.
 
 ### Persistent operation history
 

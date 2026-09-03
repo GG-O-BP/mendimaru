@@ -1221,8 +1221,17 @@ struct FixtureHttpServer {
 }
 
 #[cfg(unix)]
+const HOST_LAN_ASSET_PAGE_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<!doctype html><title>Asset mirror fixture</title><h1>Waiting</h1><script src=\"//host.lan/Data/Project/deployment/web/widget.js\"></script>";
+
+#[cfg(unix)]
 impl FixtureHttpServer {
     fn start() -> Self {
+        Self::start_with_response(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nready",
+        )
+    }
+
+    fn start_with_response(response: &'static [u8]) -> Self {
         use std::sync::atomic::Ordering;
 
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind HTTP fixture");
@@ -1239,9 +1248,7 @@ impl FixtureHttpServer {
                         let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
                         let mut request = [0_u8; 4096];
                         let _ = stream.read(&mut request);
-                        let _ = stream.write_all(
-                            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nready",
-                        );
+                        let _ = stream.write_all(response);
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(10));
@@ -1511,6 +1518,73 @@ fn write_fake_docker_inspection(
         serde_json::to_vec(&inspection).expect("serialize fake Docker inspection"),
     )
     .expect("write fake Docker inspection");
+}
+
+#[cfg(unix)]
+#[test]
+fn real_browser_tests_mirror_host_lan_assets_for_studio_runtime() {
+    let mut fixture = WinboatRuntimeFixture::new();
+    let web = fixture
+        ._temporary
+        .path()
+        .join("workspace/Project/deployment/web");
+    fs::create_dir_all(&web).expect("fixture project web directory");
+    fs::write(
+        web.join("widget.js"),
+        b"document.querySelector('h1').textContent = 'Asset loaded';",
+    )
+    .expect("fixture widget asset");
+    let suite = fixture._temporary.path().join("asset.browser.json");
+    fs::write(
+        &suite,
+        r#"{
+          "schemaVersion": "1.0.0",
+          "name": "Host.lan asset mirror",
+          "beforeEach": [{ "action": "goto", "path": "/" }],
+          "tests": [{
+            "name": "UNC widget asset loads",
+            "steps": [{
+              "action": "expectText",
+              "locator": { "by": "role", "role": "heading", "name": "Asset loaded" },
+              "value": "Asset loaded"
+            }]
+          }]
+        }"#,
+    )
+    .expect("browser suite");
+    let asset_page_server = FixtureHttpServer::start_with_response(HOST_LAN_ASSET_PAGE_RESPONSE);
+    let asset_page_port = asset_page_server.port();
+    fixture._runtime_server = asset_page_server;
+    fixture.set_runtime_binding(asset_page_port, "127.0.0.1", "winboat-storage");
+
+    let started = stdout_json(&fixture.run(&[
+        "runtime",
+        "start",
+        "--mode",
+        "studio-run-locally",
+        "--guest-port",
+        "8080",
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]));
+    let runtime_session_id = started["runtimeSessionId"]
+        .as_str()
+        .expect("Runtime session");
+    let browser_output = fixture.run(&[
+        "browser",
+        "test",
+        "--runtime-session-id",
+        runtime_session_id,
+        "--suite-path",
+        suite.to_str().expect("browser suite path"),
+        "--json",
+        "--fail-on-network-failure",
+    ]);
+    let browser = stdout_json(&browser_output);
+    assert_eq!(browser["data"]["outcome"], "passed");
+    assert_eq!(browser["data"]["passed"], 1);
+    assert_eq!(browser["data"]["failed"], 0);
 }
 
 #[cfg(unix)]

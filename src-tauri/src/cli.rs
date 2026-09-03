@@ -863,15 +863,16 @@ async fn run_command(
                     crate::application::stop_session(&paths, &config, session_id).await
                 {
                     let sessions = crate::application::studio_sessions(&config).await;
-                    return complete_stopped_session_if_absent(error, sessions, session_id).map(
-                        |()| CommandOutput {
-                            data: json!({ "completed": true }),
-                            operation_id: None,
-                            studio_session_id: Some(session_id.clone()),
-                            runtime_session_id: None,
-                            progress: Vec::new(),
-                        },
-                    );
+                    return complete_stopped_session_if_absent(
+                        error, sessions, &config, session_id,
+                    )
+                    .map(|()| CommandOutput {
+                        data: json!({ "completed": true }),
+                        operation_id: None,
+                        studio_session_id: Some(session_id.clone()),
+                        runtime_session_id: None,
+                        progress: Vec::new(),
+                    });
                 }
             }
             Ok(CommandOutput {
@@ -1018,6 +1019,7 @@ fn orphan_studio_sessions(
 fn complete_stopped_session_if_absent(
     error: CommandError,
     sessions: Result<Vec<crate::contracts::StudioSessionStatus>, CommandError>,
+    config: &crate::models::AppConfig,
     session_id: &str,
 ) -> Result<(), CommandError> {
     if matches!(error.code, CommandErrorCode::InvalidRequest) {
@@ -1033,6 +1035,7 @@ fn complete_stopped_session_if_absent(
     {
         return Err(error);
     }
+    crate::winboat::cleanup_dead_session_lock(config, session_id);
     Ok(())
 }
 
@@ -2411,6 +2414,27 @@ mod tests {
         values.iter().map(OsString::from).collect()
     }
 
+    fn app_config(workspace: &std::path::Path) -> crate::models::AppConfig {
+        crate::models::AppConfig {
+            language_preference: "en-US".into(),
+            winboat_setup_pending: false,
+            winboat_executable: "missing-winboat".into(),
+            compose_file: "missing-compose.yml".into(),
+            container_runtime: crate::models::ContainerRuntime::Docker,
+            container_name: "WinBoat".into(),
+            api_url: "http://127.0.0.1:9".into(),
+            rdp_host: "127.0.0.1".into(),
+            rdp_port: 9,
+            shared_directory: workspace.to_string_lossy().into_owned(),
+            windows_shared_directory: r"\\host.lan\Data".into(),
+            freerdp_binary: "missing-freerdp".into(),
+            mendix_install_root: r"C:\Program Files\Mendix".into(),
+            mendix_data_root: r"C:\ProgramData\Mendix".into(),
+            windows_studio_paths: Vec::new(),
+            startup_timeout_seconds: 1,
+        }
+    }
+
     #[test]
     fn help_covers_the_complete_command_tree_without_backend_output() {
         let command_tree = [
@@ -2517,10 +2541,13 @@ mod tests {
         }))
         .expect("other Studio session fixture");
         let session_id = "studio-4242-638908128000000000";
+        let cleanup_root = tempfile::tempdir().expect("temporary cleanup workspace");
+        let cleanup_config = app_config(cleanup_root.path());
 
         complete_stopped_session_if_absent(
             CommandError::new(CommandErrorCode::OperationFailed, "fixture failure".into()),
             Ok(vec![other_session]),
+            &cleanup_config,
             session_id,
         )
         .expect("an absent target is idempotently complete");
@@ -2528,6 +2555,7 @@ mod tests {
         let retained = complete_stopped_session_if_absent(
             CommandError::new(CommandErrorCode::OperationFailed, "fixture failure".into()),
             Ok(vec![stopped_session]),
+            &cleanup_config,
             session_id,
         )
         .expect_err("a live target remains a failure");
@@ -2539,6 +2567,7 @@ mod tests {
                 CommandErrorCode::OperationFailed,
                 "status failed".into(),
             )),
+            &cleanup_config,
             session_id,
         )
         .expect_err("an unverifiable target remains a failure");
@@ -2546,6 +2575,7 @@ mod tests {
         complete_stopped_session_if_absent(
             CommandError::new(CommandErrorCode::InvalidRequest, "invalid session".into()),
             Ok(Vec::new()),
+            &cleanup_config,
             session_id,
         )
         .expect_err("an invalid request is never converted to stop success");
