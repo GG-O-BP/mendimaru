@@ -131,6 +131,17 @@ a direct, bounded, exactly shaped JSON file whose `ProcessId` matches the exact
 Studio session that was just observed absent. Locks for other processes and
 malformed, linked, oversized, or ambiguous files are deliberately retained.
 
+If Windows reports that Studio Pro started but a later host-side registration
+or Runtime-link step fails, Linux cleanup performs the same conservative
+transition. Mendimaru records the RemoteApp, Studio stop, Runtime stop, and
+authoritative absence result in a private `<operation-id>.cleanup.json` report
+without host paths. A `.mpr.lock` is removed only when that authoritative guest
+query succeeds and the exact Studio identity is absent; a live or unverifiable
+session retains the lock. The failed operation is retryable only when cleanup
+recorded successful Runtime recovery and confirmed absence. A Runtime stop or
+status-query failure remains non-retryable so a caller does not repeatedly
+enter an ambiguous state.
+
 Poll at an interval larger than the command duration, retain the previous
 terminal error, and stop after a bounded number of attempts. Keep `--snapshot`
 out of polling requests; retrieve it separately with `capabilities` when a
