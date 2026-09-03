@@ -130,6 +130,47 @@ export function useStudioInstallation({
     [notify, refreshInstalled, runAction, t],
   );
 
+  const enqueueVersion = useCallback(
+    (version: DownloadableVersion, forceRedownload = false) =>
+      runAction(`install-${version.version}`, async () => {
+        setDownloadProgress({
+          version: version.version,
+          state: "starting",
+          downloadedBytes: 0,
+          percentage: 2,
+          estimated: true,
+          message: t("progress-starting"),
+        });
+        try {
+          await tauriApi.enqueueInstallStudioPro(
+            version.version,
+            forceRedownload,
+          );
+        } catch (error) {
+          setDownloadProgress((current) => ({
+            version: version.version,
+            state: "failed",
+            downloadedBytes:
+              current?.version === version.version
+                ? current.downloadedBytes
+                : 0,
+            totalBytes:
+              current?.version === version.version
+                ? current.totalBytes
+                : undefined,
+            percentage:
+              current?.version === version.version
+                ? current.percentage
+                : undefined,
+            estimated: false,
+            message: errorText(error, t),
+          }));
+          throw error;
+        }
+      }),
+    [runAction, t],
+  );
+
   const askInstall = useCallback(
     (version: DownloadableVersion, forceRedownload = false) => {
       requestConfirmation({
@@ -149,10 +190,10 @@ export function useStudioInstallation({
             ? "action-force-redownload-install"
             : "action-download-install",
         ),
-        action: () => installVersion(version, forceRedownload),
+        action: () => enqueueVersion(version, forceRedownload),
       });
     },
-    [installVersion, requestConfirmation, t],
+    [enqueueVersion, requestConfirmation, t],
   );
 
   const cancelDownload = useCallback(
@@ -170,6 +211,7 @@ export function useStudioInstallation({
     isInstalling: hasBusyPrefix("install-"),
     askInstall,
     installVersion,
+    enqueueVersion,
     cancelDownload,
   };
 }

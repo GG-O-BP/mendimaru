@@ -3,7 +3,6 @@ use crate::contracts::{
     BackendError, BackendErrorCode, BackendId, BrowserTestPolicy, CapabilityId, CapabilitySnapshot,
     PlatformId, RuntimeMode, SessionDescriptor, CONTRACT_SCHEMA_VERSION,
 };
-use crate::downloads::DownloadManager;
 use crate::models::{CommandError, CommandErrorCode, DownloadProgress};
 #[cfg(target_os = "linux")]
 use serde::Deserialize;
@@ -759,15 +758,15 @@ async fn run_command(
             version,
             force_redownload,
         } => {
-            let manager = DownloadManager::default();
+            let cancellation = crate::downloads::DownloadCancellation::new();
             let mut progress = Vec::new();
             let operation_id = crate::application::install(
                 &paths,
                 &config,
-                &manager,
                 version.clone(),
                 *force_redownload,
                 None,
+                &cancellation,
                 |update| progress.push(update.clone()),
             )
             .await?;
@@ -984,10 +983,10 @@ async fn run_command(
             Ok(output)
         }
         CliCommand::OperationRetry { operation_id } => {
-            let manager = DownloadManager::default();
+            let cancellation = crate::downloads::DownloadCancellation::new();
             let mut progress = Vec::new();
             let new_operation_id =
-                crate::application::retry(&paths, &config, &manager, operation_id, |update| {
+                crate::application::retry(&paths, &config, &cancellation, operation_id, |update| {
                     progress.push(update.clone())
                 })
                 .await?;

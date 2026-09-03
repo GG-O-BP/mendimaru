@@ -107,6 +107,40 @@ impl SecureDirectory {
         self.directory.open_with(name, &options)
     }
 
+    /// Opens a stable-named resumable payload for reading and appending.
+    ///
+    /// Unlike `SecureTemporaryFile`, this file survives drops so an
+    /// interrupted transfer can resume later. The name is validated, symlink
+    /// following is disabled, and the resulting descriptor must reference a
+    /// direct regular file.
+    pub(crate) fn open_or_create_payload(&self, name: &str) -> Result<tokio::fs::File, String> {
+        validate_direct_name(name)?;
+        let mut options = OpenOptions::new();
+        // Random-access write access permits safe truncation on Windows when
+        // a stable payload is longer than its verified metadata.
+        options
+            .read(true)
+            .write(true)
+            .create(true)
+            .follow(FollowSymlinks::No);
+        #[cfg(unix)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = self
+            .directory
+            .open_with(name, &options)
+            .map_err(|error| format!("could not open secure payload: {error}"))?;
+        let metadata = file
+            .metadata()
+            .map_err(|error| format!("could not inspect secure payload: {error}"))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("the secure payload must be a direct regular file".to_string());
+        }
+        Ok(tokio::fs::File::from_std(file.into_std()))
+    }
+
     fn retain_temporary_file(
         &self,
         name: String,
@@ -345,6 +379,33 @@ mod tests {
         drop(first);
         drop(second);
         assert_eq!(fs::read_dir(path).expect("read cache").count(), 0);
+    }
+
+    #[tokio::test]
+    async fn stable_payload_supports_append_and_safe_truncation() {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+
+        let temporary = tempfile::tempdir().expect("temporary root");
+        let directory = SecureDirectory::open_or_create(&temporary.path().join("cache"))
+            .expect("secure directory");
+        let mut payload = directory
+            .open_or_create_payload("resume.download")
+            .expect("stable payload");
+
+        payload.write_all(b"abc").await.expect("append bytes");
+        payload.set_len(1).await.expect("truncate stale tail");
+        payload
+            .seek(std::io::SeekFrom::End(0))
+            .await
+            .expect("seek resume offset");
+        payload.write_all(b"Z").await.expect("write after truncate");
+        payload.rewind().await.expect("rewind payload");
+        let mut contents = Vec::new();
+        payload
+            .read_to_end(&mut contents)
+            .await
+            .expect("read payload");
+        assert_eq!(contents, b"aZ");
     }
 
     #[cfg(unix)]

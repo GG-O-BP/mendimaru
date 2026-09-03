@@ -197,6 +197,15 @@
     "failed": true,
     "cancelled": true
   },
+  "installQueueState": {
+    "queued": true,
+    "downloading": true,
+    "staging": true,
+    "installing": true,
+    "succeeded": true,
+    "failed": true,
+    "cancelled": true
+  },
   "operationKind": {
     "install": true,
     "uninstall": true,

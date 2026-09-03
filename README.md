@@ -17,6 +17,7 @@ Mendimaru is a Tauri GUI app for discovering, installing, launching, and removin
 - **Studio Pro**: Discover, launch, install, and safely remove Studio Pro versions in the active Windows environment
 - **Projects**: Find and launch `.mpr` projects in the configured workspace
 - **Operations**: Review persistent install, removal, and launch progress, failures, and retryability
+- **Install queue**: Resume verified installer partials and queue multiple Studio Pro versions with reorder, cancel, retry, and restart recovery (see the [install queue guide](docs/install-queue.md))
 - **Settings**: Configure a native Windows workspace and optional portable Studio paths, or the WinBoat environment on Linux
 - **Portable Runtime**: Build with the project's exact MxBuild and run isolated, readiness-gated web apps on Windows or Linux
 - **WinBoat Run Locally**: Mirror a Windows guest Runtime to the same Linux `localhost` port with readiness and Compose rollback

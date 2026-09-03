@@ -50,10 +50,6 @@ impl CancellationToken {
         self.notification.notify_waiters();
     }
 
-    pub(crate) fn reset(&self) {
-        self.cancelled.store(false, Ordering::SeqCst);
-    }
-
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst)
     }

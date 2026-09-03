@@ -7,6 +7,7 @@ import { AvailableVersionsSection } from "./AvailableVersionsSection";
 import { InstalledVersionsSection } from "./InstalledVersionsSection";
 import type {
   CatalogModel,
+  InstallQueueModel,
   InstallationModel,
   InstalledVersionsModel,
   EnvironmentControlKind,
@@ -21,6 +22,7 @@ export function StudioPage({
   installed,
   catalog,
   installation,
+  queue,
 }: {
   t: Translate;
   localization: LocalizationBundle;
@@ -35,6 +37,7 @@ export function StudioPage({
   installed: InstalledVersionsModel;
   catalog: CatalogModel;
   installation: InstallationModel;
+  queue: InstallQueueModel;
 }) {
   const [installedCountLabel] = useLocalizedNumbers(
     [installed.versions.length],
@@ -104,6 +107,7 @@ export function StudioPage({
         online={online}
         catalog={catalog}
         installation={installation}
+        queue={queue}
       />
     </div>
   );

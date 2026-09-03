@@ -78,6 +78,7 @@ describe("VersionCatalogTable update guidance", () => {
           installedVersionsLoaded: true,
           studioSessionsLoading: false,
           isInstalling: false,
+          queuedVersions: new Set<string>(),
           isBusy: () => false,
           onSearch: () => undefined,
           onToggleSupportFilter: () => undefined,

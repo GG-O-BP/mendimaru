@@ -1,4 +1,6 @@
-use super::storage::{SecureDirectory, SecureTemporaryFile};
+use super::storage::SecureDirectory;
+#[cfg(test)]
+use super::storage::SecureTemporaryFile;
 use crate::app_paths::AppPaths;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -9,6 +11,7 @@ use std::path::PathBuf;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 const CACHE_METADATA_SCHEMA_VERSION: u32 = 1;
+const PARTIAL_METADATA_SCHEMA_VERSION: u32 = 1;
 const MIN_INSTALLER_SIZE: u64 = 1024 * 1024;
 const HASH_BUFFER_SIZE: usize = 128 * 1024;
 const MAX_METADATA_BYTES: u64 = 64 * 1024;
@@ -53,15 +56,149 @@ impl InstallerCache {
         self.directory.path_for(&self.installer_name)
     }
 
+    pub(super) fn partial_payload_name(&self) -> String {
+        format!("{}.partial", self.installer_name)
+    }
+
+    pub(super) fn partial_metadata_name(&self) -> String {
+        format!("{}.partial.json", self.installer_name)
+    }
+
+    #[cfg(test)]
     pub(super) fn create_payload(&self) -> Result<SecureTemporaryFile, String> {
         self.directory
             .create_random_file("mendimaru-installer-", ".download")
+    }
+
+    pub(super) fn open_partial_payload(&self) -> Result<tokio::fs::File, String> {
+        self.directory
+            .open_or_create_payload(&self.partial_payload_name())
     }
 
     #[cfg(test)]
     pub(super) fn metadata_path(&self) -> Result<PathBuf, String> {
         self.directory.path_for(&self.metadata_name)
     }
+}
+
+/// Durable state for a resumable partial installer download. Every field is
+/// revalidated before a transfer resumes; an unusable state falls back to a
+/// safe full restart.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct PartialDownloadState {
+    pub schema_version: u32,
+    pub version: String,
+    pub source_url: String,
+    pub payload_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+}
+
+impl PartialDownloadState {
+    pub(super) fn validator(&self) -> Option<&str> {
+        self.etag
+            .as_deref()
+            .or(self.last_modified.as_deref())
+            .filter(|validator| !validator.is_empty())
+    }
+
+    fn bounded(&self, maximum_bytes: u64) -> bool {
+        self.payload_bytes <= maximum_bytes
+            && self
+                .total_bytes
+                .is_none_or(|total| total <= maximum_bytes && self.payload_bytes < total)
+            && !matches!(self.payload_bytes, 0)
+    }
+}
+
+pub(super) async fn load_partial(
+    cache: &InstallerCache,
+    version: &str,
+    source_url: &str,
+    maximum_bytes: u64,
+) -> Option<PartialDownloadState> {
+    let payload_name = cache.partial_payload_name();
+    let payload = cache.directory.symlink_metadata(&payload_name).ok()??;
+    if payload.file_type().is_symlink() || !payload.is_file() {
+        return None;
+    }
+    let metadata_name = cache.partial_metadata_name();
+    let metadata = cache.directory.symlink_metadata(&metadata_name).ok()??;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_file()
+        || metadata.len() > MAX_METADATA_BYTES
+    {
+        return None;
+    }
+    let file = cache.directory.open_regular_file(&metadata_name).ok()?;
+    let mut file = file;
+    let mut bytes = Vec::new();
+    tokio::io::AsyncReadExt::take(&mut file, MAX_METADATA_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .await
+        .ok()?;
+    if bytes.len() as u64 > MAX_METADATA_BYTES {
+        return None;
+    }
+    let state = serde_json::from_slice::<PartialDownloadState>(&bytes).ok()?;
+    if state.schema_version != PARTIAL_METADATA_SCHEMA_VERSION
+        || state.version != version
+        || state.source_url != source_url
+        || state.payload_bytes != payload.len()
+        || !state.bounded(maximum_bytes)
+        || state.validator().is_none()
+    {
+        return None;
+    }
+    Some(state)
+}
+
+pub(super) async fn save_partial(
+    cache: &InstallerCache,
+    state: &PartialDownloadState,
+) -> Result<(), String> {
+    let serialized = serde_json::to_vec_pretty(state).map_err(|error| error.to_string())?;
+    if serialized.len() as u64 > MAX_METADATA_BYTES {
+        return Err("partial download metadata exceeds its safe size limit".to_string());
+    }
+    let mut partial = cache
+        .directory
+        .create_random_file("mendimaru-partial-", ".tmp")?;
+    partial
+        .file_mut()
+        .write_all(&serialized)
+        .await
+        .map_err(|error| error.to_string())?;
+    partial
+        .file_mut()
+        .flush()
+        .await
+        .map_err(|error| error.to_string())?;
+    partial
+        .file_mut()
+        .sync_all()
+        .await
+        .map_err(|error| error.to_string())?;
+    ensure_optional_regular(&cache.directory, &cache.partial_payload_name())?;
+    let metadata_name = cache.partial_metadata_name();
+    cache
+        .directory
+        .rename(partial.name(), &metadata_name)
+        .map_err(|error| error.to_string())?;
+    partial.disarm();
+    cache.directory.sync()?;
+    Ok(())
+}
+
+pub(super) fn discard_partial(cache: &InstallerCache) -> Result<(), String> {
+    cache.directory.remove_file(&cache.partial_payload_name())?;
+    cache
+        .directory
+        .remove_file(&cache.partial_metadata_name())?;
+    cache.directory.sync()?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -265,6 +402,14 @@ pub(super) async fn validate_download(
     validate_open_payload(&mut file, expected_size, None).await
 }
 
+pub(super) async fn validate_partial_payload(
+    payload: &mut tokio::fs::File,
+    expected_size: Option<u64>,
+) -> Result<DownloadedInstaller, CacheValidationError> {
+    validate_open_payload(payload, expected_size, None).await
+}
+
+#[cfg(test)]
 pub(super) async fn validate_temporary_download(
     partial: &mut SecureTemporaryFile,
     expected_size: Option<u64>,
@@ -290,9 +435,20 @@ pub(super) fn metadata_for_download(
     }
 }
 
+#[cfg(test)]
 pub(super) async fn commit(
     cache: &InstallerCache,
     partial: &mut SecureTemporaryFile,
+    metadata: &InstallerCacheMetadata,
+) -> Result<(), String> {
+    commit_named(cache, partial.name(), metadata).await?;
+    partial.disarm();
+    Ok(())
+}
+
+pub(super) async fn commit_named(
+    cache: &InstallerCache,
+    source_name: &str,
     metadata: &InstallerCacheMetadata,
 ) -> Result<(), String> {
     let serialized = serde_json::to_vec_pretty(metadata).map_err(|error| error.to_string())?;
@@ -327,10 +483,7 @@ pub(super) async fn commit(
         .directory
         .random_unused_name("mendimaru-metadata-", ".backup")?;
     let had_installer = move_to_backup(&cache.directory, &cache.installer_name, &installer_backup)?;
-    if let Err(error) = cache
-        .directory
-        .rename(partial.name(), &cache.installer_name)
-    {
+    if let Err(error) = cache.directory.rename(source_name, &cache.installer_name) {
         if had_installer {
             let _ = cache
                 .directory
@@ -338,8 +491,6 @@ pub(super) async fn commit(
         }
         return Err(error);
     }
-    partial.disarm();
-
     let had_metadata =
         match move_to_backup(&cache.directory, &cache.metadata_name, &metadata_backup) {
             Ok(value) => value,

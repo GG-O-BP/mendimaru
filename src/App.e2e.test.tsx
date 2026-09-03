@@ -56,12 +56,19 @@ const mocks = vi.hoisted(() => ({
   uninstallStudioPro: vi.fn(),
   installStudioPro: vi.fn(),
   cancelStudioDownload: vi.fn(),
+  getInstallQueue: vi.fn(),
+  enqueueInstallStudioPro: vi.fn(),
+  cancelInstallQueueItem: vi.fn(),
+  retryInstallQueueItem: vi.fn(),
+  moveInstallQueueItem: vi.fn(),
+  removeInstallQueueItem: vi.fn(),
   getOperations: vi.fn(),
   retryOperation: vi.fn(),
   clearOperationHistory: vi.fn(),
   openOperationLogs: vi.fn(),
   openFolder: vi.fn(),
   onStudioDownloadProgress: vi.fn(),
+  onInstallQueueChanged: vi.fn(),
   onWorkspaceProjectsChanged: vi.fn(),
   openDialog: vi.fn(),
   setWindowTitle: vi.fn(),
@@ -104,12 +111,19 @@ vi.mock("./api/tauri", () => ({
     uninstallStudioPro: mocks.uninstallStudioPro,
     installStudioPro: mocks.installStudioPro,
     cancelStudioDownload: mocks.cancelStudioDownload,
+    enqueueInstallStudioPro: mocks.enqueueInstallStudioPro,
+    getInstallQueue: mocks.getInstallQueue,
+    cancelInstallQueueItem: mocks.cancelInstallQueueItem,
+    retryInstallQueueItem: mocks.retryInstallQueueItem,
+    moveInstallQueueItem: mocks.moveInstallQueueItem,
+    removeInstallQueueItem: mocks.removeInstallQueueItem,
     getOperations: mocks.getOperations,
     retryOperation: mocks.retryOperation,
     clearOperationHistory: mocks.clearOperationHistory,
     openOperationLogs: mocks.openOperationLogs,
     openFolder: mocks.openFolder,
     onStudioDownloadProgress: mocks.onStudioDownloadProgress,
+    onInstallQueueChanged: mocks.onInstallQueueChanged,
     onWorkspaceProjectsChanged: mocks.onWorkspaceProjectsChanged,
   },
 }));
@@ -317,6 +331,16 @@ beforeEach(() => {
   mocks.openOperationLogs.mockResolvedValue(undefined);
   mocks.openFolder.mockResolvedValue(undefined);
   mocks.onStudioDownloadProgress.mockResolvedValue(vi.fn());
+  mocks.getInstallQueue.mockResolvedValue([]);
+  mocks.onInstallQueueChanged.mockResolvedValue(vi.fn());
+  mocks.enqueueInstallStudioPro.mockResolvedValue({
+    id: "install-queue-fixture",
+    version: "11.12.2",
+    forceRedownload: false,
+    state: "queued",
+    createdAt: "2026-09-03T00:00:00Z",
+    updatedAt: "2026-09-03T00:00:00Z",
+  });
   mocks.onWorkspaceProjectsChanged.mockResolvedValue(vi.fn());
   mocks.openDialog.mockResolvedValue(undefined);
   mocks.setWindowTitle.mockResolvedValue(undefined);
@@ -500,7 +524,10 @@ describe("native Windows application E2E", () => {
       }),
     );
     await waitFor(() =>
-      expect(mocks.installStudioPro).toHaveBeenCalledWith("11.13.0", false),
+      expect(mocks.enqueueInstallStudioPro).toHaveBeenCalledWith(
+        "11.13.0",
+        false,
+      ),
     );
 
     const installedCard = screen.getByText("11.12.2").closest("article");
@@ -666,7 +693,10 @@ describe("native Windows application E2E", () => {
     );
 
     await waitFor(() =>
-      expect(mocks.installStudioPro).toHaveBeenCalledWith("11.13.0", true),
+      expect(mocks.enqueueInstallStudioPro).toHaveBeenCalledWith(
+        "11.13.0",
+        true,
+      ),
     );
   });
 
