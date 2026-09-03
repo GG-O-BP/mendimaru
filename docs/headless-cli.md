@@ -22,10 +22,12 @@ mendimaru project version --project-id PROJECT_ID
 mendimaru runtime build --project-id PROJECT_ID [--clean]
 mendimaru runtime start --project-id PROJECT_ID [--clean] [--mode portable]
 mendimaru runtime start --mode studio-run-locally [--studio-session-id STUDIO_SESSION_ID]
+mendimaru runtime list
 mendimaru runtime status --session-id RUNTIME_SESSION_ID
 mendimaru runtime wait --session-id RUNTIME_SESSION_ID
 mendimaru runtime url --session-id RUNTIME_SESSION_ID
 mendimaru runtime stop --session-id RUNTIME_SESSION_ID
+mendimaru runtime forget --session-id RUNTIME_SESSION_ID
 mendimaru runtime logs --session-id RUNTIME_SESSION_ID [--cursor CURSOR]
 mendimaru browser doctor
 mendimaru browser install chromium
@@ -81,7 +83,8 @@ it. Mutation successes also include their persistent operation ID; Studio
 session commands include the Studio session ID when one was selected.
 
 Runtime lifecycle results include an independent `runtimeSessionId`. Runtime
-status, build artifacts, and bounded log batches validate against
+session lists, forget results, status, build artifacts, and bounded log batches
+validate against
 [`runtime.schema.json`](../schemas/runtime.schema.json); see
 [`portable-runtime.md`](portable-runtime.md) for exact-version, readiness,
 cache, licensing, and secret-handling rules, and
@@ -89,6 +92,18 @@ cache, licensing, and secret-handling rules, and
 port forwarding and recovery. Browser installation, suites, policy controls,
 artifacts, and secret handling are documented in
 [`browser-testing.md`](browser-testing.md).
+
+On Linux WinBoat, `runtime list` discovers current and preserved Studio Run
+Locally cache records without returning host paths or Compose locations. Each
+summary contains only the opaque ID, backend, mode, state, safe timestamps and
+ports when present, Studio link, incompatibility reason, and whether the record
+is eligible for explicit invalidation. `runtime forget` is deliberately not a
+stop replacement: current `starting`, `running`, or `ready` records are rejected
+with `precondition_failed`. A stopped/failed or incompatible record is preserved
+as an auditable invalidation and removed from future ID lookup and port reuse.
+Windows native currently reports this cache-management surface as an
+unsupported capability until its native Runtime record lifecycle has the same
+contract.
 
 Exit codes are stable:
 

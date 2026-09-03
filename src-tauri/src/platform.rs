@@ -5,7 +5,8 @@ mod windows_native;
 use crate::contracts::{
     ArtifactDescriptor, BackendId, BackendResult, BrowserTestRequest, BrowserTestSummary,
     CapabilityId, CapabilityManifest, CapabilitySnapshot, RuntimeBuildRequest, RuntimeBuildResult,
-    RuntimeLogBatch, RuntimeStartRequest, RuntimeStatus, StudioSessionStatus,
+    RuntimeForgetResult, RuntimeLogBatch, RuntimeSessionList, RuntimeStartRequest, RuntimeStatus,
+    StudioSessionStatus,
 };
 use crate::models::{
     AppConfig, ContainerStatus, EnvironmentDiagnostic, EnvironmentDiagnosticAction,
@@ -146,6 +147,10 @@ pub async fn start_runtime(
     backend::RuntimeBackend::start(backend::active_backend(config, None)?.as_ref(), request).await
 }
 
+pub async fn runtime_sessions(config: &AppConfig) -> BackendResult<RuntimeSessionList> {
+    backend::RuntimeBackend::runtime_sessions(backend::active_backend(config, None)?.as_ref()).await
+}
+
 pub async fn wait_runtime(config: &AppConfig, session_id: &str) -> BackendResult<RuntimeStatus> {
     backend::RuntimeBackend::wait(backend::active_backend(config, None)?.as_ref(), session_id).await
 }
@@ -165,6 +170,14 @@ pub async fn stop_runtime(config: &AppConfig, session_id: &str) -> BackendResult
         session_id,
     )
     .await
+}
+
+pub async fn forget_runtime(
+    config: &AppConfig,
+    session_id: &str,
+) -> BackendResult<RuntimeForgetResult> {
+    backend::RuntimeBackend::forget(backend::active_backend(config, None)?.as_ref(), session_id)
+        .await
 }
 
 pub async fn runtime_logs(

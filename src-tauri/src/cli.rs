@@ -67,6 +67,7 @@ enum CliCommand {
         studio_session_id: Option<String>,
         guest_port: Option<u16>,
     },
+    RuntimeList,
     RuntimeStatus {
         session_id: String,
     },
@@ -77,6 +78,9 @@ enum CliCommand {
         session_id: String,
     },
     RuntimeStop {
+        session_id: String,
+    },
+    RuntimeForget {
         session_id: String,
     },
     RuntimeLogs {
@@ -121,10 +125,12 @@ impl CliCommand {
             Self::StudioStop { .. } => "studio.stop",
             Self::RuntimeBuild { .. } => "runtime.build",
             Self::RuntimeStart { .. } => "runtime.start",
+            Self::RuntimeList => "runtime.list",
             Self::RuntimeStatus { .. } => "runtime.status",
             Self::RuntimeWait { .. } => "runtime.wait",
             Self::RuntimeUrl { .. } => "runtime.url",
             Self::RuntimeStop { .. } => "runtime.stop",
+            Self::RuntimeForget { .. } => "runtime.forget",
             Self::RuntimeLogs { .. } => "runtime.logs",
             Self::BrowserDoctor => "browser.doctor",
             Self::BrowserInstallChromium => "browser.install",
@@ -468,7 +474,7 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
         (Some("runtime"), None) => Some(
             "Usage: mendimaru runtime COMMAND\n\
              \n\
-             Commands: build, start, status, wait, url, stop, logs",
+             Commands: build, start, list, status, wait, url, stop, forget, logs",
         ),
         (Some("runtime"), Some("build")) => Some(
             "Usage: mendimaru runtime build --project-id PROJECT_ID [--clean]\n\
@@ -489,6 +495,11 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
              \n\
              Reports the Runtime session state and forwarded port information.",
         ),
+        (Some("runtime"), Some("list")) => Some(
+            "Usage: mendimaru runtime list\n\
+             \n\
+             Lists persisted Runtime session records without exposing paths.",
+        ),
         (Some("runtime"), Some("wait")) => Some(
             "Usage: mendimaru runtime wait --session-id RUNTIME_SESSION_ID\n\
              \n\
@@ -503,6 +514,11 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
             "Usage: mendimaru runtime stop --session-id RUNTIME_SESSION_ID\n\
              \n\
              Stops the Runtime session and restores any managed port forwarding.",
+        ),
+        (Some("runtime"), Some("forget")) => Some(
+            "Usage: mendimaru runtime forget --session-id RUNTIME_SESSION_ID\n\
+             \n\
+             Explicitly invalidates a stopped, failed, or incompatible record.",
         ),
         (Some("runtime"), Some("logs")) => Some(
             "Usage: mendimaru runtime logs --session-id RUNTIME_SESSION_ID [--cursor CURSOR]\n\
@@ -632,10 +648,12 @@ Commands:
   studio stop --session-id ID      Stop a Studio session
   runtime build --project-id ID   Build a portable Runtime package
   runtime start [...]             Start Runtime (portable or Studio Run Locally)
+  runtime list                    List persisted Runtime sessions
   runtime status --session-id ID  Report a Runtime session
   runtime wait --session-id ID    Wait for Runtime readiness
   runtime url --session-id ID     Print a readiness-verified Runtime URL
   runtime stop --session-id ID    Stop a Runtime session
+  runtime forget --session-id ID  Forget a stopped or incompatible record
   runtime logs --session-id ID    Read bounded Runtime diagnostic logs
   browser doctor                  Check the browser test toolchain
   browser install chromium        Install the pinned Chromium test browser
@@ -922,6 +940,9 @@ async fn run_command(
             output.runtime_session_id = Some(session_id.clone());
             Ok(output)
         }
+        CliCommand::RuntimeList => {
+            CommandOutput::data(crate::application::runtime_sessions(&config).await?)
+        }
         CliCommand::RuntimeWait { session_id } => {
             let status = crate::application::runtime_wait(&config, session_id).await?;
             let mut output = CommandOutput::data(status)?;
@@ -937,6 +958,12 @@ async fn run_command(
         CliCommand::RuntimeStop { session_id } => {
             crate::application::runtime_stop(&config, session_id).await?;
             let mut output = CommandOutput::data(json!({ "completed": true }))?;
+            output.runtime_session_id = Some(session_id.clone());
+            Ok(output)
+        }
+        CliCommand::RuntimeForget { session_id } => {
+            let result = crate::application::runtime_forget(&config, session_id).await?;
+            let mut output = CommandOutput::data(result)?;
             output.runtime_session_id = Some(session_id.clone());
             Ok(output)
         }
@@ -1889,6 +1916,7 @@ fn parse_runtime_command(values: &[String]) -> Result<CliCommand, BackendError> 
         Some("status") => Ok(CliCommand::RuntimeStatus {
             session_id: required_option(&values[1..], "--session-id")?,
         }),
+        Some("list") if values.len() == 1 => Ok(CliCommand::RuntimeList),
         Some("wait") => Ok(CliCommand::RuntimeWait {
             session_id: required_option(&values[1..], "--session-id")?,
         }),
@@ -1896,6 +1924,9 @@ fn parse_runtime_command(values: &[String]) -> Result<CliCommand, BackendError> 
             session_id: required_option(&values[1..], "--session-id")?,
         }),
         Some("stop") => Ok(CliCommand::RuntimeStop {
+            session_id: required_option(&values[1..], "--session-id")?,
+        }),
+        Some("forget") => Ok(CliCommand::RuntimeForget {
             session_id: required_option(&values[1..], "--session-id")?,
         }),
         Some("logs") => {
@@ -1906,7 +1937,7 @@ fn parse_runtime_command(values: &[String]) -> Result<CliCommand, BackendError> 
             })
         }
         _ => Err(BackendError::invalid_request(
-            "expected runtime build, start, status, wait, url, stop, or logs",
+            "expected runtime build, start, list, status, wait, url, stop, forget, or logs",
         )),
     }
 }
@@ -2462,10 +2493,12 @@ mod tests {
             vec!["runtime"],
             vec!["runtime", "build"],
             vec!["runtime", "start"],
+            vec!["runtime", "list"],
             vec!["runtime", "status"],
             vec!["runtime", "wait"],
             vec!["runtime", "url"],
             vec!["runtime", "stop"],
+            vec!["runtime", "forget"],
             vec!["runtime", "logs"],
             vec!["browser"],
             vec!["browser", "doctor"],
@@ -2782,6 +2815,13 @@ mod tests {
                 "--session-id",
                 "studio-1-700000000000000000",
             ]),
+            args(&["runtime", "list"]),
+            args(&[
+                "runtime",
+                "forget",
+                "--session-id",
+                &format!("runtime_{}", "e".repeat(32)),
+            ]),
             args(&["project", "list"]),
             args(&[
                 "project",
@@ -2833,6 +2873,7 @@ mod tests {
             args(&["project", "version"]),
             args(&["env", "ensure", "--json", "--ndjson"]),
             args(&["operation", "cancel", "--operation-id", "x"]),
+            args(&["runtime", "list", "--refresh"]),
             args(&["studio", "list", "--timeout-seconds", "0"]),
             args(&[
                 "browser",

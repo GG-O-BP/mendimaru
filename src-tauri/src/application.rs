@@ -2,8 +2,8 @@ use crate::app_paths::AppPaths;
 use crate::contracts::{
     ArtifactDescriptor, BackendError, BackendErrorCode, BackendId, BrowserRuntimeContext,
     BrowserTestPolicy, BrowserTestRequest, BrowserTestSummary, CapabilityId, CapabilityLimitation,
-    RuntimeBuildRequest, RuntimeBuildResult, RuntimeLogBatch, RuntimeMode, RuntimeStartRequest,
-    RuntimeStatus, StudioSessionStatus,
+    RuntimeBuildRequest, RuntimeBuildResult, RuntimeForgetResult, RuntimeLogBatch, RuntimeMode,
+    RuntimeSessionList, RuntimeStartRequest, RuntimeStatus, StudioSessionStatus,
 };
 use crate::downloads::{DownloadCancellation, InstallError};
 use crate::models::{
@@ -300,6 +300,12 @@ pub(crate) async fn runtime_start(
     Ok((build, status))
 }
 
+pub(crate) async fn runtime_sessions(config: &AppConfig) -> ApplicationResult<RuntimeSessionList> {
+    crate::platform::runtime_sessions(config)
+        .await
+        .map_err(CommandError::from)
+}
+
 pub(crate) async fn runtime_status(
     config: &AppConfig,
     session_id: &str,
@@ -326,6 +332,15 @@ pub(crate) async fn runtime_url(config: &AppConfig, session_id: &str) -> Applica
 
 pub(crate) async fn runtime_stop(config: &AppConfig, session_id: &str) -> ApplicationResult<()> {
     crate::platform::stop_runtime(config, session_id)
+        .await
+        .map_err(CommandError::from)
+}
+
+pub(crate) async fn runtime_forget(
+    config: &AppConfig,
+    session_id: &str,
+) -> ApplicationResult<RuntimeForgetResult> {
+    crate::platform::forget_runtime(config, session_id)
         .await
         .map_err(CommandError::from)
 }

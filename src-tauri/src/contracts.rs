@@ -695,6 +695,44 @@ pub struct RuntimeStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct RuntimeSessionSummary {
+    pub session_id: String,
+    pub backend: BackendId,
+    pub mode: RuntimeMode,
+    pub state: RuntimeState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guest_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub studio_session_id: Option<String>,
+    pub incompatible_record: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub incompatibility_reason: Option<String>,
+    pub forget_eligible: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeSessionList {
+    pub schema_version: String,
+    pub sessions: Vec<RuntimeSessionSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeForgetResult {
+    pub schema_version: String,
+    pub session_id: String,
+    pub forgotten: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeLogBatch {
     pub session_id: String,
     pub entries: Vec<String>,

@@ -9,6 +9,8 @@
   "oneOf": [
     { "$ref": "#/$defs/buildResult" },
     { "$ref": "#/$defs/status" },
+    { "$ref": "#/$defs/sessionList" },
+    { "$ref": "#/$defs/forgetResult" },
     { "$ref": "#/$defs/logBatch" }
   ],
   "$defs": {
@@ -147,6 +149,80 @@
           }
         }
       ]
+    },
+    "sessionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "backend",
+        "mode",
+        "state",
+        "incompatibleRecord",
+        "forgetEligible"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "pattern": "^runtime_[0-9a-f]{32}$"
+        },
+        "backend": {
+          "enum": ["linux-winboat", "windows-native", "mac-native"]
+        },
+        "mode": {
+          "enum": ["portable", "studio-run-locally", "external-url"]
+        },
+        "state": {
+          "enum": ["starting", "running", "ready", "stopped", "failed"]
+        },
+        "runtimeVersion": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "hostPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "guestPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "studioSessionId": {
+          "type": "string",
+          "pattern": "^studio-[1-9][0-9]*-[1-9][0-9]*$"
+        },
+        "incompatibleRecord": { "type": "boolean" },
+        "incompatibilityReason": {
+          "type": "string",
+          "enum": [
+            "schema_version_mismatch",
+            "session_identity_mismatch",
+            "backend_mismatch",
+            "mode_mismatch",
+            "record_invalid",
+            "explicit_forget"
+          ]
+        },
+        "forgetEligible": { "type": "boolean" }
+      }
+    },
+    "sessionList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "sessions"],
+      "properties": {
+        "schemaVersion": { "const": "4.0.0" },
+        "sessions": {
+          "type": "array",
+          "maxItems": 1024,
+          "items": { "$ref": "#/$defs/sessionSummary" }
+        }
+      }
+    },
+    "forgetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "sessionId", "forgotten"],
+      "properties": {
+        "schemaVersion": { "const": "4.0.0" },
+        "sessionId": {
+          "type": "string",
+          "pattern": "^runtime_[0-9a-f]{32}$"
+        },
+        "forgotten": { "type": "boolean" }
+      }
     },
     "logBatch": {
       "type": "object",
