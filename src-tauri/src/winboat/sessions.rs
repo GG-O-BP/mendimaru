@@ -213,9 +213,23 @@ pub(crate) async fn stop(
         false,
     )
     .await?;
+    let _ = super::project_locks::remove_dead_process_lock(
+        Path::new(&config.shared_directory),
+        identity.process_id,
+    );
     project_access::forget_protected_session(config, session_id);
     disconnect_client(session_id);
     Ok(())
+}
+
+pub(crate) fn cleanup_dead_session_lock(config: &AppConfig, session_id: &str) {
+    let Ok(identity) = parse_session_id(session_id) else {
+        return;
+    };
+    let _ = super::project_locks::remove_dead_process_lock(
+        Path::new(&config.shared_directory),
+        identity.process_id,
+    );
 }
 
 pub(super) struct LaunchClientRegistration<'a> {
@@ -633,6 +647,7 @@ struct StudioStopControl<'a> {
 pub(crate) async fn stop_registered_client(
     session_id: &str,
 ) -> Result<bool, WindowsOperationFailure> {
+    let identity = parse_session_id(session_id)?;
     let mut client = {
         let mut clients = clients()?;
         clients.retain(|_, client| match client.process.try_wait() {
@@ -660,6 +675,12 @@ pub(crate) async fn stop_registered_client(
 
     let result = stop_registered_client_inner(session_id, &mut client).await;
     if result.is_ok() {
+        if let Some(project_access) = &client.project_access {
+            let _ = super::project_locks::remove_dead_process_lock(
+                project_access._lease.host_project_directory(),
+                identity.process_id,
+            );
+        }
         forget_registered_project_session(session_id, &client);
         if let Ok(mut stopping) = stopping_sessions() {
             stopping.remove(session_id);
