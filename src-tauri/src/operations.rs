@@ -882,7 +882,13 @@ fn failure_classification(error: &CommandError) -> (&'static str, bool) {
         CommandErrorCode::RuntimeBuildFailed => ("runtime_build_failed", false),
         CommandErrorCode::RuntimeInitializationFailed => ("runtime_initialization_failed", false),
         CommandErrorCode::RuntimeReadinessTimeout => ("runtime_readiness_timeout", true),
-        CommandErrorCode::RuntimeSessionNotFound => ("runtime_session_not_found", false),
+        CommandErrorCode::RuntimeSessionNotFound => (
+            "runtime_session_not_found",
+            error
+                .details
+                .as_ref()
+                .is_some_and(|details| details.retryable),
+        ),
         CommandErrorCode::RuntimeExited => ("runtime_exited", false),
         CommandErrorCode::RuntimeGuestOffline => ("runtime_guest_offline", true),
         CommandErrorCode::RuntimePortConflict => ("runtime_port_conflict", true),
@@ -1008,8 +1014,8 @@ fn remove_active(history_path: &Path, id: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{OperationTracker, SessionActionGuard};
-    use crate::contracts::{BackendError, BackendId, CapabilityId};
+    use super::{failure_classification, OperationTracker, SessionActionGuard};
+    use crate::contracts::{BackendError, BackendErrorCode, BackendId, CapabilityId};
     use crate::models::{
         AppConfig, CommandError, CommandErrorCode, ContainerRuntime, OperationKind, OperationStage,
         OperationState,
@@ -1036,6 +1042,31 @@ mod tests {
             windows_studio_paths: Vec::new(),
             startup_timeout_seconds: 180,
         }
+    }
+
+    #[test]
+    fn runtime_session_absence_is_retryable_only_after_recorded_recovery() {
+        let plain = CommandError::new(
+            CommandErrorCode::RuntimeSessionNotFound,
+            "fixture".to_string(),
+        );
+        assert_eq!(
+            failure_classification(&plain),
+            ("runtime_session_not_found", false)
+        );
+
+        let mut backend_error = BackendError::operation(
+            BackendId::LinuxWinboat,
+            CapabilityId::StudioStart,
+            "fixture",
+        );
+        backend_error.code = BackendErrorCode::RuntimeSessionNotFound;
+        backend_error.retryable = true;
+        let recovered = CommandError::from(backend_error);
+        assert_eq!(
+            failure_classification(&recovered),
+            ("runtime_session_not_found", true)
+        );
     }
 
     fn history_path(config: &AppConfig) -> PathBuf {
