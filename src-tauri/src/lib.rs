@@ -13,6 +13,7 @@ mod downloads;
 #[cfg(feature = "e2e")]
 mod e2e;
 mod i18n;
+mod install_queue_host;
 mod marketplace;
 pub mod models;
 mod operations;
@@ -30,6 +31,8 @@ mod winboat;
 
 use commands::*;
 use downloads::InstallQueue;
+use install_queue_host::TauriInstallQueueHost;
+use std::sync::Arc;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -46,7 +49,7 @@ pub fn run() {
                 let _ = operations::list(app.handle(), &config);
             }
             let queue = app.state::<InstallQueue>();
-            queue.set_app(app.handle().clone());
+            queue.set_host(Arc::new(TauriInstallQueueHost::new(app.handle().clone())));
             if let Ok(paths) = app_paths::AppPaths::from_app(app.handle()) {
                 if let Err(error) =
                     queue.restore(paths.config_directory().join("install-queue.json"))

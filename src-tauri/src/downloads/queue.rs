@@ -2,6 +2,8 @@ use super::DownloadCancellation;
 use crate::models::{InstallQueueItem, InstallQueueState};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
@@ -10,6 +12,17 @@ const MAX_QUEUE_ITEMS: usize = 32;
 const MAX_QUEUE_STORE_BYTES: u64 = 256 * 1024;
 
 pub const INSTALL_QUEUE_EVENT: &str = "install-queue-changed";
+
+pub type InstallQueueWorker = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+pub trait InstallQueueHost: Send + Sync + 'static {
+    fn emit_download_progress(&self, progress: crate::models::DownloadProgress);
+    fn emit_queue_changed(&self, items: Vec<InstallQueueItem>);
+    fn install_context(
+        &self,
+    ) -> Result<(crate::app_paths::AppPaths, crate::models::AppConfig), String>;
+    fn spawn_worker(&self, worker: InstallQueueWorker);
+}
 
 #[derive(Default)]
 pub struct InstallQueue {
@@ -28,9 +41,9 @@ impl InstallQueue {
         queue
     }
 
-    pub fn set_app(&self, app: tauri::AppHandle) {
+    pub fn set_host(&self, host: Arc<dyn InstallQueueHost>) {
         if let Ok(mut state) = self.lock_state() {
-            state.app = Some(app);
+            state.host = Some(host);
         }
     }
 
@@ -293,20 +306,27 @@ impl InstallQueue {
         if !self.inner.worker_enabled.load(Ordering::SeqCst) {
             return;
         }
+        let Some(host) = self
+            .inner
+            .state
+            .lock()
+            .ok()
+            .and_then(|state| state.host.clone())
+        else {
+            return;
+        };
         if self.inner.running.swap(true, Ordering::SeqCst) {
             return;
         }
         let inner = Arc::clone(&self.inner);
-        tauri::async_runtime::spawn(async move {
-            worker_loop(inner).await;
-        });
+        host.spawn_worker(Box::pin(worker_loop(inner)));
     }
 }
 
 fn begin_next(inner: &QueueInner) -> Option<(InstallQueueItem, Arc<DownloadCancellation>)> {
     {
-        let app = inner.state.lock().ok().and_then(|state| state.app.clone());
         let mut state = inner.state.lock().ok()?;
+        let host = state.host.clone();
         let index = state
             .items
             .iter()
@@ -326,7 +346,9 @@ fn begin_next(inner: &QueueInner) -> Option<(InstallQueueItem, Arc<DownloadCance
         }
         drop(state);
         let _ = inner.watch.send(snapshot.clone());
-        emit_snapshot(app.as_ref(), &snapshot);
+        if let Some(host) = host {
+            host.emit_queue_changed(snapshot);
+        }
         Some((item, cancellation))
     }
 }
@@ -342,6 +364,7 @@ fn finish_current(
         let Ok(mut state) = inner.state.lock() else {
             return;
         };
+        let host = state.host.clone();
         state.current = None;
         if let Some(item) = state.items.iter_mut().find(|item| item.id == item_id) {
             item.state = state_result;
@@ -364,8 +387,9 @@ fn finish_current(
         }
         drop(state);
         let _ = inner.watch.send(snapshot.clone());
-        let app = state_app(inner);
-        emit_snapshot(app.as_ref(), &snapshot);
+        if let Some(host) = host {
+            host.emit_queue_changed(snapshot);
+        }
     }
 }
 
@@ -374,6 +398,7 @@ fn update_progress(inner: &QueueInner, item_id: &str, progress: &crate::models::
         let Ok(mut state) = inner.state.lock() else {
             return;
         };
+        let host = state.host.clone();
         let Some(item) = state.items.iter_mut().find(|item| item.id == item_id) else {
             return;
         };
@@ -390,51 +415,14 @@ fn update_progress(inner: &QueueInner, item_id: &str, progress: &crate::models::
         item.percentage = progress.percentage;
         item.message = Some(progress.message.clone());
         item.updated_at = Utc::now();
+        let progress = progress.clone();
         let snapshot = state.items.clone();
         drop(state);
         let _ = inner.watch.send(snapshot.clone());
-        let app = state_app(inner);
-        emit_snapshot(app.as_ref(), &snapshot);
-        if let Some(app) = app {
-            let _ = tauri::Emitter::emit(
-                &app,
-                super::DOWNLOAD_EVENT,
-                crate::models::DownloadProgress {
-                    version: progress_version(inner, item_id),
-                    state: progress.state,
-                    downloaded_bytes: progress.downloaded_bytes,
-                    total_bytes: progress.total_bytes,
-                    percentage: progress.percentage,
-                    estimated: progress.estimated,
-                    message: progress.message.clone(),
-                },
-            );
+        if let Some(host) = host {
+            host.emit_queue_changed(snapshot);
+            host.emit_download_progress(progress);
         }
-    }
-}
-
-fn state_app(inner: &QueueInner) -> Option<tauri::AppHandle> {
-    inner.state.lock().ok().and_then(|state| state.app.clone())
-}
-
-fn progress_version(inner: &QueueInner, item_id: &str) -> String {
-    inner
-        .state
-        .lock()
-        .ok()
-        .and_then(|state| {
-            state
-                .items
-                .iter()
-                .find(|item| item.id == item_id)
-                .map(|item| item.version.clone())
-        })
-        .unwrap_or_default()
-}
-
-fn emit_snapshot(app: Option<&tauri::AppHandle>, items: &[InstallQueueItem]) {
-    if let Some(app) = app {
-        let _ = tauri::Emitter::emit(app, INSTALL_QUEUE_EVENT, items.to_vec());
     }
 }
 
@@ -447,7 +435,7 @@ struct QueueState {
     items: Vec<InstallQueueItem>,
     store_path: Option<std::path::PathBuf>,
     current: Option<CurrentInstall>,
-    app: Option<tauri::AppHandle>,
+    host: Option<Arc<dyn InstallQueueHost>>,
 }
 
 struct QueueInner {
@@ -465,7 +453,7 @@ impl Default for QueueInner {
                 items: Vec::new(),
                 store_path: None,
                 current: None,
-                app: None,
+                host: None,
             }),
             watch,
             running: AtomicBool::new(false),
@@ -588,17 +576,13 @@ async fn process_item(
     retry_of: Option<String>,
     cancellation: &Arc<DownloadCancellation>,
 ) -> Result<String, QueueInstallError> {
-    let app = inner
+    let host = inner
         .state
         .lock()
         .ok()
-        .and_then(|state| state.app.clone())
-        .ok_or_else(|| {
-            QueueInstallError::Failed("the install queue has no application handle".to_string())
-        })?;
-    let paths = crate::app_paths::AppPaths::from_app(&app).map_err(QueueInstallError::Failed)?;
-    let config = crate::application::load_config(&paths)
-        .map_err(|error| QueueInstallError::Failed(error.message))?;
+        .and_then(|state| state.host.clone())
+        .ok_or_else(|| QueueInstallError::Failed("the install queue has no host".to_string()))?;
+    let (paths, config) = host.install_context().map_err(QueueInstallError::Failed)?;
     let progress_inner = Arc::clone(inner);
     let progress_item_id = item_id.to_string();
     let result = crate::application::execute_install(

@@ -4,7 +4,7 @@ mod progress;
 mod queue;
 pub(crate) mod storage;
 pub(crate) use progress::DOWNLOAD_EVENT;
-pub use queue::InstallQueue;
+pub(crate) use queue::{InstallQueue, InstallQueueHost, InstallQueueWorker, INSTALL_QUEUE_EVENT};
 
 use crate::app_paths::AppPaths;
 use crate::contracts::BackendError;
