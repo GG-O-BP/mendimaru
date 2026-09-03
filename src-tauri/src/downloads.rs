@@ -21,7 +21,7 @@ use reqwest::header::{CONTENT_RANGE, ETAG, IF_RANGE, LAST_MODIFIED, RANGE};
 use reqwest::{redirect, Url};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 pub(crate) const MAX_INSTALLER_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_DOWNLOAD_REDIRECTS: usize = 5;
@@ -431,6 +431,10 @@ where
             .await
             .map_err(|error| crate::tr!("error-installer-flush", error = error))?;
     }
+    payload
+        .seek(std::io::SeekFrom::Start(resume_offset))
+        .await
+        .map_err(|error| crate::tr!("error-installer-write", error = error))?;
 
     let mut received: u64 = 0;
     let mut stream = response.bytes_stream();

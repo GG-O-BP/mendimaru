@@ -94,8 +94,6 @@ impl SecureDirectory {
 
     fn open_new_file(&self, name: &str) -> io::Result<cap_std::fs::File> {
         let mut options = OpenOptions::new();
-        // `write` is required alongside `append` so Windows permits the safe
-        // truncation used when a stable payload is longer than its metadata.
         options
             .read(true)
             .write(true)
@@ -118,10 +116,11 @@ impl SecureDirectory {
     pub(crate) fn open_or_create_payload(&self, name: &str) -> Result<tokio::fs::File, String> {
         validate_direct_name(name)?;
         let mut options = OpenOptions::new();
+        // Random-access write access permits safe truncation on Windows when
+        // a stable payload is longer than its verified metadata.
         options
             .read(true)
             .write(true)
-            .append(true)
             .create(true)
             .follow(FollowSymlinks::No);
         #[cfg(unix)]
@@ -396,9 +395,10 @@ mod tests {
         payload.write_all(b"abc").await.expect("append bytes");
         payload.set_len(1).await.expect("truncate stale tail");
         payload
-            .write_all(b"Z")
+            .seek(std::io::SeekFrom::End(0))
             .await
-            .expect("append after truncate");
+            .expect("seek resume offset");
+        payload.write_all(b"Z").await.expect("write after truncate");
         payload.rewind().await.expect("rewind payload");
         let mut contents = Vec::new();
         payload
