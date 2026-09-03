@@ -1,9 +1,10 @@
 use crate::contracts::{
     ArtifactDescriptor, BackendError, BackendId, BackendResult, BrowserTestRequest,
     BrowserTestSummary, Capability, CapabilityId, CapabilityLimitation, CapabilityManifest,
-    PlatformId, RuntimeBuildRequest, RuntimeBuildResult, RuntimeLogBatch, RuntimeStartRequest,
-    RuntimeStatus, StudioSessionStatus, UiActionRequest, UiAutomationCapabilities, UiElement,
-    UiFindRequest, UiTree, UiWaitRequest, CONTRACT_SCHEMA_VERSION,
+    PlatformId, RuntimeBuildRequest, RuntimeBuildResult, RuntimeForgetResult, RuntimeLogBatch,
+    RuntimeSessionList, RuntimeStartRequest, RuntimeStatus, StudioSessionStatus, UiActionRequest,
+    UiAutomationCapabilities, UiElement, UiFindRequest, UiTree, UiWaitRequest,
+    CONTRACT_SCHEMA_VERSION,
 };
 use crate::models::{AppConfig, StudioInstallProgress, StudioVersion};
 use crate::process::CancellationToken;
@@ -81,6 +82,10 @@ pub trait RuntimeBackend: BackendIdentity {
         unsupported(self.backend_id(), CapabilityId::RuntimeStart)
     }
 
+    fn runtime_sessions(&self) -> BackendFuture<'_, RuntimeSessionList> {
+        unsupported(self.backend_id(), CapabilityId::RuntimeStatus)
+    }
+
     fn status<'a>(&'a self, _session_id: &'a str) -> BackendFuture<'a, RuntimeStatus> {
         unsupported(self.backend_id(), CapabilityId::RuntimeStatus)
     }
@@ -94,6 +99,10 @@ pub trait RuntimeBackend: BackendIdentity {
     }
 
     fn stop<'a>(&'a self, _session_id: &'a str) -> BackendFuture<'a, ()> {
+        unsupported(self.backend_id(), CapabilityId::RuntimeStop)
+    }
+
+    fn forget<'a>(&'a self, _session_id: &'a str) -> BackendFuture<'a, RuntimeForgetResult> {
         unsupported(self.backend_id(), CapabilityId::RuntimeStop)
     }
 
@@ -519,7 +528,7 @@ impl StudioBackend for LinuxWinboatBackend<'_> {
 
     fn status<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, StudioSessionStatus> {
         Box::pin(async move {
-            self.sessions()
+            StudioBackend::sessions(self)
                 .await?
                 .into_iter()
                 .find(|session| session.session_id == session_id)
@@ -579,6 +588,10 @@ impl RuntimeBackend for LinuxWinboatBackend<'_> {
         }
     }
 
+    fn runtime_sessions(&self) -> BackendFuture<'_, RuntimeSessionList> {
+        Box::pin(async move { crate::winboat::runtime::list_sessions() })
+    }
+
     fn status<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, RuntimeStatus> {
         if crate::winboat::runtime::session_exists(session_id) {
             Box::pin(crate::winboat::runtime::status(self.config, session_id))
@@ -612,6 +625,10 @@ impl RuntimeBackend for LinuxWinboatBackend<'_> {
         } else {
             Box::pin(crate::portable_runtime::stop(session_id, self.backend_id()))
         }
+    }
+
+    fn forget<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, RuntimeForgetResult> {
+        Box::pin(async move { crate::winboat::runtime::forget_session(session_id) })
     }
 
     fn logs<'a>(
