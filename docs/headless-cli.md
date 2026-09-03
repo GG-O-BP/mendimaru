@@ -104,6 +104,12 @@ Responses validate against
 progress events validate against
 [`cli-event.schema.json`](../schemas/cli-event.schema.json). Backend errors use
 [`backend-error.schema.json`](../schemas/backend-error.schema.json).
+Sanitization replaces free-form backend messages with code-specific safe text,
+but it preserves the structured cause code and retry policy. For example, a
+WinBoat launch that cannot link a Runtime record reports
+`runtime_session_not_found`, not a generic `operation_failed`; timeout,
+cancellation, and external-process interruption codes also remain distinct.
+Exit code `1` still covers all of these operational failures.
 
 ## Polling and lightweight status
 
