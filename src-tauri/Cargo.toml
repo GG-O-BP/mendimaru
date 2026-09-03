@@ -1,6 +1,6 @@
 [package]
 name = "mendimaru"
-version = "0.2.2"
+version = "0.3.0"
 description = "Manage Mendix Studio Pro natively on Windows or through WinBoat on Linux"
 authors = ["mendimaru contributors"]
 license = "MIT"
