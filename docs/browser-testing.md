@@ -41,7 +41,7 @@ Exactly one target is required:
 
 ```bash
 mendimaru browser test \
-  --base-url http://127.0.0.1:8080/ \
+  --base-url http://localhost:8080/ \
   --suite-path tests/browser/smoke.browser.json \
   --fail-on-console-error \
   --fail-on-network-failure \

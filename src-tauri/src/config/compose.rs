@@ -281,7 +281,7 @@ pub(crate) fn ensure_runtime_port_mapping(
         .ok_or_else(|| "the WinBoat Compose ports value is invalid".to_string())?;
     let expected = RuntimePortMapping {
         host_ip: LOOPBACK_IPV4.to_string(),
-        host_port: None,
+        host_port: Some(guest_port),
         guest_port,
         protocol: "tcp".to_string(),
     };
@@ -296,7 +296,9 @@ pub(crate) fn ensure_runtime_port_mapping(
     ports.retain(|entry| {
         parse_port_mapping(entry).is_none_or(|mapping| mapping.guest_port != guest_port)
     });
-    ports.push(Value::String(format!("{LOOPBACK_IPV4}::{guest_port}/tcp")));
+    ports.push(Value::String(format!(
+        "{LOOPBACK_IPV4}:{guest_port}:{guest_port}/tcp"
+    )));
 
     let storage_after = mapping
         .get(Value::String("volumes".to_string()))
@@ -1064,7 +1066,7 @@ mod tests {
     }
 
     #[test]
-    fn adds_only_a_dynamic_loopback_runtime_mapping_and_preserves_storage() {
+    fn adds_only_a_fixed_loopback_runtime_mapping_and_preserves_storage() {
         let temporary = tempfile::tempdir().expect("temp dir");
         let compose = temporary.path().join("docker-compose.yml");
         fs::write(
@@ -1076,14 +1078,14 @@ mod tests {
         assert!(ensure_runtime_port_mapping(&compose, 8080).expect("add mapping"));
         let updated = fs::read_to_string(&compose).expect("read compose");
         assert!(updated.contains("winboat-data:/storage"));
-        assert!(updated.contains("127.0.0.1::8080/tcp"));
+        assert!(updated.contains("127.0.0.1:8080:8080/tcp"));
         assert!(!updated.contains("0.0.0.0:8080:8080"));
         assert!(!ensure_runtime_port_mapping(&compose, 8080).expect("mapping is stable"));
         let mapping = runtime_port_mapping(&compose, 8080)
             .expect("inspect mapping")
             .expect("mapping exists");
         assert_eq!(mapping.host_ip, "127.0.0.1");
-        assert_eq!(mapping.host_port, None);
+        assert_eq!(mapping.host_port, Some(8080));
         assert_eq!(mapping.guest_port, 8080);
     }
 

@@ -158,7 +158,10 @@ function streamCompressibleResponse(response, totalBytes, complete) {
   write();
 }
 
-server.listen(0, "127.0.0.1", () => {
+const requestedPort = Number.parseInt(process.argv[2] ?? "", 10);
+const listenPort =
+  Number.isInteger(requestedPort) && requestedPort > 0 ? requestedPort : 0;
+server.listen(listenPort, "127.0.0.1", () => {
   const address = server.address();
   process.stdout.write(`${JSON.stringify({ port: address.port })}\n`);
 });

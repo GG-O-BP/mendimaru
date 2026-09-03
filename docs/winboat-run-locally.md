@@ -10,11 +10,14 @@ mendimaru runtime wait --session-id RUNTIME_SESSION_ID --json
 mendimaru runtime url --session-id RUNTIME_SESSION_ID --json
 ```
 
-The default Windows guest Runtime port is `8080`. Use `--guest-port PORT` only
-when the Studio Pro project is explicitly configured to listen on another port.
-The option accepts 1024 through 65535. The Linux host port is never supplied by
-the caller: Compose asks Docker or Podman for a dynamic port and binds it to
-`127.0.0.1` only.
+The default Studio Pro Runtime port is `8080`. There is no manual Runtime-port
+CLI option. When `--studio-session-id` is supplied, Mendimaru reads
+`MXCONSOLE_RUNTIME_PORT` from that Studio project's bounded `.launch` settings.
+Without a session, it uses the workspace `.launch` ports when every discovered
+project agrees, and falls back to `8080` when no project publishes a port.
+Conflicting workspace ports are rejected instead of guessing. Compose always
+uses the same loopback address and port: `127.0.0.1:<port>:<port>/tcp`, and the
+browser-facing URL is always `http://localhost:<port>/`.
 
 ## Start and readiness sequence
 
@@ -23,14 +26,20 @@ the caller: Compose asks Docker or Podman for a dynamic port and binds it to
 1. Require a healthy WinBoat Guest API and a direct, bounded Compose file.
 2. Capture a private `0600` copy of the original Compose file and the current
    `/storage` mount identity.
-3. Replace any stale or public mapping for the guest Runtime port with
-   `127.0.0.1::<guest-port>/tcp`. Other ports and volumes are unchanged.
+3. Replace any stale, dynamic, or public mapping for the Studio Runtime port
+   with `127.0.0.1:<port>:<port>/tcp`. Other ports and volumes are unchanged.
 4. Recreate WinBoat only when the Compose mapping changed, wait for the guest,
    verify that `/storage` still identifies the same volume, and inspect the
-   container for the actual dynamic host port.
-5. Probe the resulting `http://127.0.0.1:<host-port>` URL. A TCP mapping alone
+   container for the expected fixed host port.
+5. Probe the resulting `http://127.0.0.1:<port>` endpoint. A TCP mapping alone
    is not readiness. The status remains `starting` or `running` and omits `url`
    until an HTTP response below 500 is received.
+
+The published URL uses `localhost` so it matches the address Studio Pro users
+expect. Backend readiness probes pin `127.0.0.1` explicitly because Compose
+publishes only the IPv4 loopback address; Chromium and other browsers fall back
+from `::1` to `127.0.0.1` automatically, and this behavior is covered by the
+browser E2E suite.
 
 This split accommodates the interactive Studio Pro **Run Locally** action.
 Prepare the Runtime session first when Compose does not yet contain the
@@ -43,9 +52,9 @@ the identity is ambiguous.
 `RuntimeStatus` reports `backend=linux-winboat`,
 `mode=studio-run-locally`, distinct `hostPort` and `guestPort`, `studioState`,
 and `httpReady`. `state=ready` always implies `httpReady=true` and a loopback
-`url`. A container or guest restart is handled by inspecting the live binding
-again; a changed dynamic host port replaces the stored URL only after the new
-endpoint passes HTTP readiness.
+`url` (`http://localhost:<port>`). A container or guest restart is handled by
+inspecting the live binding again; the URL changes only after the new endpoint
+passes HTTP readiness.
 
 While `runtime status` and `runtime wait` poll for readiness, they use only the
 forwarded application HTTP endpoint. They do not repeatedly open RemoteApp or
@@ -64,15 +73,15 @@ initial error.
 
 Runtime failures have stable codes:
 
-| Code                              | Meaning                                                                                    |
-| --------------------------------- | ------------------------------------------------------------------------------------------ |
-| `runtime_guest_offline`           | The Guest API cannot be reached.                                                           |
-| `runtime_port_conflict`           | Docker or Podman could not allocate/bind the host port.                                    |
-| `runtime_port_forwarding_invalid` | The mapping is absent, duplicated, public, stale, or has no usable host port.              |
-| `runtime_not_listening`           | The authenticated Windows probe found no guest TCP listener.                               |
-| `runtime_firewall_blocked`        | A guest listener exists but Windows firewall or Mendix port security prevents host access. |
-| `runtime_readiness_timeout`       | HTTP readiness expired and a more specific guest diagnosis was unavailable.                |
-| `runtime_exited`                  | The explicitly linked Studio Pro process identity ended before readiness.                  |
+| Code                              | Meaning                                                                                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `runtime_guest_offline`           | The Guest API cannot be reached.                                                                                               |
+| `runtime_port_conflict`           | The port is owned by another active Mendimaru Runtime session, or Docker/Podman could not allocate it for an external program. |
+| `runtime_port_forwarding_invalid` | The mapping is absent, duplicated, public, stale, or has no usable host port.                                                  |
+| `runtime_not_listening`           | The authenticated Windows probe found no guest TCP listener.                                                                   |
+| `runtime_firewall_blocked`        | A guest listener exists but Windows firewall or Mendix port security prevents host access.                                     |
+| `runtime_readiness_timeout`       | HTTP readiness expired and a more specific guest diagnosis was unavailable.                                                    |
+| `runtime_exited`                  | The explicitly linked Studio Pro process identity ended before readiness.                                                      |
 
 The Windows diagnosis runs as the existing hash-pinned, authenticated
 PowerShell operation. It inspects the exact numeric guest port and returns only
