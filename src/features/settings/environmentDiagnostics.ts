@@ -50,6 +50,11 @@ const DIAGNOSTIC_MESSAGES: Record<
     recovery: "diagnostic-guest-api-recovery",
     target: "environment-settings-heading",
   },
+  "guest-clock": {
+    title: "diagnostic-guest-clock-title",
+    recovery: "diagnostic-guest-clock-recovery",
+    target: "environment-settings-heading",
+  },
   rdp: {
     title: "diagnostic-rdp-title",
     recovery: "diagnostic-rdp-recovery",
@@ -74,6 +79,7 @@ const ERROR_MESSAGES: Record<EnvironmentDiagnosticErrorCode, MessageKey> = {
   "external-process-timeout": "diagnostic-process-timeout",
   "external-process-cancelled": "diagnostic-process-cancelled",
   "external-process-interrupted": "diagnostic-process-interrupted",
+  "guest-clock-skew-exceeded": "diagnostic-clock-skew-exceeded",
 };
 
 export function diagnosticText(

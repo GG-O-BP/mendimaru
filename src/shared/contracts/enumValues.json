@@ -159,6 +159,7 @@
     "shared-mount": true,
     "container": true,
     "guest-api": true,
+    "guest-clock": true,
     "rdp": true,
     "marketplace-browser": true
   },
@@ -177,7 +178,8 @@
     "external-process-spawn-failed": true,
     "external-process-timeout": true,
     "external-process-cancelled": true,
-    "external-process-interrupted": true
+    "external-process-interrupted": true,
+    "guest-clock-skew-exceeded": true
   },
   "downloadState": {
     "starting": true,
