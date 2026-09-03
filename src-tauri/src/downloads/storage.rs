@@ -94,6 +94,8 @@ impl SecureDirectory {
 
     fn open_new_file(&self, name: &str) -> io::Result<cap_std::fs::File> {
         let mut options = OpenOptions::new();
+        // `write` is required alongside `append` so Windows permits the safe
+        // truncation used when a stable payload is longer than its metadata.
         options
             .read(true)
             .write(true)
@@ -118,6 +120,7 @@ impl SecureDirectory {
         let mut options = OpenOptions::new();
         options
             .read(true)
+            .write(true)
             .append(true)
             .create(true)
             .follow(FollowSymlinks::No);
@@ -377,6 +380,32 @@ mod tests {
         drop(first);
         drop(second);
         assert_eq!(fs::read_dir(path).expect("read cache").count(), 0);
+    }
+
+    #[tokio::test]
+    async fn stable_payload_supports_append_and_safe_truncation() {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+
+        let temporary = tempfile::tempdir().expect("temporary root");
+        let directory = SecureDirectory::open_or_create(&temporary.path().join("cache"))
+            .expect("secure directory");
+        let mut payload = directory
+            .open_or_create_payload("resume.download")
+            .expect("stable payload");
+
+        payload.write_all(b"abc").await.expect("append bytes");
+        payload.set_len(1).await.expect("truncate stale tail");
+        payload
+            .write_all(b"Z")
+            .await
+            .expect("append after truncate");
+        payload.rewind().await.expect("rewind payload");
+        let mut contents = Vec::new();
+        payload
+            .read_to_end(&mut contents)
+            .await
+            .expect("read payload");
+        assert_eq!(contents, b"aZ");
     }
 
     #[cfg(unix)]
