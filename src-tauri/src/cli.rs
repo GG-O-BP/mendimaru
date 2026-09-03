@@ -1324,6 +1324,16 @@ struct SessionSocketGuard {
 }
 
 #[cfg(target_os = "linux")]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionSocketCleanupReport {
+    schema_version: &'static str,
+    removed_sockets: u32,
+    retained_live_sockets: u32,
+    observed_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[cfg(target_os = "linux")]
 impl Drop for SessionSocketGuard {
     fn drop(&mut self) {
         let Ok(metadata) = std::fs::symlink_metadata(&self.path) else {
@@ -1337,6 +1347,90 @@ impl Drop for SessionSocketGuard {
 }
 
 #[cfg(target_os = "linux")]
+fn cleanup_stale_session_keeper_sockets(
+    directory: &std::path::Path,
+    preserve: &std::path::Path,
+) -> Result<u32, String> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+
+    const MAX_SOCKETS: usize = 128;
+    const MAX_AUDIT_BYTES: u64 = 64 * 1024;
+    let mut removed_sockets = 0_u32;
+    let mut retained_live_sockets = 0_u32;
+    let entries = std::fs::read_dir(directory)
+        .map_err(|_| "the session keeper directory could not be read".to_string())?;
+    for entry in entries.take(MAX_SOCKETS) {
+        let entry =
+            entry.map_err(|_| "a session keeper directory entry could not be read".to_string())?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with("s-") || !name.ends_with(".sock") {
+            continue;
+        }
+        let path = entry.path();
+        if path == preserve {
+            continue;
+        }
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !metadata.file_type().is_socket()
+            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.permissions().mode() & 0o777 != 0o600
+        {
+            continue;
+        }
+        if std::os::unix::net::UnixStream::connect(&path).is_ok() {
+            retained_live_sockets += 1;
+            continue;
+        }
+        std::fs::remove_file(&path)
+            .map_err(|_| "a stale session keeper socket could not be removed".to_string())?;
+        removed_sockets += 1;
+    }
+    if removed_sockets == 0 && retained_live_sockets == 0 {
+        return Ok(0);
+    }
+    let report = SessionSocketCleanupReport {
+        schema_version: CONTRACT_SCHEMA_VERSION,
+        removed_sockets,
+        retained_live_sockets,
+        observed_at: chrono::Utc::now(),
+    };
+    let audit_path = directory.join("socket-cleanup.log");
+    match std::fs::symlink_metadata(&audit_path) {
+        Ok(metadata) => {
+            if !metadata.is_file()
+                || metadata.file_type().is_symlink()
+                || metadata.len() >= MAX_AUDIT_BYTES
+            {
+                return Err("the session keeper cleanup audit is unavailable".to_string());
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => {
+            return Err("the session keeper cleanup audit could not be inspected".to_string());
+        }
+    }
+    let mut payload = serde_json::to_vec(&report)
+        .map_err(|_| "the session keeper cleanup audit could not be serialized".to_string())?;
+    payload.push(b'\n');
+    let mut options = std::fs::OpenOptions::new();
+    options.append(true).create(true);
+    use std::os::unix::fs::OpenOptionsExt;
+    options.mode(0o600);
+    let mut file = options
+        .open(audit_path)
+        .map_err(|_| "the session keeper cleanup audit could not be opened".to_string())?;
+    file.write_all(&payload)
+        .and_then(|()| file.flush())
+        .map_err(|_| "the session keeper cleanup audit could not be written".to_string())?;
+    Ok(removed_sockets)
+}
+
+#[cfg(target_os = "linux")]
 fn prepare_session_keeper(
     session_id: &str,
 ) -> Result<(std::os::unix::net::UnixListener, SessionSocketGuard, String), String> {
@@ -1346,6 +1440,7 @@ fn prepare_session_keeper(
         .map_err(|_| "the session keeper directory could not be resolved".to_string())?;
     let directory = ensure_session_socket_directory(&paths)?;
     let socket_path = directory.join(session_socket_name(session_id));
+    cleanup_stale_session_keeper_sockets(&directory, &socket_path)?;
     if let Ok(metadata) = std::fs::symlink_metadata(&socket_path) {
         if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() } {
             return Err("the session keeper socket is not trusted".to_string());
@@ -2995,6 +3090,66 @@ mod tests {
         symlink(&target, unsafe_paths.cache_directory().join("cli-sessions"))
             .expect("directory symlink");
         assert!(ensure_session_socket_directory(&unsafe_paths).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stale_keeper_sockets_are_cleaned_without_touching_live_or_untrusted_entries() {
+        use std::io::Write as _;
+        use std::os::unix::fs::{symlink, FileTypeExt, PermissionsExt};
+        use std::os::unix::net::UnixListener;
+
+        let temporary = tempfile::tempdir().expect("temporary socket directory");
+        let directory = temporary.path().join("cli-sessions");
+        std::fs::create_dir_all(&directory).expect("socket directory");
+        let live_path = directory.join(format!("s-{}.sock", "1".repeat(32)));
+        let stale_path = directory.join(format!("s-{}.sock", "2".repeat(32)));
+        let preserve_path = directory.join(format!("s-{}.sock", "3".repeat(32)));
+        let live_listener = UnixListener::bind(&live_path).expect("live keeper socket");
+        std::fs::set_permissions(&live_path, std::fs::Permissions::from_mode(0o600))
+            .expect("live socket permissions");
+        let stale_listener = UnixListener::bind(&stale_path).expect("temporary stale socket");
+        std::fs::set_permissions(&stale_path, std::fs::Permissions::from_mode(0o600))
+            .expect("stale socket permissions");
+        drop(stale_listener);
+
+        let regular = directory.join("audit.txt");
+        let mut file = std::fs::File::create(&regular).expect("regular fixture");
+        file.write_all(b"unrelated")
+            .expect("regular fixture content");
+        let link = directory.join("s-linked.sock");
+        symlink(&regular, &link).expect("socket-like symlink");
+
+        let removed = cleanup_stale_session_keeper_sockets(&directory, &preserve_path)
+            .expect("stale keeper socket cleanup");
+        assert_eq!(removed, 1);
+        assert!(std::fs::symlink_metadata(&live_path)
+            .expect("live keeper remains")
+            .file_type()
+            .is_socket());
+        assert!(!stale_path.exists());
+        assert!(regular.is_file());
+        assert!(std::fs::symlink_metadata(&link)
+            .expect("symlink remains")
+            .file_type()
+            .is_symlink());
+        drop(live_listener);
+
+        let audit_path = directory.join("socket-cleanup.log");
+        let audit = std::fs::read_to_string(&audit_path).expect("socket cleanup audit");
+        let report: serde_json::Value =
+            serde_json::from_str(audit.lines().next().expect("audit record")).expect("audit JSON");
+        assert_eq!(report["removedSockets"], 1);
+        assert_eq!(report["retainedLiveSockets"], 1);
+        assert!(!audit.contains(temporary.path().to_string_lossy().as_ref()));
+        assert_eq!(
+            std::fs::metadata(&audit_path)
+                .expect("audit metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
     }
 
     #[cfg(target_os = "linux")]

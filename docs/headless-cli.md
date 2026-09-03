@@ -209,10 +209,16 @@ keeper through a user-owned `0700` cache directory and `0600` Unix socket. This
 avoids opening a second RDP connection, which would replace the active
 RemoteApp connection. Socket names are irreversible hashes of Studio session
 IDs; no password, project path, or command line is persisted. A stale or
-untrusted socket is never treated as a live session. Stop uses an authenticated,
-replay-protected request for the exact PID and process start tick through the
-retained connection and waits for Windows to report that process gone; killing
-only the local FreeRDP client never counts as a successful stop.
+untrusted socket is never treated as a live session. When a new keeper starts,
+it makes a bounded pass over the private socket directory: a current-user,
+`0600` socket that accepts a connection is retained as live, while a
+connection-refused socket left by an abnormally terminated keeper is removed.
+Regular files, symlinks, sockets with unexpected permissions, and other users'
+entries are preserved. Cleanup appends only counts and an observation timestamp
+to a private audit log. Stop uses an authenticated, replay-protected request
+for the exact PID and process start tick through the retained connection and
+waits for Windows to report that process gone; killing only the local FreeRDP
+client never counts as a successful stop.
 
 External host project selection remains GUI-only. The headless CLI continues to
 resolve opaque project IDs from a fresh configured-workspace scan and accepts no
