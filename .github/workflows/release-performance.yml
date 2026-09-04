@@ -172,7 +172,7 @@ jobs:
           mkdir -p artifacts/e2e/release-performance
           sampling_args=()
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            sampling_args+=(--sample-count 3 --idle-window-seconds 120)
+            sampling_args+=(--sample-count 5 --idle-window-seconds 300)
           fi
           chrome_path=""
           for command_name in google-chrome-stable google-chrome chromium chromium-browser; do

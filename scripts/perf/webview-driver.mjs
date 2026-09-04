@@ -169,7 +169,7 @@ class WindowsWebviewDriver extends WebviewDriverBase {
       this.appProcess,
       20_000,
     );
-    await this.client.createWindowsSession();
+    await createWindowsSessionWithWindowRetry(this.client);
     await this.waitForShell();
     this.cpuTracker = createProcessCpuTracker();
     return rounded(performance.now() - started);
@@ -446,6 +446,21 @@ async function terminateLinuxApplications(application, expectedRoot) {
     0,
     `release application processes survived cleanup: ${JSON.stringify(survivors)}`,
   );
+}
+
+async function createWindowsSessionWithWindowRetry(client) {
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await client.createWindowsSession();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!String(error?.message).includes("no such window")) throw error;
+      await delay(500);
+    }
+  }
+  throw lastError;
 }
 
 async function linuxProcessSnapshot(rootPid, cpuTracker) {
