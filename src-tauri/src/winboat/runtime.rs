@@ -678,18 +678,66 @@ pub(super) async fn prepare_studio_session(
         None => None,
     };
     let guest_port = configured_port.unwrap_or(DEFAULT_GUEST_PORT);
-    if let Some((_, record)) = active_runtime_session_for_port(guest_port).map_err(|_| {
-        runtime_error(
-            CapabilityId::RuntimeStart,
-            BackendErrorCode::RuntimePortConflict,
-            true,
-            None,
-        )
-    })? {
-        return Ok(record.session_id);
+    if let Some((directory, mut record)) =
+        active_runtime_session_for_port(guest_port).map_err(|_| {
+            runtime_error(
+                CapabilityId::RuntimeStart,
+                BackendErrorCode::RuntimePortConflict,
+                true,
+                None,
+            )
+        })?
+    {
+        if record.studio_session_id.is_some() {
+            observe_studio(config, &mut record).await;
+            match existing_studio_runtime_disposition(&record) {
+                ExistingStudioRuntimeDisposition::Conflict => {
+                    return Err(previous_session_conflict_error(CapabilityId::RuntimeStatus));
+                }
+                ExistingStudioRuntimeDisposition::Ambiguous => {
+                    return Err(runtime_error(
+                        CapabilityId::RuntimeStatus,
+                        BackendErrorCode::PreconditionFailed,
+                        false,
+                        Some(record.log_artifact.artifact_id.clone()),
+                    ));
+                }
+                ExistingStudioRuntimeDisposition::ClearStaleLink => {
+                    record.studio_session_id = None;
+                    record.studio_process_id = None;
+                    append_log(
+                        &directory,
+                        "Stale Studio link cleared before preparing a new launch.",
+                    );
+                }
+            }
+            write_record(&directory, &record)
+                .map_err(|_| record_error(&record, CapabilityId::RuntimeStatus))?;
+        }
+        refresh(config, &directory, &mut record).await?;
+        if record.state != RuntimeState::Stopped && record.failure_code.is_none() {
+            return Ok(record.session_id);
+        }
     }
     let (_, record) = create_session(config, guest_port, None, readiness_timeout_seconds).await?;
     Ok(record.session_id)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ExistingStudioRuntimeDisposition {
+    Conflict,
+    Ambiguous,
+    ClearStaleLink,
+}
+
+fn existing_studio_runtime_disposition(record: &SessionRecord) -> ExistingStudioRuntimeDisposition {
+    match record.studio_state {
+        StudioProcessState::Running => ExistingStudioRuntimeDisposition::Conflict,
+        StudioProcessState::Stopped => ExistingStudioRuntimeDisposition::ClearStaleLink,
+        StudioProcessState::Starting | StudioProcessState::Unknown => {
+            ExistingStudioRuntimeDisposition::Ambiguous
+        }
+    }
 }
 
 pub(super) fn link_studio_session(
@@ -709,9 +757,16 @@ pub(super) fn link_studio_session(
         .studio_session_id
         .is_some_and(|current| current != studio_session_id)
     {
-        return Err(previous_session_conflict_error(CapabilityId::RuntimeStatus));
+        if record.studio_state == StudioProcessState::Running {
+            return Err(previous_session_conflict_error(CapabilityId::RuntimeStatus));
+        }
+        append_log(
+            &directory,
+            "Stale Studio link replaced while linking a verified launch.",
+        );
     }
     record.studio_session_id = Some(studio_session_id.to_string());
+    record.studio_state = StudioProcessState::Running;
     write_record(&directory, &record)
         .map_err(|_| record_error(&record, CapabilityId::RuntimeStatus))
 }
@@ -1941,10 +1996,11 @@ fn set_file_permissions(path: &Path) -> Result<(), String> {
 mod tests {
     use super::{
         active_runtime_session_in_root, append_failure_diagnostic, compose_baseline_diagnostic,
-        diagnostic_code, forget_session_in_root, is_loopback_host, port_conflict_message,
-        runtime_probe_url, runtime_url, session_summaries_in_root, studio_launch_port,
-        valid_studio_session_id, validate_runtime_session_id, ComposeBaselineGuard,
-        ComposeTransaction, SessionRecord,
+        diagnostic_code, existing_studio_runtime_disposition, forget_session_in_root,
+        is_loopback_host, port_conflict_message, runtime_probe_url, runtime_url,
+        session_summaries_in_root, studio_launch_port, valid_studio_session_id,
+        validate_runtime_session_id, ComposeBaselineGuard, ComposeTransaction,
+        ExistingStudioRuntimeDisposition, SessionRecord,
     };
     use crate::contracts::CapabilityId;
     use crate::contracts::{
@@ -1967,6 +2023,41 @@ mod tests {
         assert!(valid_studio_session_id("studio-4242-638908128000000000"));
         assert!(!valid_studio_session_id("studio-0-638908128000000000"));
         assert!(!valid_studio_session_id("studio-4242-1-extra"));
+    }
+
+    #[test]
+    fn linked_runtime_records_are_not_reused_for_an_unverified_new_studio_launch() {
+        let temporary = tempfile::tempdir().expect("temporary Runtime store");
+        let (directory, _) = write_runtime_fixture(
+            &temporary.path().join("unused"),
+            &format!("runtime_{}", "e".repeat(32)),
+            super::CONTRACT_SCHEMA_VERSION,
+            RuntimeState::Starting,
+            8_080,
+        );
+        let mut record: SessionRecord = serde_json::from_slice(
+            &fs::read(directory.join("session.json")).expect("Runtime fixture record"),
+        )
+        .expect("Runtime fixture record shape");
+
+        record.studio_session_id = Some("studio-4242-638908128000000000".into());
+        record.studio_state = StudioProcessState::Running;
+        assert_eq!(
+            existing_studio_runtime_disposition(&record),
+            ExistingStudioRuntimeDisposition::Conflict
+        );
+
+        record.studio_state = StudioProcessState::Stopped;
+        assert_eq!(
+            existing_studio_runtime_disposition(&record),
+            ExistingStudioRuntimeDisposition::ClearStaleLink
+        );
+
+        record.studio_state = StudioProcessState::Unknown;
+        assert_eq!(
+            existing_studio_runtime_disposition(&record),
+            ExistingStudioRuntimeDisposition::Ambiguous
+        );
     }
 
     #[cfg(target_os = "linux")]

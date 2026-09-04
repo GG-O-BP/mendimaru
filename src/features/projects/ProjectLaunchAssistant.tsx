@@ -266,6 +266,7 @@ export function ProjectLaunchAssistant({
           </button>
           <button
             type="button"
+            data-testid="continue-project-launch"
             className="button primary"
             onClick={launcher.continueAssistant}
             disabled={!canContinue}

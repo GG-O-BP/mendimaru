@@ -63,9 +63,7 @@
 
 .version-cell,
 .project-name-cell {
-  display: flex;
-  align-items: center;
-  gap: 11px;
+  vertical-align: middle;
 }
 
 .version-cell > div,
@@ -74,6 +72,21 @@
   min-width: 0;
   flex-direction: column;
   gap: 2px;
+}
+
+.project-identity > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-identity > div > strong,
+.project-identity > div > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .version-cell strong,

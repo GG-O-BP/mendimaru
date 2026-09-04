@@ -1,7 +1,7 @@
 {
   "name": "mendimaru",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Manage Mendix Studio Pro natively on Windows or through WinBoat on Linux",
   "engines": {
     "node": ">=22.22.2"

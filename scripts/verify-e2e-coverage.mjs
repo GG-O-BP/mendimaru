@@ -51,6 +51,10 @@ const linux = {
     '"Operation center"',
     '"Settings"',
     '"Studio Pro"',
+    "assertStudioCatalogLayout",
+    "assertProjectsLayout",
+    "waitForSuccessfulLaunchOperation",
+    "select-external-project",
   ]),
   securityDesktop:
     hasAll(linuxDesktop, [
@@ -163,7 +167,11 @@ if (runReport) {
       executed("idle CPU stays below"),
     functional:
       executed("project scanner finds the isolated Orders fixture") &&
-      executed("reports a ready WinBoat environment"),
+      executed("reports a ready WinBoat environment") &&
+      executed("catalog timestamp has separation") &&
+      executed("non-overlapping geometry") &&
+      executed("clicking Open completes a protected project launch") &&
+      executed("external project selection remains responsive"),
   };
   assert.equal(
     run.status,
@@ -187,14 +195,11 @@ const gaps = [
     "Hosted Linux CI has no real WinBoat install → launch → window → stop → uninstall lifecycle.",
   !linux.hostedPackageLifecycle &&
     "Linux has no CI package install → native launch → uninstall lifecycle comparable to MSI/NSIS.",
-  !linux.hostedLiveMarketplace &&
-    "Linux hosted CI uses Marketplace fixtures/cache rather than a live catalog refresh.",
 ].filter(Boolean);
 const fullPlatformParity =
   coreDesktopParity &&
   linux.hostedLiveStudioLifecycle &&
   linux.hostedPackageLifecycle &&
-  linux.hostedLiveMarketplace &&
   windows.hostedPackageLifecycle &&
   windows.hostedLiveMarketplace;
 

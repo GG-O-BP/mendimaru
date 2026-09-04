@@ -208,7 +208,10 @@ export function ProjectsPage({
                             </span>
                             <div>
                               <strong>{project.name}</strong>
-                              <span title={project.directory}>
+                              <span
+                                title={project.directory}
+                                data-testid="project-directory"
+                              >
                                 {compactPath(project.directory)}
                               </span>
                             </div>
@@ -248,6 +251,8 @@ export function ProjectsPage({
                         <td className="project-actions">
                           <button
                             type="button"
+                            data-testid="launch-project"
+                            data-project-name={project.name}
                             className="button primary compact"
                             onClick={() => model.onLaunch(project)}
                             disabled={
@@ -386,6 +391,7 @@ function ProjectTools({
       {model.supportsExternalSelection && (
         <button
           type="button"
+          data-testid="select-external-project"
           className="button secondary compact"
           onClick={model.onSelectExternal}
           disabled={

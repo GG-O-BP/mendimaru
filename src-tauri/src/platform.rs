@@ -239,6 +239,12 @@ pub async fn launch_studio(
     operation_id: &str,
     project_mpr_path: Option<&str>,
 ) -> BackendResult<()> {
+    #[cfg(feature = "e2e")]
+    if crate::e2e::stub_studio_launch_for_e2e()
+        .map_err(crate::contracts::BackendError::invalid_request)?
+    {
+        return Ok(());
+    }
     let selected = backend::active_backend(config, None)?;
     backend::StudioBackend::start(selected.as_ref(), version, operation_id, project_mpr_path).await
 }

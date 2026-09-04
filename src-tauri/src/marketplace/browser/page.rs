@@ -35,24 +35,31 @@ pub(super) async fn read_total_count(page: &Page) -> Option<u32> {
         .ok()
 }
 
-pub(super) async fn wait_for_selector(
+pub(super) async fn wait_for_any_selector(
     page: &Page,
-    value: &str,
+    selectors: &[&str],
     wait_duration: Duration,
 ) -> Result<(), String> {
     let started = Instant::now();
     loop {
-        if page
-            .find_elements(value)
-            .await
-            .is_ok_and(|elements| !elements.is_empty())
-        {
+        let mut found = false;
+        for selector in selectors {
+            if page
+                .find_elements(*selector)
+                .await
+                .is_ok_and(|elements| !elements.is_empty())
+            {
+                found = true;
+                break;
+            }
+        }
+        if found {
             return Ok(());
         }
         if started.elapsed() >= wait_duration {
             return Err(crate::tr!(
                 "error-marketplace-response-timeout",
-                selector = value
+                selector = selectors.first().copied().unwrap_or_default()
             ));
         }
         tokio::time::sleep(POLL_INTERVAL).await;

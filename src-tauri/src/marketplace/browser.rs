@@ -5,7 +5,7 @@ use super::parser::parse_datagrid_html;
 use crate::models::DownloadableVersion;
 use page::{
     dismiss_privacy_modal, element_inner_html, find_build_number, navigate_to_page,
-    read_total_count, verify_exact_version_page, wait_for_selector,
+    read_total_count, verify_exact_version_page, wait_for_any_selector,
 };
 use session::BrowserSession;
 use std::time::Duration;
@@ -14,11 +14,17 @@ use tokio::sync::Mutex;
 const MARKETPLACE_URL: &str = "https://marketplace.mendix.com/link/studiopro";
 #[cfg(any(feature = "e2e", test))]
 const E2E_MARKETPLACE_URL: &str = "MENDIMARU_E2E_MARKETPLACE_URL";
-const ELEMENT_TIMEOUT: Duration = Duration::from_secs(30);
+const ELEMENT_TIMEOUT: Duration = Duration::from_secs(60);
 const DATAGRID_SELECTOR: &str = "div.widget-datagrid-content";
-const DATAGRID_ROW_SELECTOR: &str =
-    "div.widget-datagrid-content div.widget-datagrid-grid-body div.tr[role=row] a.mx-name-actionButton_VersionName1, \
-     div.widget-datagrid-content div.widget-datagrid-grid-body div.tr[role=row] a.mx-name-pDSLink1";
+const DATAGRID_ROW_SELECTORS: [&str; 2] = [
+    // Current Marketplace markup exposes the version link before it exposes a
+    // stable widget name. This semantic selector also ignores skeleton rows.
+    "div.widget-datagrid-grid-body div.tr[role=row] a[href*='/link/studiopro/']",
+    // Older Marketplace builds generated either action button name.
+    "div.widget-datagrid-content div.widget-datagrid-grid-body div.tr[role=row] \
+     a.mx-name-actionButton_VersionName1, \
+     div.widget-datagrid-content div.widget-datagrid-grid-body div.tr[role=row] a.mx-name-pDSLink1",
+];
 const BUILD_NUMBER_SELECTOR: &str = "span.mx-text.pds-heading--sm.pds-mb-0";
 
 pub(super) static SCRAPE_LOCK: Mutex<()> = Mutex::const_new(());
@@ -49,7 +55,7 @@ pub(super) async fn scrape_page(
     let result = async {
         let page = session.navigate(&marketplace_url()?).await?;
         dismiss_privacy_modal(&page).await;
-        wait_for_selector(&page, DATAGRID_ROW_SELECTOR, ELEMENT_TIMEOUT).await?;
+        wait_for_any_selector(&page, &DATAGRID_ROW_SELECTORS, ELEMENT_TIMEOUT).await?;
         navigate_to_page(&page, target_page).await?;
         let html = element_inner_html(&page, DATAGRID_SELECTOR).await?;
         let versions = parse_datagrid_html(&html)?;

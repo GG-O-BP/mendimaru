@@ -75,6 +75,15 @@ pub(crate) async fn delay_environment_status_for_performance() -> Result<(), Str
     Ok(())
 }
 
+#[cfg(feature = "e2e")]
+pub(crate) fn stub_studio_launch_for_e2e() -> Result<bool, String> {
+    if std::env::var_os("MENDIMARU_E2E_STUB_STUDIO_LAUNCH").is_none() {
+        return Ok(false);
+    }
+    require_isolated_root()?;
+    Ok(true)
+}
+
 #[cfg(target_os = "windows")]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
