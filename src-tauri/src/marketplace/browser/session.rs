@@ -71,7 +71,11 @@ impl BrowserSession {
             .map_err(|error| crate::tr!("error-browser-config", error = error))?;
         let (browser, mut handler) = match Browser::launch(browser_config).await {
             Ok(launched) => launched,
-            Err(error) => return Err(browser_launch_error(&error.to_string())),
+            Err(error) => {
+                #[cfg(target_os = "linux")]
+                let _ = terminate_profile_processes(profile.path(), SHUTDOWN_TIMEOUT).await;
+                return Err(browser_launch_error(&error.to_string()));
+            }
         };
         let handler_task = tokio::spawn(async move {
             while let Some(event) = handler.next().await {
