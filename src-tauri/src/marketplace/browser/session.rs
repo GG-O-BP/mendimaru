@@ -30,6 +30,8 @@ const PROBE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const HANDLER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 const CLEANUP_RETRY_DELAY: Duration = Duration::from_millis(100);
 const CLEANUP_RETRIES: usize = 50;
+const LAUNCH_RETRIES: usize = 3;
+const LAUNCH_RETRY_DELAY: Duration = Duration::from_millis(500);
 
 const FORBIDDEN_BROWSER_SWITCHES: [&str; 7] = [
     "allow-running-insecure-content",
@@ -53,7 +55,8 @@ impl BrowserSession {
     pub(super) async fn new() -> Result<Self, String> {
         let chrome_path =
             chrome_executable().ok_or_else(|| crate::tr!("error-browser-required"))?;
-        Self::launch_in(Path::new(&chrome_path), &std::env::temp_dir()).await
+        let profile_root = std::env::temp_dir();
+        retry_browser_launch(|| Self::launch_in(Path::new(&chrome_path), &profile_root)).await
     }
 
     async fn launch_in(chrome_path: &Path, profile_root: &Path) -> Result<Self, String> {
@@ -222,6 +225,24 @@ impl BrowserSession {
     fn sandboxed_renderer_pids(&self) -> &[u32] {
         &self.sandboxed_renderer_pids
     }
+}
+
+async fn retry_browser_launch<T, F, Fut>(mut launch: F) -> Result<T, String>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, String>>,
+{
+    let mut last_error = None;
+    for _ in 0..LAUNCH_RETRIES {
+        match launch().await {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                last_error = Some(error);
+                tokio::time::sleep(LAUNCH_RETRY_DELAY).await;
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| crate::tr!("error-browser-required")))
 }
 
 impl Drop for BrowserSession {
@@ -910,6 +931,31 @@ mod tests {
                 .count(),
             0,
             "launch failure must not leave a profile"
+        );
+    }
+
+    #[tokio::test]
+    async fn transient_browser_launch_failures_are_retried() {
+        let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let expected = attempts.clone();
+        let value: u8 = retry_browser_launch(|| {
+            let attempts = attempts.clone();
+            async move {
+                if attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    Err("transient websocket timeout".to_string())
+                } else {
+                    Ok(42)
+                }
+            }
+        })
+        .await
+        .expect("second launch succeeds");
+
+        assert_eq!(value, 42);
+        assert_eq!(
+            expected.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "a transient launch failure must be retried without caller retry logic"
         );
     }
 
