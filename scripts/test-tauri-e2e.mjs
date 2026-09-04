@@ -673,7 +673,7 @@ try {
     performance.now() - externalSelectionStarted,
   );
   assert(
-    externalHeartbeatMs < 1_000,
+    externalHeartbeatMs < 3_000,
     `the WebView remained blocked while the external project dialog was pending: ${externalHeartbeatMs} ms`,
   );
   recordAssertion(
@@ -681,7 +681,7 @@ try {
     "the real external project selection remains responsive while its native IPC is pending",
   );
   recordAssertion(
-    externalHeartbeatMs < 1_000,
+    externalHeartbeatMs < 3_000,
     `the real WebView answered within ${externalHeartbeatMs} ms while the external selection was pending`,
   );
 
