@@ -467,6 +467,7 @@ async function linuxProcessSnapshot(rootPid, cpuTracker) {
     records.push({
       pid,
       parentPid: Number(fields[1]),
+      state: fields[0],
       cpuTicks: Number(fields[11]) + Number(fields[12]),
       startTicks: fields[19],
     });
@@ -478,7 +479,10 @@ async function linuxProcessSnapshot(rootPid, cpuTracker) {
   for (const pid of processIds) {
     const record = records.find((candidate) => candidate.pid === pid);
     const memory = await linuxMemory(pid);
-    if (!record || !memory) continue;
+    // Linux keeps exited children as zombies until the host reaps them. They
+    // have no scheduler, memory, or file resources and must not be counted as
+    // a live WebView process leak.
+    if (!record || record.state === "Z" || !memory) continue;
     privateMemoryBytes += memory.privateMemoryBytes;
     workingSetBytes += memory.workingSetBytes;
     processCount += 1;
