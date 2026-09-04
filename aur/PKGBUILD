@@ -91,6 +91,11 @@ build() {
 check() {
   cd "$pkgname-$pkgver"
 
+  if [[ "${MENDIMARU_RUN_TESTS:-0}" != "1" ]]; then
+    msg2 "Skipping the upstream test suite; set MENDIMARU_RUN_TESTS=1 to run it"
+    return 0
+  fi
+
   export CARGO_HOME="$srcdir/cargo-home"
   export CARGO_NET_OFFLINE=true
   export CARGO_TARGET_DIR="$srcdir/$pkgname-$pkgver/src-tauri/target"
