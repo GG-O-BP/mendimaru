@@ -319,12 +319,16 @@ export function useInstalledVersions({
     ) => {
       if (launchLock.current) return Promise.resolve();
       launchLock.current = true;
+      const refreshSessionsAfterLaunch =
+        !window.__mendimaruSkipPostLaunchSessionRefresh__;
       return runAction(`launch-${version.version}`, async () => {
         try {
           await tauriApi.launchStudioPro(version.version, projectMprPath);
           await afterLaunch?.();
         } finally {
-          await refreshSessions(true);
+          if (refreshSessionsAfterLaunch) {
+            await refreshSessions(true);
+          }
         }
         notify(
           "success",

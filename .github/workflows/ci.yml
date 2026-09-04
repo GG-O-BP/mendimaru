@@ -104,6 +104,19 @@ jobs:
               live_linux_marketplace_browser_security_gate -- \
               --ignored --nocapture --test-threads=1
 
+      - name: Scrape the real Marketplace catalog with Linux Chromium
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          chrome_path="$(
+            command -v google-chrome-stable || command -v google-chrome
+          )"
+          test -x "$chrome_path"
+          MENDIMARU_CHROME_PATH="$chrome_path" \
+            cargo test --manifest-path src-tauri/Cargo.toml \
+              live_scrapes_the_first_catalog_page -- \
+              --ignored --nocapture --test-threads=1
+
       - name: Run real Tauri WebKit E2E
         if: runner.os == 'Linux'
         env:

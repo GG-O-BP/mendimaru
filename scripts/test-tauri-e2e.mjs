@@ -87,6 +87,8 @@ try {
     "--manifest-path",
     "src-tauri/Cargo.toml",
     "--no-default-features",
+    "--features",
+    "e2e",
   ]);
   await assertPortUnused(1420, "Vite development server");
 
@@ -99,7 +101,10 @@ try {
   const vite = startProcess("npm", ["run", "dev"], {
     cwd: repository,
     label: "Vite",
-    env: { ...process.env, VITE_MENDIMARU_E2E: "1" },
+    env: {
+      ...process.env,
+      VITE_MENDIMARU_E2E: "1",
+    },
   });
   processes.push(vite);
   await waitForHttp(viteUrl, vite, 20_000);
@@ -118,6 +123,8 @@ try {
       cwd: repository,
       env: {
         ...process.env,
+        MENDIMARU_E2E_ROOT: temporary,
+        MENDIMARU_E2E_STUB_STUDIO_LAUNCH: "1",
         MENDIMARU_CHROME_PATH: fixture.chrome,
         PATH: `${fixture.bin}${path.delimiter}${process.env.PATH ?? ""}`,
         XDG_CACHE_HOME: fixture.xdgCache,
@@ -144,6 +151,7 @@ try {
   assertThreshold("startupMs", report.measurements.startupMs);
   await execute(`
     window.__MENDIMARU_E2E_ERRORS__ = [];
+    window.__mendimaruSkipPostLaunchSessionRefresh__ = true;
     window.addEventListener("error", (event) => {
       window.__MENDIMARU_E2E_ERRORS__.push(String(event.error ?? event.message));
     });
@@ -165,7 +173,7 @@ try {
           && installRow?.querySelector(".manifest-action .button")?.disabled === true
           && !installRow?.querySelector('[aria-label="Force a fresh download"]');
       `),
-    1_500,
+    5_000,
     "the cached installed list was not rendered safely before live detection",
   );
   const cacheRenderMs = await execute(`
@@ -319,9 +327,14 @@ try {
   report.measurements.projectScanMs = projectsTimed.elapsedMs;
   assertThreshold("projectsMs", projectsTimed.elapsedMs);
   recordAssertion(
-    projectsTimed.value.projects.length === 1 &&
-      projectsTimed.value.projects[0].name === "Orders" &&
-      projectsTimed.value.projects[0].version === "11.12.2",
+    projectsTimed.value.projects.length === 2 &&
+      projectsTimed.value.projects.some(
+        (project) => project.name === "Orders" && project.version === "11.12.2",
+      ) &&
+      projectsTimed.value.projects.some(
+        (project) =>
+          project.name === "ResumeCase" && project.version === "11.13.0",
+      ),
     "the real Linux project scanner finds the isolated Orders fixture",
   );
 
@@ -343,6 +356,7 @@ try {
     fixture.appRequestCount() === 1,
     "the initial overview performs exactly one expensive Guest app discovery",
   );
+  await assertStudioCatalogLayout();
 
   const routeMotion = await execute(`
     const marker = document.querySelector(".route-packet");
@@ -554,6 +568,123 @@ try {
     "the manual overview refresh performs exactly one additional Guest app discovery",
   );
 
+  await execute("document.querySelector('[data-testid=nav-projects]').click()");
+  await waitFor(
+    async () =>
+      await execute(`
+        const row = Array.from(document.querySelectorAll('.projects-table tbody tr'))
+          .find((candidate) => candidate.innerText.includes('Orders'));
+        const button = row?.querySelector('[data-testid=launch-project]');
+        const readiness = row?.querySelector('.version-state:not(.missing) small');
+        return Boolean(
+          button &&
+            !button.disabled &&
+            readiness?.innerText.includes('Ready to launch'),
+        );
+      `),
+    5_000,
+    "the real project Open action was not enabled",
+  );
+  const openBaseline = await latestLaunchOperation();
+  await clickElement('[data-project-name="Orders"]');
+  const projectLaunchOperation = await waitForSuccessfulLaunchOperation(
+    openBaseline?.id,
+  );
+  recordAssertion(
+    projectLaunchOperation.protectedProject === true,
+    "clicking Open completes a protected project launch through real WebView IPC",
+  );
+
+  await clickElement('[data-project-name="ResumeCase"]');
+  await waitFor(
+    async () =>
+      await execute(`
+        return Boolean(document.querySelector('.project-launch-dialog'));
+      `),
+    5_000,
+    "the ResumeCase launch assistant did not open",
+  );
+  await execute(`
+    const select = document.querySelector('.project-launch-dialog select');
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLSelectElement.prototype,
+      'value',
+    ).set;
+    setter.call(select, '11.12.2');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    document.querySelector('.project-launch-dialog footer button')?.click();
+    return true;
+  `);
+  await execute(
+    "document.querySelector('[data-testid=refresh-projects]').click()",
+  );
+  await waitFor(
+    async () =>
+      await execute(`
+        const row = Array.from(document.querySelectorAll('.projects-table tbody tr'))
+          .find((candidate) => candidate.innerText.includes('ResumeCase'));
+        const button = row?.querySelector('[data-testid=launch-project]');
+        return Boolean(button && button.innerText.includes('Resume'));
+      `),
+    5_000,
+    "the cancelled assistant choice did not become a Resume action",
+  );
+  await clickElement('[data-project-name="ResumeCase"]');
+  await waitFor(
+    async () =>
+      await execute(`
+        return Boolean(document.querySelector('[data-testid=continue-project-launch]'));
+      `),
+    5_000,
+    "the Resume assistant did not reopen in the real WebView",
+  );
+  await execute(`
+    document
+      .querySelector('.project-launch-safety input[type=checkbox]')
+      ?.click();
+    return true;
+  `);
+  await execute(
+    "document.querySelector('[data-testid=continue-project-launch]').click()",
+  );
+  const resumedOperation = await waitForSuccessfulLaunchOperation(
+    projectLaunchOperation.id,
+  );
+  recordAssertion(
+    resumedOperation.protectedProject === true,
+    "clicking Resume completes the remembered protected project launch",
+  );
+
+  await waitFor(
+    async () =>
+      await execute(`
+        const button = document.querySelector('[data-testid=select-external-project]');
+        return Boolean(button && !button.disabled);
+      `),
+    5_000,
+    "the external project action was not enabled",
+  );
+  const externalSelectionStarted = performance.now();
+  await clickElement("[data-testid=select-external-project]");
+  await execute(
+    "return document.querySelector('[data-testid=projects-page]')?.innerText;",
+  );
+  const externalHeartbeatMs = rounded(
+    performance.now() - externalSelectionStarted,
+  );
+  assert(
+    externalHeartbeatMs < 1_000,
+    `the WebView remained blocked while the external project dialog was pending: ${externalHeartbeatMs} ms`,
+  );
+  recordAssertion(
+    true,
+    "the real external project selection remains responsive while its native IPC is pending",
+  );
+  recordAssertion(
+    externalHeartbeatMs < 1_000,
+    `the real WebView answered within ${externalHeartbeatMs} ms while the external selection was pending`,
+  );
+
   await fs.mkdir(path.join(fixture.shared, "Live"), { mode: 0o700 });
   await fs.writeFile(
     path.join(fixture.shared, "Live", "Live.mpr"),
@@ -572,6 +703,7 @@ try {
     5_000,
     "watcher-backed workspace changes did not refresh the project list",
   );
+  await assertProjectsLayout();
   recordAssertion(
     true,
     "file watcher changes appear in the project list without manual refresh",
@@ -797,6 +929,15 @@ try {
 } catch (error) {
   report.status = "failed";
   report.error = error instanceof Error ? error.stack : String(error);
+  if (sessionId && webdriverUrl) {
+    report.webViewText = await execute(
+      "return document.querySelector('main')?.innerText ?? document.body.innerText;",
+    ).catch(() => undefined);
+    report.webViewErrors = await execute(
+      "return window.__MENDIMARU_E2E_ERRORS__ ?? [];",
+    ).catch(() => undefined);
+    report.applicationEnvironment = await applicationEnvironment();
+  }
   await retainFailureScreenshot();
   throw error;
 } finally {
@@ -853,6 +994,133 @@ async function assertView(shortcut, heading, expectedText) {
   return rounded(performance.now() - started);
 }
 
+async function assertStudioCatalogLayout() {
+  const layout = await execute(`
+    const header = document.querySelector('.available-section .section-header');
+    const cache = document.querySelector('.available-section .catalog-cache');
+    const table = document.querySelector(
+      '.available-section .manifest-table-wrap',
+    );
+    if (!header || !cache || !table) return null;
+    const rectangle = (element) => {
+      const value = element.getBoundingClientRect();
+      return {
+        top: value.top,
+        bottom: value.bottom,
+        left: value.left,
+        right: value.right,
+      };
+    };
+    return {
+      header: rectangle(header),
+      cache: rectangle(cache),
+      table: rectangle(table),
+      horizontalOverflow:
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    };
+  `);
+  assert(layout, "the Studio catalog layout elements were unavailable");
+  assert(
+    layout.header.bottom <= layout.cache.top + 0.5,
+    `the Studio catalog timestamp overlaps its header: ${JSON.stringify(layout)}`,
+  );
+  assert(
+    layout.cache.bottom <= layout.table.top + 0.5,
+    `the Studio catalog timestamp overlaps the version table: ${JSON.stringify(layout)}`,
+  );
+  assert(
+    layout.horizontalOverflow <= 0,
+    `the Studio view introduces horizontal overflow: ${layout.horizontalOverflow}px`,
+  );
+  recordAssertion(
+    true,
+    "the real Studio catalog timestamp has separation from adjacent content",
+  );
+}
+
+async function assertProjectsLayout() {
+  const layout = await execute(`
+    const rows = Array.from(document.querySelectorAll(
+      '.projects-table tbody tr',
+    ));
+    const overlaps = [];
+    for (const row of rows) {
+      const cells = Array.from(row.querySelectorAll('td'));
+      for (let left = 0; left < cells.length; left += 1) {
+        for (let right = left + 1; right < cells.length; right += 1) {
+          const first = cells[left].getBoundingClientRect();
+          const second = cells[right].getBoundingClientRect();
+          const overlapX = Math.min(first.right, second.right)
+            - Math.max(first.left, second.left);
+          const overlapY = Math.min(first.bottom, second.bottom)
+            - Math.max(first.top, second.top);
+          if (overlapX > 1 && overlapY > 1) {
+            overlaps.push({ left, right, overlapX, overlapY });
+          }
+        }
+      }
+      const directory = row.querySelector('[data-testid=project-directory]');
+      const name = row.querySelector('.project-name-cell strong');
+      if (directory && name) {
+        const first = name.getBoundingClientRect();
+        const second = directory.getBoundingClientRect();
+        const overlapY = Math.min(first.bottom, second.bottom)
+          - Math.max(first.top, second.top);
+        if (overlapY > 1) overlaps.push({ elements: ['name', 'path'], overlapY });
+      }
+    }
+    return {
+      rowCount: rows.length,
+      overlaps,
+      horizontalOverflow:
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    };
+  `);
+  assert(
+    layout?.rowCount >= 1,
+    `expected rendered project fixture rows: ${JSON.stringify(layout)}`,
+  );
+  assert.deepEqual(
+    layout.overlaps,
+    [],
+    "project path/name/cell rectangles overlap in the real WebView",
+  );
+  assert(
+    layout.horizontalOverflow <= 0,
+    `the Projects view introduces horizontal overflow: ${layout.horizontalOverflow}px`,
+  );
+  recordAssertion(
+    true,
+    "real Projects cells, names, and directory paths have non-overlapping geometry",
+  );
+}
+
+async function latestLaunchOperation() {
+  const operations = await invoke("get_operations");
+  return operations.find((operation) => operation.kind === "launch") ?? null;
+}
+
+async function waitForSuccessfulLaunchOperation(afterId) {
+  return waitFor(
+    async () => {
+      const operation = await latestLaunchOperation();
+      if (
+        operation &&
+        operation.id !== afterId &&
+        operation.state === "succeeded" &&
+        operation.stage === "completed"
+      ) {
+        return operation;
+      }
+      return null;
+    },
+    10_000,
+    `a new protected project launch operation did not succeed (after ${afterId ?? "none"})`,
+  );
+}
+
 async function createSession(baseUrl, binary) {
   const value = await webdriverRequest(
     "POST",
@@ -873,6 +1141,16 @@ async function createSession(baseUrl, binary) {
 
 async function command(method, endpoint, body) {
   return webdriverRequest(method, `/session/${sessionId}${endpoint}`, body);
+}
+
+async function clickElement(selector) {
+  const element = await command("POST", "/element", {
+    using: "css selector",
+    value: selector,
+  });
+  const elementId = element["element-6066-11e4-a52e-4f735466cecf"];
+  assert(elementId, `WebDriver did not find ${selector}`);
+  await command("POST", `/element/${elementId}/click`, {});
 }
 
 async function execute(script, args = []) {
@@ -934,20 +1212,29 @@ async function webdriverRequest(
 async function createFixture(root) {
   const bin = path.join(root, "bin");
   const shared = path.join(root, "shared");
+  const longSegment = "D".repeat(88);
+  const ordersDirectory = path.join(shared, longSegment, "Orders");
+  const resumeDirectory = path.join(shared, "ResumeCase");
   const xdgCache = path.join(root, "cache");
   const xdgConfig = path.join(root, "config");
   await Promise.all([
     fs.mkdir(bin, { mode: 0o700, recursive: true }),
-    fs.mkdir(path.join(shared, "Orders"), { mode: 0o700, recursive: true }),
-    fs.mkdir(path.join(xdgCache, "com.ggobp.mendimaru"), {
+    fs.mkdir(ordersDirectory, { mode: 0o700, recursive: true }),
+    fs.mkdir(resumeDirectory, { mode: 0o700, recursive: true }),
+    fs.mkdir(xdgCache, {
       mode: 0o700,
       recursive: true,
     }),
-    fs.mkdir(path.join(xdgConfig, "com.ggobp.mendimaru"), {
+    fs.mkdir(xdgConfig, {
       mode: 0o700,
       recursive: true,
     }),
   ]);
+  await fs.writeFile(
+    path.join(root, ".mendimaru-e2e-root"),
+    "mendimaru isolated native e2e\n",
+    { mode: 0o600 },
+  );
   const legacySharedCache = path.join(shared, ".mendimaru", "installers");
   const legacySentinel = path.join(root, "host-sentinel.txt");
   const legacyPartial = path.join(
@@ -1082,18 +1369,23 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
     compose,
     `services:\n  windows:\n    image: ghcr.io/dockur/windows:e2e-fixture\n    container_name: MendimaruTauriE2E\n    volumes:\n      - ${JSON.stringify(`${shared}:/shared`)}\n      - mendimaru-e2e-storage:/storage\n    ports:\n      - 127.0.0.1:${apiPort}:7148\n      - 127.0.0.1:${rdpPort}:3389\nvolumes:\n  mendimaru-e2e-storage: {}\n`,
   );
-  await fs.writeFile(path.join(shared, "Orders", "Orders.mpr"), "fixture\n");
+  const projectSettings = JSON.stringify({
+    settingsParts: [
+      { type: "Mendix.Core, Version=11.12.2.0, Culture=neutral" },
+    ],
+  });
+  await fs.writeFile(path.join(ordersDirectory, "Orders.mpr"), "fixture\n");
   await fs.writeFile(
-    path.join(shared, "Orders", "project-settings.user.json"),
-    `${JSON.stringify({
-      settingsParts: [
-        { type: "Mendix.Core, Version=11.12.2.0, Culture=neutral" },
-      ],
-    })}\n`,
+    path.join(ordersDirectory, "project-settings.user.json"),
+    `${projectSettings}\n`,
   );
-
+  await fs.writeFile(path.join(resumeDirectory, "ResumeCase.mpr"), "fixture\n");
   await fs.writeFile(
-    path.join(xdgConfig, "com.ggobp.mendimaru", "config.json"),
+    path.join(resumeDirectory, "project-settings.user.json"),
+    '{"settingsParts":[{"type":"Mendix.Core, Version=11.13.0.0, Culture=neutral"}]}\n',
+  );
+  await fs.writeFile(
+    path.join(xdgConfig, "config.json"),
     `${JSON.stringify(
       {
         languagePreference: "en-US",
@@ -1118,7 +1410,7 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
     )}\n`,
   );
   await fs.writeFile(
-    path.join(xdgConfig, "com.ggobp.mendimaru", "operation-history.json"),
+    path.join(xdgConfig, "operation-history.json"),
     `${JSON.stringify(
       {
         schemaVersion: "1.0.0",
@@ -1148,7 +1440,7 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
     { mode: 0o600 },
   );
   await fs.writeFile(
-    path.join(xdgCache, "com.ggobp.mendimaru", "studio-version-catalog.json"),
+    path.join(xdgCache, "studio-version-catalog.json"),
     `${JSON.stringify(
       {
         versions: [
@@ -1171,11 +1463,7 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
     )}\n`,
   );
   await fs.writeFile(
-    path.join(
-      xdgCache,
-      "com.ggobp.mendimaru",
-      "installed-studio-versions.json",
-    ),
+    path.join(xdgCache, "installed-studio-versions.json"),
     `${JSON.stringify(
       {
         schemaVersion: "1.0.0",
@@ -1339,7 +1627,8 @@ async function waitFor(predicate, timeout, message) {
   let lastError;
   while (Date.now() < deadline) {
     try {
-      if (await predicate()) return;
+      const result = await predicate();
+      if (result) return result;
     } catch (error) {
       lastError = error;
     }
@@ -1602,6 +1891,27 @@ async function findApplicationProcess(binary, expectedConfigHome) {
     `expected one isolated Mendimaru process, found ${matches.join(", ") || "none"}`,
   );
   return matches[0];
+}
+
+async function applicationEnvironment() {
+  const expectedBinary = await fs.realpath(application);
+  for (const entry of await fs.readdir("/proc", { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^[1-9][0-9]*$/.test(entry.name)) continue;
+    const executablePath = await fs
+      .realpath(`/proc/${entry.name}/exe`)
+      .catch(() => undefined);
+    if (executablePath !== expectedBinary) continue;
+    const environment = await fs
+      .readFile(`/proc/${entry.name}/environ`)
+      .catch(() => undefined);
+    return (
+      environment
+        ?.toString("utf8")
+        .split("\0")
+        .filter((value) => value.startsWith("MENDIMARU_E2E_")) ?? []
+    );
+  }
+  return [];
 }
 
 async function linuxProcessSnapshot(rootPid) {

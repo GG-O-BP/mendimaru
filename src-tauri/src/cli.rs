@@ -1668,6 +1668,8 @@ async fn request_session_keeper(
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
+    let response_timeout = keeper_response_timeout(request);
+
     let metadata = match std::fs::symlink_metadata(socket_path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -1714,7 +1716,7 @@ async fn request_session_keeper(
     .map_err(|_| keeper_command_error("the session keeper request failed".to_string()))?;
     let mut reader = BufReader::new(read_half).take(32 * 1024);
     let mut response = String::new();
-    let count = tokio::time::timeout(Duration::from_secs(2), reader.read_line(&mut response))
+    let count = tokio::time::timeout(response_timeout, reader.read_line(&mut response))
         .await
         .map_err(|_| keeper_command_error("the session keeper response timed out".to_string()))?
         .map_err(|_| keeper_command_error("the session keeper response failed".to_string()))?;
@@ -1726,6 +1728,15 @@ async fn request_session_keeper(
     serde_json::from_str(&response)
         .map(Some)
         .map_err(|_| keeper_command_error("the session keeper response was invalid".to_string()))
+}
+
+#[cfg(target_os = "linux")]
+fn keeper_response_timeout(request: &str) -> Duration {
+    if request == "stop" {
+        Duration::from_secs(90)
+    } else {
+        Duration::from_secs(2)
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -3204,5 +3215,37 @@ mod tests {
         std::fs::write(&untrusted, b"not a socket").expect("untrusted fixture");
         let result = tauri::async_runtime::block_on(request_session_keeper(&untrusted, "status"));
         assert!(result.is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn session_keeper_stop_waits_for_a_slow_authoritative_shutdown() {
+        use std::io::{BufRead, Write};
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let socket_path = temporary.path().join("slow-stop.sock");
+        let listener =
+            std::os::unix::net::UnixListener::bind(&socket_path).expect("fixture listener");
+        std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
+            .expect("fixture permissions");
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("fixture connection");
+            let mut request = String::new();
+            std::io::BufReader::new(&stream)
+                .read_line(&mut request)
+                .expect("fixture request");
+            assert_eq!(request, "stop\n");
+            std::thread::sleep(Duration::from_millis(2_100));
+            let mut stream = stream;
+            writeln!(stream, r#"{{"ok":true,"session":null}}"#).expect("fixture response");
+        });
+
+        let response = tauri::async_runtime::block_on(request_session_keeper(&socket_path, "stop"))
+            .expect("keeper stop request")
+            .expect("keeper stop response");
+        assert!(response.ok);
+        assert!(response.session.is_none());
+        server.join().expect("fixture server");
     }
 }

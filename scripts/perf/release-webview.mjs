@@ -23,7 +23,10 @@ if (!["linux", "windows"].includes(platform)) {
   throw new Error("release WebView performance runs only on Linux and Windows");
 }
 const options = parseArguments(process.argv.slice(2));
-const sampling = samplingPolicy();
+const sampling = samplingPolicy({
+  sampleCount: options.sampleCount,
+  idleWindowSeconds: options.idleWindowSeconds,
+});
 const reportPath = path.resolve(
   options.report ??
     path.join(
@@ -375,12 +378,31 @@ function parseArguments(arguments_) {
   }
   return {
     application: path.resolve(application),
+    sampleCount: positiveIntegerOption(
+      values["sample-count"],
+      7,
+      "--sample-count",
+    ),
+    idleWindowSeconds: positiveIntegerOption(
+      values["idle-window-seconds"],
+      300,
+      "--idle-window-seconds",
+    ),
     report: values.report,
     commit,
     baselineCommit,
     packageKind,
     runId: values["run-id"] ?? process.env.GITHUB_RUN_ID ?? "local",
   };
+}
+
+function positiveIntegerOption(value, fallback, name) {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
 }
 
 function gitCommit() {

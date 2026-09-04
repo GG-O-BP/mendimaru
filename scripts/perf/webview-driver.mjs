@@ -169,7 +169,7 @@ class WindowsWebviewDriver extends WebviewDriverBase {
       this.appProcess,
       20_000,
     );
-    await this.client.createWindowsSession();
+    await createWindowsSessionWithWindowRetry(this.client);
     await this.waitForShell();
     this.cpuTracker = createProcessCpuTracker();
     return rounded(performance.now() - started);
@@ -448,6 +448,21 @@ async function terminateLinuxApplications(application, expectedRoot) {
   );
 }
 
+async function createWindowsSessionWithWindowRetry(client) {
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await client.createWindowsSession();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!String(error?.message).includes("no such window")) throw error;
+      await delay(500);
+    }
+  }
+  throw lastError;
+}
+
 async function linuxProcessSnapshot(rootPid, cpuTracker) {
   const records = [];
   for (const entry of await fs.readdir("/proc", { withFileTypes: true })) {
@@ -467,6 +482,7 @@ async function linuxProcessSnapshot(rootPid, cpuTracker) {
     records.push({
       pid,
       parentPid: Number(fields[1]),
+      state: fields[0],
       cpuTicks: Number(fields[11]) + Number(fields[12]),
       startTicks: fields[19],
     });
@@ -478,7 +494,10 @@ async function linuxProcessSnapshot(rootPid, cpuTracker) {
   for (const pid of processIds) {
     const record = records.find((candidate) => candidate.pid === pid);
     const memory = await linuxMemory(pid);
-    if (!record || !memory) continue;
+    // Linux keeps exited children as zombies until the host reaps them. They
+    // have no scheduler, memory, or file resources and must not be counted as
+    // a live WebView process leak.
+    if (!record || record.state === "Z" || !memory) continue;
     privateMemoryBytes += memory.privateMemoryBytes;
     workingSetBytes += memory.workingSetBytes;
     processCount += 1;

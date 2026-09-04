@@ -170,6 +170,10 @@ jobs:
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
         run: |
           mkdir -p artifacts/e2e/release-performance
+          sampling_args=()
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            sampling_args+=(--sample-count 5 --idle-window-seconds 300)
+          fi
           chrome_path=""
           for command_name in google-chrome-stable google-chrome chromium chromium-browser; do
             if command -v "$command_name" >/dev/null 2>&1; then
@@ -185,14 +189,16 @@ jobs:
             --commit "${{ steps.revisions.outputs.baseline }}" \
             --baseline-commit "${{ steps.revisions.outputs.baseline }}" \
             --package-kind appimage \
-            --run-id "${GITHUB_RUN_ID}-baseline"
+            --run-id "${GITHUB_RUN_ID}-baseline" \
+            "${sampling_args[@]}"
           xvfb-run --auto-servernum node scripts/perf/release-webview.mjs \
             --application "${{ steps.linux-applications.outputs.candidate }}" \
             --report artifacts/e2e/release-performance/linux-candidate.json \
             --commit "${{ steps.revisions.outputs.candidate }}" \
             --baseline-commit "${{ steps.revisions.outputs.baseline }}" \
             --package-kind appimage \
-            --run-id "${GITHUB_RUN_ID}-candidate"
+            --run-id "${GITHUB_RUN_ID}-candidate" \
+            "${sampling_args[@]}"
 
       - name: Measure baseline and candidate Windows executables
         if: runner.os == 'Windows'

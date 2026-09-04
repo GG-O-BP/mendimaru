@@ -110,28 +110,46 @@ pub(crate) fn set_project_favorite(
 }
 
 #[tauri::command]
-pub(crate) fn select_external_project(app: AppHandle) -> CommandResult<Option<MendixProject>> {
+pub(crate) async fn select_external_project(
+    app: AppHandle,
+) -> CommandResult<Option<MendixProject>> {
     if !cfg!(target_os = "linux") {
         return Err(CommandError::new(
             CommandErrorCode::UnsupportedCapability,
             crate::tr!("error-external-project-linux-only"),
         ));
     }
-    let config = load_command_config(&app)?;
-    let selection = app
-        .dialog()
+
+    let (selection_sender, selection_receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
         .file()
         .add_filter("Mendix project", &["mpr"])
-        .blocking_pick_file();
+        .pick_file(move |selection| {
+            let _ = selection_sender.send(selection);
+        });
+    let selection = selection_receiver.await.map_err(|_| {
+        CommandError::new(
+            CommandErrorCode::OperationFailed,
+            "the project selection dialog stopped unexpectedly".to_string(),
+        )
+    })?;
     let Some(selection) = selection else {
         return Ok(None);
     };
     let path = selection
         .into_path()
         .map_err(|error| crate::tr!("error-project-path-encoding-detail", error = error))?;
+    inspect_external_selection(&app, path).await
+}
+
+async fn inspect_external_selection(
+    app: &AppHandle,
+    path: std::path::PathBuf,
+) -> CommandResult<Option<MendixProject>> {
+    let config = load_command_config(app)?;
     let mut project = crate::projects::inspect_selected_project(&config, &path)
         .map_err(|message| CommandError::new(CommandErrorCode::InvalidRequest, message))?;
-    crate::project_launches::apply_preferences(&app, &config, std::slice::from_mut(&mut project))?;
+    crate::project_launches::apply_preferences(app, &config, std::slice::from_mut(&mut project))?;
     Ok(Some(project))
 }
 
