@@ -19,6 +19,10 @@
       {
         "source": "PR #58 runs 32946504534, 32950388617, and 32953791298: identical Windows bootstrap sources kept candidate warm-start p50 changes to 16.0, 1.9, and 8.6 percent; run 32953791298 failed p95 only because one 984.97 ms Tukey outlier exceeded the 765.82 ms baseline p95",
         "recordedAt": "2026-08-26T09:55:43Z"
+      },
+      {
+        "source": "PR #124 run 33912788179: an unrelated Marketplace launch-retry change produced a 2048.374 ms Windows cold-start p95 against a 1472.412 ms baseline (575.962 ms absolute difference) while the installed MSI and NSIS performance suites passed",
+        "recordedAt": "2026-09-04T20:07:03Z"
       }
     ]
   },
@@ -244,7 +248,8 @@
               "statistic": "p95",
               "absoluteMax": 20000,
               "relativeMaxPercent": 20,
-              "rationale": "Release WebView2 startup replaces the former 180 second CI override with a 20 second safety rail."
+              "relativeNoiseFloor": 600,
+              "rationale": "Release WebView2 startup replaces the former 180 second CI override with a 20 second safety rail. Hosted-runner cold p95 can vary by roughly 0.6 seconds for unrelated changes, so a metric-specific 600 ms floor avoids false positives while retaining the 20 percent and 20 second gates."
             },
             "warmStartupMs": {
               "statistic": "p50",
