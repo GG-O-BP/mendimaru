@@ -23,6 +23,10 @@
       {
         "source": "PR #124 run 33912788179: an unrelated Marketplace launch-retry change produced a 2048.374 ms Windows cold-start p95 against a 1472.412 ms baseline (575.962 ms absolute difference) while the installed MSI and NSIS performance suites passed",
         "recordedAt": "2026-09-04T20:07:03Z"
+      },
+      {
+        "source": "Main runs 33919703993 and 33925549585: Linux release navigation p95 missed its relative gate by 3.441 ms and 21.326 ms respectively on unrelated test-only changes",
+        "recordedAt": "2026-09-04T23:01:35Z"
       }
     ]
   },
@@ -116,7 +120,8 @@
               "statistic": "p95",
               "absoluteMax": 1500,
               "relativeMaxPercent": 20,
-              "rationale": "Observed debug navigation was 111 to 248 ms; release navigation receives bounded noise headroom."
+              "relativeNoiseFloor": 100,
+              "rationale": "Observed debug navigation was 111 to 248 ms. Hosted Linux release comparisons can jitter by tens of milliseconds on unrelated changes, so navigation uses a reviewed 100 ms floor while retaining its 20 percent and 1.5 second gates."
             },
             "backgroundPollingCpuPercent": {
               "statistic": "p95",
