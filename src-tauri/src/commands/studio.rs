@@ -78,6 +78,33 @@ pub(crate) async fn resolve_downloadable_version(
 }
 
 #[tauri::command]
+pub(crate) fn open_release_notes(app: AppHandle, url: String) -> CommandResult<()> {
+    let url = validate_release_notes_url(&url)
+        .map_err(|message| CommandError::new(CommandErrorCode::InvalidRequest, message))?;
+
+    #[cfg(feature = "e2e")]
+    if let Some(capture_path) = crate::e2e::release_notes_capture_file()
+        .map_err(|message| CommandError::new(CommandErrorCode::InvalidRequest, message))?
+    {
+        std::fs::write(&capture_path, url).map_err(|error| {
+            CommandError::new(
+                CommandErrorCode::OperationFailed,
+                crate::tr!("error-release-notes-open", error = error),
+            )
+        })?;
+        return Ok(());
+    }
+
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_url(url, None::<&str>).map_err(|error| {
+        CommandError::new(
+            CommandErrorCode::OperationFailed,
+            crate::tr!("error-release-notes-open", error = error),
+        )
+    })
+}
+
+#[tauri::command]
 pub(crate) async fn launch_studio_pro(
     app: AppHandle,
     version: String,
@@ -249,4 +276,44 @@ async fn wait_for_queue_success(
 
 fn operation_history_error(message: String) -> CommandError {
     CommandError::new(CommandErrorCode::OperationFailed, message)
+}
+
+fn validate_release_notes_url(value: &str) -> Result<String, String> {
+    if value.len() > 2048 {
+        return Err(crate::tr!("error-release-notes-url-invalid"));
+    }
+    let url =
+        reqwest::Url::parse(value).map_err(|_| crate::tr!("error-release-notes-url-invalid"))?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
+        return Err(crate::tr!("error-release-notes-url-invalid"));
+    }
+    Ok(url.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_release_notes_url;
+
+    #[test]
+    fn release_notes_urls_must_be_bounded_https_without_credentials() {
+        assert_eq!(
+            validate_release_notes_url("https://docs.mendix.com/releasenotes/studio-pro/11.12/")
+                .expect("safe release notes URL"),
+            "https://docs.mendix.com/releasenotes/studio-pro/11.12/"
+        );
+        for invalid in [
+            "http://docs.mendix.com/",
+            "file:///etc/passwd",
+            "https://user@example.com/",
+            "https://user:secret@example.com/",
+            "not-a-url",
+            &format!("https://example.com/{}", "a".repeat(2048)),
+        ] {
+            assert!(
+                validate_release_notes_url(invalid).is_err(),
+                "unexpectedly accepted {}...",
+                &invalid[..invalid.len().min(40)]
+            );
+        }
+    }
 }

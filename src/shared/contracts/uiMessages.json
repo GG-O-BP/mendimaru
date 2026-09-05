@@ -152,6 +152,7 @@
   "badge-beta": true,
   "badge-update-available": true,
   "release-notes-for": true,
+  "release-notes-open-failed": true,
   "manifest-version": true,
   "manifest-support": true,
   "manifest-release": true,

@@ -84,6 +84,24 @@ pub(crate) fn stub_studio_launch_for_e2e() -> Result<bool, String> {
     Ok(true)
 }
 
+#[cfg(feature = "e2e")]
+pub(crate) fn release_notes_capture_file() -> Result<Option<PathBuf>, String> {
+    let Some(value) =
+        std::env::var_os("MENDIMARU_E2E_RELEASE_NOTES_FILE").filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let root = require_isolated_root()?;
+    let path = PathBuf::from(value);
+    if !path.is_absolute() || path.parent() != Some(root.as_path()) || path.file_name().is_none() {
+        return Err(
+            "MENDIMARU_E2E_RELEASE_NOTES_FILE must name a file directly inside the isolated e2e root"
+                .to_string(),
+        );
+    }
+    Ok(Some(path))
+}
+
 #[cfg(target_os = "windows")]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]

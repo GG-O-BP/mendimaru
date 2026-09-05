@@ -125,6 +125,7 @@ try {
         ...process.env,
         MENDIMARU_E2E_ROOT: temporary,
         MENDIMARU_E2E_STUB_STUDIO_LAUNCH: "1",
+        MENDIMARU_E2E_RELEASE_NOTES_FILE: fixture.releaseNotesCapture,
         MENDIMARU_CHROME_PATH: fixture.chrome,
         PATH: `${fixture.bin}${path.delimiter}${process.env.PATH ?? ""}`,
         XDG_CACHE_HOME: fixture.xdgCache,
@@ -357,6 +358,7 @@ try {
     "the initial overview performs exactly one expensive Guest app discovery",
   );
   await assertStudioCatalogLayout();
+  await assertReleaseNotesAction(fixture);
 
   const routeMotion = await execute(`
     const marker = document.querySelector(".route-packet");
@@ -1039,6 +1041,68 @@ async function assertStudioCatalogLayout() {
   );
 }
 
+async function assertReleaseNotesAction(fixture) {
+  const expectedUrl = "https://docs.mendix.com/releasenotes/studio-pro/11.13/";
+  const layout = await execute(`
+    const link = document.querySelector('.release-notes-link');
+    const cell = link?.closest('td');
+    const wrap = document.querySelector(
+      '.available-section .manifest-table-wrap',
+    );
+    if (!link || !cell || !wrap) return null;
+    const rectangle = (element) => {
+      const value = element.getBoundingClientRect();
+      return {
+        top: value.top,
+        bottom: value.bottom,
+        left: value.left,
+        right: value.right,
+      };
+    };
+    return {
+      link: rectangle(link),
+      cell: rectangle(cell),
+      wrap: rectangle(wrap),
+      horizontalOverflow:
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    };
+  `);
+  assert(layout, "the Studio release notes action was unavailable");
+  assert(
+    layout.link.left >= layout.cell.left - 0.5 &&
+      layout.link.right <= layout.cell.right + 0.5,
+    `the release notes action escapes its Actions cell: ${JSON.stringify(layout)}`,
+  );
+  assert(
+    layout.link.top >= layout.cell.top - 0.5 &&
+      layout.link.bottom <= layout.cell.bottom + 0.5,
+    `the release notes action escapes its row vertically: ${JSON.stringify(layout)}`,
+  );
+  assert(
+    layout.cell.right <= layout.wrap.right + 0.5,
+    `the Actions cell escapes the catalog table: ${JSON.stringify(layout)}`,
+  );
+  assert(
+    layout.horizontalOverflow <= 0,
+    `the release notes action introduces document horizontal overflow: ${layout.horizontalOverflow}px`,
+  );
+
+  await clickElement(".release-notes-link");
+  await waitFor(
+    async () =>
+      (
+        await fs.readFile(fixture.releaseNotesCapture, "utf8").catch(() => "")
+      ).trim() === expectedUrl,
+    5_000,
+    "clicking Release notes did not reach the native opener IPC",
+  );
+  recordAssertion(
+    true,
+    "the real Release notes action stays inside its cell and reaches the opener IPC",
+  );
+}
+
 async function assertProjectsLayout() {
   const layout = await execute(`
     const rows = Array.from(document.querySelectorAll(
@@ -1299,6 +1363,7 @@ async function createFixture(root) {
   const activeShared = path.join(root, "active-shared.txt");
   const runtimeCalls = path.join(root, "runtime-calls.jsonl");
   const runtimeFailFlag = path.join(root, "runtime-fail.flag");
+  const releaseNotesCapture = path.join(root, "release-notes.url");
   await fs.writeFile(activeShared, shared);
   const runtimeHangFlag = path.join(root, "runtime-hang.flag");
   const runtimeHangPids = path.join(root, "runtime-hang.pids");
@@ -1447,7 +1512,8 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
           {
             version: "11.13.0",
             releaseDate: "2026-07-28",
-            releaseNotesUrl: null,
+            releaseNotesUrl:
+              "https://docs.mendix.com/releasenotes/studio-pro/11.13/",
             isLts: false,
             isBeta: false,
             isMts: true,
@@ -1504,6 +1570,7 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
     runtimeHangPids,
     runtimeCalls,
     runtimeFailFlag,
+    releaseNotesCapture,
     shared,
     xdgCache,
     xdgConfig,

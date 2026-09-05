@@ -52,6 +52,7 @@ const linux = {
     '"Settings"',
     '"Studio Pro"',
     "assertStudioCatalogLayout",
+    "assertReleaseNotesAction",
     "assertProjectsLayout",
     "waitForSuccessfulLaunchOperation",
     "select-external-project",
@@ -169,6 +170,7 @@ if (runReport) {
       executed("project scanner finds the isolated Orders fixture") &&
       executed("reports a ready WinBoat environment") &&
       executed("catalog timestamp has separation") &&
+      executed("Release notes action stays inside its cell") &&
       executed("non-overlapping geometry") &&
       executed("clicking Open completes a protected project launch") &&
       executed("external project selection remains responsive"),

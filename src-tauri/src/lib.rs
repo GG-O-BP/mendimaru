@@ -60,6 +60,7 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init());
+    let builder = builder.plugin(tauri_plugin_opener::init());
     #[cfg(feature = "e2e")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
     let app = builder
@@ -110,6 +111,7 @@ pub fn run() {
             clear_operation_history,
             open_operation_logs,
             open_folder,
+            open_release_notes,
             #[cfg(all(feature = "e2e", target_os = "windows"))]
             e2e::e2e_bounded_process_cleanup,
         ])

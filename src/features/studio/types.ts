@@ -60,6 +60,7 @@ export interface CatalogModel {
   onRefresh: () => void;
   onLoadMore: () => void;
   onInstall: (version: DownloadableVersion, forceRedownload?: boolean) => void;
+  onOpenReleaseNotes: (url: string) => void;
 }
 
 export interface InstallationModel {
