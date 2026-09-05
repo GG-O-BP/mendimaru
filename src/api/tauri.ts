@@ -68,6 +68,7 @@ const commands = {
   clearOperationHistory: "clear_operation_history",
   openOperationLogs: "open_operation_logs",
   openFolder: "open_folder",
+  openReleaseNotes: "open_release_notes",
 } as const;
 
 export const tauriApi = {
@@ -187,6 +188,8 @@ export const tauriApi = {
   clearOperationHistory: () => invoke<number>(commands.clearOperationHistory),
   openOperationLogs: () => invoke<void>(commands.openOperationLogs),
   openFolder: (path: string) => invoke<void>(commands.openFolder, { path }),
+  openReleaseNotes: (url: string) =>
+    invoke<void>(commands.openReleaseNotes, { url }),
   onStudioDownloadProgress: (
     handler: (progress: DownloadProgress) => void,
   ): Promise<UnlistenFn> =>

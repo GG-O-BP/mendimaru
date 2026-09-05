@@ -62,6 +62,7 @@ export function VersionCatalogTable({
                 catalog.queuedVersions.has(version.version)
               }
               onInstall={catalog.onInstall}
+              onOpenReleaseNotes={catalog.onOpenReleaseNotes}
             />
           ))}
         </tbody>
@@ -82,6 +83,7 @@ function VersionRow({
   connectedRemoteAppVersion,
   installing,
   onInstall,
+  onOpenReleaseNotes,
 }: {
   t: Translate;
   version: CatalogModel["versions"][number];
@@ -94,6 +96,7 @@ function VersionRow({
   connectedRemoteAppVersion?: string;
   installing: boolean;
   onInstall: CatalogModel["onInstall"];
+  onOpenReleaseNotes: CatalogModel["onOpenReleaseNotes"];
 }) {
   const releaseNotesUrl = safeReleaseNotesUrl(version.releaseNotesUrl);
   const availability = !installedVersionsLoaded
@@ -198,6 +201,10 @@ function VersionRow({
             title={t("release-notes-for", { version: version.version })}
             target="_blank"
             rel="noreferrer"
+            onClick={(event) => {
+              event.preventDefault();
+              onOpenReleaseNotes(releaseNotesUrl);
+            }}
           >
             <FileText size={14} />
             <span className="sr-only">

@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import type {
   DownloadableVersion,
   LocalizationBundle,
@@ -85,6 +85,7 @@ describe("VersionCatalogTable update guidance", () => {
           onRefresh: () => undefined,
           onLoadMore: () => undefined,
           onInstall: () => undefined,
+          onOpenReleaseNotes: () => undefined,
         }}
       />,
     );
@@ -101,5 +102,53 @@ describe("VersionCatalogTable update guidance", () => {
     expect(
       screen.queryByRole("link", { name: "release-notes-for:11.14.0" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("routes release notes through the native opener callback", () => {
+    const onOpenReleaseNotes = vi.fn();
+    render(
+      <VersionCatalogTable
+        t={t}
+        localization={localization}
+        online
+        catalog={{
+          versions: [
+            downloadable("11.13.0", {
+              releaseNotesUrl: "https://docs.example.com/release/11.13.0",
+            }),
+          ],
+          totalCount: 1,
+          fetchedAt: "2026-09-01T00:00:00Z",
+          cacheFresh: true,
+          loadedCount: 1,
+          search: "",
+          supportFilters: { lts: false, mts: false },
+          loading: false,
+          error: null,
+          hasMore: false,
+          installedSet: new Set<string>(),
+          installedVersions: [],
+          updateCandidates: new Set<string>(),
+          installedVersionsLoaded: true,
+          studioSessionsLoading: false,
+          isInstalling: false,
+          queuedVersions: new Set<string>(),
+          isBusy: () => false,
+          onSearch: () => undefined,
+          onToggleSupportFilter: () => undefined,
+          onRefresh: () => undefined,
+          onLoadMore: () => undefined,
+          onInstall: () => undefined,
+          onOpenReleaseNotes,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("link", { name: "release-notes-for:11.13.0" }),
+    );
+    expect(onOpenReleaseNotes).toHaveBeenCalledWith(
+      "https://docs.example.com/release/11.13.0",
+    );
   });
 });

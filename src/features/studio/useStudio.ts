@@ -22,5 +22,6 @@ export function useStudio(dependencies: StudioDependencies) {
     ...installation,
     installQueue,
     isBusy: dependencies.isBusy,
+    notify: dependencies.notify,
   };
 }

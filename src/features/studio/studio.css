@@ -374,6 +374,15 @@
   border-radius: 3px;
 }
 
+.available-section .manifest-table th:nth-child(5) {
+  width: 185px;
+}
+
+.release-notes-link:focus-visible {
+  outline: 3px solid rgba(0, 123, 138, 0.34);
+  outline-offset: 2px;
+}
+
 .release-notes-link:hover {
   color: var(--ink);
   border-color: var(--cyan);

@@ -29,7 +29,7 @@ pub(crate) use studio::{
     enqueue_install_queue_item, fetch_downloadable_versions, get_downloadable_versions_cache,
     get_install_queue, get_installed_versions, get_installed_versions_cache, get_operations,
     get_studio_sessions, install_studio_pro, launch_studio_pro, move_install_queue_item,
-    open_operation_logs, reconnect_studio_session, remove_install_queue_item,
+    open_operation_logs, open_release_notes, reconnect_studio_session, remove_install_queue_item,
     resolve_downloadable_version, retry_install_queue_item, retry_operation, stop_studio_session,
     uninstall_studio_pro,
 };

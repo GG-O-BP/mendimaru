@@ -67,6 +67,7 @@ const mocks = vi.hoisted(() => ({
   clearOperationHistory: vi.fn(),
   openOperationLogs: vi.fn(),
   openFolder: vi.fn(),
+  openReleaseNotes: vi.fn(),
   onStudioDownloadProgress: vi.fn(),
   onInstallQueueChanged: vi.fn(),
   onWorkspaceProjectsChanged: vi.fn(),
@@ -122,6 +123,7 @@ vi.mock("./api/tauri", () => ({
     clearOperationHistory: mocks.clearOperationHistory,
     openOperationLogs: mocks.openOperationLogs,
     openFolder: mocks.openFolder,
+    openReleaseNotes: mocks.openReleaseNotes,
     onStudioDownloadProgress: mocks.onStudioDownloadProgress,
     onInstallQueueChanged: mocks.onInstallQueueChanged,
     onWorkspaceProjectsChanged: mocks.onWorkspaceProjectsChanged,
@@ -235,6 +237,7 @@ const catalog: StudioVersionCatalog = {
     {
       version: "11.13.0",
       releaseDate: "2026-07-28",
+      releaseNotesUrl: "https://docs.mendix.com/releasenotes/studio-pro/11.13/",
       isLts: false,
       isBeta: false,
       isMts: true,
@@ -330,6 +333,7 @@ beforeEach(() => {
   mocks.clearOperationHistory.mockResolvedValue(0);
   mocks.openOperationLogs.mockResolvedValue(undefined);
   mocks.openFolder.mockResolvedValue(undefined);
+  mocks.openReleaseNotes.mockResolvedValue(undefined);
   mocks.onStudioDownloadProgress.mockResolvedValue(vi.fn());
   mocks.getInstallQueue.mockResolvedValue([]);
   mocks.onInstallQueueChanged.mockResolvedValue(vi.fn());
@@ -446,6 +450,23 @@ describe("native Windows application E2E", () => {
       ).toBeEnabled(),
     );
     expect(screen.getByTestId("refresh-installed")).toBeEnabled();
+  });
+
+  it("opens release notes through the native opener and reports failure", async () => {
+    mocks.openReleaseNotes.mockRejectedValueOnce(
+      new Error("default browser unavailable"),
+    );
+    await renderReadyApp();
+
+    fireEvent.click(await screen.findByTitle(/^release-notes-for/));
+
+    await waitFor(() =>
+      expect(mocks.openReleaseNotes).toHaveBeenCalledWith(
+        "https://docs.mendix.com/releasenotes/studio-pro/11.13/",
+      ),
+    );
+    expect(await screen.findByText("release-notes-open-failed")).toBeVisible();
+    expect(screen.getByText("default browser unavailable")).toBeVisible();
   });
 
   it("shows zero and the empty state only after an authoritative empty result", async () => {

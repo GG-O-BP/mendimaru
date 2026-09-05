@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import { errorText } from "../api/errors";
+import { tauriApi } from "../api/tauri";
 import type { LocalizationBundle } from "../domain/types";
 import type { EnvironmentController } from "../features/settings/useEnvironment";
 import {
@@ -86,6 +88,15 @@ export function StudioView({
         onRefresh: () => void studio.refreshCatalog(),
         onLoadMore: () => void studio.loadMore(),
         onInstall: studio.askInstall,
+        onOpenReleaseNotes: (url) => {
+          void tauriApi.openReleaseNotes(url).catch((error: unknown) => {
+            studio.notify(
+              "error",
+              t("release-notes-open-failed"),
+              errorText(error, t),
+            );
+          });
+        },
       }}
       installation={{
         progress: studio.downloadProgress,
