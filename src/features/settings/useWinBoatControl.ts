@@ -37,6 +37,7 @@ export function useWinBoatControl({
   const mounted = useRef(false);
   const starting = useRef(false);
   const [startupFailure, setStartupFailure] = useState<string | null>(null);
+  const [failureAfterId, setFailureAfterId] = useState(0);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -65,6 +66,7 @@ export function useWinBoatControl({
         } catch (error) {
           if (!mounted.current) return;
           setStartupFailure(errorText(error, t));
+          setFailureAfterId(status?.startup?.id ?? 0);
           throw error;
         } finally {
           if (mounted.current) {
@@ -77,7 +79,14 @@ export function useWinBoatControl({
       starting.current = false;
       if (mounted.current) setStartupPending(false);
     }
-  }, [notify, refreshStatus, runAction, setStartupPending, t]);
+  }, [
+    notify,
+    refreshStatus,
+    runAction,
+    setStartupPending,
+    status?.startup?.id,
+    t,
+  ]);
 
   const openWinBoat = useCallback(
     () => runAction("open-winboat", () => tauriApi.openWinBoat()),
@@ -158,7 +167,10 @@ export function useWinBoatControl({
       deriveEnvironmentPresentation(
         status,
         t,
-        startupFailure ??
+        (status?.startup?.phase === "online" &&
+        status.startup.id > failureAfterId
+          ? null
+          : startupFailure) ??
           (observedStartupFailure
             ? t(
                 observedStartupFailure.errorCode === "qemu_boot_timeout"
@@ -170,7 +182,14 @@ export function useWinBoatControl({
             : null),
         startupPending,
       ),
-    [status, startupFailure, startupPending, observedStartupFailure, t],
+    [
+      status,
+      startupFailure,
+      failureAfterId,
+      startupPending,
+      observedStartupFailure,
+      t,
+    ],
   );
 
   const runPrimaryAction = useCallback(() => {

@@ -29,7 +29,11 @@ Compose, ROM, TPM state, and installed apps are not edited or deleted.
 Mendimaru holds a cross-process maintenance lease through restart and Guest
 readiness verification. Studio/install/session actions and Runtime start/stop
 cannot overlap recovery. The container must be stopped before changing UEFI
-files. If readiness fails, Mendimaru stops that exact container, revalidates the
+files. This lease coordinates Mendimaru processes, not external Docker/WinBoat
+controllers: stop their automatic restarts and do not start or modify the VM
+through another tool while confirming or running recovery. No application-side
+file lock can prevent an unrelated runtime client from racing a container start.
+If readiness fails, Mendimaru stops that exact container, revalidates the
 preconditions, preserves any failed regenerated variable store, and restores the
 original inode. If safe restoration is unavailable, the backup and original stay
 intact and Settings offers a separately confirmed Restore UEFI backup action.

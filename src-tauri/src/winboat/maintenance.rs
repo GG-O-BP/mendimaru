@@ -38,7 +38,7 @@ pub(super) fn acquire(config: &AppConfig, exclusive: bool) -> Result<Lease, Stri
         .write(true)
         .create(true)
         .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW);
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     let file = directory
         .open_with(".mendimaru-maintenance.lock", &options)
         .map_err(|_| rejected())?

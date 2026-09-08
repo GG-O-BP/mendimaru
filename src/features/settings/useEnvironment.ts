@@ -104,7 +104,7 @@ export function useEnvironment(dependencies: EnvironmentDependencies) {
     choosePath: settings.choosePath,
     rerunDiagnostics: () =>
       dependencies.runAction("rerun-environment-diagnostics", () =>
-        environmentStatus.refreshStatus(),
+        environmentStatus.refreshStatus({ sourceChanged: true }),
       ),
     addStudioPath: settings.addStudioPath,
     removeStudioPath: settings.removeStudioPath,

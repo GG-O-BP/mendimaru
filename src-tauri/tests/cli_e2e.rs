@@ -34,6 +34,86 @@ fn fixture_config(workspace: &std::path::Path) -> AppConfig {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn startup_command_failure_matrix_is_bounded_and_secret_free() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let bin = root.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let script = bin.join("docker");
+    fs::write(&script, r#"#!/bin/sh
+case "$1" in
+  inspect)
+    case "$MENDIMARU_STARTUP_FIXTURE" in
+      inspect-hang) sleep 30 ;;
+      inspect-fail) echo 'password=fixture-secret /home/fixture-private' >&2; exit 1 ;;
+      health-timeout) echo '[{"State":{"Status":"running"}}]' ;;
+      unsafe-port) echo '[{"State":{"Status":"running"},"NetworkSettings":{"Ports":{"7148/tcp":[{"HostIp":"0.0.0.0","HostPort":"9"}]}}}]' ;;
+      *) echo '[{"State":{"Status":"exited"}}]' ;;
+    esac ;;
+  start) exit 0 ;;
+  logs)
+    case "$MENDIMARU_STARTUP_FIXTURE" in
+      qemu) echo 'ERROR: Timeout while waiting for QEMU to boot the machine!' >&2 ;;
+      log-hang) sleep 30 ;;
+      log-fail) echo 'password=fixture-secret' >&2; exit 1 ;;
+      *) echo 'unknown boot error password=fixture-secret /home/fixture-private' >&2 ;;
+    esac ;;
+  *) exit 1 ;;
+esac
+"#).unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
+    let mut config = fixture_config(root.path());
+    config.startup_timeout_seconds = 2;
+    fs::write(
+        root.path().join("config.json"),
+        serde_json::to_vec(&config).unwrap(),
+    )
+    .unwrap();
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    for (mode, code) in [
+        ("inspect-hang", "external_process_timeout"),
+        ("inspect-fail", "operation_failed"),
+        ("health-timeout", "guest_startup_timeout"),
+        ("unsafe-port", "precondition_failed"),
+        ("qemu", "qemu_boot_timeout"),
+        ("unknown", "container_exited_during_startup"),
+        ("log-hang", "container_exited_during_startup"),
+        ("log-fail", "container_exited_during_startup"),
+    ] {
+        let started = Instant::now();
+        let output = run_with_environment(
+            root.path(),
+            &["env", "ensure", "--json"],
+            &[
+                ("PATH", path.as_os_str()),
+                ("MENDIMARU_STARTUP_FIXTURE", std::ffi::OsStr::new(mode)),
+            ],
+        );
+        let error = stderr_json(&output);
+        assert_eq!(error["error"]["code"], code, "{mode}: {error}");
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "unbounded {mode}"
+        );
+        for secret in [
+            "fixture-secret",
+            "/home/fixture-private",
+            "ERROR: Timeout",
+            "unknown boot error",
+        ] {
+            assert!(
+                !error.to_string().contains(secret),
+                "{mode} leaked {secret}"
+            );
+        }
+    }
+}
+
 fn run(config_directory: &std::path::Path, arguments: &[&str]) -> Output {
     run_with_environment(config_directory, arguments, &[])
 }

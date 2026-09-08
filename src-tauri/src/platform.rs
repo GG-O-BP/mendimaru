@@ -469,6 +469,9 @@ mod tests {
             Ok("1"),
             "set MENDIMARU_E2E_ALLOW_MUTATION=1 to mutate the live WinBoat VM"
         );
+        let snapshot = std::env::var("MENDIMARU_E2E_DISPOSABLE_SNAPSHOT").unwrap_or_default();
+        assert!((3..=128).contains(&snapshot.len()) && snapshot.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b)),
+            "set MENDIMARU_E2E_DISPOSABLE_SNAPSHOT to a restorable disposable VM snapshot identifier");
         let version = std::env::var("MENDIMARU_E2E_VERSION")
             .expect("set MENDIMARU_E2E_VERSION to the exact test version");
         validate_version(&version).expect("the E2E version must be valid");

@@ -40,6 +40,16 @@ const marketplaceSandboxGate =
   ]);
 
 const linux = {
+  startupRecovery: hasAll(linuxDesktop, [
+    "assertStartupRecoveryMatrix(fixture)",
+    "Start click transitions through starting",
+    "recover_winboat_nvram",
+    "preview_winboat_nvram",
+    "rolledBack",
+    "backupPath",
+    "startup and recovery localization contract",
+    "fixture-secret",
+  ]),
   realDesktopWebView: hasAll(linuxDesktop, [
     'browserName: "wry"',
     "window.__TAURI_INTERNALS__.invoke",
@@ -174,6 +184,15 @@ if (runReport) {
       executed("non-overlapping geometry") &&
       executed("clicking Open completes a protected project launch") &&
       executed("external project selection remains responsive"),
+    startupRecovery:
+      executed("starting to online") &&
+      executed("starting to startup-failed") &&
+      executed("without a premature readiness success toast") &&
+      executed("without raw logs or secret-like values") &&
+      executed("WinBoat and Settings rerun recovery actions") &&
+      executed("disposable NVRAM success") &&
+      executed("disposable NVRAM fail") &&
+      executed("localization contract passes en-US, ko-KR and ja-JP"),
   };
   assert.equal(
     run.status,
@@ -183,7 +202,8 @@ if (runReport) {
   assert.ok(
     executedLinuxDesktop.security &&
       executedLinuxDesktop.performance &&
-      executedLinuxDesktop.functional,
+      executedLinuxDesktop.functional &&
+      executedLinuxDesktop.startupRecovery,
     `Recorded Linux E2E assertions do not corroborate the static coverage claims: ${JSON.stringify(
       executedLinuxDesktop,
       null,
