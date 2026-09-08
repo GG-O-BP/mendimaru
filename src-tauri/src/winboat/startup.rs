@@ -146,34 +146,28 @@ impl ContainerDriver<'_> {
         args: &[&str],
         deadline: Instant,
     ) -> Result<process::CommandOutput, BackendError> {
-        // Reserve the bounded process termination and pipe-drain allowance.
-        let budget = remaining(deadline)?
-            .checked_sub(Duration::from_millis(2250))
-            .filter(|d| !d.is_zero())
-            .ok_or_else(|| failure(BackendErrorCode::GuestStartupTimeout))?;
+        let budget = remaining(deadline)?;
+        let policy = CommandPolicy::within_budget(
+            budget,
+            if matches!(args.first(), Some(&"start" | &"compose")) {
+                budget
+            } else {
+                Duration::from_secs(5)
+            },
+            64 * 1024,
+        )
+        .ok_or_else(|| failure(BackendErrorCode::GuestStartupTimeout))?;
         let mut command = Command::new(self.config.container_runtime.as_str());
         command.args(args);
-        process::output(
-            command,
-            CommandPolicy::new(
-                if matches!(args.first(), Some(&"start" | &"compose")) {
-                    budget
-                } else {
-                    budget.min(Duration::from_secs(5))
-                },
-                64 * 1024,
-            ),
-            None,
-            "Windows startup",
-        )
-        .await
-        .map_err(|error| {
-            failure(match error.kind() {
-                CommandFailureKind::Timeout => BackendErrorCode::ExternalProcessTimeout,
-                CommandFailureKind::Cancelled => BackendErrorCode::ExternalProcessCancelled,
-                _ => BackendErrorCode::ExternalProcessInterrupted,
+        process::output(command, policy, None, "Windows startup")
+            .await
+            .map_err(|error| {
+                failure(match error.kind() {
+                    CommandFailureKind::Timeout => BackendErrorCode::ExternalProcessTimeout,
+                    CommandFailureKind::Cancelled => BackendErrorCode::ExternalProcessCancelled,
+                    _ => BackendErrorCode::ExternalProcessInterrupted,
+                })
             })
-        })
     }
 
     async fn inspection(

@@ -17,6 +17,7 @@ pub(crate) struct CommandPolicy {
     pub(crate) timeout: Duration,
     pub(crate) output_limit: usize,
     pub(crate) termination_grace: Duration,
+    pub(crate) pipe_drain_timeout: Duration,
 }
 
 impl CommandPolicy {
@@ -28,7 +29,29 @@ impl CommandPolicy {
             timeout,
             output_limit,
             termination_grace: DEFAULT_TERMINATION_GRACE,
+            pipe_drain_timeout: PIPE_DRAIN_TIMEOUT,
         }
+    }
+
+    /// Reserves all three termination/reap waits and pipe draining inside one
+    /// caller budget, including short startup budgets used by desktop fixtures.
+    pub(crate) fn within_budget(
+        total: Duration,
+        command_limit: Duration,
+        output_limit: usize,
+    ) -> Option<Self> {
+        let timeout = total
+            .checked_sub(Duration::from_millis(400))?
+            .min(command_limit);
+        if timeout.is_zero() {
+            return None;
+        }
+        Some(Self {
+            timeout,
+            output_limit,
+            termination_grace: Duration::from_millis(50),
+            pipe_drain_timeout: Duration::from_millis(100),
+        })
     }
 
     #[cfg(all(test, unix))]
@@ -218,7 +241,7 @@ pub(crate) async fn output(
         Completion::Exited(Ok(status)) => status,
         Completion::Exited(Err(error)) => {
             terminate_and_reap(&tree, &mut child, policy.termination_grace).await;
-            drain_after_termination(stdout_task, stderr_task).await;
+            drain_after_termination(stdout_task, stderr_task, policy.pipe_drain_timeout).await;
             return Err(CommandFailure::new(
                 CommandFailureKind::Wait,
                 operation,
@@ -227,7 +250,7 @@ pub(crate) async fn output(
         }
         Completion::TimedOut => {
             terminate_and_reap(&tree, &mut child, policy.termination_grace).await;
-            drain_after_termination(stdout_task, stderr_task).await;
+            drain_after_termination(stdout_task, stderr_task, policy.pipe_drain_timeout).await;
             return Err(CommandFailure::new(
                 CommandFailureKind::Timeout,
                 operation,
@@ -236,7 +259,7 @@ pub(crate) async fn output(
         }
         Completion::Cancelled => {
             terminate_and_reap(&tree, &mut child, policy.termination_grace).await;
-            drain_after_termination(stdout_task, stderr_task).await;
+            drain_after_termination(stdout_task, stderr_task, policy.pipe_drain_timeout).await;
             return Err(CommandFailure::new(
                 CommandFailureKind::Cancelled,
                 operation,
@@ -245,7 +268,7 @@ pub(crate) async fn output(
         }
     };
 
-    let (stdout, stderr) = match tokio::time::timeout(PIPE_DRAIN_TIMEOUT, async {
+    let (stdout, stderr) = match tokio::time::timeout(policy.pipe_drain_timeout, async {
         tokio::try_join!(join_capture(stdout_task), join_capture(stderr_task))
     })
     .await
@@ -339,8 +362,9 @@ async fn join_capture(
 async fn drain_after_termination(
     stdout: tokio::task::JoinHandle<io::Result<CapturedStream>>,
     stderr: tokio::task::JoinHandle<io::Result<CapturedStream>>,
+    timeout: Duration,
 ) {
-    let _ = tokio::time::timeout(PIPE_DRAIN_TIMEOUT, async {
+    let _ = tokio::time::timeout(timeout, async {
         let _ = tokio::join!(stdout, stderr);
     })
     .await;
@@ -584,6 +608,25 @@ mod tests {
     use super::{output, CancellationToken, CommandFailureKind, CommandPolicy, PIPE_DRAIN_TIMEOUT};
     use std::time::Duration;
     use tokio::process::Command;
+
+    #[tokio::test]
+    async fn short_total_budget_includes_command_and_process_tree_cleanup() {
+        let total = Duration::from_secs(1);
+        let policy = CommandPolicy::within_budget(total, Duration::from_millis(60), 1024).unwrap();
+        let cleanup = policy.termination_grace
+            + policy.termination_grace.max(Duration::from_millis(100)) * 2
+            + policy.pipe_drain_timeout;
+        assert!(policy.timeout + cleanup <= total);
+        let mut command = Command::new("sh");
+        command.args(["-c", "trap '' TERM; while :; do sleep 1; done"]);
+        let started = tokio::time::Instant::now();
+        let error = output(command, policy, None, "short startup fixture")
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), CommandFailureKind::Timeout);
+        assert!(started.elapsed() < total);
+        assert!(CommandPolicy::within_budget(Duration::from_millis(300), total, 1024).is_none());
+    }
 
     #[cfg(unix)]
     #[tokio::test]
