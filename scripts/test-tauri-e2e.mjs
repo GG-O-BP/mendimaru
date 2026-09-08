@@ -894,6 +894,7 @@ try {
     "the real project view did not replace the old workspace project",
   );
 
+  await assertStartupRecoveryMatrix(fixture);
   await delay(1_750);
   assert.deepEqual(
     await execute("return window.__MENDIMARU_E2E_ERRORS__;"),
@@ -972,6 +973,196 @@ try {
 if (succeeded) {
   process.stdout.write(
     `Tauri E2E: real WebKit window passed (functional, security, and performance; ${report.assertions.length} explicit parity assertions)\n`,
+  );
+}
+
+async function assertStartupRecoveryMatrix(fixture) {
+  const config = await invoke("get_config");
+  await invoke("save_config", {
+    config: { ...config, startupTimeoutSeconds: 6 },
+    applyMount: false,
+  });
+  const setState = (state) =>
+    fs.writeFile(fixture.startupState, JSON.stringify(state));
+  const clickText = async (text) => {
+    await execute(`
+      const button = Array.from(document.querySelectorAll("button"))
+        .find((b) => b.textContent.trim() === ${JSON.stringify(text)} && !b.disabled);
+      if (!button) throw new Error("Fixture action unavailable: " + ${JSON.stringify(text)});
+      button.click(); return true;
+    `);
+  };
+  const refresh = async () => {
+    await execute(
+      "document.querySelector('[data-testid=nav-settings]').click(); return true;",
+    );
+    await clickText("Rerun diagnostics");
+    await waitFor(
+      async () =>
+        await execute(
+          `return Array.from(document.querySelectorAll("button")).some((b) => b.textContent.trim() === "Rerun diagnostics" && !b.disabled);`,
+        ),
+      10_000,
+      "diagnostics refresh did not settle",
+    );
+  };
+  for (const mode of ["success", "qemu"]) {
+    await setState({ status: "exited", mode });
+    await refresh();
+    await waitFor(
+      async () =>
+        await execute(
+          `return Array.from(document.querySelectorAll("button")).some((b) => b.textContent.trim() === "Start Windows" && !b.disabled);`,
+        ),
+      10_000,
+      "stopped fixture did not offer Start Windows",
+    );
+    await execute(
+      "document.querySelector('[data-testid=nav-studio]').click(); document.querySelectorAll('.toast button').forEach((button) => button.click()); return true;",
+    );
+    await clickText("Start Windows");
+    await waitFor(
+      async () =>
+        await execute(
+          `return /Starting Windows container|WinBoat Windows is preparing/.test(document.querySelector('.route-status')?.innerText ?? '');`,
+        ),
+      3_000,
+      "Start click did not display starting lifecycle",
+    );
+    recordAssertion(
+      !(await execute(
+        "return document.querySelector('.toast.success')?.innerText.includes('WinBoat Windows is ready') ?? false;",
+      )),
+      "Start click stays pending without a premature readiness success toast",
+    );
+    const phase = mode === "success" ? "online" : "startup-failed";
+    await waitFor(
+      async () =>
+        (await invoke("get_environment_status")).startup?.phase === phase,
+      10_000,
+      `startup fixture did not reach ${phase}`,
+    );
+    await waitFor(
+      async () =>
+        await execute(
+          mode === "success"
+            ? "return document.body.innerText.includes('WinBoat Windows is ready');"
+            : "return document.querySelector('.route-status')?.innerText.includes('Windows startup failed');",
+        ),
+      10_000,
+      "startup lifecycle was not reflected in WebView",
+    );
+    recordAssertion(
+      true,
+      `actual WebView Start click transitions through starting to ${phase}`,
+    );
+  }
+  const failed = await invoke("get_environment_status");
+  assert.equal(failed.startup.errorCode, "qemu_boot_timeout");
+  const diagnosticReport = await invoke("get_environment_diagnostic_report");
+  for (const secret of [
+    "fixture-secret",
+    "token=private",
+    "/home/fixture-private",
+    "ERROR: Timeout",
+  ]) {
+    assert(!diagnosticReport.includes(secret));
+    assert(
+      !(await execute("return document.body.innerText;")).includes(secret),
+    );
+  }
+  recordAssertion(
+    true,
+    "startup-failed exposes the safe QEMU code without raw logs or secret-like values",
+  );
+  await clickText("Open WinBoat");
+  await refresh();
+  recordAssertion(
+    await execute("return document.body.innerText.includes('QEMU timed out');"),
+    "startup-failed offers WinBoat and Settings rerun recovery actions",
+  );
+  assert.equal(
+    (await invokeResult("preview_winboat_nvram")).ok,
+    false,
+    "named storage must refuse recovery",
+  );
+
+  // This is a disposable host fixture, not a Docker daemon or a Windows data disk.
+  const vars = path.join(fixture.storage, "windows.vars");
+  const disk = path.join(fixture.storage, "data.img");
+  await fs.writeFile(disk, "DISPOSABLE DATA DISK SENTINEL", { mode: 0o600 });
+  await fs.writeFile(vars, Buffer.alloc(540672), { mode: 0o600 });
+  const compose = (await fs.readFile(fixture.compose, "utf8")).replace(
+    "mendimaru-e2e-storage:/storage",
+    `${fixture.storage}:/storage`,
+  );
+  await fs.writeFile(fixture.compose, compose);
+  await fs.writeFile(fixture.recoveryFlag, "success");
+  for (const recoveryMode of ["success", "fail"]) {
+    if (recoveryMode === "fail") {
+      await fs.writeFile(vars, Buffer.alloc(540672));
+      await setState({ status: "exited", mode: "qemu" });
+      assert.equal((await invokeResult("start_winboat_windows")).ok, false);
+    }
+    await fs.writeFile(fixture.recoveryFlag, recoveryMode);
+    const preview = await invoke("preview_winboat_nvram");
+    assert.equal(preview.targetPath, vars);
+    assert.equal(
+      (
+        await invokeResult("recover_winboat_nvram", {
+          previewId: preview.id,
+          confirmed: false,
+        })
+      ).ok,
+      false,
+    );
+    assert.equal((await fs.readFile(vars)).equals(Buffer.alloc(540672)), true);
+    const result = await invoke("recover_winboat_nvram", {
+      previewId: preview.id,
+      confirmed: true,
+    });
+    assert.equal(result.ready, recoveryMode === "success");
+    assert.equal(result.rolledBack, recoveryMode === "fail");
+    assert.equal(result.rollbackRequired, false);
+    assert.equal(
+      (await fs.readFile(preview.backupPath)).equals(Buffer.alloc(540672)),
+      true,
+    );
+    if (recoveryMode === "fail")
+      assert.equal(
+        (await fs.readFile(vars)).equals(Buffer.alloc(540672)),
+        true,
+      );
+    assert.equal(
+      await fs.readFile(disk, "utf8"),
+      "DISPOSABLE DATA DISK SENTINEL",
+    );
+    assert.equal(await fs.readFile(fixture.compose, "utf8"), compose);
+    recordAssertion(
+      true,
+      `disposable NVRAM ${recoveryMode}: confirmation, backup, readiness/rollback and unchanged data disk/Compose through real IPC`,
+    );
+  }
+  await setState({ status: "running", mode: "online" });
+  await invoke("start_winboat_windows");
+  await refresh();
+  for (const language of ["en-US", "ko-KR", "ja-JP"]) {
+    const bundle = await invoke("set_language_preference", { language });
+    for (const key of [
+      "windows-startup-failed-title",
+      "connection-online-attention",
+      "action-nvram-preview",
+      "confirm-nvram-description",
+    ]) {
+      assert.equal(typeof bundle.messages[key], "string");
+      assert.notEqual(bundle.messages[key], key);
+      assert(bundle.messages[key].length > 0);
+    }
+  }
+  await invoke("set_language_preference", { language: "en-US" });
+  recordAssertion(
+    true,
+    "startup and recovery localization contract passes en-US, ko-KR and ja-JP through real IPC",
   );
 }
 
@@ -1319,9 +1510,29 @@ async function createFixture(root) {
   await fs.symlink(legacySentinel, legacyPartial);
 
   let appRequestCount = 0;
+  const startupState = path.join(root, "startup-state.json");
+  const recoveryFlag = path.join(root, "recovery-fixture.flag");
+  const storage = path.join(root, "disposable-storage");
+  await fs.mkdir(storage, { mode: 0o700 });
+  await fs.writeFile(
+    startupState,
+    JSON.stringify({ status: "running", mode: "online" }),
+  );
   const api = http.createServer(async (request, response) => {
     response.setHeader("content-type", "application/json");
     if (request.url === "/health") {
+      const state = JSON.parse(await fs.readFile(startupState, "utf8"));
+      if (
+        state.status !== "running" ||
+        state.mode === "timeout" ||
+        ((state.mode === "success" || state.mode === "qemu") &&
+          Date.now() - state.startedAt < 600) ||
+        state.mode === "qemu"
+      ) {
+        response.statusCode = 503;
+        response.end('{"status":"starting"}');
+        return;
+      }
       response.end('{"status":"ok"}');
       return;
     }
@@ -1387,6 +1598,14 @@ const runtimeCalls = ${JSON.stringify(runtimeCalls)};
 const failFlag = ${JSON.stringify(runtimeFailFlag)};
 const hangFlag = ${JSON.stringify(runtimeHangFlag)};
 const hangPids = ${JSON.stringify(runtimeHangPids)};
+const startupState = ${JSON.stringify(startupState)};
+const recoveryFlag = ${JSON.stringify(recoveryFlag)};
+const storage = ${JSON.stringify(storage)};
+let state = JSON.parse(readFileSync(startupState, "utf8"));
+if (state.status === "running" && state.mode === "qemu" && Date.now() - state.startedAt >= 600) {
+  state.status = "exited";
+  writeFileSync(startupState, JSON.stringify(state));
+}
 appendFileSync(runtimeCalls, JSON.stringify(args) + "\\n");
 if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
   const descendant = spawn(
@@ -1406,8 +1625,36 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
   process.exit(1);
 } else if (args[0] === "inspect") {
   const current = structuredClone(inspect);
+  current[0].State = { Status: state.status, Running: state.status === "running", Restarting: false, Paused: false };
+  if (existsSync(recoveryFlag)) {
+    current[0].Id = "a".repeat(64);
+    current[0].Image = "sha256:" + "b".repeat(64);
+    current[0].Config = { Image: "ghcr.io/dockur/windows:e2e-fixture", Env: [], Labels: {
+      "com.docker.compose.service": "windows",
+      "com.docker.compose.project.config_files": ${JSON.stringify(compose)},
+    }};
+    current[0].Mounts = current[0].Mounts.filter((mount) => mount.Destination !== "/storage");
+    current[0].Mounts.push({ Type: "bind", Source: storage, Destination: "/storage", RW: true });
+  }
   current[0].Mounts.find((mount) => mount.Destination === "/shared").Source = readFileSync(activeShared, "utf8");
   console.log(JSON.stringify(current));
+  process.exit(0);
+} else if (args[0] === "start") {
+  if (existsSync(recoveryFlag) && !existsSync(storage + "/windows.vars")) {
+    writeFileSync(storage + "/windows.vars", Buffer.alloc(540672, 42), { mode: 0o600 });
+    state.mode = readFileSync(recoveryFlag, "utf8").trim() === "fail" ? "qemu" : "success";
+  }
+  state.status = "running";
+  state.startedAt = Date.now();
+  writeFileSync(startupState, JSON.stringify(state));
+  process.exit(0);
+} else if (args[0] === "stop") {
+  state.status = "exited";
+  writeFileSync(startupState, JSON.stringify(state));
+  process.exit(0);
+} else if (args[0] === "logs") {
+  console.error("ERROR: Timeout while waiting for QEMU to boot the machine!");
+  console.error("password=fixture-secret token=private /home/fixture-private");
   process.exit(0);
 } else if (args[0] === "compose") {
   if (existsSync(failFlag)) {
@@ -1567,6 +1814,9 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
   );
 
   return {
+    startupState,
+    recoveryFlag,
+    storage,
     appRequestCount: () => appRequestCount,
     bin,
     chrome,

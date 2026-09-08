@@ -32,10 +32,9 @@ pub(super) async fn classify_exit(
     deadline: Instant,
 ) -> BackendErrorCode {
     let fallback = BackendErrorCode::ContainerExitedDuringStartup;
-    let Some(budget) = deadline
+    let Some(policy) = deadline
         .checked_duration_since(Instant::now())
-        .and_then(|d| d.checked_sub(Duration::from_millis(2250)))
-        .filter(|d| !d.is_zero())
+        .and_then(|d| CommandPolicy::within_budget(d, Duration::from_secs(2), LOG_BYTES))
     else {
         return fallback;
     };
@@ -48,14 +47,7 @@ pub(super) async fn classify_exit(
         "100",
         &config.container_name,
     ]);
-    let Ok(output) = process::output(
-        command,
-        CommandPolicy::new(budget.min(Duration::from_secs(2)), LOG_BYTES),
-        None,
-        "startup diagnostics",
-    )
-    .await
-    else {
+    let Ok(output) = process::output(command, policy, None, "startup diagnostics").await else {
         return fallback;
     };
     if !output.status.success() {

@@ -268,6 +268,7 @@ official installer already in the host-private application cache:
 
 ```bash
 MENDIMARU_E2E_ALLOW_MUTATION=1 \
+MENDIMARU_E2E_DISPOSABLE_SNAPSHOT=disposable-before-lifecycle \
 MENDIMARU_E2E_VERSION=11.13.0 \
 npm run check
 ```

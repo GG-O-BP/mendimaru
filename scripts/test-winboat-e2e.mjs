@@ -23,6 +23,11 @@ if (process.platform !== "linux") {
 }
 const version = process.env.MENDIMARU_E2E_VERSION ?? "";
 if (lifecycle) {
+  assert.match(
+    process.env.MENDIMARU_E2E_DISPOSABLE_SNAPSHOT ?? "",
+    /^[A-Za-z0-9][A-Za-z0-9_.-]{2,127}$/,
+    "set MENDIMARU_E2E_DISPOSABLE_SNAPSHOT to the restorable disposable VM snapshot identifier",
+  );
   assert.equal(
     process.env.MENDIMARU_E2E_ALLOW_MUTATION,
     "1",

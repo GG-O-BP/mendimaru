@@ -77,6 +77,29 @@ function setup() {
   return { ...hook, notify, refreshStatus, onError };
 }
 describe("Windows startup lifecycle", () => {
+  it("clears a local failure when a newer external readiness attempt succeeds", async () => {
+    api.startWinBoatWindows.mockRejectedValueOnce({
+      code: "guest_startup_timeout",
+      message: "safe failure",
+    });
+    const { result, rerender } = setup();
+    await act(() => result.current.startWindows());
+    expect(result.current.lifecycle).toBe("startup-failed");
+    rerender({
+      status: {
+        ...stopped,
+        guestOnline: true,
+        startup: {
+          id: 2,
+          startedAt: "2026-09-08T00:00:00Z",
+          phase: "online",
+          errorCode: null,
+          containerStatus: "running",
+        },
+      },
+    });
+    expect(result.current.lifecycle).toBe("online");
+  });
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
