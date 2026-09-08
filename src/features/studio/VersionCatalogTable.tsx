@@ -138,7 +138,11 @@ function VersionRow({
               ? t("action-installed")
               : installReady
                 ? t("status-available")
-                : t(online ? "connection-online-attention" : "connection-offline")}
+                : t(
+                    online
+                      ? "connection-online-attention"
+                      : "connection-offline",
+                  )}
         </span>
       </td>
       <td className="manifest-action">
