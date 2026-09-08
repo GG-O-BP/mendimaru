@@ -978,12 +978,21 @@ if (succeeded) {
 
 async function assertStartupRecoveryMatrix(fixture) {
   const config = await invoke("get_config");
-  await invoke("save_config", {
-    config: { ...config, startupTimeoutSeconds: 6 },
+  const startupConfig = { ...config, startupTimeoutSeconds: 6 };
+  const settingsPreview = await invoke("preview_settings_save", {
+    config: startupConfig,
     applyMount: false,
   });
-  const setState = (state) =>
-    fs.writeFile(fixture.startupState, JSON.stringify(state));
+  await invoke("save_config", {
+    config: startupConfig,
+    applyMount: false,
+    composeRevision: settingsPreview?.composeRevision,
+  });
+  const setState = async (state) => {
+    const pending = `${fixture.startupState}.controller`;
+    await fs.writeFile(pending, JSON.stringify(state));
+    await fs.rename(pending, fixture.startupState);
+  };
   const clickText = async (text) => {
     await execute(`
       const button = Array.from(document.querySelectorAll("button"))
@@ -1589,7 +1598,7 @@ async function createFixture(root) {
   await writeExecutable(
     docker,
     `#!${process.execPath}
-const { appendFileSync, existsSync, readFileSync, writeFileSync } = require("node:fs");
+const { appendFileSync, existsSync, readFileSync, writeFileSync, renameSync } = require("node:fs");
 const { spawn } = require("node:child_process");
 const args = process.argv.slice(2);
 const inspect = ${JSON.stringify(inspectPayload)};
@@ -1601,10 +1610,15 @@ const hangPids = ${JSON.stringify(runtimeHangPids)};
 const startupState = ${JSON.stringify(startupState)};
 const recoveryFlag = ${JSON.stringify(recoveryFlag)};
 const storage = ${JSON.stringify(storage)};
+function saveState(state) {
+  const pending = startupState + "." + process.pid;
+  writeFileSync(pending, JSON.stringify(state));
+  renameSync(pending, startupState);
+}
 let state = JSON.parse(readFileSync(startupState, "utf8"));
 if (state.status === "running" && state.mode === "qemu" && Date.now() - state.startedAt >= 600) {
   state.status = "exited";
-  writeFileSync(startupState, JSON.stringify(state));
+  saveState(state);
 }
 appendFileSync(runtimeCalls, JSON.stringify(args) + "\\n");
 if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
@@ -1646,11 +1660,11 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
   }
   state.status = "running";
   state.startedAt = Date.now();
-  writeFileSync(startupState, JSON.stringify(state));
+  saveState(state);
   process.exit(0);
 } else if (args[0] === "stop") {
   state.status = "exited";
-  writeFileSync(startupState, JSON.stringify(state));
+  saveState(state);
   process.exit(0);
 } else if (args[0] === "logs") {
   console.error("ERROR: Timeout while waiting for QEMU to boot the machine!");
