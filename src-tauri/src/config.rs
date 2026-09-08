@@ -1,6 +1,8 @@
 mod compose;
 mod store;
 mod validation;
+#[cfg(target_os = "linux")]
+pub(crate) use compose::{nvram_mount_plan, NvramMountPlan};
 
 use crate::models::{AppConfig, ContainerRuntime};
 use crate::process::{self, CommandFailure, CommandPolicy};

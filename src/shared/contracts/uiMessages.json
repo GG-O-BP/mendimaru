@@ -1,4 +1,13 @@
 {
+  "action-nvram-preview": true,
+  "action-nvram-recover": true,
+  "action-nvram-restore": true,
+  "confirm-nvram-title": true,
+  "confirm-nvram-restore-title": true,
+  "confirm-nvram-description": true,
+  "toast-nvram-ready": true,
+  "toast-nvram-rolled-back": true,
+  "toast-nvram-rollback-required": true,
   "diagnostic-qemu-boot-timeout": true,
   "diagnostic-action-rerun": true,
   "toast-windows-start-requested": true,

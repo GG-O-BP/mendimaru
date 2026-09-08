@@ -46,6 +46,11 @@ pub async fn save_settings(
     }
 
     let previous_config = crate::config::load_config(app).ok();
+    let _maintenance = crate::winboat::maintenance::shared(&config)?;
+    let _previous_maintenance = previous_config
+        .as_ref()
+        .map(crate::winboat::maintenance::shared)
+        .transpose()?;
     let config_snapshot = crate::config::snapshot_config(app)?;
     let plan = crate::config::plan_shared_mount(
         &PathBuf::from(&config.compose_file),

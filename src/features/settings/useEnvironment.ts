@@ -9,9 +9,11 @@ import { diagnosticTarget } from "./environmentDiagnostics";
 import { useEnvironmentStatus } from "./useEnvironmentStatus";
 import { useSettingsDraft } from "./useSettingsDraft";
 import { useWinBoatControl } from "./useWinBoatControl";
+import { useNvramRecovery } from "./useNvramRecovery";
 
 export function useEnvironment(dependencies: EnvironmentDependencies) {
   const environmentStatus = useEnvironmentStatus(dependencies);
+  const nvram = useNvramRecovery(dependencies, environmentStatus.refreshStatus);
   const settings = useSettingsDraft({
     ...dependencies,
     environmentStatus: environmentStatus.status,
@@ -76,6 +78,7 @@ export function useEnvironment(dependencies: EnvironmentDependencies) {
   );
 
   return {
+    nvram,
     config: settings.config,
     draftConfig: settings.draftConfig,
     setDraftConfig: settings.setDraftConfig,

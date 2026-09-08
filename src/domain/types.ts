@@ -160,6 +160,7 @@ export interface PlatformCapabilities {
 }
 
 export interface EnvironmentStatus {
+  nvramRecoveryAvailable?: boolean;
   startup?: {
     id: number;
     startedAt: string;
@@ -357,4 +358,20 @@ export interface ConfirmationState {
   confirmLabel: string;
   danger?: boolean;
   action: () => Promise<void>;
+}
+
+export interface NvramRecoveryPreview {
+  id: string;
+  targetPath: string;
+  backupPath: string;
+  originalPath: string;
+  bytes: number;
+  sha256: string;
+  evidence: "erased-ovmf-variable-store";
+}
+
+export interface NvramRecoveryOutcome {
+  ready: boolean;
+  rolledBack: boolean;
+  rollbackRequired: boolean;
 }

@@ -121,8 +121,13 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     let mut diagnostics = build_linux_diagnostics(&state);
     let startup = super::startup::snapshot(config);
     super::startup_diagnostics::apply(startup.as_ref(), &mut diagnostics);
+    #[cfg(target_os = "linux")]
+    let nvram_recovery_available = super::nvram::available(config).await;
+    #[cfg(not(target_os = "linux"))]
+    let nvram_recovery_available = false;
 
     EnvironmentStatus {
+        nvram_recovery_available,
         startup,
         platform: crate::platform::capabilities(),
         ready,
