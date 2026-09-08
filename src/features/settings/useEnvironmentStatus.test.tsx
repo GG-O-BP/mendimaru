@@ -56,6 +56,133 @@ async function runInitialTimer() {
 }
 
 describe("useEnvironmentStatus polling", () => {
+  it("retains an observed failure through a retry until that attempt succeeds", async () => {
+    const failed: EnvironmentStatus = {
+      ...status,
+      guestOnline: false,
+      startup: {
+        id: 1,
+        startedAt: "2026-09-08T00:00:00Z",
+        phase: "startup-failed",
+        errorCode: "container_exited_during_startup",
+        containerStatus: "exited",
+      },
+    };
+    api.getEnvironmentStatus.mockResolvedValue(failed);
+    const onWarning = vi.fn();
+    const { result } = renderHook(
+      () => useEnvironmentStatus({ t, onWarning }),
+      { wrapper },
+    );
+    await runInitialTimer();
+    expect(result.current.startupFailure?.id).toBe(1);
+    api.getEnvironmentStatus.mockResolvedValue({
+      ...failed,
+      startup: {
+        ...failed.startup,
+        id: 2,
+        phase: "waiting-for-guest",
+        errorCode: null,
+      },
+    });
+    await act(() => result.current.refreshStatus());
+    expect(result.current.startupFailure?.errorCode).toBe(
+      "container_exited_during_startup",
+    );
+    api.getEnvironmentStatus.mockResolvedValue({
+      ...status,
+      startup: { ...failed.startup, id: 2, phase: "online", errorCode: null },
+    });
+    await act(() => result.current.refreshStatus());
+    expect(result.current.startupFailure).toBeNull();
+  });
+  it.each(["online", "startup-failed"] as const)(
+    "polls preparation quickly and returns to 15 seconds after %s",
+    async (phase) => {
+      const starting: EnvironmentStatus = {
+        ...status,
+        guestOnline: false,
+        ready: false,
+        startup: {
+          id: 1,
+          startedAt: "2026-09-08T00:00:00Z",
+          phase: "waiting-for-guest",
+          errorCode: null,
+          containerStatus: "running",
+        },
+      };
+      const terminal: EnvironmentStatus = {
+        ...starting,
+        guestOnline: phase === "online",
+        startup: {
+          ...starting.startup!,
+          phase,
+          errorCode:
+            phase === "startup-failed" ? "guest_startup_timeout" : null,
+        },
+      };
+      api.getEnvironmentStatus
+        .mockResolvedValueOnce(starting)
+        .mockResolvedValue(terminal);
+      const onWarning = vi.fn();
+      renderHook(() => useEnvironmentStatus({ t, onWarning }), { wrapper });
+      await runInitialTimer();
+      expect(api.getEnvironmentStatus).toHaveBeenCalledTimes(1);
+      await act(() => vi.advanceTimersByTimeAsync(1_499));
+      expect(api.getEnvironmentStatus).toHaveBeenCalledTimes(1);
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(api.getEnvironmentStatus).toHaveBeenCalledTimes(2);
+      await act(() => vi.advanceTimersByTimeAsync(14_999));
+      expect(api.getEnvironmentStatus).toHaveBeenCalledTimes(2);
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(api.getEnvironmentStatus).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it("drops pending responses and replacement requests after unmount", async () => {
+    const pending = deferred<EnvironmentStatus>();
+    api.getEnvironmentStatus.mockReturnValue(pending.promise);
+    const onWarning = vi.fn();
+    const { result, unmount } = renderHook(
+      () => useEnvironmentStatus({ t, onWarning }),
+      { wrapper },
+    );
+    await runInitialTimer();
+    let replacement!: Promise<void>;
+    act(() => {
+      replacement = result.current.refreshStatus({ sourceChanged: true });
+    });
+    unmount();
+    await act(async () => {
+      pending.resolve(status);
+      await replacement;
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(api.getEnvironmentStatus).toHaveBeenCalledTimes(1);
+    expect(onWarning).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("accelerates immediately after a local start request", async () => {
+    api.getEnvironmentStatus.mockResolvedValue({
+      ...status,
+      guestOnline: false,
+    });
+    const onWarning = vi.fn();
+    const { result } = renderHook(
+      () => useEnvironmentStatus({ t, onWarning }),
+      { wrapper },
+    );
+    await runInitialTimer();
+    act(() => result.current.setStartupPending(true));
+    await act(() => vi.advanceTimersByTimeAsync(1_500));
+    expect(api.getEnvironmentStatus).toHaveBeenCalledTimes(2);
+    act(() => result.current.setStartupPending(false));
+    await act(() => vi.advanceTimersByTimeAsync(14_999));
+    expect(api.getEnvironmentStatus).toHaveBeenCalledTimes(2);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(api.getEnvironmentStatus).toHaveBeenCalledTimes(3);
+  });
   beforeEach(() => {
     vi.useFakeTimers();
     api.getEnvironmentStatus.mockReset();

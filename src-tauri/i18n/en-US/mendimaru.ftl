@@ -1,3 +1,10 @@
+toast-windows-start-requested = Windows start requested — checking readiness
+toast-windows-ready = WinBoat Windows is ready
+windows-startup-failed-title = Windows startup failed
+windows-startup-failed-detail = Windows stopped before it became ready. Open WinBoat or check Settings diagnostics, then retry.
+windows-startup-timeout-detail = Windows did not become ready before the deadline. Open WinBoat or check Settings diagnostics, then retry.
+windows-starting-container-title = Starting Windows container
+windows-stopping-title = Stopping Windows
 error-container-exited-during-startup = Windows stopped before the Guest API became ready. Open WinBoat and retry.
 error-guest-startup-timeout = Windows did not become ready before the startup deadline.
 error-startup-command-failed = The Windows startup command failed. Run diagnostics and open WinBoat.

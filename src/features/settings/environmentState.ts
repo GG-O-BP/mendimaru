@@ -3,6 +3,14 @@ import type { Translate } from "../../i18n";
 import type { EnvironmentControlKind } from "../studio/types";
 
 export interface EnvironmentPresentation {
+  lifecycle:
+    | "stopped"
+    | "starting-container"
+    | "waiting-for-guest"
+    | "online"
+    | "startup-failed"
+    | "stopping";
+  connectionLabel: string;
   online: boolean;
   controlKind: EnvironmentControlKind;
   actionKey: string;
@@ -16,19 +24,58 @@ export interface EnvironmentPresentation {
 export function deriveEnvironmentPresentation(
   status: EnvironmentStatus | null,
   t: Translate,
+  startupFailure: string | null = null,
+  startupPending = false,
 ): EnvironmentPresentation {
   const nativeWindows = status?.platform.kind === "windows-native";
   const online = nativeWindows
     ? Boolean(status?.ready)
     : Boolean(status?.guestOnline);
-  const controlKind = deriveControlKind(status, online);
+  const controlKind =
+    !nativeWindows &&
+    (startupFailure || status?.startup?.phase === "startup-failed")
+      ? "open"
+      : deriveControlKind(status, online);
+  const lifecycle = startupPending
+    ? status?.startup?.phase === "waiting-for-guest"
+      ? "waiting-for-guest"
+      : "starting-container"
+    : status?.startup?.phase === "startup-failed" || startupFailure
+      ? "startup-failed"
+      : online
+        ? "online"
+        : status?.containerStatus === "removing"
+          ? "stopping"
+          : status?.startup?.phase === "starting-container" ||
+              status?.startup?.phase === "waiting-for-guest"
+            ? status.startup.phase
+            : "stopped";
+  const connectionLabel = nativeWindows
+    ? t(online ? "connection-native" : "connection-native-not-ready")
+    : t(
+        lifecycle === "online"
+          ? "connection-online"
+          : lifecycle === "startup-failed"
+            ? "windows-startup-failed-title"
+            : lifecycle === "starting-container"
+              ? "windows-starting-container-title"
+              : lifecycle === "waiting-for-guest"
+                ? "windows-preparing-title"
+                : lifecycle === "stopping"
+                  ? "windows-stopping-title"
+                  : "connection-offline",
+      );
 
   return {
+    lifecycle,
+    connectionLabel,
     online,
     controlKind,
     actionKey: actionKeyFor(controlKind),
     actionLabel: actionLabelFor(controlKind, status, online, t),
-    offlineGuidance: offlineGuidanceFor(status, t),
+    offlineGuidance: startupFailure
+      ? { title: t("windows-startup-failed-title"), detail: startupFailure }
+      : offlineGuidanceFor(status, t),
   };
 }
 
@@ -91,6 +138,28 @@ function offlineGuidanceFor(status: EnvironmentStatus | null, t: Translate) {
     return {
       title: t("native-workspace-missing-title"),
       detail: t("native-workspace-missing-detail"),
+    };
+  }
+  if (status?.startup?.phase === "startup-failed") {
+    return {
+      title: t("windows-startup-failed-title"),
+      detail: t(
+        status.startup.errorCode === "guest_startup_timeout"
+          ? "windows-startup-timeout-detail"
+          : "windows-startup-failed-detail",
+      ),
+    };
+  }
+  if (status?.startup?.phase === "starting-container") {
+    return {
+      title: t("windows-starting-container-title"),
+      detail: t("windows-preparing-detail"),
+    };
+  }
+  if (status?.startup?.phase === "waiting-for-guest") {
+    return {
+      title: t("windows-preparing-title"),
+      detail: t("windows-preparing-detail"),
     };
   }
   if (!status?.winboatAvailable) {

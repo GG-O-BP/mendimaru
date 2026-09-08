@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tauriApi } from "../../api/tauri";
+import { errorText } from "../../api/errors";
 import type { AppConfig, EnvironmentStatus } from "../../domain/types";
 import type { WinBoatControlDependencies } from "./dependencies";
 import { deriveEnvironmentPresentation } from "./environmentState";
@@ -15,6 +16,9 @@ interface UseWinBoatControlOptions extends WinBoatControlDependencies {
   refreshStatus: (options?: EnvironmentRefreshOptions) => Promise<void>;
   applyConfig: (config: AppConfig) => void;
   updateConfigPair: (update: (config: AppConfig) => AppConfig) => void;
+  setStartupPending: (pending: boolean) => void;
+  startupPending: boolean;
+  observedStartupFailure?: EnvironmentStatus["startup"];
 }
 
 export function useWinBoatControl({
@@ -26,26 +30,54 @@ export function useWinBoatControl({
   refreshStatus,
   applyConfig,
   updateConfigPair,
+  setStartupPending,
+  startupPending,
+  observedStartupFailure,
 }: UseWinBoatControlOptions) {
+  const mounted = useRef(false);
+  const starting = useRef(false);
+  const [startupFailure, setStartupFailure] = useState<string | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const setupCompletionScheduled = useRef(false);
   const [setupCompletion, setSetupCompletion] =
     useState<SetupCompletion | null>(null);
   const setupPending = Boolean(status?.setupPending);
   const guestOnline = Boolean(status?.guestOnline);
 
-  const startWindows = useCallback(
-    () =>
-      runAction("start-windows", async () => {
-        await tauriApi.startWinBoatWindows();
-        notify(
-          "info",
-          t("toast-windows-started"),
-          t("toast-windows-started-detail"),
-        );
-        window.setTimeout(() => void refreshStatus(), 3_500);
-      }),
-    [notify, refreshStatus, runAction, t],
-  );
+  const startWindows = useCallback(async () => {
+    if (starting.current || !mounted.current) return;
+    starting.current = true;
+    setStartupPending(true);
+    try {
+      await runAction("start-windows", async () => {
+        notify("info", t("toast-windows-start-requested"));
+        void refreshStatus({ sourceChanged: true });
+        try {
+          await tauriApi.startWinBoatWindows();
+          if (!mounted.current) return;
+          setStartupFailure(null);
+          notify("success", t("toast-windows-ready"));
+        } catch (error) {
+          if (!mounted.current) return;
+          setStartupFailure(errorText(error, t));
+          throw error;
+        } finally {
+          if (mounted.current) {
+            setStartupPending(false);
+            await refreshStatus({ sourceChanged: true });
+          }
+        }
+      });
+    } finally {
+      starting.current = false;
+      if (mounted.current) setStartupPending(false);
+    }
+  }, [notify, refreshStatus, runAction, setStartupPending, t]);
 
   const openWinBoat = useCallback(
     () => runAction("open-winboat", () => tauriApi.openWinBoat()),
@@ -113,8 +145,31 @@ export function useWinBoatControl({
     t,
   ]);
 
-  const { actionKey, actionLabel, controlKind, offlineGuidance, online } =
-    useMemo(() => deriveEnvironmentPresentation(status, t), [status, t]);
+  const {
+    actionKey,
+    actionLabel,
+    controlKind,
+    offlineGuidance,
+    online,
+    connectionLabel,
+    lifecycle,
+  } = useMemo(
+    () =>
+      deriveEnvironmentPresentation(
+        status,
+        t,
+        startupFailure ??
+          (observedStartupFailure
+            ? t(
+                observedStartupFailure.errorCode === "guest_startup_timeout"
+                  ? "windows-startup-timeout-detail"
+                  : "windows-startup-failed-detail",
+              )
+            : null),
+        startupPending,
+      ),
+    [status, startupFailure, startupPending, observedStartupFailure, t],
+  );
 
   const runPrimaryAction = useCallback(() => {
     if (controlKind === "setup") void beginWinBoatSetup();
@@ -124,6 +179,9 @@ export function useWinBoatControl({
 
   return {
     online,
+    connectionLabel,
+    lifecycle,
+    startupFailure,
     offlineGuidance,
     setupCompletion,
     startWindows,

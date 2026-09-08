@@ -153,6 +153,7 @@ export function Workspace({
       localization={localization}
       activeView={activeView}
       online={environment.online}
+      connectionLabel={environment.connectionLabel}
       warning={warning}
       languageChanging={languageChanging}
       winBoatControl={winBoatControl}

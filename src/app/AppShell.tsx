@@ -31,6 +31,7 @@ export function AppShell({
   localization,
   activeView,
   online,
+  connectionLabel,
   warning,
   languageChanging,
   winBoatControl,
@@ -43,6 +44,7 @@ export function AppShell({
   localization: LocalizationBundle;
   activeView: ViewKey;
   online: boolean;
+  connectionLabel?: string;
   warning: string | null;
   languageChanging: boolean;
   winBoatControl: {
@@ -131,13 +133,14 @@ export function AppShell({
             </span>
             <strong>
               <i />
-              {nativeWindows
-                ? online
-                  ? t("connection-native")
-                  : t("connection-native-not-ready")
-                : online
-                  ? t("connection-online")
-                  : t("connection-offline")}
+              {connectionLabel ??
+                (nativeWindows
+                  ? online
+                    ? t("connection-native")
+                    : t("connection-native-not-ready")
+                  : online
+                    ? t("connection-online")
+                    : t("connection-offline"))}
             </strong>
           </div>
 
