@@ -160,6 +160,18 @@ export interface PlatformCapabilities {
 }
 
 export interface EnvironmentStatus {
+  connectivity?: boolean;
+  readiness?: {
+    studioLaunch: boolean;
+    installation: boolean;
+    uninstallation: boolean;
+    projects: boolean;
+    blockingChecks: EnvironmentDiagnosticId[];
+  };
+  health?: {
+    attentionRequired: boolean;
+    attentionChecks: EnvironmentDiagnosticId[];
+  };
   nvramRecoveryAvailable?: boolean;
   startup?: {
     id: number;

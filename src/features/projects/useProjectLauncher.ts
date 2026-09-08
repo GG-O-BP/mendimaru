@@ -15,6 +15,7 @@ interface ProjectLauncherDependencies {
   installedVersions: StudioVersion[];
   installedVersionsLoaded: boolean;
   studioLaunchReady: boolean;
+  installationReady?: boolean;
   studioSessionsLoading: boolean;
   connectedRemoteAppVersion?: string;
   catalogVersions: DownloadableVersion[];
@@ -60,6 +61,7 @@ export function useProjectLauncher({
   installedVersions,
   installedVersionsLoaded,
   studioLaunchReady,
+  installationReady = true,
   studioSessionsLoading,
   connectedRemoteAppVersion,
   catalogVersions,
@@ -352,6 +354,7 @@ export function useProjectLauncher({
     const { project, selectedVersion } = assistant;
     const sequence = ++actionSequence.current;
     const installed = installedByVersion.get(selectedVersion);
+    if (!installed && !installationReady) return;
     const downloadable =
       assistant.resolvedVersion ?? catalogByVersion.get(selectedVersion);
     void remember(project, selectedVersion, true)
@@ -373,6 +376,7 @@ export function useProjectLauncher({
   }, [
     assistant,
     catalogByVersion,
+    installationReady,
     completeLaunch,
     installVersion,
     installedByVersion,
@@ -431,6 +435,7 @@ export function useProjectLauncher({
     selectedDownloadable,
     installedVersionsLoaded,
     studioLaunchReady,
+    installationReady,
     studioSessionsLoading,
     connectedRemoteAppVersion,
     safetyRequired,

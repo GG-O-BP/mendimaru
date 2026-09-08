@@ -49,6 +49,23 @@ export function Workspace({
   onWarning,
 }: WorkspaceProps) {
   const [activeView, setActiveView] = useState<ViewKey>("studio");
+  const diagnosticFocus = useRef<string | null>(null);
+  const openDiagnostics = () => {
+    const first =
+      environment.readiness.blockingChecks[0] ??
+      environment.status?.health?.attentionChecks[0];
+    diagnosticFocus.current = first
+      ? `environment-diagnostic-${first}`
+      : "environment-diagnostics-heading";
+    setActiveView("settings");
+  };
+  useEffect(() => {
+    if (activeView !== "settings" || !diagnosticFocus.current) return;
+    const target = document.getElementById(diagnosticFocus.current);
+    target?.scrollIntoView?.({ block: "center" });
+    target?.focus({ preventScroll: true });
+    diagnosticFocus.current = null;
+  }, [activeView]);
   const processedSetup = useRef(0);
   const studio = useStudio({
     t,
@@ -154,6 +171,8 @@ export function Workspace({
       activeView={activeView}
       online={environment.online}
       connectionLabel={environment.connectionLabel}
+      attentionRequired={environment.attentionRequired}
+      onOpenDiagnostics={openDiagnostics}
       warning={warning}
       languageChanging={languageChanging}
       winBoatControl={winBoatControl}
@@ -168,6 +187,7 @@ export function Workspace({
           environment={environment}
           studio={studio}
           isBusy={isBusy}
+          onOpenDiagnostics={openDiagnostics}
         />
       )}
       {activeView === "projects" && environment.config && (
@@ -178,6 +198,8 @@ export function Workspace({
           requiresWinboat={Boolean(
             environment.status?.platform.requiresWinboat,
           )}
+          environmentReady={environment.readiness.projects}
+          installationReady={environment.readiness.installation}
           projects={projects}
           studio={studio}
           isBusy={isBusy}

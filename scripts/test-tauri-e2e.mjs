@@ -352,10 +352,10 @@ try {
         const installRow = Array.from(document.querySelectorAll(".manifest-table tbody tr"))
           .find((row) => row.querySelector(".version-cell strong")?.textContent === "11.13.0");
         return document.querySelector(".route-status")?.classList.contains("online")
-          && document.body.innerText.includes("WinBoat online")
+          && /WinBoat online|Online — attention required/.test(document.body.innerText)
           && document.body.innerText.includes("11.12.2")
           && document.body.innerText.includes("11.13.0")
-          && installRow?.querySelector(".manifest-action .button")?.disabled === false;
+          && installRow?.querySelector(".manifest-action .button")?.disabled === true;
       `),
     20_000,
     "the fixture-backed native commands did not populate the online Studio view",

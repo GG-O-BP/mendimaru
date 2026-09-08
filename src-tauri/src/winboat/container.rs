@@ -127,6 +127,7 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     let nvram_recovery_available = false;
 
     EnvironmentStatus {
+        assessment: Default::default(),
         nvram_recovery_available,
         startup,
         platform: crate::platform::capabilities(),
@@ -143,6 +144,7 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
         guest_online,
         diagnostics,
     }
+    .assessed()
 }
 
 #[derive(Debug, Clone, Default)]

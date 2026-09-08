@@ -32,6 +32,8 @@ export function AppShell({
   activeView,
   online,
   connectionLabel,
+  attentionRequired = false,
+  onOpenDiagnostics,
   warning,
   languageChanging,
   winBoatControl,
@@ -45,6 +47,8 @@ export function AppShell({
   activeView: ViewKey;
   online: boolean;
   connectionLabel?: string;
+  attentionRequired?: boolean;
+  onOpenDiagnostics?: () => void;
   warning: string | null;
   languageChanging: boolean;
   winBoatControl: {
@@ -145,6 +149,15 @@ export function AppShell({
           </div>
 
           <div className="winboat-control">
+            {attentionRequired && (
+              <button
+                type="button"
+                className="button secondary"
+                onClick={onOpenDiagnostics}
+              >
+                {t("action-view-diagnostics")}
+              </button>
+            )}
             <label className="language-control" title={t("language-label")}>
               <Languages size={16} aria-hidden="true" />
               <span className="sr-only">{t("language-label")}</span>

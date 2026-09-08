@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/environment-assessment.schema.json",
+  "title": "Environment connectivity, capability readiness and health projection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["connectivity", "readiness", "health"],
+  "properties": {
+    "connectivity": { "type": "boolean" },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "studioLaunch",
+        "installation",
+        "uninstallation",
+        "projects",
+        "blockingChecks"
+      ],
+      "properties": {
+        "studioLaunch": { "type": "boolean" },
+        "installation": { "type": "boolean" },
+        "uninstallation": { "type": "boolean" },
+        "projects": { "type": "boolean" },
+        "blockingChecks": { "$ref": "#/$defs/checks" }
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attentionRequired", "attentionChecks"],
+      "properties": {
+        "attentionRequired": { "type": "boolean" },
+        "attentionChecks": { "$ref": "#/$defs/checks" }
+      }
+    }
+  },
+  "$defs": {
+    "checks": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 11,
+      "items": {
+        "enum": [
+          "winboat",
+          "compose",
+          "container-runtime",
+          "freerdp",
+          "shared-directory",
+          "shared-mount",
+          "container",
+          "guest-api",
+          "guest-clock",
+          "rdp",
+          "marketplace-browser"
+        ]
+      }
+    }
+  }
+}

@@ -74,6 +74,7 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     }
     #[allow(unreachable_code)]
     EnvironmentStatus {
+        assessment: Default::default(),
         nvram_recovery_available: false,
         startup: None,
         platform: capabilities(),

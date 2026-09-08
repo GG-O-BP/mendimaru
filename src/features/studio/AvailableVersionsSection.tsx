@@ -21,6 +21,7 @@ export function AvailableVersionsSection({
   t,
   localization,
   online,
+  installReady = online,
   catalog,
   installation,
   queue,
@@ -28,6 +29,7 @@ export function AvailableVersionsSection({
   t: Translate;
   localization: LocalizationBundle;
   online: boolean;
+  installReady?: boolean;
   catalog: CatalogModel;
   installation: InstallationModel;
   queue: InstallQueueModel;
@@ -108,6 +110,7 @@ export function AvailableVersionsSection({
           t={t}
           localization={localization}
           online={online}
+          installReady={installReady}
           catalog={catalog}
         />
       )}

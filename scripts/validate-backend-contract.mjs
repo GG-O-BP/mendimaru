@@ -14,6 +14,7 @@ const schemaFiles = [
   "schemas/browser-suite.schema.json",
   "schemas/browser.schema.json",
   "schemas/startup.schema.json",
+  "schemas/environment-assessment.schema.json",
 ];
 const schemas = schemaFiles.map((path) =>
   JSON.parse(fs.readFileSync(path, "utf8")),
@@ -22,7 +23,29 @@ const ajv = new Ajv2020({ allErrors: true, strict: true });
 addFormats(ajv);
 for (const schema of schemas) ajv.addSchema(schema);
 
-const startupSchema = schemas.at(-1).$id;
+const startupSchema = schemas.find((schema) =>
+  schema.$id.endsWith("/startup.schema.json"),
+).$id;
+const assessmentSchema = schemas.at(-1).$id;
+for (const blocking of [false, true]) {
+  const assessment = {
+    connectivity: true,
+    readiness: {
+      studioLaunch: !blocking,
+      installation: !blocking,
+      uninstallation: !blocking,
+      projects: !blocking,
+      blockingChecks: blocking ? ["rdp"] : [],
+    },
+    health: {
+      attentionRequired: true,
+      attentionChecks: [blocking ? "rdp" : "guest-clock"],
+    },
+  };
+  validate(assessmentSchema, assessment, "environment assessment");
+  if (ajv.validate(assessmentSchema, { ...assessment, rawLog: "secret" }))
+    throw new Error("assessment schema accepted raw logs");
+}
 for (const code of [
   "container_exited_during_startup",
   "guest_startup_timeout",

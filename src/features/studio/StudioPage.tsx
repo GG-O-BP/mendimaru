@@ -18,6 +18,11 @@ export function StudioPage({
   localization,
   online,
   startupFailed = false,
+  launchReady = online,
+  installReady = online,
+  uninstallReady = online,
+  attentionRequired = false,
+  onOpenDiagnostics,
   offlineGuidance,
   winBoatControl,
   installed,
@@ -29,6 +34,11 @@ export function StudioPage({
   localization: LocalizationBundle;
   online: boolean;
   startupFailed?: boolean;
+  launchReady?: boolean;
+  installReady?: boolean;
+  uninstallReady?: boolean;
+  attentionRequired?: boolean;
+  onOpenDiagnostics?: () => void;
   offlineGuidance: { title: string; detail: string };
   winBoatControl: {
     kind: EnvironmentControlKind;
@@ -96,10 +106,42 @@ export function StudioPage({
         </aside>
       )}
 
+      {online &&
+        !startupFailed &&
+        (attentionRequired || !launchReady || !installReady) && (
+          <aside
+            className="route-notice"
+            aria-labelledby="environment-attention-title"
+          >
+            <Settings size={22} aria-hidden="true" />
+            <div>
+              <strong id="environment-attention-title">
+                {t("connection-online-attention")}
+              </strong>
+              <p>
+                {t(
+                  launchReady
+                    ? "environment-attention-detail"
+                    : "environment-not-ready-detail",
+                )}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="button secondary"
+              onClick={onOpenDiagnostics}
+            >
+              {t("action-view-diagnostics")}
+            </button>
+          </aside>
+        )}
+
       <InstalledVersionsSection
         t={t}
         localization={localization}
         online={online}
+        launchReady={launchReady}
+        uninstallReady={uninstallReady}
         model={installed}
         countLabel={visibleInstalledCount}
       />
@@ -107,6 +149,7 @@ export function StudioPage({
         t={t}
         localization={localization}
         online={online}
+        installReady={installReady}
         catalog={catalog}
         installation={installation}
         queue={queue}

@@ -116,6 +116,7 @@ pub(super) fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     let browser_available = crate::marketplace::browser_executable().is_some();
     let ready = platform.supports_studio_management && shared_directory_available;
     EnvironmentStatus {
+        assessment: Default::default(),
         nvram_recovery_available: false,
         startup: None,
         platform,
@@ -156,6 +157,7 @@ pub(super) fn environment_status(config: &AppConfig) -> EnvironmentStatus {
             },
         ],
     }
+    .assessed()
 }
 
 pub(super) fn installed_versions(config: &AppConfig) -> Result<Vec<StudioVersion>, String> {

@@ -367,6 +367,69 @@ async function renderReadyApp() {
   await screen.findByText("route-native-windows");
 }
 
+describe("WinBoat capability readiness application flow", () => {
+  it.each(["guest-clock", "rdp", "marketplace-browser"] as const)(
+    "uses explicit capability readiness for %s and focuses diagnostics",
+    async (id) => {
+      const ready = id !== "rdp";
+      mocks.getEnvironmentStatus.mockResolvedValue({
+        ...status,
+        platform: {
+          ...status.platform,
+          kind: "linux-winboat",
+          requiresWinboat: true,
+        },
+        winboatAvailable: true,
+        winboatInitialized: true,
+        containerStatus: "running",
+        connectivity: true,
+        ready,
+        readiness: {
+          studioLaunch: ready,
+          projects: ready,
+          uninstallation: ready,
+          installation: id === "guest-clock",
+          blockingChecks: ready ? [] : [id],
+        },
+        health: { attentionRequired: true, attentionChecks: [id] },
+        diagnostics: [{ id, status: "failure", action: "open-settings" }],
+      } satisfies EnvironmentStatus);
+      render(<App />);
+      await screen.findByText("route-linux");
+      await waitFor(() =>
+        expect(
+          screen.getAllByRole("button", { name: "action-launch" }).length,
+        ).toBeGreaterThan(0),
+      );
+      expect(
+        screen.getAllByText("connection-online-attention").length,
+      ).toBeGreaterThan(0);
+      await waitFor(() => {
+        const launch = screen.getAllByRole("button", {
+          name: "action-launch",
+        })[0];
+        if (ready) expect(launch).toBeEnabled();
+        else expect(launch).toBeDisabled();
+        const install = screen.getByRole("button", { name: "action-install" });
+        if (id === "guest-clock") expect(install).toBeEnabled();
+        else expect(install).toBeDisabled();
+      });
+      fireEvent.click(screen.getByRole("button", { name: /nav-projects/ }));
+      const open = await screen.findByRole("button", { name: "action-open" });
+      if (ready) expect(open).toBeEnabled();
+      else expect(open).toBeDisabled();
+      fireEvent.click(
+        screen.getAllByRole("button", { name: "action-view-diagnostics" })[0],
+      );
+      await waitFor(() =>
+        expect(document.activeElement?.id).toBe(`environment-diagnostic-${id}`),
+      );
+      expect(mocks.launchStudioPro).not.toHaveBeenCalled();
+      expect(mocks.enqueueInstallStudioPro).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("native Windows application E2E", () => {
   it("shows cached installed versions immediately, allows verified-backend launch, and blocks installs until live detection completes", async () => {
     let finishDetection: (versions: StudioVersion[]) => void = () => {
