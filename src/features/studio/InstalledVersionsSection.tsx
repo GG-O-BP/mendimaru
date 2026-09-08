@@ -25,6 +25,7 @@ export function InstalledVersionsSection({
   t,
   localization,
   online,
+  launchReady = online,
   uninstallReady = online,
   model,
   countLabel,
@@ -32,6 +33,7 @@ export function InstalledVersionsSection({
   t: Translate;
   localization: LocalizationBundle;
   online: boolean;
+  launchReady?: boolean;
   uninstallReady?: boolean;
   model: InstalledVersionsModel;
   countLabel: string;
@@ -141,7 +143,7 @@ export function InstalledVersionsSection({
                   className="button light"
                   onClick={() => model.onLaunch(version)}
                   disabled={
-                    !online ||
+                    !launchReady ||
                     !model.launchReady ||
                     Boolean(model.connectedRemoteAppVersion) ||
                     model.isLaunching
@@ -245,7 +247,7 @@ export function InstalledVersionsSection({
                             className="button light compact"
                             onClick={() => model.onReconnect(session)}
                             disabled={
-                              !online ||
+                              !launchReady ||
                               !model.loaded ||
                               !session.reconnectable ||
                               reconnectBusy ||
@@ -268,7 +270,7 @@ export function InstalledVersionsSection({
                             className="icon-button danger inverse"
                             onClick={() => model.onStop(session)}
                             disabled={
-                              !online ||
+                              !launchReady ||
                               !model.loaded ||
                               stopBusy ||
                               reconnectBusy ||

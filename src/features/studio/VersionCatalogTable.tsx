@@ -15,11 +15,13 @@ export function VersionCatalogTable({
   t,
   localization,
   online,
+  installReady = online,
   catalog,
 }: {
   t: Translate;
   localization: LocalizationBundle;
   online: boolean;
+  installReady?: boolean;
   catalog: CatalogModel;
 }) {
   const releaseDates = useLocalizedDates(
@@ -52,6 +54,7 @@ export function VersionCatalogTable({
               version={version}
               releaseDate={releaseDates[index] || version.releaseDate || "—"}
               online={online}
+              installReady={installReady}
               alreadyInstalled={catalog.installedSet.has(version.version)}
               isUpdateCandidate={catalog.updateCandidates.has(version.version)}
               installedVersionsLoaded={catalog.installedVersionsLoaded}
@@ -76,6 +79,7 @@ function VersionRow({
   version,
   releaseDate,
   online,
+  installReady,
   alreadyInstalled,
   isUpdateCandidate,
   installedVersionsLoaded,
@@ -89,6 +93,7 @@ function VersionRow({
   version: CatalogModel["versions"][number];
   releaseDate: string;
   online: boolean;
+  installReady: boolean;
   alreadyInstalled: boolean;
   isUpdateCandidate: boolean;
   installedVersionsLoaded: boolean;
@@ -103,7 +108,7 @@ function VersionRow({
     ? "checking"
     : alreadyInstalled
       ? "installed"
-      : online
+      : installReady
         ? "available"
         : "offline";
 
@@ -131,9 +136,9 @@ function VersionRow({
             ? t("status-checking-installed")
             : alreadyInstalled
               ? t("action-installed")
-              : online
+              : installReady
                 ? t("status-available")
-                : t("connection-offline")}
+                : t(online ? "connection-online-attention" : "connection-offline")}
         </span>
       </td>
       <td className="manifest-action">
@@ -141,7 +146,7 @@ function VersionRow({
           type="button"
           className={`button compact ${alreadyInstalled ? "quiet" : "primary"}`}
           disabled={
-            !online ||
+            !installReady ||
             !installedVersionsLoaded ||
             studioSessionsLoading ||
             Boolean(connectedRemoteAppVersion) ||
@@ -176,7 +181,7 @@ function VersionRow({
             className="icon-button compact"
             aria-label={t("action-force-redownload")}
             disabled={
-              !online ||
+              !installReady ||
               studioSessionsLoading ||
               Boolean(connectedRemoteAppVersion) ||
               installing

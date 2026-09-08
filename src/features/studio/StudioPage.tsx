@@ -139,7 +139,8 @@ export function StudioPage({
       <InstalledVersionsSection
         t={t}
         localization={localization}
-        online={launchReady}
+        online={online}
+        launchReady={launchReady}
         uninstallReady={uninstallReady}
         model={installed}
         countLabel={visibleInstalledCount}
@@ -147,7 +148,8 @@ export function StudioPage({
       <AvailableVersionsSection
         t={t}
         localization={localization}
-        online={installReady}
+        online={online}
+        installReady={installReady}
         catalog={catalog}
         installation={installation}
         queue={queue}

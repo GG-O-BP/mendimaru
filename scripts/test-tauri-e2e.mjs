@@ -355,7 +355,7 @@ try {
           && /WinBoat online|Online — attention required/.test(document.body.innerText)
           && document.body.innerText.includes("11.12.2")
           && document.body.innerText.includes("11.13.0")
-          && installRow?.querySelector(".manifest-action .button")?.disabled === false;
+          && installRow?.querySelector(".manifest-action .button")?.disabled === true;
       `),
     20_000,
     "the fixture-backed native commands did not populate the online Studio view",
