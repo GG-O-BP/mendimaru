@@ -853,6 +853,8 @@ fn trim_history(records: &mut Vec<OperationRecord>) {
 fn failure_classification(error: &CommandError) -> (&'static str, bool) {
     use crate::models::CommandErrorCode;
     match error.code {
+        CommandErrorCode::ContainerExitedDuringStartup => ("container_exited_during_startup", true),
+        CommandErrorCode::GuestStartupTimeout => ("guest_startup_timeout", true),
         CommandErrorCode::ConfigLoadFailed => ("config_load_failed", false),
         CommandErrorCode::DownloadCancelled => ("download_cancelled", true),
         CommandErrorCode::InstallFailed => ("install_failed", true),

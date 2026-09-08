@@ -121,6 +121,7 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     let diagnostics = build_linux_diagnostics(&state);
 
     EnvironmentStatus {
+        startup: super::startup::snapshot(config),
         platform: crate::platform::capabilities(),
         ready,
         winboat_available,
@@ -594,31 +595,6 @@ const fn container_status_name(status: ContainerStatus) -> &'static str {
     }
 }
 
-pub async fn start_container(config: &AppConfig) -> Result<ContainerStatus, String> {
-    if !Path::new(&config.compose_file).is_file() {
-        return Err(crate::tr!(
-            "error-compose-file-not-found",
-            path = &config.compose_file
-        ));
-    }
-    let status = inspect_container_status(config).await;
-    if status.is_running() {
-        return Ok(status);
-    }
-
-    if status.exists() {
-        let mut command = Command::new(config.container_runtime.as_str());
-        command.arg("start").arg(&config.container_name);
-        let output = process::output(command, lifecycle_policy(config), None, "container start")
-            .await
-            .map_err(|error| crate::tr!("error-container-start", error = error))?;
-        ensure_success(output, &crate::tr!("operation-container-start"))?;
-    } else {
-        compose_up(config, false).await?;
-    }
-    Ok(inspect_container_status(config).await)
-}
-
 pub async fn recreate_container(config: &AppConfig) -> Result<(), String> {
     let service_name = winboat_compose_service_name(Path::new(&config.compose_file))?;
     recreate_compose_service(config, &service_name).await
@@ -641,11 +617,6 @@ pub fn open_winboat(config: &AppConfig) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| crate::tr!("error-winboat-open", error = error))
-}
-
-async fn compose_up(config: &AppConfig, force_recreate: bool) -> Result<(), String> {
-    let service_name = winboat_compose_service_name(Path::new(&config.compose_file))?;
-    compose_up_service(config, force_recreate, &service_name).await
 }
 
 async fn compose_up_service(
@@ -701,24 +672,7 @@ fn lifecycle_policy(config: &AppConfig) -> CommandPolicy {
     )
 }
 
-pub(super) async fn ensure_guest_online(config: &AppConfig) -> Result<(), String> {
-    if guest_is_online(config).await {
-        return Ok(());
-    }
-    start_container(config).await?;
-    let timeout = Duration::from_secs(config.startup_timeout_seconds);
-    let started = tokio::time::Instant::now();
-    while started.elapsed() < timeout {
-        if guest_is_online(config).await {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-    Err(crate::tr!(
-        "error-guest-timeout",
-        seconds = crate::i18n::format_number(config.startup_timeout_seconds)
-    ))
-}
+pub(super) use super::startup::ensure_guest_online;
 
 pub(super) async fn ensure_private_operation_transport(config: &AppConfig) -> Result<(), String> {
     if !is_loopback_host(&config.rdp_host) {
@@ -832,10 +786,6 @@ pub(super) fn http_client(timeout: Duration) -> Result<reqwest::Client, String> 
         .user_agent("mendimaru/0.1 (WinBoat Studio Pro manager)")
         .build()
         .map_err(|error| crate::tr!("error-http-client-create", error = error))
-}
-
-pub(crate) async fn inspect_container_status(config: &AppConfig) -> ContainerStatus {
-    inspect_container(config).await.status
 }
 
 #[derive(Debug)]

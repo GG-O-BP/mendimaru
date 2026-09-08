@@ -50,7 +50,7 @@ pub(crate) async fn export_environment_diagnostic_report(app: AppHandle) -> Comm
 pub(crate) async fn start_winboat_windows(app: AppHandle) -> CommandResult<()> {
     require_winboat()?;
     let config = load_command_config(&app)?;
-    crate::winboat::start_container(&config).await?;
+    crate::winboat::ensure_guest_online(&config).await?;
     Ok(())
 }
 

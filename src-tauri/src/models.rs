@@ -232,6 +232,8 @@ mod tests {
             "commandErrorCode",
             [
                 CommandErrorCode::ConfigLoadFailed,
+                CommandErrorCode::ContainerExitedDuringStartup,
+                CommandErrorCode::GuestStartupTimeout,
                 CommandErrorCode::DownloadCancelled,
                 CommandErrorCode::InstallFailed,
                 CommandErrorCode::UnsupportedCapability,

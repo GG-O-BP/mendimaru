@@ -11,6 +11,7 @@ mod scripts;
 mod security;
 mod sessions;
 mod staging;
+pub(crate) mod startup;
 mod studio;
 
 pub(crate) use asset_mirror::AssetMirrorServer;
@@ -21,8 +22,7 @@ use crate::models::{AppConfig, StudioVersion};
 pub use client::installed_versions;
 pub(crate) use container::guest_is_online_at_url;
 pub use container::{
-    environment_status, guest_is_online, open_winboat, recreate_compose_service,
-    recreate_container, start_container,
+    environment_status, guest_is_online, open_winboat, recreate_compose_service, recreate_container,
 };
 pub(crate) use operation::WindowsOperationFailure;
 pub(crate) use sessions::stop as stop_studio_session;
@@ -32,6 +32,7 @@ pub(crate) use sessions::{
 };
 pub(crate) use sessions::{list as studio_sessions, reconnect as reconnect_studio_session};
 pub(crate) use staging::stage_installer;
+pub(crate) use startup::ensure_guest_online;
 pub use studio::{install_studio, launch_studio, launch_uninstaller, open_linux_folder};
 
 pub(crate) fn seed_installed_versions_cache(config: &AppConfig, versions: &[StudioVersion]) {

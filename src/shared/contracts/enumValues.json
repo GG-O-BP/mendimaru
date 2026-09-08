@@ -69,6 +69,8 @@
     "runtime_port_forwarding_invalid": true,
     "runtime_firewall_blocked": true,
     "runtime_not_listening": true,
+    "container_exited_during_startup": true,
+    "guest_startup_timeout": true,
     "runtime_compose_recovery_failed": true
   },
   "sessionState": {
@@ -260,6 +262,8 @@
     "runtime_port_forwarding_invalid": true,
     "runtime_firewall_blocked": true,
     "runtime_not_listening": true,
+    "container_exited_during_startup": true,
+    "guest_startup_timeout": true,
     "runtime_compose_recovery_failed": true,
     "compose_not_winboat": true,
     "compose_ambiguous": true,

@@ -160,6 +160,14 @@ export interface PlatformCapabilities {
 }
 
 export interface EnvironmentStatus {
+  startup?: {
+    id: number;
+    startedAt: string;
+    phase:
+      "starting-container" | "waiting-for-guest" | "online" | "startup-failed";
+    errorCode: BackendErrorCode | null;
+    containerStatus: ContainerStatus;
+  } | null;
   platform: PlatformCapabilities;
   ready: boolean;
   winboatAvailable: boolean;

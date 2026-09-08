@@ -1,5 +1,18 @@
 # Platform backend and capability contract
 
+Windows startup is complete only after Guest `/health` succeeds while the
+container is running. Desktop Start, CLI `env ensure`, and Studio operations use
+the same bounded readiness implementation. `container_exited_during_startup`
+and `guest_startup_timeout` distinguish early exit from unavailable Guest health;
+external command timeouts retain `external_process_timeout`. CLI `env ensure`
+also checks required environment diagnostics before returning ready.
+
+Environment status includes an optional `startup` object with a monotonic
+process-local `id`, UTC `startedAt`, `phase` (`starting-container`,
+`waiting-for-guest`, `online`, `startup-failed`), safe `errorCode`, and
+`containerStatus`. It contains no command output or configured paths. Concurrent
+startup callers are serialized within their original startup deadline.
+
 Mendimaru uses one versioned contract for Studio Pro, Runtime, UI automation,
 and browser operations. The contract describes equivalent behavior; it does not
 require adapters to share an implementation or transport.

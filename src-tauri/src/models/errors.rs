@@ -4,6 +4,8 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandErrorCode {
+    ContainerExitedDuringStartup,
+    GuestStartupTimeout,
     ConfigLoadFailed,
     DownloadCancelled,
     InstallFailed,
@@ -56,6 +58,10 @@ impl CommandError {
 impl From<BackendError> for CommandError {
     fn from(error: BackendError) -> Self {
         let code = match error.code {
+            BackendErrorCode::ContainerExitedDuringStartup => {
+                CommandErrorCode::ContainerExitedDuringStartup
+            }
+            BackendErrorCode::GuestStartupTimeout => CommandErrorCode::GuestStartupTimeout,
             BackendErrorCode::UnsupportedCapability => CommandErrorCode::UnsupportedCapability,
             BackendErrorCode::BackendMismatch => CommandErrorCode::BackendMismatch,
             BackendErrorCode::InvalidRequest => CommandErrorCode::InvalidRequest,

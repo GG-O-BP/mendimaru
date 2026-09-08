@@ -96,38 +96,28 @@ pub(crate) async fn ensure_environment(
     config: &AppConfig,
     timeout: Duration,
 ) -> ApplicationResult<SafeEnvironmentStatus> {
-    let initial = crate::platform::environment_status(config).await;
-    if initial.ready {
-        return Ok(SafeEnvironmentStatus::from(&initial));
-    }
-
     #[cfg(target_os = "linux")]
     {
-        if !initial.winboat_available || !initial.compose_available || !initial.runtime_available {
-            return Err(precondition_error(
-                CapabilityId::StudioDetect,
-                "the WinBoat environment prerequisites are not ready",
-                false,
-            ));
-        }
-        crate::winboat::start_container(config).await.map_err(|_| {
-            precondition_error(
-                CapabilityId::StudioDetect,
-                "the WinBoat environment could not be started",
-                true,
-            )
-        })?;
-        let started = tokio::time::Instant::now();
-        while started.elapsed() < timeout {
-            let current = crate::platform::environment_status(config).await;
-            if current.ready {
-                return Ok(SafeEnvironmentStatus::from(&current));
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
+        let mut bounded = config.clone();
+        bounded.startup_timeout_seconds = timeout
+            .as_secs()
+            .min(config.startup_timeout_seconds)
+            .clamp(1, 900);
+        let deadline =
+            tokio::time::Instant::now() + Duration::from_secs(bounded.startup_timeout_seconds);
+        crate::winboat::ensure_guest_online(&bounded).await?;
+        let current =
+            tokio::time::timeout_at(deadline, crate::platform::environment_status(&bounded))
+                .await
+                .map_err(|_| {
+                    crate::winboat::startup::failure(BackendErrorCode::GuestStartupTimeout)
+                })?;
+        if current.ready {
+            return Ok(SafeEnvironmentStatus::from(&current));
         }
         Err(precondition_error(
             CapabilityId::StudioDetect,
-            "the WinBoat environment did not become ready before the timeout",
+            "Windows is online but required environment diagnostics are not ready",
             true,
         ))
     }
@@ -135,6 +125,10 @@ pub(crate) async fn ensure_environment(
     #[cfg(not(target_os = "linux"))]
     {
         let _ = timeout;
+        let initial = crate::platform::environment_status(config).await;
+        if initial.ready {
+            return Ok(SafeEnvironmentStatus::from(&initial));
+        }
         Err(precondition_error(
             CapabilityId::StudioDetect,
             "the native environment is not ready",
@@ -1050,6 +1044,7 @@ mod tests {
     #[test]
     fn headless_environment_status_preserves_process_codes_without_observed_details() {
         let status = EnvironmentStatus {
+            startup: None,
             platform: PlatformCapabilities {
                 kind: HostPlatform::LinuxWinboat,
                 architecture: "x86_64".into(),
