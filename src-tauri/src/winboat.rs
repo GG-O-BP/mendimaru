@@ -1,6 +1,9 @@
 mod asset_mirror;
 mod client;
 mod container;
+pub(crate) mod maintenance;
+#[cfg(target_os = "linux")]
+pub(crate) mod nvram;
 mod operation;
 mod project_access;
 mod project_locks;

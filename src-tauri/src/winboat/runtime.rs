@@ -566,6 +566,8 @@ pub(crate) async fn start(
     config: &AppConfig,
     request: &RuntimeStartRequest,
 ) -> BackendResult<RuntimeStatus> {
+    let _maintenance = super::maintenance::shared(config)
+        .map_err(|_| super::startup::failure(BackendErrorCode::PreconditionFailed))?;
     validate_start_request(request)?;
     if !guest_is_online(config).await {
         return Err(runtime_error(
@@ -1074,6 +1076,8 @@ pub(crate) async fn url(config: &AppConfig, session_id: &str) -> BackendResult<S
 }
 
 pub(crate) async fn stop(config: &AppConfig, session_id: &str) -> BackendResult<()> {
+    let _maintenance = super::maintenance::shared(config)
+        .map_err(|_| super::startup::failure(BackendErrorCode::PreconditionFailed))?;
     let (directory, mut record) = load_session(session_id, CapabilityId::RuntimeStop)?;
     if record.state == RuntimeState::Stopped {
         return Ok(());

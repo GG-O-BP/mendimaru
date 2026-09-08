@@ -14,7 +14,7 @@ pub(crate) use configuration::{
 pub(crate) use environment::{
     begin_winboat_setup, complete_winboat_setup, export_environment_diagnostic_report,
     get_capabilities, get_environment_diagnostic_report, get_environment_status, open_winboat,
-    start_winboat_windows,
+    preview_winboat_nvram, recover_winboat_nvram, restore_winboat_nvram, start_winboat_windows,
 };
 pub(crate) use localization::{
     format_localized_bytes, format_localized_dates, format_localized_numbers, get_localization,

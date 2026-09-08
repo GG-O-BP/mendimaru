@@ -123,6 +123,8 @@ pub struct EnvironmentDiagnostic {
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentStatus {
     #[serde(default)]
+    pub nvram_recovery_available: bool,
+    #[serde(default)]
     pub startup: Option<crate::winboat::startup::StartupAttempt>,
     pub platform: PlatformCapabilities,
     pub ready: bool,
@@ -193,6 +195,7 @@ mod diagnostic_report_tests {
     fn report_uses_an_allowlist_and_omits_observed_values() {
         let secret = "password=hunter2 token=private-value /home/private/workspace";
         let status = EnvironmentStatus {
+            nvram_recovery_available: false,
             startup: Some(crate::winboat::startup::StartupAttempt {
                 id: 1,
                 started_at: "2026-09-08T00:00:00Z".into(),

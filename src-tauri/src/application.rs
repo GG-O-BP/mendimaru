@@ -1046,6 +1046,7 @@ mod tests {
     #[test]
     fn headless_environment_status_preserves_process_codes_without_observed_details() {
         let status = EnvironmentStatus {
+            nvram_recovery_available: false,
             startup: None,
             platform: PlatformCapabilities {
                 kind: HostPlatform::LinuxWinboat,

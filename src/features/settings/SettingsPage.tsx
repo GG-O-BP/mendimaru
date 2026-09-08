@@ -58,6 +58,10 @@ export interface SettingsPageModel {
   ) => void;
   onCopyDiagnosticReport: () => void;
   onRerunDiagnostics: () => void;
+  nvramRecoveryAvailable: boolean;
+  nvramRollbackRequired: boolean;
+  onRecoverNvram: () => void;
+  onRestoreNvram: () => void;
   onExportDiagnosticReport: () => void;
 }
 
@@ -406,6 +410,29 @@ export function SettingsPage({
             <p>{t("diagnostics-description")}</p>
           </div>
           <div className="diagnostic-report-actions">
+            {model.nvramRecoveryAvailable && !model.nvramRollbackRequired && (
+              <button
+                type="button"
+                className="button secondary compact"
+                onClick={model.onRecoverNvram}
+                disabled={
+                  model.isBusy("preview-winboat-nvram") ||
+                  model.isBusy("recover-winboat-nvram")
+                }
+              >
+                {t("action-nvram-preview")}
+              </button>
+            )}
+            {model.nvramRollbackRequired && (
+              <button
+                type="button"
+                className="button secondary compact"
+                onClick={model.onRestoreNvram}
+                disabled={model.isBusy("recover-winboat-nvram")}
+              >
+                {t("action-nvram-restore")}
+              </button>
+            )}
             <button
               type="button"
               className="button secondary compact"

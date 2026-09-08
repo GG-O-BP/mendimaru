@@ -291,6 +291,12 @@ impl StartupDriver for ContainerDriver<'_> {
 }
 
 pub async fn ensure_guest_online(config: &AppConfig) -> Result<(), BackendError> {
+    let _maintenance = super::maintenance::shared(config)
+        .map_err(|_| failure(BackendErrorCode::PreconditionFailed))?;
+    ensure_guest_online_unlocked(config).await
+}
+
+pub(super) async fn ensure_guest_online_unlocked(config: &AppConfig) -> Result<(), BackendError> {
     let deadline =
         Instant::now() + Duration::from_secs(config.startup_timeout_seconds.clamp(1, 900));
     let _guard = tokio::time::timeout_at(

@@ -1085,6 +1085,104 @@ pub(crate) fn winboat_compose_service_name(path: &Path) -> Result<String, String
     winboat_service_name(&compose).map_err(String::from)
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) struct NvramMountPlan {
+    pub directory: PathBuf,
+    pub service: String,
+    pub image: String,
+    pub revision: String,
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn nvram_mount_plan(config: &AppConfig) -> Result<NvramMountPlan, String> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let reject = || crate::tr!("error-nvram-unsupported");
+    if config.container_runtime != crate::models::ContainerRuntime::Docker {
+        return Err(reject());
+    }
+    let path = Path::new(&config.compose_file);
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|_| reject())?;
+    let metadata = file.metadata().map_err(|_| reject())?;
+    if !metadata.is_file() || metadata.len() > MAX_COMPOSE_BYTES {
+        return Err(reject());
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_COMPOSE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| reject())?;
+    if bytes.len() as u64 > MAX_COMPOSE_BYTES {
+        return Err(reject());
+    }
+    let compose: Value = serde_yaml::from_slice(&bytes).map_err(|_| reject())?;
+    let service = winboat_service_name(&compose).map_err(|_| reject())?;
+    let value = service_value_named(&compose, &service).ok_or_else(reject)?;
+    if value.get("command").is_some()
+        || value.get("entrypoint").is_some()
+        || value.get("volumes_from").is_some()
+        || value.get("container_name").and_then(Value::as_str)
+            != Some(config.container_name.as_str())
+    {
+        return Err(reject());
+    }
+    let image = value
+        .get("image")
+        .and_then(Value::as_str)
+        .ok_or_else(reject)?
+        .to_string();
+    let mounts = value
+        .get("volumes")
+        .and_then(Value::as_sequence)
+        .ok_or_else(reject)?;
+    let storage = storage_mounts(mounts);
+    let [mount] = storage.as_slice() else {
+        return Err(reject());
+    };
+    if mount
+        .get("type")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind != "bind")
+        || mount.get("read_only").and_then(Value::as_bool) == Some(true)
+        || mount.as_str().is_some_and(|raw| raw.ends_with(":ro"))
+    {
+        return Err(reject());
+    }
+    let source = volume_source_value(mount).ok_or_else(reject)?;
+    let directory = PathBuf::from(source);
+    if !directory.is_absolute() || source.contains(['$', '\0']) {
+        return Err(reject());
+    }
+    // No sidecar or nested mount may write through a second identity.
+    let services = compose
+        .get("services")
+        .and_then(Value::as_mapping)
+        .ok_or_else(reject)?;
+    for (name, candidate) in services {
+        if let Some(volumes) = candidate.get("volumes").and_then(Value::as_sequence) {
+            for volume in volumes {
+                if name.as_str() != Some(service.as_str())
+                    && volume_source_value(volume) == Some(source)
+                    || name.as_str() == Some(service.as_str())
+                        && volume_target_value(volume)
+                            .is_some_and(|target| target.starts_with("/storage/"))
+                {
+                    return Err(reject());
+                }
+            }
+        }
+    }
+    let revision = format!("{:x}", Sha256::digest(&bytes));
+    Ok(NvramMountPlan {
+        directory,
+        service,
+        image,
+        revision,
+    })
+}
+
 fn service_value_named<'a>(compose: &'a Value, service_name: &str) -> Option<&'a Value> {
     compose
         .get("services")?

@@ -109,6 +109,68 @@ fn require_winboat() -> CommandResult<()> {
     }
 }
 
+#[tauri::command]
+pub(crate) async fn preview_winboat_nvram(app: AppHandle) -> CommandResult<serde_json::Value> {
+    require_winboat()?;
+    let config = load_command_config(&app)?;
+    #[cfg(target_os = "linux")]
+    {
+        Ok(
+            serde_json::to_value(crate::winboat::nvram::preview(&config).await?)
+                .map_err(|_| crate::tr!("error-nvram-unsupported"))?,
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = config;
+        Err(crate::tr!("error-winboat-not-required").into())
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn recover_winboat_nvram(
+    app: AppHandle,
+    preview_id: String,
+    confirmed: bool,
+) -> CommandResult<serde_json::Value> {
+    require_winboat()?;
+    let config = load_command_config(&app)?;
+    #[cfg(target_os = "linux")]
+    {
+        Ok(serde_json::to_value(
+            crate::winboat::nvram::recover(&config, &preview_id, confirmed).await?,
+        )
+        .map_err(|_| crate::tr!("error-nvram-unsupported"))?)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (config, preview_id, confirmed);
+        Err(crate::tr!("error-winboat-not-required").into())
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn restore_winboat_nvram(
+    app: AppHandle,
+    preview_id: String,
+    confirmed: bool,
+) -> CommandResult<serde_json::Value> {
+    require_winboat()?;
+    let config = load_command_config(&app)?;
+    #[cfg(target_os = "linux")]
+    {
+        Ok(serde_json::to_value(
+            crate::winboat::nvram::restore(&config, &preview_id, confirmed).await?,
+        )
+        .map_err(|_| crate::tr!("error-nvram-unsupported"))?)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (config, preview_id, confirmed);
+        Err(crate::tr!("error-winboat-not-required").into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::get_capabilities;

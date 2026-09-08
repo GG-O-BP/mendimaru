@@ -65,6 +65,10 @@ function model(overrides: Partial<SettingsPageModel> = {}): SettingsPageModel {
     onDiagnosticAction: vi.fn(),
     onCopyDiagnosticReport: vi.fn(),
     onRerunDiagnostics: vi.fn(),
+    nvramRecoveryAvailable: false,
+    nvramRollbackRequired: false,
+    onRecoverNvram: vi.fn(),
+    onRestoreNvram: vi.fn(),
     onExportDiagnosticReport: vi.fn(),
     ...overrides,
   };

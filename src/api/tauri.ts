@@ -48,6 +48,9 @@ const commands = {
   setProjectLaunchPreference: "set_project_launch_preference",
   setProjectFavorite: "set_project_favorite",
   startWinBoatWindows: "start_winboat_windows",
+  previewWinBoatNvram: "preview_winboat_nvram",
+  recoverWinBoatNvram: "recover_winboat_nvram",
+  restoreWinBoatNvram: "restore_winboat_nvram",
   openWinBoat: "open_winboat",
   beginWinBoatSetup: "begin_winboat_setup",
   completeWinBoatSetup: "complete_winboat_setup",
@@ -72,6 +75,20 @@ const commands = {
 } as const;
 
 export const tauriApi = {
+  previewWinBoatNvram: () =>
+    invoke<import("../domain/types").NvramRecoveryPreview>(
+      commands.previewWinBoatNvram,
+    ),
+  recoverWinBoatNvram: (previewId: string) =>
+    invoke<import("../domain/types").NvramRecoveryOutcome>(
+      commands.recoverWinBoatNvram,
+      { previewId, confirmed: true },
+    ),
+  restoreWinBoatNvram: (previewId: string) =>
+    invoke<import("../domain/types").NvramRecoveryOutcome>(
+      commands.restoreWinBoatNvram,
+      { previewId, confirmed: true },
+    ),
   getConfig: () => invoke<AppConfig>(commands.getConfig),
   getLocalization: () => invoke<LocalizationBundle>(commands.getLocalization),
   setLanguagePreference: (language: string) =>

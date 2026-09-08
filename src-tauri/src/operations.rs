@@ -57,6 +57,7 @@ impl Default for OperationHistory {
 }
 
 pub(crate) struct OperationTracker {
+    _maintenance: Option<crate::winboat::maintenance::Lease>,
     history_path: PathBuf,
     log_directory: PathBuf,
     id: String,
@@ -67,6 +68,7 @@ pub(crate) struct OperationTracker {
 }
 
 pub(crate) struct SessionActionGuard {
+    _maintenance: Option<crate::winboat::maintenance::Lease>,
     history_path: PathBuf,
     target_version: String,
 }
@@ -102,6 +104,7 @@ impl OperationTracker {
         retry_of: Option<String>,
     ) -> Result<Self, String> {
         validate_target_version(target_version)?;
+        let maintenance = crate::winboat::maintenance::shared(config)?;
         let log_directory = operation_log_directory(config);
         let _store = lock_store()?;
         let mut history = load_history(&history_path)?;
@@ -154,6 +157,7 @@ impl OperationTracker {
         Ok(Self {
             history_path,
             log_directory,
+            _maintenance: maintenance,
             id,
             finished: false,
             last_stage: stage,
@@ -300,6 +304,7 @@ impl SessionActionGuard {
         history_path: PathBuf,
         target_version: &str,
     ) -> Result<Self, String> {
+        let maintenance = crate::winboat::maintenance::shared(config)?;
         validate_target_version(target_version)?;
         let _store = lock_store()?;
         let mut history = load_history(&history_path)?;
@@ -329,6 +334,7 @@ impl SessionActionGuard {
         Ok(Self {
             history_path,
             target_version: target_version.to_string(),
+            _maintenance: maintenance,
         })
     }
 }

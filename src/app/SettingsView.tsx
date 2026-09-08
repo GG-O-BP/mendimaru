@@ -40,6 +40,12 @@ export function SettingsView({
           void environment.runDiagnosticAction(action, id),
         onCopyDiagnosticReport: () => void environment.copyDiagnosticReport(),
         onRerunDiagnostics: () => void environment.rerunDiagnostics(),
+        nvramRecoveryAvailable: Boolean(
+          environment.status?.nvramRecoveryAvailable,
+        ),
+        nvramRollbackRequired: environment.nvram.rollbackRequired,
+        onRecoverNvram: () => void environment.nvram.recoverNvram(),
+        onRestoreNvram: environment.nvram.restoreNvram,
         onExportDiagnosticReport: () =>
           void environment.exportDiagnosticReport(),
       }}
