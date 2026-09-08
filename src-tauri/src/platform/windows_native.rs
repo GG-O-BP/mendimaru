@@ -116,6 +116,7 @@ pub(super) fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     let browser_available = crate::marketplace::browser_executable().is_some();
     let ready = platform.supports_studio_management && shared_directory_available;
     EnvironmentStatus {
+        startup: None,
         platform,
         ready,
         winboat_available: false,

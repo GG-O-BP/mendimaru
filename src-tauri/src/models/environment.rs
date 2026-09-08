@@ -119,6 +119,8 @@ pub struct EnvironmentDiagnostic {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentStatus {
+    #[serde(default)]
+    pub startup: Option<crate::winboat::startup::StartupAttempt>,
     pub platform: PlatformCapabilities,
     pub ready: bool,
     pub winboat_available: bool,
@@ -186,6 +188,7 @@ mod diagnostic_report_tests {
     fn report_uses_an_allowlist_and_omits_observed_values() {
         let secret = "password=hunter2 token=private-value /home/private/workspace";
         let status = EnvironmentStatus {
+            startup: None,
             platform: PlatformCapabilities {
                 kind: HostPlatform::LinuxWinboat,
                 architecture: "x86_64".to_string(),

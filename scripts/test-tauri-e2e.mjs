@@ -296,10 +296,17 @@ try {
     fixturePids.length >= 2,
     "the hang fixture exercised and cleaned a descendant process tree",
   );
+  // Background Studio discovery can share the deliberately hung startup
+  // attempt. Only a subsequent successful attempt clears that failure.
+  await invoke("start_winboat_windows");
   const recoveredEnvironment = await timed(() =>
     invoke("get_environment_status"),
   );
   report.measurements.recoveredEnvironmentMs = recoveredEnvironment.elapsedMs;
+  recordAssertion(
+    recoveredEnvironment.value.startup?.phase === "online",
+    "a successful readiness attempt clears the injected startup failure",
+  );
   recordAssertion(
     recoveredEnvironment.value.ready === true &&
       recoveredEnvironment.value.diagnostics.every(

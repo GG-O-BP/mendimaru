@@ -2350,6 +2350,10 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
         return sanitize_backend_error(*details);
     }
     let code = match error.code {
+        CommandErrorCode::ContainerExitedDuringStartup => {
+            BackendErrorCode::ContainerExitedDuringStartup
+        }
+        CommandErrorCode::GuestStartupTimeout => BackendErrorCode::GuestStartupTimeout,
         CommandErrorCode::UnsupportedCapability => BackendErrorCode::UnsupportedCapability,
         CommandErrorCode::BackendMismatch => BackendErrorCode::BackendMismatch,
         CommandErrorCode::InvalidRequest => BackendErrorCode::InvalidRequest,
@@ -2398,6 +2402,8 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
         retryable: matches!(
             error.code,
             CommandErrorCode::DownloadCancelled
+                | CommandErrorCode::ContainerExitedDuringStartup
+                | CommandErrorCode::GuestStartupTimeout
                 | CommandErrorCode::InstallFailed
                 | CommandErrorCode::OperationFailed
                 | CommandErrorCode::ExternalProcessTimeout
@@ -2427,6 +2433,12 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
 
 fn safe_error_message(code: BackendErrorCode) -> &'static str {
     match code {
+        BackendErrorCode::ContainerExitedDuringStartup => {
+            "the WinBoat container exited before Windows became ready"
+        }
+        BackendErrorCode::GuestStartupTimeout => {
+            "Windows did not become ready before the startup deadline"
+        }
         BackendErrorCode::UnsupportedCapability => {
             "the selected backend does not support this command"
         }
@@ -2487,6 +2499,9 @@ fn safe_error_message_for_backend(
 
 fn exit_code(error: &BackendError) -> i32 {
     match error.code {
+        BackendErrorCode::ContainerExitedDuringStartup | BackendErrorCode::GuestStartupTimeout => {
+            EXIT_OPERATION_FAILED
+        }
         BackendErrorCode::InvalidRequest => EXIT_INVALID_REQUEST,
         BackendErrorCode::BackendMismatch
         | BackendErrorCode::UnsupportedCapability

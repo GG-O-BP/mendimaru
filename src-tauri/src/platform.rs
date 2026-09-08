@@ -74,6 +74,7 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     }
     #[allow(unreachable_code)]
     EnvironmentStatus {
+        startup: None,
         platform: capabilities(),
         ready: false,
         winboat_available: false,

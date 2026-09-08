@@ -1009,6 +1009,8 @@ fn runtime_error(
 
 fn safe_runtime_error_message(code: BackendErrorCode) -> &'static str {
     match code {
+        BackendErrorCode::ContainerExitedDuringStartup => "the WinBoat container exited before Windows became ready",
+        BackendErrorCode::GuestStartupTimeout => "Windows did not become ready before the startup deadline",
         BackendErrorCode::ToolchainUnavailable => {
             "the exact-version MxBuild or required Java toolchain is unavailable"
         }

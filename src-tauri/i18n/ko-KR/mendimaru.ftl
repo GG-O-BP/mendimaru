@@ -1,3 +1,6 @@
+error-container-exited-during-startup = Guest API가 준비되기 전에 Windows가 종료되었습니다. WinBoat를 열어 확인한 뒤 다시 시도하세요.
+error-guest-startup-timeout = 제한 시간 안에 Windows가 준비되지 않았습니다.
+error-startup-command-failed = Windows 시작 명령이 실패했습니다. 진단을 다시 실행하고 WinBoat를 확인하세요.
 # 애플리케이션 셸
 app-title = mendimaru — Mendix Studio Pro 관리자
 app-description = Windows 또는 Linux에서 Mendix Studio Pro 관리

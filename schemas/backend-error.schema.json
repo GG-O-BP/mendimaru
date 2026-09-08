@@ -30,6 +30,8 @@
         "runtime_port_forwarding_invalid",
         "runtime_firewall_blocked",
         "runtime_not_listening",
+        "container_exited_during_startup",
+        "guest_startup_timeout",
         "runtime_compose_recovery_failed"
       ]
     },
@@ -69,6 +71,8 @@
             "runtime_port_forwarding_invalid",
             "runtime_firewall_blocked",
             "runtime_not_listening",
+            "container_exited_during_startup",
+            "guest_startup_timeout",
             "runtime_compose_recovery_failed"
           ]
         },
