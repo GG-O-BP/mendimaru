@@ -64,6 +64,7 @@ function model(overrides: Partial<SettingsPageModel> = {}): SettingsPageModel {
     connectionTest: null,
     onDiagnosticAction: vi.fn(),
     onCopyDiagnosticReport: vi.fn(),
+    onRerunDiagnostics: vi.fn(),
     onExportDiagnosticReport: vi.fn(),
     ...overrides,
   };
@@ -90,6 +91,7 @@ describe("SettingsPage environment diagnostics", () => {
     const onDiagnosticAction = vi.fn();
     const onCopyDiagnosticReport = vi.fn();
     const onExportDiagnosticReport = vi.fn();
+    const onRerunDiagnostics = vi.fn();
     render(
       <SettingsPage
         t={t}
@@ -97,6 +99,7 @@ describe("SettingsPage environment diagnostics", () => {
           onDiagnosticAction,
           onCopyDiagnosticReport,
           onExportDiagnosticReport,
+          onRerunDiagnostics,
         })}
       />,
     );
@@ -126,6 +129,10 @@ describe("SettingsPage environment diagnostics", () => {
     );
     expect(onCopyDiagnosticReport).toHaveBeenCalledOnce();
     expect(onExportDiagnosticReport).toHaveBeenCalledOnce();
+    fireEvent.click(
+      screen.getByRole("button", { name: "diagnostic-action-rerun" }),
+    );
+    expect(onRerunDiagnostics).toHaveBeenCalledOnce();
   });
 });
 

@@ -118,10 +118,12 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
         browser_sandbox_available,
     };
     let ready = state.ready();
-    let diagnostics = build_linux_diagnostics(&state);
+    let mut diagnostics = build_linux_diagnostics(&state);
+    let startup = super::startup::snapshot(config);
+    super::startup_diagnostics::apply(startup.as_ref(), &mut diagnostics);
 
     EnvironmentStatus {
-        startup: super::startup::snapshot(config),
+        startup,
         platform: crate::platform::capabilities(),
         ready,
         winboat_available,

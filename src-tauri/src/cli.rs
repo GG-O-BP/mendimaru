@@ -2350,6 +2350,7 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
         return sanitize_backend_error(*details);
     }
     let code = match error.code {
+        CommandErrorCode::QemuBootTimeout => BackendErrorCode::QemuBootTimeout,
         CommandErrorCode::ContainerExitedDuringStartup => {
             BackendErrorCode::ContainerExitedDuringStartup
         }
@@ -2404,6 +2405,7 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
             CommandErrorCode::DownloadCancelled
                 | CommandErrorCode::ContainerExitedDuringStartup
                 | CommandErrorCode::GuestStartupTimeout
+                | CommandErrorCode::QemuBootTimeout
                 | CommandErrorCode::InstallFailed
                 | CommandErrorCode::OperationFailed
                 | CommandErrorCode::ExternalProcessTimeout
@@ -2433,6 +2435,7 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
 
 fn safe_error_message(code: BackendErrorCode) -> &'static str {
     match code {
+        BackendErrorCode::QemuBootTimeout => "QEMU timed out while booting Windows",
         BackendErrorCode::ContainerExitedDuringStartup => {
             "the WinBoat container exited before Windows became ready"
         }
@@ -2499,6 +2502,7 @@ fn safe_error_message_for_backend(
 
 fn exit_code(error: &BackendError) -> i32 {
     match error.code {
+        BackendErrorCode::QemuBootTimeout => EXIT_OPERATION_FAILED,
         BackendErrorCode::ContainerExitedDuringStartup | BackendErrorCode::GuestStartupTimeout => {
             EXIT_OPERATION_FAILED
         }

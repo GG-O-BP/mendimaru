@@ -1009,6 +1009,7 @@ fn runtime_error(
 
 fn safe_runtime_error_message(code: BackendErrorCode) -> &'static str {
     match code {
+        BackendErrorCode::QemuBootTimeout => "QEMU timed out while booting Windows",
         BackendErrorCode::ContainerExitedDuringStartup => "the WinBoat container exited before Windows became ready",
         BackendErrorCode::GuestStartupTimeout => "Windows did not become ready before the startup deadline",
         BackendErrorCode::ToolchainUnavailable => {

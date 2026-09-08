@@ -161,9 +161,11 @@ export function useWinBoatControl({
         startupFailure ??
           (observedStartupFailure
             ? t(
-                observedStartupFailure.errorCode === "guest_startup_timeout"
-                  ? "windows-startup-timeout-detail"
-                  : "windows-startup-failed-detail",
+                observedStartupFailure.errorCode === "qemu_boot_timeout"
+                  ? "diagnostic-qemu-boot-timeout"
+                  : observedStartupFailure.errorCode === "guest_startup_timeout"
+                    ? "windows-startup-timeout-detail"
+                    : "windows-startup-failed-detail",
               )
             : null),
         startupPending,

@@ -191,6 +191,7 @@ pub enum CapabilityStatus {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendErrorCode {
+    QemuBootTimeout,
     ContainerExitedDuringStartup,
     GuestStartupTimeout,
     UnsupportedCapability,
@@ -929,6 +930,7 @@ mod tests {
                 BackendErrorCode::UnsupportedCapability,
                 BackendErrorCode::ContainerExitedDuringStartup,
                 BackendErrorCode::GuestStartupTimeout,
+                BackendErrorCode::QemuBootTimeout,
                 BackendErrorCode::BackendMismatch,
                 BackendErrorCode::InvalidRequest,
                 BackendErrorCode::PreconditionFailed,

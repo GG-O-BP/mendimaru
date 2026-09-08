@@ -31,6 +31,7 @@
         "runtime_firewall_blocked",
         "runtime_not_listening",
         "container_exited_during_startup",
+        "qemu_boot_timeout",
         "guest_startup_timeout",
         "runtime_compose_recovery_failed"
       ]
@@ -72,6 +73,7 @@
             "runtime_firewall_blocked",
             "runtime_not_listening",
             "container_exited_during_startup",
+            "qemu_boot_timeout",
             "guest_startup_timeout",
             "runtime_compose_recovery_failed"
           ]

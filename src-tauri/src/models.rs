@@ -149,6 +149,9 @@ mod tests {
                 EnvironmentDiagnosticErrorCode::ExternalProcessCancelled,
                 EnvironmentDiagnosticErrorCode::ExternalProcessInterrupted,
                 EnvironmentDiagnosticErrorCode::GuestClockSkewExceeded,
+                EnvironmentDiagnosticErrorCode::QemuBootTimeout,
+                EnvironmentDiagnosticErrorCode::ContainerExitedDuringStartup,
+                EnvironmentDiagnosticErrorCode::GuestStartupTimeout,
             ],
         );
         assert_registry(
@@ -234,6 +237,7 @@ mod tests {
                 CommandErrorCode::ConfigLoadFailed,
                 CommandErrorCode::ContainerExitedDuringStartup,
                 CommandErrorCode::GuestStartupTimeout,
+                CommandErrorCode::QemuBootTimeout,
                 CommandErrorCode::DownloadCancelled,
                 CommandErrorCode::InstallFailed,
                 CommandErrorCode::UnsupportedCapability,

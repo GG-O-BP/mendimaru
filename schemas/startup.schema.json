@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/startup.schema.json",
+  "title": "Safe WinBoat startup attempt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "startedAt", "phase", "errorCode", "containerStatus"],
+  "properties": {
+    "id": { "type": "integer", "minimum": 1 },
+    "startedAt": { "type": "string", "format": "date-time", "maxLength": 40 },
+    "phase": {
+      "enum": [
+        "starting-container",
+        "waiting-for-guest",
+        "online",
+        "startup-failed"
+      ]
+    },
+    "errorCode": {
+      "anyOf": [
+        { "type": "null" },
+        { "$ref": "backend-error.schema.json#/properties/code" }
+      ]
+    },
+    "containerStatus": {
+      "enum": [
+        "created",
+        "restarting",
+        "running",
+        "removing",
+        "paused",
+        "exited",
+        "dead",
+        "not-found",
+        "unknown"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "phase": { "const": "startup-failed" } },
+        "required": ["phase"]
+      },
+      "then": { "properties": { "errorCode": { "type": "string" } } },
+      "else": { "properties": { "errorCode": { "type": "null" } } }
+    }
+  ]
+}

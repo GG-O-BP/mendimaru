@@ -12,6 +12,7 @@ mod security;
 mod sessions;
 mod staging;
 pub(crate) mod startup;
+mod startup_diagnostics;
 mod studio;
 
 pub(crate) use asset_mirror::AssetMirrorServer;

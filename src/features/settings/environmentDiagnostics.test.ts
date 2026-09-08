@@ -5,6 +5,21 @@ import { diagnosticText } from "./environmentDiagnostics";
 const t: Translate = (key) => key;
 
 describe("environment diagnostic process failures", () => {
+  it("renders QEMU's stable diagnosis without remote output", () => {
+    const text = diagnosticText(
+      {
+        id: "container",
+        status: "failure",
+        action: "open-winboat",
+        errorCode: "qemu-boot-timeout",
+        observed: "password=secret /home/private",
+      },
+      t,
+    );
+    expect(text.detail).toBe("diagnostic-qemu-boot-timeout");
+    expect(text.action).toBe("diagnostic-action-open-winboat");
+    expect(JSON.stringify(text)).not.toContain("secret");
+  });
   it("renders a stable timeout recovery message instead of a generic probe failure", () => {
     const text = diagnosticText(
       {
