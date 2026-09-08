@@ -25,12 +25,14 @@ export function InstalledVersionsSection({
   t,
   localization,
   online,
+  uninstallReady = online,
   model,
   countLabel,
 }: {
   t: Translate;
   localization: LocalizationBundle;
   online: boolean;
+  uninstallReady?: boolean;
   model: InstalledVersionsModel;
   countLabel: string;
 }) {
@@ -179,7 +181,7 @@ export function InstalledVersionsSection({
                   }
                   onClick={() => model.onUninstall(version)}
                   disabled={
-                    !online ||
+                    !uninstallReady ||
                     !model.loaded ||
                     model.sessionsLoading ||
                     Boolean(model.connectedRemoteAppVersion) ||

@@ -122,6 +122,8 @@ pub struct EnvironmentDiagnostic {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentStatus {
+    #[serde(flatten)]
+    pub assessment: EnvironmentAssessment,
     #[serde(default)]
     pub nvram_recovery_available: bool,
     #[serde(default)]
@@ -141,9 +143,77 @@ pub struct EnvironmentStatus {
     pub diagnostics: Vec<EnvironmentDiagnostic>,
 }
 
+/// Explicit policy, independent of translated messages and failure counts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentAssessment {
+    pub connectivity: bool,
+    pub readiness: EnvironmentReadiness,
+    pub health: EnvironmentHealth,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentReadiness {
+    pub studio_launch: bool,
+    pub installation: bool,
+    pub uninstallation: bool,
+    pub projects: bool,
+    pub blocking_checks: Vec<EnvironmentDiagnosticId>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentHealth {
+    pub attention_required: bool,
+    pub attention_checks: Vec<EnvironmentDiagnosticId>,
+}
+
+impl EnvironmentStatus {
+    pub fn assessed(mut self) -> Self {
+        use EnvironmentDiagnosticId::*;
+        let mut blockers = Vec::new();
+        let mut attention = Vec::new();
+        let mut browser_ready = false;
+        for check in &self.diagnostics {
+            if check.id == MarketplaceBrowser {
+                browser_ready = check.status == EnvironmentDiagnosticStatus::Success;
+            }
+            if check.status == EnvironmentDiagnosticStatus::Success {
+                continue;
+            }
+            attention.push(check.id);
+            match check.id {
+                GuestClock | MarketplaceBrowser => {}
+                Winboat | Compose | ContainerRuntime | Freerdp | SharedDirectory | SharedMount
+                | Container | GuestApi | Rdp => blockers.push(check.id),
+            }
+        }
+        // Preserve platform-level preconditions, including unsupported architectures.
+        self.ready = self.ready && blockers.is_empty();
+        self.assessment = EnvironmentAssessment {
+            connectivity: self.guest_online,
+            readiness: EnvironmentReadiness {
+                studio_launch: self.ready && self.platform.supports_studio_management,
+                installation: self.ready && browser_ready && self.platform.supports_installation,
+                uninstallation: self.ready && self.platform.supports_uninstallation,
+                projects: self.ready && self.platform.supports_projects,
+                blocking_checks: blockers,
+            },
+            health: EnvironmentHealth {
+                attention_required: !attention.is_empty(),
+                attention_checks: attention,
+            },
+        };
+        self
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EnvironmentDiagnosticReport<'a> {
+    #[serde(flatten)]
+    assessment: &'a EnvironmentAssessment,
     startup: Option<&'a crate::winboat::startup::StartupAttempt>,
     schema_version: &'static str,
     generated_at: String,
@@ -166,6 +236,7 @@ struct EnvironmentDiagnosticReportCheck {
 
 pub fn environment_diagnostic_report(status: &EnvironmentStatus) -> Result<String, String> {
     let report = EnvironmentDiagnosticReport {
+        assessment: &status.assessment,
         startup: status.startup.as_ref(),
         schema_version: ENVIRONMENT_DIAGNOSTIC_SCHEMA_VERSION,
         generated_at: chrono::Utc::now().to_rfc3339(),
@@ -191,10 +262,119 @@ pub fn environment_diagnostic_report(status: &EnvironmentStatus) -> Result<Strin
 mod diagnostic_report_tests {
     use super::*;
 
+    fn healthy(native: bool) -> EnvironmentStatus {
+        EnvironmentStatus {
+            assessment: Default::default(),
+            nvram_recovery_available: false,
+            startup: None,
+            platform: PlatformCapabilities {
+                kind: if native {
+                    HostPlatform::WindowsNative
+                } else {
+                    HostPlatform::LinuxWinboat
+                },
+                architecture: "x86_64".into(),
+                requires_winboat: !native,
+                supports_studio_management: true,
+                supports_installation: true,
+                supports_uninstallation: true,
+                supports_projects: true,
+            },
+            ready: true,
+            winboat_available: !native,
+            winboat_initialized: !native,
+            setup_pending: false,
+            compose_available: !native,
+            runtime_available: true,
+            freerdp_available: !native,
+            shared_directory_available: true,
+            shared_mount_matches: true,
+            container_status: ContainerStatus::Running,
+            guest_online: true,
+            diagnostics: [
+                EnvironmentDiagnosticId::GuestClock,
+                EnvironmentDiagnosticId::Rdp,
+                EnvironmentDiagnosticId::GuestApi,
+                EnvironmentDiagnosticId::SharedMount,
+                EnvironmentDiagnosticId::SharedDirectory,
+                EnvironmentDiagnosticId::MarketplaceBrowser,
+            ]
+            .into_iter()
+            .map(|id| EnvironmentDiagnostic {
+                id,
+                status: EnvironmentDiagnosticStatus::Success,
+                observed: None,
+                action: None,
+                error_code: None,
+            })
+            .collect(),
+        }
+    }
+
+    #[test]
+    fn clock_health_does_not_block_capabilities_but_required_paths_do() {
+        for id in [
+            EnvironmentDiagnosticId::GuestClock,
+            EnvironmentDiagnosticId::Rdp,
+            EnvironmentDiagnosticId::GuestApi,
+            EnvironmentDiagnosticId::SharedMount,
+        ] {
+            let mut status = healthy(false);
+            status
+                .diagnostics
+                .iter_mut()
+                .find(|d| d.id == id)
+                .unwrap()
+                .status = EnvironmentDiagnosticStatus::Failure;
+            status.guest_online = id != EnvironmentDiagnosticId::GuestApi;
+            let status = status.assessed();
+            let nonblocking = id == EnvironmentDiagnosticId::GuestClock;
+            assert_eq!(
+                status.assessment.connectivity,
+                id != EnvironmentDiagnosticId::GuestApi
+            );
+            assert!(status.assessment.health.attention_required);
+            assert_eq!(status.ready, nonblocking);
+            assert_eq!(status.assessment.readiness.studio_launch, nonblocking);
+            assert_eq!(status.assessment.readiness.installation, nonblocking);
+            assert_eq!(status.assessment.readiness.projects, nonblocking);
+            assert_eq!(
+                status.assessment.readiness.blocking_checks.is_empty(),
+                nonblocking
+            );
+        }
+    }
+
+    #[test]
+    fn browser_readiness_only_blocks_installation_and_native_contract_is_preserved() {
+        for native in [false, true] {
+            let mut status = healthy(native);
+            status
+                .diagnostics
+                .iter_mut()
+                .find(|d| d.id == EnvironmentDiagnosticId::MarketplaceBrowser)
+                .unwrap()
+                .status = EnvironmentDiagnosticStatus::Warning;
+            let status = status.assessed();
+            assert!(status.ready && status.assessment.connectivity);
+            assert!(
+                status.assessment.readiness.studio_launch && status.assessment.readiness.projects
+            );
+            assert!(!status.assessment.readiness.installation);
+            assert!(status.assessment.readiness.uninstallation);
+            let json = serde_json::to_value(&status).unwrap();
+            assert_eq!(json["connectivity"], true);
+            assert_eq!(json["readiness"]["installation"], false);
+            assert_eq!(json["health"]["attentionRequired"], true);
+            assert!(json.get("assessment").is_none());
+        }
+    }
+
     #[test]
     fn report_uses_an_allowlist_and_omits_observed_values() {
         let secret = "password=hunter2 token=private-value /home/private/workspace";
         let status = EnvironmentStatus {
+            assessment: Default::default(),
             nvram_recovery_available: false,
             startup: Some(crate::winboat::startup::StartupAttempt {
                 id: 1,

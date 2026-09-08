@@ -86,6 +86,16 @@ export function useEnvironment(dependencies: EnvironmentDependencies) {
     online: winBoat.online,
     connectionLabel: winBoat.connectionLabel,
     lifecycle: winBoat.lifecycle,
+    attentionRequired: Boolean(
+      environmentStatus.status?.health?.attentionRequired,
+    ),
+    readiness: environmentStatus.status?.readiness ?? {
+      studioLaunch: Boolean(environmentStatus.status?.ready),
+      installation: Boolean(environmentStatus.status?.ready),
+      uninstallation: Boolean(environmentStatus.status?.ready),
+      projects: Boolean(environmentStatus.status?.ready),
+      blockingChecks: [],
+    },
     loading: settings.loading,
     applyMountNow: settings.applyMountNow,
     setApplyMountNow: settings.setApplyMountNow,

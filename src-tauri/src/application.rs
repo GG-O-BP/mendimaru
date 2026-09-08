@@ -48,6 +48,8 @@ pub(crate) struct SafeProject {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SafeEnvironmentStatus {
+    #[serde(flatten)]
+    pub assessment: crate::models::EnvironmentAssessment,
     pub startup: Option<crate::winboat::startup::StartupAttempt>,
     pub ready: bool,
     pub container_status: crate::models::ContainerStatus,
@@ -69,6 +71,7 @@ impl From<&EnvironmentStatus> for SafeEnvironmentStatus {
     fn from(value: &EnvironmentStatus) -> Self {
         Self {
             startup: value.startup.clone(),
+            assessment: value.assessment.clone(),
             ready: value.ready,
             container_status: value.container_status,
             checks: value
@@ -1046,6 +1049,7 @@ mod tests {
     #[test]
     fn headless_environment_status_preserves_process_codes_without_observed_details() {
         let status = EnvironmentStatus {
+            assessment: Default::default(),
             nvram_recovery_available: false,
             startup: None,
             platform: PlatformCapabilities {

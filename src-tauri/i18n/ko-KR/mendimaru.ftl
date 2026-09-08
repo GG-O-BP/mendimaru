@@ -1,3 +1,7 @@
+connection-online-attention = 온라인 — 주의 필요
+environment-attention-detail = Windows에 연결됐지만 확인이 필요한 진단이 있습니다. 준비된 작업은 계속 사용할 수 있습니다.
+environment-not-ready-detail = Windows에 연결됐지만 필수 경로가 준비되지 않았습니다. Studio 또는 프로젝트를 사용하기 전에 진단을 확인하세요.
+action-view-diagnostics = 진단 보기
 error-nvram-operation-busy = 다른 Mendimaru 작업 또는 UEFI 복구가 진행 중입니다.
 error-nvram-unsupported = 이 진단 근거, mount, 파일 식별 정보 또는 부팅 설정은 UEFI 복구 지원 대상이 아닙니다. WinBoat에서 확인하세요.
 error-nvram-preview-changed = UEFI 복구 미리보기가 만료되었거나 대상이 변경되었습니다. 다시 확인하세요.

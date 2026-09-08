@@ -1,4 +1,8 @@
 {
+  "connection-online-attention": true,
+  "environment-attention-detail": true,
+  "environment-not-ready-detail": true,
+  "action-view-diagnostics": true,
   "action-nvram-preview": true,
   "action-nvram-recover": true,
   "action-nvram-restore": true,

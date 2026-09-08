@@ -32,6 +32,27 @@ function status(overrides: Partial<EnvironmentStatus> = {}): EnvironmentStatus {
 }
 
 describe("environment presentation", () => {
+  it("keeps degraded connectivity distinct from blocking readiness", () => {
+    for (const ready of [true, false]) {
+      const presentation = deriveEnvironmentPresentation(
+        status({
+          ready,
+          connectivity: true,
+          guestOnline: true,
+          containerStatus: "running",
+          health: {
+            attentionRequired: true,
+            attentionChecks: [ready ? "guest-clock" : "rdp"],
+          },
+        }),
+        translate,
+      );
+      expect(presentation.online).toBe(true);
+      expect(presentation.lifecycle).toBe("online");
+      expect(presentation.connectionLabel).toBe("connection-online-attention");
+      expect(presentation.attentionRequired).toBe(true);
+    }
+  });
   it("routes a missing WinBoat installation to settings", () => {
     const presentation = deriveEnvironmentPresentation(null, translate);
 

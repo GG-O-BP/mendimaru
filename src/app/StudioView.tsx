@@ -17,12 +17,14 @@ export function StudioView({
   environment,
   studio,
   isBusy,
+  onOpenDiagnostics,
 }: {
   t: Translate;
   localization: LocalizationBundle;
   environment: EnvironmentController;
   studio: ReturnType<typeof useStudio>;
   isBusy: (key: string) => boolean;
+  onOpenDiagnostics: () => void;
 }) {
   const updateCandidates = useMemo(
     () =>
@@ -43,6 +45,11 @@ export function StudioView({
       t={t}
       localization={localization}
       online={environment.online}
+      launchReady={environment.readiness.studioLaunch}
+      installReady={environment.readiness.installation}
+      uninstallReady={environment.readiness.uninstallation}
+      attentionRequired={environment.attentionRequired}
+      onOpenDiagnostics={onOpenDiagnostics}
       startupFailed={environment.lifecycle === "startup-failed"}
       offlineGuidance={environment.offlineGuidance}
       winBoatControl={environment.winBoatControl}
@@ -52,7 +59,7 @@ export function StudioView({
         connectedRemoteAppVersion,
         loading: studio.installedLoading,
         loaded: studio.installedLoaded,
-        launchReady: studio.launchReady,
+        launchReady: studio.launchReady && environment.readiness.studioLaunch,
         stale: studio.installedStale,
         error: studio.installedError,
         sessionsLoading: studio.sessionsLoading,

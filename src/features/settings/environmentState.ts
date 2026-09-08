@@ -11,6 +11,7 @@ export interface EnvironmentPresentation {
     | "startup-failed"
     | "stopping";
   connectionLabel: string;
+  attentionRequired: boolean;
   online: boolean;
   controlKind: EnvironmentControlKind;
   actionKey: string;
@@ -30,7 +31,8 @@ export function deriveEnvironmentPresentation(
   const nativeWindows = status?.platform.kind === "windows-native";
   const online = nativeWindows
     ? Boolean(status?.ready)
-    : Boolean(status?.guestOnline);
+    : Boolean(status?.connectivity ?? status?.guestOnline);
+  const attentionRequired = Boolean(status?.health?.attentionRequired);
   const controlKind =
     !nativeWindows &&
     (startupFailure || status?.startup?.phase === "startup-failed")
@@ -54,7 +56,9 @@ export function deriveEnvironmentPresentation(
     ? t(online ? "connection-native" : "connection-native-not-ready")
     : t(
         lifecycle === "online"
-          ? "connection-online"
+          ? attentionRequired
+            ? "connection-online-attention"
+            : "connection-online"
           : lifecycle === "startup-failed"
             ? "windows-startup-failed-title"
             : lifecycle === "starting-container"
@@ -69,6 +73,7 @@ export function deriveEnvironmentPresentation(
   return {
     lifecycle,
     connectionLabel,
+    attentionRequired,
     online,
     controlKind,
     actionKey: actionKeyFor(controlKind),

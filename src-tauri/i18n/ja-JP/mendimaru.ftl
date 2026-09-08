@@ -1,3 +1,7 @@
+connection-online-attention = オンライン — 要確認
+environment-attention-detail = Windowsに接続されていますが、確認が必要な診断があります。準備済みの操作は引き続き利用できます。
+environment-not-ready-detail = Windowsに接続されていますが、必須経路の準備ができていません。Studioやプロジェクトを使用する前に診断を確認してください。
+action-view-diagnostics = 診断を表示
 error-nvram-operation-busy = 別のMendimaru操作またはUEFI復旧が進行中です。
 error-nvram-unsupported = この診断結果、マウント、ファイル識別情報、または起動設定はUEFI復旧の対象外です。WinBoatで確認してください。
 error-nvram-preview-changed = UEFI復旧プレビューが期限切れか対象が変更されました。再確認してください。

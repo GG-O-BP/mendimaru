@@ -72,6 +72,7 @@ export function ProjectLaunchAssistant({
     launcher.studioLaunchReady &&
     !launcher.connectedRemoteAppVersion &&
     (launcher.selectedInstalled || launcher.selectedDownloadable) &&
+    (launcher.selectedInstalled || launcher.installationReady) &&
     state.lookupState !== "loading" &&
     !launcher.actionBusy &&
     !launcher.isInstalling &&

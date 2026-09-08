@@ -14,7 +14,7 @@ pub use config::{
 };
 pub use download::{DownloadProgress, DownloadState, InstallQueueItem, InstallQueueState};
 pub use environment::{
-    environment_diagnostic_report, ContainerStatus, EnvironmentDiagnostic,
+    environment_diagnostic_report, ContainerStatus, EnvironmentAssessment, EnvironmentDiagnostic,
     EnvironmentDiagnosticAction, EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId,
     EnvironmentDiagnosticStatus, EnvironmentStatus, HostPlatform, PlatformCapabilities,
 };

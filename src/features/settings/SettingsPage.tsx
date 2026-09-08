@@ -404,7 +404,7 @@ export function SettingsPage({
           </span>
           <div>
             <span className="micro-label">{t("diagnostics-eyebrow")}</span>
-            <h2 id="environment-diagnostics-heading">
+            <h2 id="environment-diagnostics-heading" tabIndex={-1}>
               {t("diagnostics-title")}
             </h2>
             <p>{t("diagnostics-description")}</p>
@@ -469,6 +469,8 @@ export function SettingsPage({
             return (
               <article
                 key={diagnostic.id}
+                id={`environment-diagnostic-${diagnostic.id}`}
+                tabIndex={-1}
                 className={`diagnostic-item ${diagnostic.status}`}
                 role="listitem"
               >

@@ -1,3 +1,7 @@
+connection-online-attention = Online — attention required
+environment-attention-detail = Windows is connected. Some diagnostics need attention; available actions remain enabled.
+environment-not-ready-detail = Windows is connected, but required paths are not ready. Review diagnostics before using Studio or projects.
+action-view-diagnostics = View diagnostics
 error-nvram-operation-busy = Another Mendimaru operation or UEFI recovery holds the WinBoat maintenance lock.
 error-nvram-unsupported = UEFI recovery is not supported for this evidence, mount, file identity, or boot configuration. Open WinBoat for recovery.
 error-nvram-preview-changed = The UEFI recovery preview expired or its exact target changed. Create a new preview.
