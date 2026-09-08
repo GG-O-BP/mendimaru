@@ -1,3 +1,10 @@
+toast-windows-start-requested = Windowsの起動を要求しました — 準備を確認中
+toast-windows-ready = WinBoat Windowsの準備が完了しました
+windows-startup-failed-title = Windowsの起動に失敗しました
+windows-startup-failed-detail = 準備が完了する前にWindowsが終了しました。WinBoatまたは設定の診断を確認して再試行してください。
+windows-startup-timeout-detail = 制限時間内にWindowsの準備が完了しませんでした。WinBoatまたは設定の診断を確認して再試行してください。
+windows-starting-container-title = Windowsコンテナを起動中
+windows-stopping-title = Windowsを終了中
 error-container-exited-during-startup = Guest APIの準備が完了する前にWindowsが終了しました。WinBoatを開いて再試行してください。
 error-guest-startup-timeout = 制限時間内にWindowsの準備が完了しませんでした。
 error-startup-command-failed = Windowsの起動コマンドが失敗しました。診断を再実行してWinBoatを確認してください。

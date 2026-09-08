@@ -5,6 +5,7 @@ import type { EnvironmentStatus } from "../../domain/types";
 import type { EnvironmentStatusDependencies } from "./dependencies";
 
 const REFRESH_INTERVAL_MILLISECONDS = 15_000;
+const STARTUP_REFRESH_INTERVAL_MILLISECONDS = 1_500;
 
 export interface EnvironmentRefreshOptions {
   sourceChanged?: boolean;
@@ -23,6 +24,9 @@ export function useEnvironmentStatus({
   onWarning,
 }: EnvironmentStatusDependencies) {
   const [status, setStatus] = useState<EnvironmentStatus | null>(null);
+  const [startupPending, setStartupPending] = useState(false);
+  const [startupFailure, setStartupFailure] =
+    useState<EnvironmentStatus["startup"]>(null);
   const mounted = useRef(false);
   const sourceGeneration = useRef(0);
   const pendingRefresh = useRef<PendingRefresh | null>(null);
@@ -30,6 +34,8 @@ export function useEnvironmentStatus({
 
   const requestForGeneration = useCallback(async (generation: number) => {
     for (;;) {
+      if (!mounted.current || sourceGeneration.current !== generation)
+        return null;
       let pending = pendingRefresh.current;
       if (!pending) {
         const promise = tauriApi
@@ -48,7 +54,8 @@ export function useEnvironmentStatus({
       const outcome = await pending.promise;
       if (pendingRefresh.current === pending) pendingRefresh.current = null;
       if (pending.generation === generation) return outcome;
-      if (sourceGeneration.current !== generation) return null;
+      if (!mounted.current || sourceGeneration.current !== generation)
+        return null;
     }
   }, []);
 
@@ -66,6 +73,16 @@ export function useEnvironmentStatus({
       }
 
       if (outcome.ok) {
+        const attempt = outcome.status.startup;
+        setStartupFailure((previous) => {
+          if (attempt?.phase === "startup-failed") return attempt;
+          if (
+            attempt?.phase === "online" &&
+            (!previous || attempt.id >= previous.id)
+          )
+            return null;
+          return previous;
+        });
         setStatus(outcome.status);
         if (lastWarning.current !== null) {
           lastWarning.current = null;
@@ -85,23 +102,45 @@ export function useEnvironmentStatus({
 
   useEffect(() => {
     mounted.current = true;
+    return () => {
+      mounted.current = false;
+      sourceGeneration.current += 1;
+    };
+  }, []);
+
+  const transitional =
+    startupPending ||
+    status?.startup?.phase === "starting-container" ||
+    status?.startup?.phase === "waiting-for-guest";
+  const polled = useRef(false);
+
+  useEffect(() => {
     let active = true;
     let timeout: number | undefined;
+    const interval = transitional
+      ? STARTUP_REFRESH_INTERVAL_MILLISECONDS
+      : REFRESH_INTERVAL_MILLISECONDS;
 
     const poll = async () => {
+      polled.current = true;
       await refreshStatus();
       if (active) {
-        timeout = window.setTimeout(poll, REFRESH_INTERVAL_MILLISECONDS);
+        timeout = window.setTimeout(poll, interval);
       }
     };
-    timeout = window.setTimeout(poll, 0);
+    timeout = window.setTimeout(poll, polled.current ? interval : 0);
 
     return () => {
       active = false;
-      mounted.current = false;
       if (timeout !== undefined) window.clearTimeout(timeout);
     };
-  }, [refreshStatus]);
+  }, [refreshStatus, transitional]);
 
-  return { status, refreshStatus };
+  return {
+    status,
+    refreshStatus,
+    startupPending,
+    setStartupPending,
+    startupFailure,
+  };
 }

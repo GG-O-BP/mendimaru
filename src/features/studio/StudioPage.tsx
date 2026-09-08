@@ -17,6 +17,7 @@ export function StudioPage({
   t,
   localization,
   online,
+  startupFailed = false,
   offlineGuidance,
   winBoatControl,
   installed,
@@ -27,6 +28,7 @@ export function StudioPage({
   t: Translate;
   localization: LocalizationBundle;
   online: boolean;
+  startupFailed?: boolean;
   offlineGuidance: { title: string; detail: string };
   winBoatControl: {
     kind: EnvironmentControlKind;
@@ -56,7 +58,7 @@ export function StudioPage({
         description={t("studio-description")}
       />
 
-      {!online && (
+      {(!online || startupFailed) && (
         <aside
           className="route-notice"
           aria-labelledby="offline-guidance-title"

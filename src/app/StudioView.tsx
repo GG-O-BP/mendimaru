@@ -43,6 +43,7 @@ export function StudioView({
       t={t}
       localization={localization}
       online={environment.online}
+      startupFailed={environment.lifecycle === "startup-failed"}
       offlineGuidance={environment.offlineGuidance}
       winBoatControl={environment.winBoatControl}
       installed={{

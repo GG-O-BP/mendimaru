@@ -13,6 +13,14 @@ process-local `id`, UTC `startedAt`, `phase` (`starting-container`,
 `containerStatus`. It contains no command output or configured paths. Concurrent
 startup callers are serialized within their original startup deadline.
 
+The desktop announces start acceptance separately from successful readiness.
+While a local request or backend startup phase is pending, status polling uses
+a 1.5-second interval after each completed request; terminal states use 15 seconds.
+Polling remains single-flight across manual refreshes and source generations.
+The header renders lifecycle text from phase codes, and startup failure notices
+retain their cause and Open WinBoat action through offline refreshes and retries
+until a successful attempt. Unmount invalidates pending responses and timers.
+
 Mendimaru uses one versioned contract for Studio Pro, Runtime, UI automation,
 and browser operations. The contract describes equivalent behavior; it does not
 require adapters to share an implementation or transport.

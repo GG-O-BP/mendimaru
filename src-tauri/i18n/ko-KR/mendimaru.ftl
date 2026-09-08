@@ -1,3 +1,10 @@
+toast-windows-start-requested = Windows 시작 요청됨 — 준비 확인 중
+toast-windows-ready = WinBoat Windows 준비 완료
+windows-startup-failed-title = Windows 시작 실패
+windows-startup-failed-detail = 준비가 완료되기 전에 Windows가 종료되었습니다. WinBoat 또는 설정의 진단을 확인한 뒤 다시 시도하세요.
+windows-startup-timeout-detail = 제한 시간 안에 Windows가 준비되지 않았습니다. WinBoat 또는 설정의 진단을 확인한 뒤 다시 시도하세요.
+windows-starting-container-title = Windows 컨테이너 시작 중
+windows-stopping-title = Windows 종료 중
 error-container-exited-during-startup = Guest API가 준비되기 전에 Windows가 종료되었습니다. WinBoat를 열어 확인한 뒤 다시 시도하세요.
 error-guest-startup-timeout = 제한 시간 안에 Windows가 준비되지 않았습니다.
 error-startup-command-failed = Windows 시작 명령이 실패했습니다. 진단을 다시 실행하고 WinBoat를 확인하세요.

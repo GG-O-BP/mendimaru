@@ -1,4 +1,11 @@
 {
+  "toast-windows-start-requested": true,
+  "toast-windows-ready": true,
+  "windows-startup-failed-title": true,
+  "windows-startup-failed-detail": true,
+  "windows-startup-timeout-detail": true,
+  "windows-starting-container-title": true,
+  "windows-stopping-title": true,
   "app-title": true,
   "app-description": true,
   "nav-main-aria": true,

@@ -23,6 +23,9 @@ export function useEnvironment(dependencies: EnvironmentDependencies) {
     refreshStatus: environmentStatus.refreshStatus,
     applyConfig: settings.applyConfig,
     updateConfigPair: settings.updateConfigPair,
+    setStartupPending: environmentStatus.setStartupPending,
+    startupPending: environmentStatus.startupPending,
+    observedStartupFailure: environmentStatus.startupFailure,
   });
 
   const runDiagnosticAction = useCallback(
@@ -78,6 +81,8 @@ export function useEnvironment(dependencies: EnvironmentDependencies) {
     setDraftConfig: settings.setDraftConfig,
     status: environmentStatus.status,
     online: winBoat.online,
+    connectionLabel: winBoat.connectionLabel,
+    lifecycle: winBoat.lifecycle,
     loading: settings.loading,
     applyMountNow: settings.applyMountNow,
     setApplyMountNow: settings.setApplyMountNow,
