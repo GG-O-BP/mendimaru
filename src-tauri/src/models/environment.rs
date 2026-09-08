@@ -96,6 +96,9 @@ pub enum EnvironmentDiagnosticAction {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum EnvironmentDiagnosticErrorCode {
+    QemuBootTimeout,
+    ContainerExitedDuringStartup,
+    GuestStartupTimeout,
     ExternalProcessSpawnFailed,
     ExternalProcessTimeout,
     ExternalProcessCancelled,
@@ -139,6 +142,7 @@ pub struct EnvironmentStatus {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct EnvironmentDiagnosticReport<'a> {
+    startup: Option<&'a crate::winboat::startup::StartupAttempt>,
     schema_version: &'static str,
     generated_at: String,
     platform: &'a PlatformCapabilities,
@@ -160,6 +164,7 @@ struct EnvironmentDiagnosticReportCheck {
 
 pub fn environment_diagnostic_report(status: &EnvironmentStatus) -> Result<String, String> {
     let report = EnvironmentDiagnosticReport {
+        startup: status.startup.as_ref(),
         schema_version: ENVIRONMENT_DIAGNOSTIC_SCHEMA_VERSION,
         generated_at: chrono::Utc::now().to_rfc3339(),
         platform: &status.platform,
@@ -188,7 +193,13 @@ mod diagnostic_report_tests {
     fn report_uses_an_allowlist_and_omits_observed_values() {
         let secret = "password=hunter2 token=private-value /home/private/workspace";
         let status = EnvironmentStatus {
-            startup: None,
+            startup: Some(crate::winboat::startup::StartupAttempt {
+                id: 1,
+                started_at: "2026-09-08T00:00:00Z".into(),
+                phase: crate::winboat::startup::StartupPhase::StartupFailed,
+                error_code: Some(crate::contracts::BackendErrorCode::QemuBootTimeout),
+                container_status: ContainerStatus::Exited,
+            }),
             platform: PlatformCapabilities {
                 kind: HostPlatform::LinuxWinboat,
                 architecture: "x86_64".to_string(),
@@ -222,6 +233,9 @@ mod diagnostic_report_tests {
         assert!(!report.contains("hunter2"));
         assert!(!report.contains("private-value"));
         assert!(!report.contains("/home/private"));
+        assert!(report.contains("qemu_boot_timeout"));
+        assert!(!report.contains("rawLog"));
+        assert!(!report.contains("observed"));
         assert!(report.contains("\"schemaVersion\": \"2.0.0\""));
         assert!(report.contains("\"id\": \"winboat\""));
         assert!(report.contains("\"action\": \"redetect\""));

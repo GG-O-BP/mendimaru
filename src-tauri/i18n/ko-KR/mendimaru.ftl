@@ -1,3 +1,6 @@
+error-qemu-boot-timeout = Windows 부팅 중 QEMU 제한 시간을 초과했습니다. WinBoat를 열고 진단을 다시 실행하세요. 이 오류만으로 NVRAM 문제를 판단할 수는 없습니다.
+diagnostic-qemu-boot-timeout = Windows 부팅 중 QEMU 제한 시간을 초과했습니다. WinBoat를 열고 진단을 다시 실행하세요. 이 오류만으로 NVRAM 문제를 판단할 수는 없습니다.
+diagnostic-action-rerun = 진단 다시 실행
 toast-windows-start-requested = Windows 시작 요청됨 — 준비 확인 중
 toast-windows-ready = WinBoat Windows 준비 완료
 windows-startup-failed-title = Windows 시작 실패

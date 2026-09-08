@@ -70,6 +70,7 @@
     "runtime_firewall_blocked": true,
     "runtime_not_listening": true,
     "container_exited_during_startup": true,
+    "qemu_boot_timeout": true,
     "guest_startup_timeout": true,
     "runtime_compose_recovery_failed": true
   },
@@ -177,6 +178,9 @@
     "open-settings": true
   },
   "environmentDiagnosticErrorCode": {
+    "qemu-boot-timeout": true,
+    "container-exited-during-startup": true,
+    "guest-startup-timeout": true,
     "external-process-spawn-failed": true,
     "external-process-timeout": true,
     "external-process-cancelled": true,
@@ -263,6 +267,7 @@
     "runtime_firewall_blocked": true,
     "runtime_not_listening": true,
     "container_exited_during_startup": true,
+    "qemu_boot_timeout": true,
     "guest_startup_timeout": true,
     "runtime_compose_recovery_failed": true,
     "compose_not_winboat": true,

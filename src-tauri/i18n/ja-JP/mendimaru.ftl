@@ -1,3 +1,6 @@
+error-qemu-boot-timeout = Windowsの起動中にQEMUがタイムアウトしました。WinBoatを開いて診断を再実行してください。このエラーだけではNVRAMの問題とは判断できません。
+diagnostic-qemu-boot-timeout = Windowsの起動中にQEMUがタイムアウトしました。WinBoatを開いて診断を再実行してください。このエラーだけではNVRAMの問題とは判断できません。
+diagnostic-action-rerun = 診断を再実行
 toast-windows-start-requested = Windowsの起動を要求しました — 準備を確認中
 toast-windows-ready = WinBoat Windowsの準備が完了しました
 windows-startup-failed-title = Windowsの起動に失敗しました

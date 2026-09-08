@@ -59,6 +59,7 @@ fn update(phase: StartupPhase, status: ContainerStatus, code: Option<BackendErro
 
 pub(crate) fn failure(code: BackendErrorCode) -> BackendError {
     let message = match code {
+        BackendErrorCode::QemuBootTimeout => crate::tr!("error-qemu-boot-timeout"),
         BackendErrorCode::ContainerExitedDuringStartup => {
             crate::tr!("error-container-exited-during-startup")
         }
@@ -314,7 +315,18 @@ pub async fn ensure_guest_online(config: &AppConfig) -> Result<(), BackendError>
             },
         ));
     }
-    let result = readiness(&ContainerDriver { config }, deadline).await;
+    let mut result = readiness(&ContainerDriver { config }, deadline).await;
+    if result
+        .as_ref()
+        .is_err_and(|e| e.code == BackendErrorCode::ContainerExitedDuringStartup)
+    {
+        if let Some(attempt) = snapshot(config) {
+            let code =
+                super::startup_diagnostics::classify_exit(config, &attempt.started_at, deadline)
+                    .await;
+            result = Err(failure(code));
+        }
+    }
     if let Err(error) = &result {
         let status = snapshot(config).map_or(ContainerStatus::Unknown, |a| a.container_status);
         update(StartupPhase::StartupFailed, status, Some(error.code));

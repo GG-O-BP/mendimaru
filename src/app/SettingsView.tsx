@@ -39,6 +39,7 @@ export function SettingsView({
         onDiagnosticAction: (action, id) =>
           void environment.runDiagnosticAction(action, id),
         onCopyDiagnosticReport: () => void environment.copyDiagnosticReport(),
+        onRerunDiagnostics: () => void environment.rerunDiagnostics(),
         onExportDiagnosticReport: () =>
           void environment.exportDiagnosticReport(),
       }}

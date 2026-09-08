@@ -75,6 +75,9 @@ const ACTION_MESSAGES: Record<EnvironmentDiagnosticAction, MessageKey> = {
 };
 
 const ERROR_MESSAGES: Record<EnvironmentDiagnosticErrorCode, MessageKey> = {
+  "qemu-boot-timeout": "diagnostic-qemu-boot-timeout",
+  "container-exited-during-startup": "windows-startup-failed-detail",
+  "guest-startup-timeout": "windows-startup-timeout-detail",
   "external-process-spawn-failed": "diagnostic-process-spawn-failed",
   "external-process-timeout": "diagnostic-process-timeout",
   "external-process-cancelled": "diagnostic-process-cancelled",

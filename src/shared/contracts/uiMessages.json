@@ -1,4 +1,6 @@
 {
+  "diagnostic-qemu-boot-timeout": true,
+  "diagnostic-action-rerun": true,
   "toast-windows-start-requested": true,
   "toast-windows-ready": true,
   "windows-startup-failed-title": true,

@@ -48,6 +48,7 @@ pub(crate) struct SafeProject {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SafeEnvironmentStatus {
+    pub startup: Option<crate::winboat::startup::StartupAttempt>,
     pub ready: bool,
     pub container_status: crate::models::ContainerStatus,
     pub checks: Vec<SafeEnvironmentCheck>,
@@ -67,6 +68,7 @@ pub(crate) struct SafeEnvironmentCheck {
 impl From<&EnvironmentStatus> for SafeEnvironmentStatus {
     fn from(value: &EnvironmentStatus) -> Self {
         Self {
+            startup: value.startup.clone(),
             ready: value.ready,
             container_status: value.container_status,
             checks: value

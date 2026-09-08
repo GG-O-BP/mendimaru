@@ -89,6 +89,10 @@ export function useEnvironment(dependencies: EnvironmentDependencies) {
     settingsChanged: settings.settingsChanged,
     refreshStatus: environmentStatus.refreshStatus,
     choosePath: settings.choosePath,
+    rerunDiagnostics: () =>
+      dependencies.runAction("rerun-environment-diagnostics", () =>
+        environmentStatus.refreshStatus(),
+      ),
     addStudioPath: settings.addStudioPath,
     removeStudioPath: settings.removeStudioPath,
     saveSettings: settings.saveSettings,

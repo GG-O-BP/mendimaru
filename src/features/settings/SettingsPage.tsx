@@ -57,6 +57,7 @@ export interface SettingsPageModel {
     id: EnvironmentDiagnosticId,
   ) => void;
   onCopyDiagnosticReport: () => void;
+  onRerunDiagnostics: () => void;
   onExportDiagnosticReport: () => void;
 }
 
@@ -405,6 +406,15 @@ export function SettingsPage({
             <p>{t("diagnostics-description")}</p>
           </div>
           <div className="diagnostic-report-actions">
+            <button
+              type="button"
+              className="button secondary compact"
+              onClick={model.onRerunDiagnostics}
+              disabled={model.isBusy("rerun-environment-diagnostics")}
+            >
+              <RefreshCw size={15} />
+              {t("diagnostic-action-rerun")}
+            </button>
             <button
               type="button"
               className="button secondary compact"

@@ -13,6 +13,7 @@ const schemaFiles = [
   "schemas/runtime.schema.json",
   "schemas/browser-suite.schema.json",
   "schemas/browser.schema.json",
+  "schemas/startup.schema.json",
 ];
 const schemas = schemaFiles.map((path) =>
   JSON.parse(fs.readFileSync(path, "utf8")),
@@ -20,6 +21,31 @@ const schemas = schemaFiles.map((path) =>
 const ajv = new Ajv2020({ allErrors: true, strict: true });
 addFormats(ajv);
 for (const schema of schemas) ajv.addSchema(schema);
+
+const startupSchema = schemas.at(-1).$id;
+for (const code of [
+  "container_exited_during_startup",
+  "guest_startup_timeout",
+  "qemu_boot_timeout",
+]) {
+  const attempt = {
+    id: 1,
+    startedAt: "2026-09-08T00:00:00Z",
+    phase: "startup-failed",
+    errorCode: code,
+    containerStatus: "exited",
+  };
+  validate(startupSchema, attempt, "safe startup attempt");
+  if (
+    ajv.validate(startupSchema, {
+      ...attempt,
+      rawLog: "password=private /home/private",
+    })
+  )
+    throw new Error("startup schema accepted raw logs");
+  if (ajv.validate(startupSchema, { ...attempt, errorCode: null }))
+    throw new Error("failed startup has no error code");
+}
 
 let input = "";
 process.stdin.setEncoding("utf8");

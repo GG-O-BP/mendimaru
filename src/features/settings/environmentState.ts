@@ -144,9 +144,11 @@ function offlineGuidanceFor(status: EnvironmentStatus | null, t: Translate) {
     return {
       title: t("windows-startup-failed-title"),
       detail: t(
-        status.startup.errorCode === "guest_startup_timeout"
-          ? "windows-startup-timeout-detail"
-          : "windows-startup-failed-detail",
+        status.startup.errorCode === "qemu_boot_timeout"
+          ? "diagnostic-qemu-boot-timeout"
+          : status.startup.errorCode === "guest_startup_timeout"
+            ? "windows-startup-timeout-detail"
+            : "windows-startup-failed-detail",
       ),
     };
   }

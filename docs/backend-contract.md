@@ -21,6 +21,15 @@ The header renders lifecycle text from phase codes, and startup failure notices
 retain their cause and Open WinBoat action through offline refreshes and retries
 until a successful attempt. Unmount invalidates pending responses and timers.
 
+Startup diagnostics collect only `logs --since <attempt UTC time> --tail 100`,
+with a two-second process limit and 16 KiB per output stream, all within the
+remaining startup budget. Only exact allowlisted signatures (including the
+logger's known prefix/color wrapper) produce `qemu_boot_timeout`; unknown or
+unavailable logs retain `container_exited_during_startup`. The environment check
+uses the corresponding kebab-case diagnostic code. Neither payloads nor exports
+contain raw logs. `schemas/startup.schema.json` rejects extra metadata fields.
+QEMU timeout alone does not establish an NVRAM fault or authorize recovery.
+
 Mendimaru uses one versioned contract for Studio Pro, Runtime, UI automation,
 and browser operations. The contract describes equivalent behavior; it does not
 require adapters to share an implementation or transport.
