@@ -237,6 +237,28 @@ fn nvram_only_erased_stores_are_evidence_and_only_stopped_bind_containers_are_el
         "Config": { "Image": plan.mount.image, "Labels": { "com.docker.compose.service": "windows" }, "Env": ["BOOT_MODE=windows"] },
         "Mounts": [{ "Type": "bind", "Source": plan.mount.directory, "Destination": "/storage", "RW": true }] });
     assert!(validate_container(&value, &plan.mount, true).is_ok());
+    for pointer in ["/State/Running", "/State/Restarting", "/State/Paused"] {
+        let mut changed = value.clone();
+        *changed.pointer_mut(pointer).unwrap() = true.into();
+        assert!(validate_container(&changed, &plan.mount, true).is_err());
+    }
+    for env in [
+        serde_json::json!(["BIOS=Y"]),
+        serde_json::json!(["CLEAR=Y"]),
+        serde_json::json!(["BOOT_MODE=windows", "BOOT_MODE=windows"]),
+        serde_json::json!(["STORAGE=/different"]),
+        serde_json::json!([null]),
+    ] {
+        let mut changed = value.clone();
+        changed["Config"]["Env"] = env;
+        assert!(validate_container(&changed, &plan.mount, true).is_err());
+    }
+    let mut readonly = value.clone();
+    readonly["Mounts"][0]["RW"] = false.into();
+    assert!(validate_container(&readonly, &plan.mount, true).is_err());
+    let mut nested = value.clone();
+    nested["Mounts"].as_array_mut().unwrap().push(serde_json::json!({"Type":"bind", "Source":"/unrelated", "Destination":"/storage/nested", "RW":true}));
+    assert!(validate_container(&nested, &plan.mount, true).is_err());
     for status in [
         "running",
         "restarting",
