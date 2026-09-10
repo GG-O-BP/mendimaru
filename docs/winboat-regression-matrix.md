@@ -51,6 +51,26 @@ live/Windows gates and never becomes a prerequisite for this matrix.
 | Compose baseline     | target Runtime mappings are removed from rollback baselines while system/user ports survive                                | #102  |
 | Keeper hygiene       | connection-refused sockets are removed while live and untrusted entries survive                                            | #103  |
 
+## Concurrent Runtime stop and keeper cleanup (#146)
+
+`cli::runtime_stop_tests` runs CLI command dispatch and the real session-keeper
+loop in isolated subprocesses with a registered, live RDP stand-in. Fake Compose
+disconnects that client while its first recreation is held at a barrier. The
+tests assert one recreation, no overlapping Compose children, restored Compose
+bytes, and a final stopped record. They also inject a first-recreation failure
+and verify the keeper's serialized recovery and an idempotent explicit retry.
+Separate cases cover simultaneous explicit stops, a cancelled lock waiter, lock
+owner process death, and refusal of symlinked, hardlinked, public, or non-file
+locks. The lock unit test checks its bounded asynchronous wait.
+
+These tests run in the ordinary Rust suite. Docker, guest health, and the RDP
+client are fixtures; they do not prove behavior of a real Windows VM. Live
+reproduction still requires the verified disposable snapshot described above.
+On that VM, launch a keeper-owned Studio session with a linked Runtime, issue one
+explicit Runtime stop, and verify both processes exit, Compose is restored, the
+configured container name is running, and the Runtime record is stopped. A
+second stop must succeed without another recreation.
+
 ## Contract schema upgrade checklist
 
 Whenever `CONTRACT_SCHEMA_VERSION`, a runtime schema, or a persisted WinBoat

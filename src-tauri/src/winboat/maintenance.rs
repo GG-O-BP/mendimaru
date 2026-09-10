@@ -25,6 +25,18 @@ pub(crate) fn shared(config: &AppConfig) -> Result<Option<Lease>, String> {
 
 #[cfg(target_os = "linux")]
 pub(super) fn acquire(config: &AppConfig, exclusive: bool) -> Result<Lease, String> {
+    let file = open_lock(config, ".mendimaru-maintenance.lock")?;
+    let result = if exclusive {
+        fs2::FileExt::try_lock_exclusive(&file)
+    } else {
+        fs2::FileExt::try_lock_shared(&file)
+    };
+    result.map_err(|_| rejected())?;
+    Ok(Lease { _file: file })
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn open_lock(config: &AppConfig, name: &str) -> Result<std::fs::File, String> {
     use std::os::unix::fs::MetadataExt;
     let parent = std::path::Path::new(&config.compose_file)
         .parent()
@@ -40,7 +52,7 @@ pub(super) fn acquire(config: &AppConfig, exclusive: bool) -> Result<Lease, Stri
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     let file = directory
-        .open_with(".mendimaru-maintenance.lock", &options)
+        .open_with(name, &options)
         .map_err(|_| rejected())?
         .into_std();
     let metadata = file.metadata().map_err(|_| rejected())?;
@@ -51,13 +63,7 @@ pub(super) fn acquire(config: &AppConfig, exclusive: bool) -> Result<Lease, Stri
     {
         return Err(rejected());
     }
-    let result = if exclusive {
-        fs2::FileExt::try_lock_exclusive(&file)
-    } else {
-        fs2::FileExt::try_lock_shared(&file)
-    };
-    result.map_err(|_| rejected())?;
-    Ok(Lease { _file: file })
+    Ok(file)
 }
 
 #[cfg(target_os = "linux")]

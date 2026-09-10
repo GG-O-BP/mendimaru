@@ -123,6 +123,17 @@ Run Locally stop API yet. The managed Compose digest must still match; a
 concurrent user edit is preserved and stop returns
 `runtime_compose_recovery_failed` instead of overwriting it.
 
+Overlapping stops, including keeper cleanup after the RDP disconnect, take an
+exclusive process-shared lock in the Compose directory. The lock covers Compose
+restoration, recreation, guest/storage checks, and the final record write. A
+waiting caller reloads the record and returns success without another recreation
+when the first stop completed. A failed recovery leaves the record available for
+retry; the next owner can finish recovery from the original Compose baseline.
+Lock waits are asynchronous and bounded to one hour, with the CLI's shorter
+deadline or cancellation taking precedence. The private lock file remains in
+place; closing the descriptor or exiting the process releases ownership. An
+untrusted lock file is rejected before Compose is changed.
+
 The host URL is always IPv4 loopback. `0.0.0.0`, a LAN address, multiple
 bindings, host networking, a missing `/storage` volume, and a caller-selected
 host port are rejected. Native Windows and macOS adapters do not read or change

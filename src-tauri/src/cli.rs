@@ -2580,7 +2580,7 @@ mod tests {
         values.iter().map(OsString::from).collect()
     }
 
-    fn app_config(workspace: &std::path::Path) -> crate::models::AppConfig {
+    pub(super) fn app_config(workspace: &std::path::Path) -> crate::models::AppConfig {
         crate::models::AppConfig {
             language_preference: "en-US".into(),
             winboat_setup_pending: false,
@@ -3268,3 +3268,6 @@ mod tests {
         server.join().expect("fixture server");
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod runtime_stop_tests;
