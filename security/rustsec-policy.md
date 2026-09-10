@@ -7,16 +7,21 @@ cargo-audit exits zero.
 
 The current exception baseline is `security/rustsec-exceptions.json`. It was
 reviewed against cargo-audit 0.22.2 and RustSec advisory database commit
-`4b27756fe154d080be5c91a7486e4fbd5cfc3b3a` (1,236 advisories, last updated
-2026-09-01). Each exception records an owner, introducing dependency, reason,
+`b50980aad8b8f14f77e25a97b32dd94bf008b0af` (1,243 advisories, last updated
+2026-09-09). Each exception records an owner, introducing dependency, reason,
 upstream HTTPS link, remediation plan, exact package/version, and expiry date.
 An exception whose advisory disappears or whose package version changes is
 reported as stale and fails CI.
 
+The 2026-09-11 review removed the ten stale GTK3 unmaintained exceptions
+`RUSTSEC-2024-0411` through `RUSTSEC-2024-0420`, which are no longer reported by
+that database for the unchanged lockfile. The audit reports zero vulnerabilities
+and seven warnings covered by the remaining exceptions.
+
 ## Exception classes
 
 - **Unmaintained:** allowed only with the complete metadata above. The current
-  GTK3 bindings, `proc-macro-error`, and `unic-*` entries are transitive
+  `proc-macro-error` and `unic-*` entries are transitive
   dependencies of Tauri/wry/urlpattern and expire on 2026-12-31.
 - **Unsound:** denied by default. The only current exception is
   `RUSTSEC-2024-0429` in `glib 0.18.5`, and it uses the stricter
