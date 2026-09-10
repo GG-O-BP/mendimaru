@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Runs only inside the disposable Arch builder created by package-gate.sh.
+# PKGBUILD supplies depends, makedepends, and pkgver when sourced below.
+# shellcheck disable=SC2154
 set -euo pipefail
 pacman -Syu --noconfirm
 useradd --create-home --shell /bin/bash aurbuild

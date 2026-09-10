@@ -15,7 +15,9 @@ release and publishes the package automatically.
   packages, including their licenses. Cargo alone does not copy Tauri resources.
 - Node.js `>=22.22.2` is a required runtime dependency. npm is needed only to
   build the package. Browser commands use the installed resources and host Node
-  without a source checkout or environment overrides.
+  without a source checkout or environment overrides. The package also requires
+  `nss` for Chromium's NSS/NSPR shared libraries; the remaining Chromium system
+  libraries are provided by the existing desktop dependencies.
 - The single `mendimaru` package has a required `winboat` dependency. Paru
   installs the exact-name AUR package when the dependency is missing. Existing
   `winboat-bin`, `winboat-electron`, and `winboat-git` packages provide

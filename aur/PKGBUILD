@@ -19,6 +19,7 @@ depends=(
   'libgcc'
   'libsoup3'
   'nodejs>=22.22.2'
+  'nss'
   'webkit2gtk-4.1'
   'winboat'
   'xdg-utils'

@@ -18,6 +18,7 @@ const lock = await json(path.join(source, "package-lock.json"));
 const manifest = await json(path.join(source, "package.json"));
 const metadata = await readFile(path.join(installed, ".PKGINFO"), "utf8");
 assert.match(metadata, /^depend = nodejs>=22\.22\.2$/m);
+assert.match(metadata, /^depend = nss$/m);
 assert.equal(manifest.engines.node, ">=22.22.2");
 assert((await lstat(path.join(installed, "usr/bin/mendimaru"))).mode & 0o111);
 
