@@ -44,6 +44,9 @@ cp "$output/inventory.json" "$scratch/smoke/inventory.json"
 docker cp "$scratch/smoke" "$runtime:/smoke"
 docker exec "$runtime" bash -c '
   set -euo pipefail
+  # Arch container images omit documentation by default. Install every file
+  # so pacman -Qkk also verifies the package documentation directories.
+  sed -i "/^NoExtract[[:space:]]*=/d" /etc/pacman.conf
   pacman -Syu --noconfirm
   mapfile -t dependencies < <(bsdtar -xOf /tmp/mendimaru.pkg.tar.zst .PKGINFO | sed -n "s/^depend = //p" | sed "/^winboat$/d")
   pacman -S --needed --noconfirm "${dependencies[@]}" ttf-liberation
