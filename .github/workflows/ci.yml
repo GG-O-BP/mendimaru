@@ -15,6 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  aur-package:
+    uses: ./.github/workflows/aur-package.yml
+
   test:
     name: Test (${{ matrix.os }})
     strategy:

@@ -3,7 +3,7 @@ dist
 coverage
 src-tauri
 public
-aur
+/aur/
 README*.md
 AUR_PUBLISHING.md
 package-lock.json

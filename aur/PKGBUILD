@@ -18,13 +18,14 @@ depends=(
   'hicolor-icon-theme'
   'libgcc'
   'libsoup3'
+  'nodejs>=22.22.2'
+  'nss'
   'webkit2gtk-4.1'
   'winboat'
   'xdg-utils'
 )
 makedepends=(
   'cargo'
-  'nodejs'
   'npm'
   'pango'
 )
@@ -54,6 +55,7 @@ prepare() {
   export npm_config_cache="$srcdir/npm-cache"
   export npm_config_fund=false
   export npm_config_update_notifier=false
+  export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
   npm ci
 
   export CARGO_HOME="$srcdir/cargo-home"
@@ -112,6 +114,19 @@ package() {
 
   install -Dm755 src-tauri/target/release/mendimaru \
     "$pkgdir/usr/bin/mendimaru"
+
+  # Cargo does not process Tauri bundle.resources. Keep these destinations in
+  # sync with tauri.conf.json; Linux resource_dir resolves /usr/lib/mendimaru.
+  local browser_dir="$pkgdir/usr/lib/$pkgname/browser"
+  install -Dm644 scripts/browser-runner.mjs "$browser_dir/browser-runner.mjs"
+  install -Dm644 scripts/browser-artifact-safety.mjs \
+    "$browser_dir/browser-artifact-safety.mjs"
+  install -dm755 "$browser_dir/node_modules/@playwright"
+  cp -a node_modules/@playwright/test "$browser_dir/node_modules/@playwright/"
+  local module
+  for module in fflate playwright playwright-core; do
+    cp -a "node_modules/$module" "$browser_dir/node_modules/"
+  done
 
   install -Dm644 /dev/stdin \
     "$pkgdir/usr/share/applications/mendimaru.desktop" <<'EOF'

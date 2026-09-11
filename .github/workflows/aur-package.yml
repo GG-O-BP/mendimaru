@@ -1,0 +1,38 @@
+name: AUR installed package gate
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit or release tag to package
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build and smoke installed AUR package
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+
+      - name: Build and test in separate disposable Arch containers
+        run: bash scripts/aur/package-gate.sh
+
+      - name: Upload package inventory and installed smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-aur-package
+          path: artifacts/aur
+          if-no-files-found: error

@@ -15,6 +15,12 @@ The installed application includes the pinned Playwright JavaScript runner,
 but invokes a host Node.js 22.22.2 or later executable and a separately
 installed pinned Chromium build. A test never downloads a browser implicitly.
 
+The AUR package declares Node.js as a runtime dependency and installs the runner
+and its locked JavaScript dependencies under `/usr/lib/mendimaru/browser/`.
+An AUR installation needs neither npm nor a Mendimaru source checkout to run
+the following commands. The optional system Chromium/Chrome packages used for
+Marketplace discovery do not replace the pinned Playwright browser.
+
 ```bash
 mendimaru browser doctor --json
 mendimaru browser install chromium --json
