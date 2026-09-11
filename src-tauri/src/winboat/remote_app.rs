@@ -23,6 +23,14 @@ pub(super) struct RemoteAppProcess {
 }
 
 impl RemoteAppProcess {
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn from_test_child(child: Child) -> Self {
+        Self {
+            child,
+            diagnostics: Mutex::new(tempfile::tempfile().expect("fixture diagnostics")),
+        }
+    }
+
     pub(super) fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
         self.child.try_wait()
     }

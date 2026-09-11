@@ -43,6 +43,35 @@ pub(crate) fn seed_installed_versions_cache(config: &AppConfig, versions: &[Stud
     version_cache::seed(config, versions);
 }
 
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) fn register_keeper_test_client(config: &AppConfig, child: std::process::Child) {
+    let security = security::OperationSecurity::fixture();
+    let payload = security::authenticated_envelope(&security, 1, b"{}").unwrap();
+    let previous_report = security::authenticate_report(&payload, &security).unwrap();
+    let directory = std::path::Path::new(&config.shared_directory);
+    let report_path = directory.join("client-report.json");
+    std::fs::write(&report_path, payload).unwrap();
+    sessions::register_launch_client(sessions::LaunchClientRegistration {
+        config,
+        expected_version: "11.12.3",
+        report: &[operation::WindowsStudioSessionReport {
+            session_id: "studio-4242-638908128000000000".into(),
+            version: "11.12.3".into(),
+            process_id: 4242,
+            started_at: "2025-08-15T00:00:00Z".into(),
+            project_name: None,
+            has_window: true,
+        }],
+        client: remote_app::RemoteAppProcess::from_test_child(child),
+        report_path,
+        control_path: directory.join("client-control.json"),
+        security,
+        previous_report,
+        project_access: None,
+    })
+    .expect("register a live keeper client");
+}
+
 #[cfg(test)]
 use client::parse_studio_versions;
 #[cfg(test)]

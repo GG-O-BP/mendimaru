@@ -27,6 +27,8 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod stop_lock;
+
 const STORE_DIRECTORY: &str = "winboat-runtime";
 const MAX_RECORD_BYTES: u64 = 1024 * 1024;
 const MAX_COMPOSE_BYTES: u64 = 4 * 1024 * 1024;
@@ -1078,6 +1080,21 @@ pub(crate) async fn url(config: &AppConfig, session_id: &str) -> BackendResult<S
 pub(crate) async fn stop(config: &AppConfig, session_id: &str) -> BackendResult<()> {
     let _maintenance = super::maintenance::shared(config)
         .map_err(|_| super::startup::failure(BackendErrorCode::PreconditionFailed))?;
+    let (_, record) = load_session(session_id, CapabilityId::RuntimeStop)?;
+    if record.state == RuntimeState::Stopped {
+        return Ok(());
+    }
+    // Compose recreation disconnects the keeper's RDP client. Hold this lease
+    // through recovery and the final record write, then reload after waiting so
+    // that the keeper (or another CLI process) observes the completed stop.
+    let _stop = stop_lock::acquire(config).await.map_err(|_| {
+        runtime_error(
+            CapabilityId::RuntimeStop,
+            BackendErrorCode::PreconditionFailed,
+            true,
+            Some(record.log_artifact.artifact_id.clone()),
+        )
+    })?;
     let (directory, mut record) = load_session(session_id, CapabilityId::RuntimeStop)?;
     if record.state == RuntimeState::Stopped {
         return Ok(());
