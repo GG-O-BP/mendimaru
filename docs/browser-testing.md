@@ -133,6 +133,27 @@ agent consume failure evidence without parsing diagnostic text.
 
 ## Declarative suite format
 
+### Studio session observation
+
+On Linux, `browser test --runtime-session-id` reads Studio version metadata from
+the local registered owner or the keeper's private Unix socket. It never opens
+another RDP connection to discover that metadata. Missing, stopped, malformed,
+incompatible, or timed-out owner metadata fails before browser execution with
+retryable `precondition_failed` and a path-free diagnostic identifying the
+unavailable session owner. Socket status responses have a two-second deadline.
+
+Issue [#148](https://github.com/GG-O-BP/mendimaru/issues/148) reproduced the old
+browser metadata query replacing an existing RDP connection and triggering
+keeper teardown without concurrent external work. This corrects the earlier
+attribution in #63/#141: external interference is not required to reproduce
+that defect. Ordinary Chrome's `host.lan` asset-resolution failure is a separate
+problem handled by the asset mirror below.
+
+The fixture regression suite and the optional existing-session live gate are
+described in the [WinBoat regression matrix](winboat-regression-matrix.md#safe-browser-and-runtime-observation-148).
+
+### Suite structure
+
 Suites validate against
 [`browser-suite.schema.json`](../schemas/browser-suite.schema.json). They are
 data, not executable JavaScript. The checked-in smoke suite is a complete

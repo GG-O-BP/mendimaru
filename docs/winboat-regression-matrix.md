@@ -55,7 +55,8 @@ live/Windows gates and never becomes a prerequisite for this matrix.
 
 `cli::runtime_stop_tests` runs CLI command dispatch and the real session-keeper
 loop in isolated subprocesses with a registered, live RDP stand-in. Fake Compose
-disconnects that client while its first recreation is held at a barrier. The
+disconnects that client while its first recreation is held at a barrier, and
+the fixture supplies a newer authenticated Studio-exit report. The
 tests assert one recreation, no overlapping Compose children, restored Compose
 bytes, and a final stopped record. They also inject a first-recreation failure
 and verify the keeper's serialized recovery and an idempotent explicit retry.
@@ -86,6 +87,52 @@ receive stop requests and exit, the completed launch becomes interrupted, linked
 Runtime forwarding is restored with one serialized Compose recreation, untrusted
 files survive, and the same socket path can be bound on retry. These isolated
 fixtures do not claim a live Studio Pro or VM reproduction.
+
+## Safe browser and Runtime observation (#148)
+
+The ordinary Rust suite runs the real keeper loop, Unix IPC, CLI dispatch, and
+Chromium against an HTTP fixture with a linked Studio session. Repeated browser
+tests and Runtime status/wait/url/logs/list leave the client, Studio identity,
+Compose bytes, and published-port fixture unchanged, with zero RDP launches or
+Compose recreations. The local GUI-owner path is covered separately. Missing,
+timed-out, malformed, wrong-session, wrong-schema, invalid-version, and stopped
+metadata fail with a bounded, retryable, path-free browser diagnostic.
+
+RDP loss plus missing/tampered reports preserves the Runtime across automatic
+keeper ticks. A later authenticated Studio-exit report permits one cleanup.
+Readiness timeout cases cover both available and missing owner metadata without
+guest diagnostics or teardown. Explicit guest discovery is still distinct from
+owner observation; the #99 authoritative-absence checks remain required.
+
+For an **already-running actual keeper-linked Studio F5 session**, run:
+
+```bash
+MENDIMARU_CONFIG_DIR=/absolute/test/config \
+MENDIMARU_CACHE_DIR=/absolute/test/cache \
+MENDIMARU_E2E_BINARY=/absolute/current/mendimaru \
+MENDIMARU_E2E_RUNTIME_SESSION_ID=runtime_0123456789abcdef0123456789abcdef \
+MENDIMARU_E2E_KEEPER_PID=12345 \
+MENDIMARU_E2E_BROWSER_SUITE=/absolute/read-only-smoke.browser.json \
+node scripts/test-browser-winboat-live.mjs
+```
+
+Choose a read-only suite that asserts the actual app's heading or another stable
+element. The gate requires HTTP-ready `studio-run-locally` mode and trusted keeper
+metadata. It executes two browser runs with strict console/network checks and ten
+Runtime status reads, sampling before/during/after and for three seconds afterward.
+It compares the actual container ID/status, Compose SHA-256, all published ports,
+Studio PID/start identity from the authenticated session owner, keeper PID/start
+identity, and current-user FreeRDP PID/parent/start identities. Samples run at
+500 ms intervals plus command duration; shorter-lived processes can escape this
+sampling, so the fixture's zero-launch assertion remains complementary evidence.
+The Studio identity is owner-reported, not an independent Windows process query.
+
+The gate emits a JSON report without process arguments, project paths, credentials,
+or Compose content. It never starts/stops Studio or restores Compose. Preparing
+or tearing down a live test session must follow the disposable-snapshot rules
+above; the existing-session observer itself needs no mutation opt-in. Missing
+prerequisites fail rather than silently substituting an HTTP-only or unlinked
+session. Automated gate fixtures do not count as an actual VM run.
 
 ## Contract schema upgrade checklist
 
