@@ -27,7 +27,9 @@ assert.equal(existsSync("/smoke/node_modules"), false);
 const inventory = JSON.parse(await readFile("/smoke/inventory.json", "utf8"));
 const browserCache = path.join(os.homedir(), ".cache/ms-playwright");
 const before = await cacheFiles();
-const doctor = invoke(["browser", "doctor"]);
+const doctor = invoke(["browser", "doctor"], {
+  exitCode: mode === "ready" ? 0 : 1,
+});
 assert.equal(doctor.minimumNodeVersion, inventory.minimumNodeVersion);
 assert.equal(doctor.nodeSupported, true);
 assert.equal(doctor.playwrightVersion, inventory.modules["@playwright/test"]);
@@ -80,13 +82,18 @@ try {
   if (mode === "missing") {
     assert.deepEqual(before, []);
     invoke(args, { env, error: "precondition_failed" });
-    // A missing Node executable must remain a structured prerequisite error.
+    // Doctor must retain its prerequisite report even without Node.js.
     const noNode = path.join(os.homedir(), "empty-path");
     await mkdir(noNode);
-    invoke(["browser", "doctor"], {
+    const missingNode = invoke(["browser", "doctor"], {
       env: { ...process.env, PATH: noNode },
-      error: "precondition_failed",
+      exitCode: 1,
     });
+    assert.equal(missingNode.ready, false);
+    assert.equal(
+      missingNode.checks.find(({ id }) => id === "node").code,
+      "node_missing",
+    );
     assert.deepEqual(await cacheFiles(), []);
     console.log(
       JSON.stringify({
@@ -122,7 +129,10 @@ try {
   server.kill("SIGTERM");
 }
 
-function invoke(args, { env = process.env, error } = {}) {
+function invoke(
+  args,
+  { env = process.env, error, exitCode = error ? 1 : 0 } = {},
+) {
   const result = spawnSync(
     "/usr/bin/mendimaru",
     [...args, "--timeout-seconds", "60", "--json"],
@@ -136,7 +146,8 @@ function invoke(args, { env = process.env, error } = {}) {
   );
   assert.ifError(result.error);
   assert.equal(result.signal, null);
-  assert.equal(result.status, error ? 1 : 0, result.stderr || result.stdout);
+  assert.equal(result.status, exitCode, result.stderr || result.stdout);
+  if (!error) assert.equal(result.stderr, "");
   const envelope = JSON.parse(error ? result.stderr : result.stdout);
   assert.equal(envelope.ok, !error);
   if (error) assert.equal(envelope.error.code, error);

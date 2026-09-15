@@ -18,6 +18,8 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use zip::{CompressionMethod, ZipArchive};
 
+mod doctor;
+
 const STORE_DIRECTORY: &str = "browser-tests";
 const MAX_SUITE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_RUNNER_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
@@ -143,6 +145,10 @@ pub(crate) struct BrowserDoctor {
     pub playwright_version: String,
     pub chromium: ChromiumDiagnostic,
     pub download_policy: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<doctor::PrerequisiteCheck>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<doctor::DoctorDiagnostic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -390,8 +396,7 @@ impl BrowserStore {
 }
 
 pub(crate) async fn doctor(backend: BackendId) -> BackendResult<BrowserDoctor> {
-    let value = invoke_runner("doctor", None, backend, CapabilityId::BrowserTest).await?;
-    parse_doctor(value, backend)
+    Ok(doctor::inspect(backend).await)
 }
 
 pub(crate) async fn install_chromium(backend: BackendId) -> BackendResult<BrowserDoctor> {
@@ -408,22 +413,22 @@ fn parse_doctor(value: Value, backend: BackendId) -> BackendResult<BrowserDoctor
             false,
         )
     })?;
-    let launch_identity_valid = !doctor.chromium.launchable
-        || (doctor.chromium.installed
-            && doctor
-                .chromium
-                .version
-                .as_ref()
-                .is_some_and(|version| !version.is_empty() && version.len() <= 80));
+    let launch_identity_valid = doctor
+        .chromium
+        .version
+        .as_ref()
+        .is_none_or(|version| doctor::is_browser_version(version))
+        && (!doctor.chromium.launchable
+            || (doctor.chromium.installed && doctor.chromium.version.is_some()));
     let node_supported =
         numeric_version(&doctor.node_version).is_some_and(|version| version >= [22, 22, 2]);
     if doctor.schema_version != CONTRACT_SCHEMA_VERSION
         || doctor.runner_version != RUNNER_VERSION
         || doctor.minimum_node_version != MINIMUM_NODE_VERSION
-        || doctor.node_version.is_empty()
-        || doctor.node_version.len() > 80
-        || doctor.playwright_version.is_empty()
-        || doctor.playwright_version.len() > 80
+        || numeric_version(&doctor.node_version).is_none()
+        || numeric_version(&doctor.playwright_version).is_none()
+        || !doctor.checks.is_empty()
+        || doctor.diagnostic.is_some()
         || doctor.download_policy != "explicit-only"
         || doctor.node_supported != node_supported
         || doctor.ready
@@ -441,6 +446,13 @@ fn parse_doctor(value: Value, backend: BackendId) -> BackendResult<BrowserDoctor
 }
 
 fn numeric_version(value: &str) -> Option<[u64; 3]> {
+    if value.len() > 80
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'.')
+    {
+        return None;
+    }
     let mut parts = value.split('.');
     let version = [
         parts.next()?.parse().ok()?,
@@ -843,11 +855,11 @@ async fn invoke_runner(
     })
 }
 
-fn runner_path() -> Result<PathBuf, String> {
+fn runner_path() -> Result<PathBuf, doctor::Cause> {
     if let Some(value) = std::env::var_os(RUNNER_PATH_OVERRIDE) {
         let path = PathBuf::from(value);
         if !path.is_absolute() {
-            return Err("the browser runner override must be absolute".to_string());
+            return Err(doctor::Cause::UnsafeOverride);
         }
         validate_runner_file(&path)?;
         return Ok(path);
@@ -855,7 +867,7 @@ fn runner_path() -> Result<PathBuf, String> {
     if cfg!(debug_assertions) {
         let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .ok_or_else(|| "the browser runner directory is unavailable".to_string())?
+            .ok_or(doctor::Cause::RunnerMissing)?
             .join("scripts/browser-runner.mjs");
         if validate_runner_file(&source).is_ok() {
             return Ok(source);
@@ -865,39 +877,44 @@ fn runner_path() -> Result<PathBuf, String> {
         name: env!("CARGO_PKG_NAME").to_string(),
         version: env!("CARGO_PKG_VERSION")
             .parse()
-            .map_err(|_| "the application package version is invalid".to_string())?,
+            .map_err(|_| doctor::Cause::RunnerMissing)?,
         authors: env!("CARGO_PKG_AUTHORS"),
         description: env!("CARGO_PKG_DESCRIPTION"),
         crate_name: env!("CARGO_PKG_NAME"),
     };
     let resource = tauri::utils::platform::resource_dir(&package, &tauri::Env::default())
-        .map_err(|error| format!("could not resolve application resources: {error}"))?
+        .map_err(|_| doctor::Cause::RunnerMissing)?
         .join("browser/browser-runner.mjs");
     validate_runner_file(&resource)?;
     Ok(resource)
 }
 
-fn validate_runner_file(path: &Path) -> Result<(), String> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| format!("could not inspect browser runner: {error}"))?;
+fn validate_runner_file(path: &Path) -> Result<(), doctor::Cause> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => doctor::Cause::RunnerMissing,
+        _ => doctor::Cause::RunnerUnreadable,
+    })?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err("the browser runner must be a direct regular file".to_string());
+        return Err(doctor::Cause::UnsafeOverride);
     }
+    File::open(path).map_err(|_| doctor::Cause::RunnerUnreadable)?;
     Ok(())
 }
 
-fn node_binary() -> Result<PathBuf, String> {
+fn node_binary() -> Result<PathBuf, doctor::Cause> {
     let Some(value) = std::env::var_os(NODE_BINARY_OVERRIDE) else {
         return Ok(PathBuf::from("node"));
     };
     let path = PathBuf::from(value);
     if !path.is_absolute() {
-        return Err("the Node.js override must be absolute".to_string());
+        return Err(doctor::Cause::UnsafeOverride);
     }
-    let metadata = fs::symlink_metadata(&path)
-        .map_err(|error| format!("could not inspect Node.js: {error}"))?;
+    let metadata = fs::symlink_metadata(&path).map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => doctor::Cause::NodeMissing,
+        _ => doctor::Cause::NodeSpawnDenied,
+    })?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err("the Node.js override must be a direct regular file".to_string());
+        return Err(doctor::Cause::UnsafeOverride);
     }
     Ok(path)
 }
