@@ -1,0 +1,440 @@
+{
+  "issue": 148,
+  "dateUtc": "2026-09-15",
+  "sourceCommit": "80f4179",
+  "binarySha256": "7cd0528873e6c2614345ad3933ef43140b14c3412aa0e8aa2a54b23bc484a2ef",
+  "snapshot": {
+    "id": "mendimaru-148-20260915-cold-reflink",
+    "verifiedFiles": 8,
+    "coldSnapshotContentCompared": true,
+    "restoredGuestBootVerified": true
+  },
+  "successfulBrowser": {
+    "page": "/login.html",
+    "runs": [
+      {
+        "passed": 1,
+        "failed": 0
+      },
+      {
+        "passed": 1,
+        "failed": 0
+      }
+    ],
+    "sampleCount": 29,
+    "allIdentitiesPreserved": true,
+    "before": {
+      "at": "2026-09-15T13:56:07.708Z",
+      "container": {
+        "id": "7cde9dbbd7e310ffaf6132f4372e0be7daa6d927d9fed3bf477e80da87297f96",
+        "state": "running",
+        "ports": {
+          "3389/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47302"
+            }
+          ],
+          "3389/udp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47312"
+            }
+          ],
+          "7148/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47282"
+            }
+          ],
+          "7149/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47292"
+            }
+          ],
+          "8006/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47272"
+            }
+          ],
+          "8080/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "8080"
+            }
+          ]
+        }
+      },
+      "compose": "82a00c6baec391aacb7ec2d6b38d7c5237296a2224be8f97ea09f52dbdfdda02",
+      "studio": {
+        "sessionId": "studio-8852-639250768087635345",
+        "processId": 8852,
+        "startedAt": "2026-09-15T13:46:48.763534500Z",
+        "version": "11.12.3",
+        "state": "running",
+        "connection": "connected"
+      },
+      "keeper": {
+        "pid": 25023,
+        "parent": 1,
+        "startTicks": "132150"
+      },
+      "rdp": [
+        {
+          "pid": 26120,
+          "parent": 25023,
+          "startTicks": "135472"
+        }
+      ]
+    },
+    "after": {
+      "at": "2026-09-15T13:56:16.915Z",
+      "container": {
+        "id": "7cde9dbbd7e310ffaf6132f4372e0be7daa6d927d9fed3bf477e80da87297f96",
+        "state": "running",
+        "ports": {
+          "3389/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47302"
+            }
+          ],
+          "3389/udp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47312"
+            }
+          ],
+          "7148/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47282"
+            }
+          ],
+          "7149/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47292"
+            }
+          ],
+          "8006/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47272"
+            }
+          ],
+          "8080/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "8080"
+            }
+          ]
+        }
+      },
+      "compose": "82a00c6baec391aacb7ec2d6b38d7c5237296a2224be8f97ea09f52dbdfdda02",
+      "studio": {
+        "sessionId": "studio-8852-639250768087635345",
+        "processId": 8852,
+        "startedAt": "2026-09-15T13:46:48.763534500Z",
+        "version": "11.12.3",
+        "state": "running",
+        "connection": "connected"
+      },
+      "keeper": {
+        "pid": 25023,
+        "parent": 1,
+        "startTicks": "132150"
+      },
+      "rdp": [
+        {
+          "pid": 26120,
+          "parent": 25023,
+          "startTicks": "135472"
+        }
+      ]
+    }
+  },
+  "failedHomeBrowser": {
+    "page": "/",
+    "outcome": "failed",
+    "sampleCount": 15,
+    "allIdentitiesPreserved": true,
+    "separateAppFailure": [
+      "dist/widgets.css returned 404",
+      "LanguageSelector.css was imported as a JavaScript module"
+    ]
+  },
+  "unavailableMetadata": {
+    "outcome": "passed",
+    "elapsedSeconds": 0.2753653190000023,
+    "error": {
+      "schemaVersion": "4.0.0",
+      "code": "precondition_failed",
+      "message": "Studio metadata is unavailable from the session owner; check studio status and retry (no RDP connection was opened)",
+      "backend": "linux-winboat",
+      "capability": "browser.test",
+      "retryable": true
+    },
+    "sampleCount": 1,
+    "allIdentitiesPreserved": true
+  },
+  "rdpLoss": {
+    "outcome": "passed",
+    "terminatedRdpPid": 26120,
+    "sampleCount": 20,
+    "before": {
+      "at": 1789480655.9339125,
+      "container": {
+        "id": "7cde9dbbd7e310ffaf6132f4372e0be7daa6d927d9fed3bf477e80da87297f96",
+        "state": "running",
+        "ports": {
+          "3389/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47302"
+            }
+          ],
+          "3389/udp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47312"
+            }
+          ],
+          "7148/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47282"
+            }
+          ],
+          "7149/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47292"
+            }
+          ],
+          "8006/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47272"
+            }
+          ],
+          "8080/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "8080"
+            }
+          ]
+        }
+      },
+      "compose": "82a00c6baec391aacb7ec2d6b38d7c5237296a2224be8f97ea09f52dbdfdda02",
+      "studio": {
+        "sessionId": "studio-8852-639250768087635345",
+        "processId": 8852,
+        "startedAt": "2026-09-15T13:46:48.763534500Z",
+        "version": "11.12.3",
+        "state": "unknown",
+        "connection": "disconnected"
+      }
+    },
+    "after": {
+      "at": 1789480666.1003401,
+      "container": {
+        "id": "7cde9dbbd7e310ffaf6132f4372e0be7daa6d927d9fed3bf477e80da87297f96",
+        "state": "running",
+        "ports": {
+          "3389/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47302"
+            }
+          ],
+          "3389/udp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47312"
+            }
+          ],
+          "7148/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47282"
+            }
+          ],
+          "7149/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47292"
+            }
+          ],
+          "8006/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "47272"
+            }
+          ],
+          "8080/tcp": [
+            {
+              "HostIp": "127.0.0.1",
+              "HostPort": "8080"
+            }
+          ]
+        }
+      },
+      "compose": "82a00c6baec391aacb7ec2d6b38d7c5237296a2224be8f97ea09f52dbdfdda02",
+      "studio": {
+        "sessionId": "studio-8852-639250768087635345",
+        "processId": 8852,
+        "startedAt": "2026-09-15T13:46:48.763534500Z",
+        "version": "11.12.3",
+        "state": "unknown",
+        "connection": "disconnected"
+      }
+    }
+  },
+  "authenticatedStop": {
+    "outcome": "passed",
+    "authenticatedStudioStop": true,
+    "runtimeState": "stopped",
+    "keeperExited": true,
+    "containerRecreations": 1,
+    "events": [
+      {
+        "action": "create",
+        "id": "75a7713745937682afbb61990fdad03d63a524f42580ca47fe25de7ce4fff9f4",
+        "time": 1789480689
+      },
+      {
+        "action": "stop",
+        "id": "7cde9dbbd7e310ffaf6132f4372e0be7daa6d927d9fed3bf477e80da87297f96",
+        "time": 1789480705
+      },
+      {
+        "action": "die",
+        "id": "7cde9dbbd7e310ffaf6132f4372e0be7daa6d927d9fed3bf477e80da87297f96",
+        "time": 1789480705
+      },
+      {
+        "action": "destroy",
+        "id": "7cde9dbbd7e310ffaf6132f4372e0be7daa6d927d9fed3bf477e80da87297f96",
+        "time": 1789480705
+      },
+      {
+        "action": "rename",
+        "id": "75a7713745937682afbb61990fdad03d63a524f42580ca47fe25de7ce4fff9f4",
+        "time": 1789480705
+      },
+      {
+        "action": "start",
+        "id": "75a7713745937682afbb61990fdad03d63a524f42580ca47fe25de7ce4fff9f4",
+        "time": 1789480705
+      },
+      {
+        "action": "stop",
+        "id": "75a7713745937682afbb61990fdad03d63a524f42580ca47fe25de7ce4fff9f4",
+        "time": 1789480782
+      },
+      {
+        "action": "die",
+        "id": "75a7713745937682afbb61990fdad03d63a524f42580ca47fe25de7ce4fff9f4",
+        "time": 1789480782
+      }
+    ]
+  },
+  "originalEnvironment": {
+    "outcome": "passed",
+    "originalContainerId": "fe8193555eb37f8ca3bac177169439248aa65ce2084e158049b333eccd550568",
+    "originalComposeSha256": "2f5b01e8396e655cd9da9badb650ff57af60281f46e189e1ae35cace4a779079",
+    "originalComposeUnchanged": true,
+    "publishedPortsReassignedWithinOriginalRanges": true,
+    "originalPorts": {
+      "3389/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "47300"
+        }
+      ],
+      "3389/udp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "47310"
+        }
+      ],
+      "7148/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "47280"
+        }
+      ],
+      "7149/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "47290"
+        }
+      ],
+      "8006/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "47270"
+        }
+      ],
+      "8080/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "8080"
+        }
+      ]
+    },
+    "restoredPorts": {
+      "3389/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "47304"
+        }
+      ],
+      "3389/udp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "47314"
+        }
+      ],
+      "7148/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "47284"
+        }
+      ],
+      "7149/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "47294"
+        }
+      ],
+      "8006/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "47274"
+        }
+      ],
+      "8080/tcp": [
+        {
+          "HostIp": "127.0.0.1",
+          "HostPort": "8080"
+        }
+      ]
+    },
+    "guestHealth": "ok",
+    "disposableContainerStopped": true
+  },
+  "rawReportSha256": {
+    "live-gate.json": "23b1cd1890e4cf6f18caa02357e1e4c2825b6226f024ee617fc21eb3f0d841cd",
+    "live-home-failure.json": "f78c2c57bda166f9677fd21b6817e05fab840153573312c800fc70d89927ada6",
+    "live-metadata-fault.json": "157af170911f3269c61bb94b3314f18beb9ecd7fab58680e45470e9c1c5ca1d9",
+    "live-rdp-loss.json": "193c175210ea43af37bca9582da1509c21f11c7ff351e3f0bf129a9e56018650",
+    "live-authenticated-stop.json": "3d9466e791e762e5375af11c38a7fd0612a355d4aacc8ca14219f478201d7f29",
+    "original-restored.json": "db1002f9a93ef61535d9d80d4abf8ec41ceb6afcdcaf6319e49e28e035cc17ec",
+    "snapshot/manifest.json": "ff2eb2be160a21543f1756a596fd96c0c45ba32b1b3975c1d52d621f8e8f7c0f",
+    "snapshot/restore-verification.json": "5b15b7c6dece7148a8dd5408a21087914dd0c2541e21992adc895486bc7dcc09"
+  }
+}

@@ -134,6 +134,10 @@ above; the existing-session observer itself needs no mutation opt-in. Missing
 prerequisites fail rather than silently substituting an HTTP-only or unlinked
 session. Automated gate fixtures do not count as an actual VM run.
 
+The [2026-09-15 verification record](issue-148-verification.md) includes an actual
+restored-VM browser run, missing-owner diagnostic, RDP loss, authenticated Studio
+stop, and original-environment restoration, with explicit app-test limitations.
+
 ## Contract schema upgrade checklist
 
 Whenever `CONTRACT_SCHEMA_VERSION`, a runtime schema, or a persisted WinBoat
