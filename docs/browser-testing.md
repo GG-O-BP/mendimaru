@@ -133,6 +133,27 @@ agent consume failure evidence without parsing diagnostic text.
 
 ## Declarative suite format
 
+### Studio session observation
+
+On Linux, `browser test --runtime-session-id` reads Studio version metadata from
+the local registered owner or the keeper's private Unix socket. It never opens
+another RDP connection to discover that metadata. Missing, stopped, malformed,
+incompatible, or timed-out owner metadata fails before browser execution with
+retryable `precondition_failed` and a path-free diagnostic identifying the
+unavailable session owner. Socket status responses have a two-second deadline.
+
+Issue [#148](https://github.com/GG-O-BP/mendimaru/issues/148) reproduced the old
+browser metadata query replacing an existing RDP connection and triggering
+keeper teardown without concurrent external work. This corrects the earlier
+attribution in #63/#141: external interference is not required to reproduce
+that defect. Ordinary Chrome's `host.lan` asset-resolution failure is a separate
+problem covered by the [opt-in generated-import repair](winboat-assets.md).
+
+The fixture regression suite and the optional existing-session live gate are
+described in the [WinBoat regression matrix](winboat-regression-matrix.md#safe-browser-and-runtime-observation-148).
+
+### Suite structure
+
 Suites validate against
 [`browser-suite.schema.json`](../schemas/browser-suite.schema.json). They are
 data, not executable JavaScript. The checked-in smoke suite is a complete
@@ -183,25 +204,27 @@ compare paths rather than platform-specific host setup.
 
 ### WinBoat UNC widget assets
 
-Mendix Studio Pro 11.12.3 can emit protocol-relative imports such as
-`//host.lan/Data/<project>/deployment/web/widgets/...` when a project resides
-on the WinBoat SMB share. Linux does not resolve `host.lan`, and a normal user
-process must not modify `/etc/hosts` or bind privileged port 80.
+For **ordinary Chrome and `browser test --base-url`**, use the explicit
+[generated-import watcher](winboat-assets.md). It fixes selected-project widget
+imports before Studio's Rspack bundling and continues across regenerations.
+It requires `--rewrite-generated-assets`, preserves model/widget originals, and
+needs no hosts/privileged-port setup or browser interception.
 
-When a browser suite targets a Linux WinBoat Runtime session, Mendimaru starts
-an ephemeral loopback-only asset mirror and installs a Chromium route for
-`http(s)://host.lan/Data/**`. Requests are fulfilled only from
-`<shared-directory>/<project>/deployment/web/**`. Query-bearing paths,
+The older `browser test --runtime-session-id` path still starts an ephemeral
+loopback-only asset mirror and installs a Chromium route for
+`http(s)://host.lan/Data/**`. This is an automation-only compatibility path; it
+must not be used as evidence that ordinary Chrome works. Requests are restricted
+to `<shared-directory>/<project>/deployment/web/**`. Query-bearing paths,
 non-GET/HEAD requests, traversal, symlinks, directories, and files over 64 MiB
 are rejected. The mirror is destroyed with the browser run and never exposes a
 LAN listener, project paths, or model files.
 
-This makes Studio Run Locally E2E work without administrator privileges. A
-system-wide `curl http://host.lan/...` installation remains a deployment
-decision: an administrator can separately provide loopback name resolution and
-a socket-activated port-80 proxy with the same path restrictions. Mendimaru
-does not silently change host name resolution or acquire privileged socket
-capabilities.
+The mirror does not repair missing aggregate CSS or CSS imported as JavaScript by the generated
+client; see [widget CSS diagnostics and the upstream reproduction](widget-css-diagnostics.md).
+For #63 acceptance, exercise the normalizer with an ordinary browser or
+direct-URL browser suite, without that route. The normalizer requires no
+system-wide `curl http://host.lan/...` installation because Rspack bundles the
+normalized imports into assets served by the normal Runtime URL.
 
 Test credentials are never CLI arguments or suite literals. A suite may read
 only environment variables named `MENDIMARU_TEST_<NAME>`:
@@ -303,3 +326,98 @@ the compiled executable and runs that exact smoke suite through both a real
 Portable supervisor URL and a WinBoat loopback adapter URL. It also verifies
 exit/stream semantics and Runtime readiness rejection, re-queries artifacts,
 checks integrity, and scans trace members again.
+
+## Opt-in frontend health (#144)
+
+`browser frontend-health` opens the target in a fresh Chromium session with
+ordinary network resolution. Operations → Frontend health exposes the same
+application operation in English, Korean and Japanese. Nothing runs until the
+user explicitly requests a diagnosis. The existing `browser.test` platform
+capability and pinned, explicitly installed toolchain apply.
+
+```bash
+mendimaru browser frontend-health --base-url http://localhost:8080/ --json
+mendimaru browser frontend-health \
+  --runtime-session-id runtime_0123456789abcdef0123456789abcdef \
+  --navigation-timeout-ms 15000 --observation-ms 3000 --json
+```
+
+WinBoat Runtime targets hold shared VM use through the complete diagnosis.
+For a plain URL in the configured VM, add `--winboat-use`; a plain URL without
+this flag remains external. In the desktop, use the Runtime session ID for VM
+protection. The lease does not enable asset bypass or RDP discovery. See
+[shared VM use](winboat-vm-use.md).
+
+Exactly one target is required. Navigation accepts 100–30000 ms (default 15000),
+and observation accepts 100–10000 ms (default 3000). The desktop uses these
+defaults. The runner has a separate bounded process-tree supervisor, 128 KiB
+output capture, and startup/cleanup allowance. Diagnosis never downloads tools.
+Run `browser doctor --json` if prerequisites fail.
+
+Three results are kept separate:
+
+| Field           | Meaning                                                                                                                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `studioState`   | Session-owner-reported Studio process state for a linked Runtime; null for an explicit URL/Portable Runtime. It does not prove frontend readiness.                                               |
+| `httpReady`     | The existing lightweight Runtime readiness snapshot, or final document HTTP status `<500` for an explicit URL. Null when no HTTP response was observed. Even HTTP 404 can satisfy this contract. |
+| `frontendState` | `healthy` means no failure was observed during this fresh-session window; `unhealthy` means a browser failure was observed; `inconclusive` means navigation/loading/observation was incomplete.  |
+
+An HTTP 200 page may be `unhealthy` with `httpReady: true`. Blank content,
+unfinished document/script/stylesheet requests, observation timeout and truncated
+evidence cannot yield `healthy`. This is a bounded startup observation, not proof
+of all app functionality. It does not log in, share an ordinary browser's
+cookies, exercise app actions, or assert a project-specific ready element. A
+working login page may be healthy. Use a declarative suite for authenticated or
+app-specific assertions and rerun diagnosis after changes. Reports are snapshots,
+not a persistent frontend-ready flag.
+
+The observer collects uncaught page errors, console errors (including ESM load
+errors), failed network requests, HTTP errors, visible Mendix error dialogs and
+native browser dialogs. Native dialogs are recorded and dismissed to allow the
+observation to finish. DOM error dialogs are observed without clicking them.
+It uses Playwright's [request/response events](https://playwright.dev/docs/api/class-page#page-event-requestfailed)
+and [dialog handling](https://playwright.dev/docs/dialogs); HTTP 4xx/5xx responses
+are recorded separately because they are not failed network requests.
+
+Results validate against [frontend-health.schema.json](../schemas/frontend-health.schema.json).
+A completed observation emits one success envelope on stdout, no stderr, with
+exit **0 only for `healthy`** and **1 for `unhealthy`/`inconclusive`**. Invalid
+arguments, unsupported platforms, unavailable tools and an HTTP-unready Runtime
+retain normal CLI error envelopes; no frontend health is claimed for them.
+
+Diagnostics contain stable `code`, actionable `action`, bounded `occurrences`,
+and optional `endpoint`, network `failure`, and HTTP `status`. Endpoints classify
+scheme, host (`shared-unc`, `same-origin`, `loopback`, `external`, `unknown`), port
+and path (`shared-deployment`, `stylesheet`, `script`, `document`, `other`). They
+deliberately omit raw hosts, paths, query strings, credentials and console/error
+text. `shared-unc` identifies `host.lan/Data/…`; its failures are listed first,
+with the underlying DNS/connection/TLS/HTTP cause retained. Guidance points to
+the explicit [generated-import repair](winboat-assets.md), without claiming a
+widget defect or applying that repair. Aggregate widget CSS 404 has separate
+[CSS guidance](widget-css-diagnostics.md). There are at most 100 distinct
+findings, 10000 occurrences per finding and 10000 events per counter. Overflow
+sets `truncated`; the report contains no screenshots, DOM snapshots or raw logs.
+
+Unlike `browser test --runtime-session-id`, this operation never starts an asset
+mirror or installs browser routes. `assetBypass` is always false. It does not
+modify projects, generated imports, Compose, hosts files;
+it does not connect to RDP or discover Studio through guest automation. Runtime
+URL and Studio state come from the existing safe status read. Existing
+`runtime status`, `wait`, `url` and lifecycle behavior remain unchanged.
+
+`npm run test:browser:frontend` exercises real headless Chromium on HTTP fixtures
+for HTTP 200 with ESM/CSS/dialog failures, shared UNC failures without a mirror,
+404/503, blank pages, delayed dialogs, native dialogs, unfinished requests,
+timeouts, event floods and privacy. The ordinary Rust suite runs those same
+pages through the compiled CLI, validates Runtime observation against a real
+keeper socket and checks zero RDP launches or Compose recreations. These are
+controlled fixtures, not a new live Windows VM acceptance claim.
+
+## Shared WinBoat use
+
+WinBoat Runtime targets automatically hold shared VM use for the complete browser
+command. For a plain URL in the configured VM, add `--winboat-use`; separate
+config/cache directories still coordinate through the same management identity.
+Lifecycle changes return a bounded, retryable busy precondition while tests hold
+use. See [VM use policy and boundaries](winboat-vm-use.md) for modes, timeout and
+cancellation, generations, and the advisory trust boundary.

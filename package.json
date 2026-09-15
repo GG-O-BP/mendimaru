@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "npm run test:frontend && npm run test:motion && npm run test:perf && npm run test:e2e:windows:helpers && npm run test:browser:security && npm run test:rustsec-policy && npm run test:backend && npm run test:contracts",
+    "test": "npm run test:frontend && npm run test:motion && npm run test:perf && npm run test:e2e:windows:helpers && npm run test:browser:security && npm run test:browser:winboat:helpers && npm run test:rustsec-policy && npm run test:backend && npm run test:contracts",
     "test:frontend": "vitest run",
     "test:app-flow": "vitest run src/App.e2e.test.tsx",
     "test:motion": "node scripts/verify-motion-contract.mjs",
@@ -25,8 +25,10 @@
     "test:perf:release:build": "npm run tauri -- build --no-bundle --features e2e --config src-tauri/tauri.e2e.conf.json",
     "test:winboat-smoke": "node scripts/test-winboat-e2e.mjs --smoke",
     "test:winboat-e2e": "node scripts/test-winboat-e2e.mjs --lifecycle",
-    "test:browser": "node scripts/test-browser-e2e.mjs",
+    "test:browser": "node scripts/test-browser-e2e.mjs && npm run test:browser:frontend",
     "test:browser:security": "node --test scripts/browser-artifact-safety.node-test.mjs",
+    "test:browser:winboat": "node scripts/test-browser-winboat-live.mjs",
+    "test:browser:winboat:helpers": "node --test scripts/browser-winboat-live.node-test.mjs",
     "test:backend": "cargo test --manifest-path src-tauri/Cargo.toml",
     "test:contracts": "cargo run --quiet --manifest-path src-tauri/Cargo.toml -- capabilities --json | node scripts/validate-backend-contract.mjs",
     "test:rustsec-policy": "node --test scripts/rustsec-policy.node-test.mjs",
@@ -42,7 +44,8 @@
     "check:windows": "npm run check:portable && npm run test:e2e:windows:powershell && npm run lint:rust:all-features && npm run test:security && npm run test:e2e:windows",
     "preview": "vite preview",
     "tarui": "npm run tauri --",
-    "tauri": "cross-env NO_STRIP=1 tauri"
+    "tauri": "cross-env NO_STRIP=1 tauri",
+    "test:browser:frontend": "node --test scripts/browser-frontend-health.node-test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

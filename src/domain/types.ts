@@ -387,3 +387,38 @@ export interface NvramRecoveryOutcome {
   rolledBack: boolean;
   rollbackRequired: boolean;
 }
+
+export interface FrontendHealth {
+  schemaVersion: string;
+  frontendState: "healthy" | "unhealthy" | "inconclusive";
+  studioState: "starting" | "running" | "stopped" | "unknown" | null;
+  httpReady: boolean | null;
+  runtimeSessionId: string | null;
+  startedAt: string;
+  finishedAt: string;
+  navigationComplete: boolean;
+  documentStatus: number | null;
+  observationMilliseconds: number;
+  assetBypass: false;
+  counts: {
+    pageErrors: number;
+    consoleErrors: number;
+    failedRequests: number;
+    httpErrors: number;
+    errorDialogs: number;
+  };
+  truncated: boolean;
+  diagnostics: {
+    code: string;
+    action: string;
+    occurrences: number;
+    failure?: string;
+    status?: number;
+    endpoint?: {
+      scheme: string;
+      hostKind: string;
+      port: number;
+      pathKind: string;
+    };
+  }[];
+}

@@ -13,6 +13,7 @@ const schemaFiles = [
   "schemas/runtime.schema.json",
   "schemas/browser-suite.schema.json",
   "schemas/browser.schema.json",
+  "schemas/frontend-health.schema.json",
   "schemas/startup.schema.json",
   "schemas/environment-assessment.schema.json",
 ];

@@ -35,6 +35,7 @@
     "targets": "all",
     "resources": {
       "../scripts/browser-artifact-safety.mjs": "browser/browser-artifact-safety.mjs",
+      "../scripts/browser-frontend-health.mjs": "browser/browser-frontend-health.mjs",
       "../scripts/browser-runner.mjs": "browser/browser-runner.mjs",
       "../node_modules/@playwright/test/": "browser/node_modules/@playwright/test/",
       "../node_modules/fflate/": "browser/node_modules/fflate/",

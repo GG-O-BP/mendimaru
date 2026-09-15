@@ -19,6 +19,7 @@ use tokio::io::AsyncWriteExt;
 use zip::{CompressionMethod, ZipArchive};
 
 mod doctor;
+pub(crate) mod frontend;
 
 const STORE_DIRECTORY: &str = "browser-tests";
 const MAX_SUITE_BYTES: u64 = 2 * 1024 * 1024;

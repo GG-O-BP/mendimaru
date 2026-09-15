@@ -13,6 +13,8 @@ use std::io::Write;
 use std::str::FromStr;
 use std::time::Duration;
 
+mod assets;
+
 const EXIT_OK: i32 = 0;
 const EXIT_OPERATION_FAILED: i32 = 1;
 const EXIT_INVALID_REQUEST: i32 = 2;
@@ -89,9 +91,16 @@ enum CliCommand {
         session_id: String,
         cursor: Option<String>,
     },
+    BrowserFrontendHealth {
+        target: String,
+        winboat_use: bool,
+        navigation_ms: u64,
+        observation_ms: u64,
+    },
     BrowserDoctor,
     BrowserInstallChromium,
     BrowserTest {
+        winboat_use: bool,
         base_url: Option<String>,
         runtime_session_id: Option<String>,
         suite_path: String,
@@ -134,6 +143,7 @@ impl CliCommand {
             Self::RuntimeStop { .. } => "runtime.stop",
             Self::RuntimeForget { .. } => "runtime.forget",
             Self::RuntimeLogs { .. } => "runtime.logs",
+            Self::BrowserFrontendHealth { .. } => "browser.frontend-health",
             Self::BrowserDoctor => "browser.doctor",
             Self::BrowserInstallChromium => "browser.install",
             Self::BrowserTest { .. } => "browser.test",
@@ -266,6 +276,9 @@ pub fn dispatch_from_env() -> Option<i32> {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
     if arguments.is_empty() {
         return None;
+    }
+    if arguments.first().and_then(|value| value.to_str()) == Some("assets") {
+        return Some(assets::dispatch(&arguments[1..]));
     }
     if matches!(
         arguments.first().and_then(|value| value.to_str()),
@@ -530,7 +543,12 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
         (Some("browser"), None) => Some(
             "Usage: mendimaru browser COMMAND\n\
              \n\
-             Commands: doctor, install chromium, test, artifacts",
+             Commands: doctor, install chromium, frontend-health, test, artifacts",
+        ),
+        (Some("browser"), Some("frontend-health")) => Some(
+            "Usage: mendimaru browser frontend-health (--base-url URL | --runtime-session-id ID)\n\
+             Options: --winboat-use (with --base-url), --navigation-timeout-ms (100–30000, default 15000), --observation-ms (100–10000, default 3000).\n\
+             Observes the frontend without asset bypass or Studio connections; HTTP readiness stays separate.",
         ),
         (Some("browser"), Some("doctor")) => Some(
             "Usage: mendimaru browser doctor\n\
@@ -546,7 +564,8 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
             "Usage: mendimaru browser test (--base-url URL | --runtime-session-id ID)\n\
                     --suite-path SUITE_JSON [options]\n\
              \n\
-             Options include timeout controls, --record-video, --record-har,\n\
+             Options include --winboat-use (protect the configured VM with --base-url),\n\
+             timeout controls, --record-video, --record-har,\n\
              --fail-on-console-error, --fail-on-network-failure,\n\
              --max-artifact-mib, and --retention-runs. See browser-testing.md.",
         ),
@@ -637,6 +656,8 @@ Usage: mendimaru [--json | --ndjson] [--backend ID] [--timeout-seconds SECONDS] 
 
 Commands:
   capabilities                     Print the backend capability snapshot
+  assets watch --project-id ID --rewrite-generated-assets
+                                    Normalize generated UNC widget imports until Ctrl+C (Linux)
   env status                       Report the current environment status
   env ensure                       Ensure required environment dependencies are ready
   studio list                      List installed Studio Pro versions
@@ -657,6 +678,7 @@ Commands:
   runtime stop --session-id ID    Stop a Runtime session
   runtime forget --session-id ID  Forget a stopped or incompatible record
   runtime logs --session-id ID    Read bounded Runtime diagnostic logs
+  browser frontend-health [...]   Observe frontend health without asset bypass
   browser doctor                  Check the browser test toolchain
   browser install chromium        Install the pinned Chromium test browser
   browser test [...]              Run a browser test suite
@@ -693,7 +715,8 @@ async fn run_command(
     let browser_capability = match command {
         CliCommand::BrowserDoctor
         | CliCommand::BrowserInstallChromium
-        | CliCommand::BrowserTest { .. } => Some(CapabilityId::BrowserTest),
+        | CliCommand::BrowserTest { .. }
+        | CliCommand::BrowserFrontendHealth { .. } => Some(CapabilityId::BrowserTest),
         CliCommand::BrowserArtifacts { .. } => Some(CapabilityId::BrowserArtifacts),
         _ => None,
     };
@@ -718,6 +741,23 @@ async fn run_command(
         }
     }
     match command {
+        CliCommand::BrowserFrontendHealth {
+            target,
+            navigation_ms,
+            observation_ms,
+            winboat_use: false,
+        } if !target.starts_with("runtime_") => {
+            return CommandOutput::data(
+                crate::application::browser_frontend_health(
+                    None,
+                    capability_snapshot.manifest.backend,
+                    target,
+                    *navigation_ms,
+                    *observation_ms,
+                )
+                .await?,
+            );
+        }
         CliCommand::BrowserDoctor => {
             return CommandOutput::data(
                 crate::application::browser_doctor(capability_snapshot.manifest.backend).await?,
@@ -732,12 +772,31 @@ async fn run_command(
         CliCommand::BrowserTest {
             base_url: Some(base_url),
             runtime_session_id: None,
+            winboat_use,
             suite_path,
             policy,
         } => {
+            let vm_config = if *winboat_use {
+                if capability_snapshot.manifest.backend != BackendId::LinuxWinboat {
+                    return Err(BackendError::invalid_request(
+                        "--winboat-use requires the linux-winboat backend",
+                    )
+                    .into());
+                }
+                let paths = AppPaths::discover_for_cli().map_err(|_| {
+                    CommandError::new(
+                        CommandErrorCode::ConfigLoadFailed,
+                        "the application directories could not be resolved".into(),
+                    )
+                })?;
+                Some(crate::application::load_config(&paths)?)
+            } else {
+                None
+            };
             return CommandOutput::data(
                 crate::application::browser_test_url(
                     capability_snapshot.manifest.backend,
+                    vm_config.as_ref(),
                     base_url,
                     suite_path,
                     policy.clone(),
@@ -762,6 +821,21 @@ async fn run_command(
     let config = crate::application::load_config(&paths)?;
     match command {
         CliCommand::Capabilities => unreachable!("handled without configuration"),
+        CliCommand::BrowserFrontendHealth {
+            target,
+            navigation_ms,
+            observation_ms,
+            winboat_use: _,
+        } => CommandOutput::data(
+            crate::application::browser_frontend_health(
+                Some(&config),
+                capability_snapshot.manifest.backend,
+                target,
+                *navigation_ms,
+                *observation_ms,
+            )
+            .await?,
+        ),
         CliCommand::BrowserDoctor | CliCommand::BrowserInstallChromium => {
             unreachable!("handled without configuration")
         }
@@ -979,6 +1053,7 @@ async fn run_command(
         CliCommand::BrowserTest {
             base_url: None,
             runtime_session_id: Some(runtime_session_id),
+            winboat_use: _,
             suite_path,
             policy,
         } => CommandOutput::data(
@@ -1585,16 +1660,14 @@ async fn serve_session_keeper(
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
     let Ok(listener) = tokio::net::UnixListener::from_std(listener) else {
-        cleanup_linked_runtimes(session_id).await;
-        crate::winboat::close_all_registered_clients().await;
         return;
     };
+    let mut observation = tokio::time::interval(Duration::from_secs(1));
+    observation.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             accepted = listener.accept() => {
                 let Ok((stream, _)) = accepted else {
-                    cleanup_linked_runtimes(session_id).await;
-                    crate::winboat::close_all_registered_clients().await;
                     return;
                 };
                 let (read_half, mut write_half) = stream.into_split();
@@ -1642,12 +1715,10 @@ async fn serve_session_keeper(
                     return;
                 }
             }
-            _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                if !crate::winboat::registered_client_sessions()
-                    .iter()
-                    .any(|session| session.session_id == session_id)
-                {
+            _ = observation.tick() => {
+                if crate::winboat::registered_session_ended(session_id) {
                     cleanup_linked_runtimes(session_id).await;
+                    crate::winboat::disconnect_client(session_id);
                     return;
                 }
             }
@@ -1705,7 +1776,7 @@ async fn keeper_sessions(
 }
 
 #[cfg(target_os = "linux")]
-async fn keeper_session(
+pub(crate) async fn keeper_session(
     paths: &AppPaths,
     session_id: &str,
 ) -> Result<Option<crate::contracts::StudioSessionStatus>, CommandError> {
@@ -1734,7 +1805,13 @@ async fn request_keeper_stop(paths: &AppPaths, session_id: &str) -> Result<bool,
     let Some(response) = request_session_keeper(&socket_path, "stop").await? else {
         return Ok(false);
     };
-    Ok(response.ok && response.session.is_none())
+    if response.ok && response.session.is_none() {
+        Ok(true)
+    } else {
+        Err(keeper_command_error(
+            "the session keeper did not confirm Studio stopped".to_string(),
+        ))
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1961,8 +2038,110 @@ fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
     }
 }
 
+#[cfg(test)]
+#[test]
+fn frontend_health_rejects_ambiguous_targets_and_unbounded_options() {
+    for arguments in [
+        vec!["frontend-health"],
+        vec![
+            "frontend-health",
+            "--base-url",
+            "http://localhost",
+            "--runtime-session-id",
+            "runtime_00000000000000000000000000000000",
+        ],
+        vec!["frontend-health", "--runtime-session-id", "runtime_bad"],
+        vec![
+            "frontend-health",
+            "--base-url",
+            "runtime_00000000000000000000000000000000",
+        ],
+        vec![
+            "frontend-health",
+            "--base-url",
+            "http://localhost",
+            "--observation-ms",
+            "10001",
+        ],
+        vec![
+            "frontend-health",
+            "--base-url",
+            "http://localhost",
+            "--navigation-timeout-ms",
+            "30001",
+        ],
+        vec![
+            "frontend-health",
+            "--base-url",
+            "http://localhost",
+            "--asset-mirror-url",
+            "http://localhost",
+        ],
+    ] {
+        let args = arguments
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>();
+        assert!(parse_browser_command(&args).is_err(), "{arguments:?}");
+    }
+}
+
 fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> {
     match values.first().map(String::as_str) {
+        Some("frontend-health") => {
+            let (options, flags) = parse_options(
+                &values[1..],
+                &[
+                    "--base-url",
+                    "--runtime-session-id",
+                    "--navigation-timeout-ms",
+                    "--observation-ms",
+                ],
+                &["--winboat-use"],
+            )?;
+            let winboat_use = flags.contains("--winboat-use");
+            let base_url = options.get("--base-url");
+            if winboat_use && base_url.is_none() {
+                return Err(BackendError::invalid_request(
+                    "--winboat-use requires --base-url; Runtime targets acquire use automatically",
+                ));
+            }
+            let session = options.get("--runtime-session-id");
+            if base_url.is_some() == session.is_some() {
+                return Err(BackendError::invalid_request(
+                    "exactly one of --base-url or --runtime-session-id is required",
+                ));
+            }
+            if session.is_some_and(|id| {
+                !id.starts_with("runtime_")
+                    || id.len() != 40
+                    || !id[8..]
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            }) {
+                return Err(BackendError::invalid_request("invalid Runtime session ID"));
+            }
+            if base_url.is_some_and(|url| url.starts_with("runtime_")) {
+                return Err(BackendError::invalid_request("expected an HTTP(S) URL"));
+            }
+            let navigation_ms = options
+                .get("--navigation-timeout-ms")
+                .map(|value| parse_browser_timeout(value))
+                .transpose()?
+                .unwrap_or(15000);
+            let observation_ms = options
+                .get("--observation-ms")
+                .map(|value| parse_browser_timeout(value))
+                .transpose()?
+                .unwrap_or(3000);
+            crate::browser::frontend::validate_options(navigation_ms, observation_ms)?;
+            Ok(CliCommand::BrowserFrontendHealth {
+                winboat_use,
+                target: base_url.or(session).unwrap().clone(),
+                navigation_ms,
+                observation_ms,
+            })
+        }
         Some("doctor") if values.len() == 1 => Ok(CliCommand::BrowserDoctor),
         Some("install")
             if values.get(1).map(String::as_str) == Some("chromium") && values.len() == 2 =>
@@ -1990,6 +2169,7 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
                     "--fail-on-network-failure",
                     "--record-video",
                     "--record-har",
+                    "--winboat-use",
                 ],
             )?;
             let base_url = options.get("--base-url").cloned();
@@ -1997,6 +2177,12 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
             if base_url.is_some() == runtime_session_id.is_some() {
                 return Err(BackendError::invalid_request(
                     "exactly one of --base-url or --runtime-session-id is required",
+                ));
+            }
+            let winboat_use = flags.contains("--winboat-use");
+            if winboat_use && base_url.is_none() {
+                return Err(BackendError::invalid_request(
+                    "--winboat-use requires --base-url; Runtime targets acquire use automatically",
                 ));
             }
             let policy = BrowserTestPolicy {
@@ -2031,6 +2217,7 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
                     .unwrap_or(DEFAULT_BROWSER_RETENTION_RUNS),
             };
             Ok(CliCommand::BrowserTest {
+                winboat_use,
                 base_url,
                 runtime_session_id,
                 suite_path: required_map_option(&options, "--suite-path")?,
@@ -2038,7 +2225,7 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
             })
         }
         _ => Err(BackendError::invalid_request(
-            "expected browser doctor, install chromium, test, or artifacts",
+            "expected browser doctor, install chromium, frontend-health, test, or artifacts",
         )),
     }
 }
@@ -2342,8 +2529,10 @@ fn success_execution(
         }
     }
     stdout.push_str(&json_line(&envelope));
-    let exit_code = if (command == "browser.doctor"
-        && output.data.get("ready").and_then(Value::as_bool) == Some(false))
+    let exit_code = if (command == "browser.frontend-health"
+        && output.data.get("frontendState").and_then(Value::as_str) != Some("healthy"))
+        || (command == "browser.doctor"
+            && output.data.get("ready").and_then(Value::as_bool) == Some(false))
         || (command == "browser.test"
             && output.data.get("outcome").and_then(Value::as_str) == Some("failed"))
     {
@@ -2497,7 +2686,7 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
 }
 
 fn sanitize_backend_error(error: BackendError) -> BackendError {
-    // Only these exact, path-free preflight messages may survive sanitization.
+    // Only these exact, path-free diagnostics may survive sanitization.
     let message = match (
         error.code,
         error.backend,
@@ -2516,6 +2705,20 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
             Some(CapabilityId::StudioStart),
             KEEPER_SOCKET_UNAVAILABLE,
         ) => KEEPER_SOCKET_UNAVAILABLE,
+        (
+            BackendErrorCode::PreconditionFailed,
+            Some(BackendId::LinuxWinboat | BackendId::WindowsNative),
+            Some(CapabilityId::BrowserTest),
+            crate::application::BROWSER_STUDIO_METADATA_UNAVAILABLE,
+        ) => crate::application::BROWSER_STUDIO_METADATA_UNAVAILABLE,
+        (
+            BackendErrorCode::PreconditionFailed,
+            Some(BackendId::LinuxWinboat),
+            Some(_),
+            message @ (crate::winboat::vm_use::BUSY
+            | crate::winboat::vm_use::UNTRUSTED
+            | crate::winboat::vm_use::UPGRADE),
+        ) => message,
         _ => safe_error_message_for_backend(error.code, error.backend),
     };
     let diagnostic_ref = error
@@ -2757,6 +2960,55 @@ mod tests {
     }
 
     #[test]
+    fn winboat_use_flag_requires_a_url_and_diagnostics_are_exactly_allowlisted() {
+        let parsed = parse(&args(&[
+            "browser",
+            "test",
+            "--base-url",
+            "http://127.0.0.1:8080/",
+            "--suite-path",
+            "suite.json",
+            "--winboat-use",
+        ]))
+        .unwrap();
+        assert!(matches!(
+            parsed.command,
+            CliCommand::BrowserTest {
+                winboat_use: true,
+                ..
+            }
+        ));
+        assert!(parse(&args(&[
+            "browser",
+            "test",
+            "--runtime-session-id",
+            "runtime_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--suite-path",
+            "suite.json",
+            "--winboat-use"
+        ]))
+        .is_err());
+        for message in [
+            crate::winboat::vm_use::BUSY,
+            crate::winboat::vm_use::UNTRUSTED,
+            crate::winboat::vm_use::UPGRADE,
+        ] {
+            let mut error = BackendError::operation(
+                BackendId::LinuxWinboat,
+                CapabilityId::RuntimeStop,
+                message,
+            );
+            error.code = BackendErrorCode::PreconditionFailed;
+            assert_eq!(sanitize_backend_error(error.clone()).message, message);
+            error.message.push_str(" /private/credential=secret");
+            assert_eq!(
+                sanitize_backend_error(error).message,
+                safe_error_message(BackendErrorCode::PreconditionFailed)
+            );
+        }
+    }
+
+    #[test]
     fn sanitized_cli_errors_preserve_cause_codes_and_stable_existing_contracts() {
         let mut cause = crate::contracts::BackendError::operation(
             BackendId::LinuxWinboat,
@@ -2903,7 +3155,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "current_thread")]
-    async fn an_unconfirmed_keeper_stop_remains_fallback_eligible() {
+    async fn an_unconfirmed_keeper_stop_cannot_open_a_fallback_rdp_connection() {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixListener;
 
@@ -2925,10 +3177,10 @@ mod tests {
         });
         let paths = AppPaths::for_tests(root.path().join("config"), root.path().join("cache"));
 
-        let stopped = request_keeper_stop(&paths, session_id)
+        let error = request_keeper_stop(&paths, session_id)
             .await
-            .expect("an unconfirmed keeper response is not a CLI transport error");
-        assert!(!stopped);
+            .expect_err("an unconfirmed stop must not fall back to another RDP connection");
+        assert!(error.message.contains("did not confirm Studio stopped"));
         server.join().expect("fixture keeper server completes");
     }
 
@@ -3057,6 +3309,12 @@ mod tests {
             args(&["operation", "list"]),
             args(&["operation", "status", "--operation-id", "install-11.12.2-a"]),
             args(&["operation", "retry", "--operation-id", "install-11.12.2-a"]),
+            args(&[
+                "browser",
+                "frontend-health",
+                "--base-url",
+                "http://localhost:8080",
+            ]),
             args(&["browser", "doctor"]),
             args(&["browser", "install", "chromium"]),
             args(&[

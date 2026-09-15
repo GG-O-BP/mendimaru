@@ -29,6 +29,7 @@ mendimaru runtime url --session-id RUNTIME_SESSION_ID
 mendimaru runtime stop --session-id RUNTIME_SESSION_ID
 mendimaru runtime forget --session-id RUNTIME_SESSION_ID
 mendimaru runtime logs --session-id RUNTIME_SESSION_ID [--cursor CURSOR]
+mendimaru browser frontend-health (--base-url URL | --runtime-session-id RUNTIME_SESSION_ID)
 mendimaru browser doctor
 mendimaru browser install chromium
 mendimaru browser test (--base-url URL | --runtime-session-id RUNTIME_SESSION_ID) --suite-path SUITE_JSON
@@ -220,6 +221,20 @@ for the exact PID and process start tick through the retained connection and
 waits for Windows to report that process gone; killing only the local FreeRDP
 client never counts as a successful stop.
 
+`browser test --runtime-session-id` uses the registered owner or bounded keeper
+IPC for Studio version metadata. Missing, invalid, or timed-out metadata returns
+a retryable `precondition_failed` for `browser.test`, with the diagnostic
+`Studio metadata is unavailable from the session owner; check studio status and retry (no RDP connection was opened)`.
+There is no RDP discovery fallback on browser or Runtime observation paths,
+including a terminal `runtime wait` timeout. Explicit Studio discovery retains
+its guest-query behavior when no owned session is available.
+
+A disconnected RDP client leaves ownership and project access intact and reports
+Studio process state `unknown`. Only a newer authenticated successful report
+confirming Studio exit allows automatic linked Runtime cleanup. A failed keeper
+stop returns an error and preserves ownership; it cannot fall back to a second
+RDP connection. IPC listener failures likewise do not initiate Runtime teardown.
+
 Before launching Studio or changing Runtime forwarding, the keeper checks the
 socket pathname length in bytes and creates, configures, and removes a real
 private probe socket with the same filename length. Linux accepts at most 107
@@ -252,3 +267,26 @@ Passwords, tokens, installer URLs, project paths, Windows command lines, and
 diagnostic observations are excluded from CLI DTOs, operation records, and
 checked-in fixtures. Backend diagnostic text is reduced to stable error codes
 and allowlisted messages before serialization.
+
+## WinBoat VM use
+
+`browser test --runtime-session-id` automatically holds shared use for a WinBoat
+Runtime. `browser test --base-url <url> --winboat-use` joins the configured VM for
+the complete command without requiring a Runtime record in this cache. The flag
+requires the Linux WinBoat backend and a URL target. Lifecycle lock acquisition
+waits at most three seconds per VM (or the shorter command timeout) and returns
+`precondition_failed` with a retryable, path-free busy message on contention.
+See [WinBoat VM use](winboat-vm-use.md) for identity, generations, and limitations.
+
+## Foreground generated-asset repair (Linux)
+
+`mendimaru assets watch --project-id ID --rewrite-generated-assets` keeps Studio's
+generated widget imports relative across rebuilds. It emits a dedicated NDJSON
+status stream until Ctrl+C/SIGTERM, outside the normal command timeout/envelope.
+See [WinBoat assets](winboat-assets.md) for its opt-in, exact write scope,
+lifecycle, limits, and ordinary-browser validation.
+
+`browser frontend-health` provides a separate opt-in observation without asset
+bypass; HTTP readiness retains its lightweight contract. See the
+[frontend diagnosis contract](browser-testing.md#opt-in-frontend-health-144)
+for state meanings, limits and exit codes.

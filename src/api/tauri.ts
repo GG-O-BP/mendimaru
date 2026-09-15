@@ -22,6 +22,7 @@ import type {
 } from "../domain/types";
 
 const commands = {
+  diagnoseFrontendHealth: "diagnose_frontend_health",
   getConfig: "get_config",
   getLocalization: "get_localization",
   setLanguagePreference: "set_language_preference",
@@ -75,6 +76,11 @@ const commands = {
 } as const;
 
 export const tauriApi = {
+  diagnoseFrontendHealth: (target: string) =>
+    invoke<import("../domain/types").FrontendHealth>(
+      commands.diagnoseFrontendHealth,
+      { target },
+    ),
   previewWinBoatNvram: () =>
     invoke<import("../domain/types").NvramRecoveryPreview>(
       commands.previewWinBoatNvram,

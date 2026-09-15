@@ -7,7 +7,10 @@ use super::operation::{
 use super::project_access::{self, ProjectAccessLease};
 use super::remote_app::RemoteAppProcess;
 use super::scripts::{studio_sessions_script, StudioSessionScriptMode};
-use super::security::{authenticated_envelope, AuthenticatedPayload, OperationSecurity};
+use super::security::{
+    authenticated_envelope, AuthenticatedPayload, OperationSecurity, ReportSequenceTracker,
+    MAX_REPORT_BYTES,
+};
 use super::studio::{secure_shared_directory, write_command_script};
 use crate::contracts::{
     StudioConnectionState, StudioProcessState, StudioReconnectUnavailable, StudioSessionStatus,
@@ -20,7 +23,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -535,8 +538,11 @@ fn client_is_connected(session_id: &str) -> bool {
     let Ok(mut clients) = clients() else {
         return false;
     };
-    retain_live_clients(&mut clients);
-    if clients.contains_key(session_id) {
+    refresh_registered_clients(&mut clients);
+    if clients.get(session_id).is_some_and(|client| {
+        client.status.connection == StudioConnectionState::Connected
+            && client.status.state != StudioProcessState::Stopped
+    }) {
         return true;
     }
     drop(clients);
@@ -547,9 +553,10 @@ pub(crate) fn registered_client_sessions() -> Vec<StudioSessionStatus> {
     let Ok(mut clients) = clients() else {
         return Vec::new();
     };
-    retain_live_clients(&mut clients);
+    refresh_registered_clients(&mut clients);
     let mut sessions = clients
         .values()
+        .filter(|client| client.status.state != StudioProcessState::Stopped)
         .map(|client| client.status.clone())
         .collect::<Vec<_>>();
     drop(clients);
@@ -567,33 +574,93 @@ pub(crate) fn registered_client_sessions() -> Vec<StudioSessionStatus> {
     sessions
 }
 
-fn retain_live_clients(clients: &mut HashMap<String, RegisteredClient>) {
-    clients.retain(|session_id, client| {
-        match client.process.try_wait() {
-            Ok(Some(_)) => return false,
-            Err(_) => return true,
-            Ok(None) => {}
+fn refresh_registered_clients(clients: &mut HashMap<String, RegisteredClient>) {
+    for (session_id, client) in clients.iter_mut() {
+        if client.status.state == StudioProcessState::Stopped {
+            continue;
         }
+        // A lost RDP client is not evidence that Studio exited. Read the
+        // authenticated continuation even after disconnect, and retain its
+        // control state and project lease until termination is confirmed.
         match read_session_active(&mut client.control) {
             Ok(false) => {
                 terminate_client_process(&mut client.process);
                 forget_registered_project_session(session_id, client);
-                false
+                client.project_access.take();
+                client.status.state = StudioProcessState::Stopped;
             }
-            Ok(true) | Err(_) => true,
+            Ok(true) => {}
+            Err(_) => client.status.state = StudioProcessState::Unknown,
         }
-    });
+        if !matches!(client.process.try_wait(), Ok(None)) {
+            client.status.connection = StudioConnectionState::Disconnected;
+            if client.status.state != StudioProcessState::Stopped {
+                client.status.state = StudioProcessState::Unknown;
+            }
+            client.status.reconnectable = false;
+            client.status.reconnect_unavailable =
+                Some(StudioReconnectUnavailable::WindowUnavailable);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn registered_session_ended(session_id: &str) -> bool {
+    let Ok(mut clients) = clients() else {
+        return false;
+    };
+    refresh_registered_clients(&mut clients);
+    clients
+        .get(session_id)
+        .is_some_and(|client| client.status.state == StudioProcessState::Stopped)
+}
+
+/// Observe an owned session without guest discovery or a new RDP connection.
+#[cfg(target_os = "linux")]
+pub(crate) async fn observed_session(
+    session_id: &str,
+) -> Result<Option<StudioSessionStatus>, String> {
+    parse_session_id(session_id).map_err(|error| error.message)?;
+    {
+        let mut clients = clients().map_err(|error| error.message)?;
+        refresh_registered_clients(&mut clients);
+        if let Some(client) = clients.get(session_id) {
+            return Ok(Some(client.status.clone()));
+        }
+    }
+    let paths = crate::app_paths::AppPaths::discover_for_cli()?;
+    crate::cli::keeper_session(&paths, session_id)
+        .await
+        .map_err(|error| error.message)
 }
 
 fn read_session_active(control: &mut RegisteredControl) -> Result<bool, String> {
-    let content = fs::read(&control.report_path)
-        .map_err(|error| format!("could not read the Studio Pro session report: {error}"))?;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(&control.report_path)
+        .map_err(|_| "could not open the Studio Pro session report")?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| "could not inspect the Studio Pro session report")?;
+    if !metadata.is_file() || metadata.len() > MAX_REPORT_BYTES {
+        return Err("the Studio Pro session report is not a bounded regular file".to_string());
+    }
+    let mut content = Vec::new();
+    file.take(MAX_REPORT_BYTES + 1)
+        .read_to_end(&mut content)
+        .map_err(|_| "could not read the Studio Pro session report")?;
     let authenticated = super::security::authenticate_report(&content, &control.security)
         .map_err(|error| error.to_string())?;
-    if authenticated.sequence < control.previous_report.sequence {
-        return Err("the Studio Pro session report sequence regressed".to_string());
-    }
-    if authenticated.sequence == control.previous_report.sequence {
+    if !ReportSequenceTracker::after(&control.previous_report)
+        .accept(&authenticated)
+        .map_err(|error| error.to_string())?
+    {
         return Ok(true);
     }
     let report = super::operation::parse_install_report(&authenticated.payload)
@@ -650,10 +717,7 @@ pub(crate) async fn stop_registered_client(
     let identity = parse_session_id(session_id)?;
     let mut client = {
         let mut clients = clients()?;
-        clients.retain(|_, client| match client.process.try_wait() {
-            Ok(Some(_)) => false,
-            Ok(None) | Err(_) => true,
-        });
+        refresh_registered_clients(&mut clients);
         let Some(client) = clients.remove(session_id) else {
             drop(clients);
             if stopping_sessions()?.contains_key(session_id) {
@@ -661,6 +725,9 @@ pub(crate) async fn stop_registered_client(
             }
             return Ok(false);
         };
+        if client.status.state == StudioProcessState::Stopped {
+            return Ok(true);
+        }
         match stopping_sessions() {
             Ok(mut stopping) => {
                 stopping.insert(session_id.to_string(), client.status.clone());
@@ -688,21 +755,14 @@ pub(crate) async fn stop_registered_client(
         return Ok(true);
     }
 
-    let connected = match client.process.try_wait() {
-        Ok(Some(_)) => false,
-        Ok(None) | Err(_) => true,
-    };
-    if connected {
-        match clients() {
-            Ok(mut clients) => {
-                if let Some(previous) = clients.insert(session_id.to_string(), client) {
-                    terminate_client(previous.process);
-                }
+    // A failed stop, including a disconnected transport, does not prove exit.
+    match clients() {
+        Ok(mut clients) => {
+            if let Some(previous) = clients.insert(session_id.to_string(), client) {
+                terminate_client(previous.process);
             }
-            Err(_) => terminate_client(client.process),
         }
-    } else {
-        let _ = client.process.wait();
+        Err(_) => terminate_client(client.process),
     }
     if let Ok(mut stopping) = stopping_sessions() {
         stopping.remove(session_id);
@@ -818,6 +878,7 @@ fn register_client(
             return Err(error);
         }
     };
+    clients.retain(|_, client| client.status.state != StudioProcessState::Stopped);
     if let Some(mut previous) = clients.insert(
         session_id.to_string(),
         RegisteredClient {
@@ -839,7 +900,7 @@ fn forget_registered_project_session(session_id: &str, client: &RegisteredClient
     }
 }
 
-fn disconnect_client(session_id: &str) {
+pub(crate) fn disconnect_client(session_id: &str) {
     if let Ok(mut clients) = clients() {
         if let Some(mut client) = clients.remove(session_id) {
             let _ = client.process.kill();
@@ -1202,6 +1263,51 @@ mod tests {
             cleanup_report: false,
         };
 
+        // Neither a stale/reused sequence nor an authenticated observation
+        // failure may turn missing sessions into a confirmed Studio exit.
+        for invalid in [
+            authenticated_report_fixture(&control.security, 1, closed_payload),
+            authenticated_report_fixture(&control.security, 2, closed_payload),
+            authenticated_report_fixture(
+                &control.security,
+                3,
+                br#"{"state":"failed","timestamp":"2026-08-23T03:01:00Z","sessions":[]}"#,
+            ),
+            "{\"sessions\":[]}".to_string(),
+        ] {
+            std::fs::write(&control.report_path, invalid).expect("write invalid report");
+            assert!(read_session_active(&mut control).is_err());
+            assert_eq!(control.previous_report.sequence, 2);
+        }
+        std::fs::File::create(&control.report_path)
+            .unwrap()
+            .set_len(super::MAX_REPORT_BYTES + 1)
+            .unwrap();
+        assert!(read_session_active(&mut control).is_err());
+        std::fs::remove_file(&control.report_path).unwrap();
+        assert!(read_session_active(&mut control).is_err());
+        #[cfg(unix)]
+        {
+            let target = directory.path().join("untrusted-report");
+            std::fs::write(
+                &target,
+                authenticated_report_fixture(&control.security, 3, closed_payload),
+            )
+            .unwrap();
+            std::os::unix::fs::symlink(&target, &control.report_path).unwrap();
+            assert!(read_session_active(&mut control).is_err());
+            std::fs::remove_file(&control.report_path).unwrap();
+            let fifo =
+                std::ffi::CString::new(control.report_path.as_os_str().as_encoded_bytes()).unwrap();
+            assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+            assert!(read_session_active(&mut control).is_err());
+            std::fs::remove_file(&control.report_path).unwrap();
+        }
+        std::fs::write(
+            &control.report_path,
+            authenticated_report_fixture(&control.security, 3, closed_payload),
+        )
+        .expect("restore authenticated exit report");
         assert!(!read_session_active(&mut control).expect("closed report is valid"));
         assert_eq!(control.previous_report.sequence, 3);
     }

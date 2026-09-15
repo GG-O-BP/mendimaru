@@ -214,7 +214,8 @@
             "playwright-core",
             "playwright",
             "fflate",
-            "browser-artifact-safety.mjs"
+            "browser-artifact-safety.mjs",
+            "browser-frontend-health.mjs"
           ]
         }
       }

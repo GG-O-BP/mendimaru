@@ -45,7 +45,75 @@ pub async fn save_settings(
         });
     }
 
+    // Preserve the existing typed Compose validation errors before attempting
+    // VM use, and identify the selected VM from the validated plan. The plan
+    // and revision are checked again under the lease before writing anything.
+    crate::config::plan_shared_mount(
+        &PathBuf::from(&config.compose_file),
+        &config.shared_directory,
+    )
+    .map_err(compose_command_error)?
+    .apply_detection(&mut config);
+
     let previous_config = crate::config::load_config(app).ok();
+    let mut identities = vec![&config];
+    if let Some(previous) = previous_config.as_ref() {
+        identities.push(previous);
+    }
+    identities.sort_by_key(|value| {
+        (
+            value.container_runtime.as_str(),
+            value.container_name.as_str(),
+        )
+    });
+    identities.dedup_by_key(|value| {
+        (
+            value.container_runtime.as_str(),
+            value.container_name.as_str(),
+        )
+    });
+    let first = crate::winboat::vm_use::acquire(
+        identities[0],
+        crate::winboat::vm_use::Mode::Exclusive,
+        crate::contracts::CapabilityId::RuntimeStart,
+    )
+    .await?;
+    let second = if identities.len() == 2 {
+        Some(
+            crate::winboat::vm_use::acquire(
+                identities[1],
+                crate::winboat::vm_use::Mode::Exclusive,
+                crate::contracts::CapabilityId::RuntimeStart,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    let work = save_settings_with_lease(
+        app,
+        config,
+        apply_mount,
+        expected_compose_revision,
+        previous_config,
+    );
+    first
+        .run(async {
+            match second {
+                Some(lease) => lease.run(work).await,
+                None => work.await,
+            }
+        })
+        .await
+}
+
+async fn save_settings_with_lease(
+    app: &AppHandle,
+    mut config: AppConfig,
+    apply_mount: bool,
+    expected_compose_revision: Option<String>,
+    previous_config: Option<AppConfig>,
+) -> Result<SettingsSaveResult, CommandError> {
     let _maintenance = crate::winboat::maintenance::shared(&config)?;
     let _previous_maintenance = previous_config
         .as_ref()

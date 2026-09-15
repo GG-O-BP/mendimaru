@@ -55,7 +55,8 @@ live/Windows gates and never becomes a prerequisite for this matrix.
 
 `cli::runtime_stop_tests` runs CLI command dispatch and the real session-keeper
 loop in isolated subprocesses with a registered, live RDP stand-in. Fake Compose
-disconnects that client while its first recreation is held at a barrier. The
+disconnects that client while its first recreation is held at a barrier, and
+the fixture supplies a newer authenticated Studio-exit report. The
 tests assert one recreation, no overlapping Compose children, restored Compose
 bytes, and a final stopped record. They also inject a first-recreation failure
 and verify the keeper's serialized recovery and an idempotent explicit retry.
@@ -87,6 +88,56 @@ Runtime forwarding is restored with one serialized Compose recreation, untrusted
 files survive, and the same socket path can be bound on retry. These isolated
 fixtures do not claim a live Studio Pro or VM reproduction.
 
+## Safe browser and Runtime observation (#148)
+
+The ordinary Rust suite runs the real keeper loop, Unix IPC, CLI dispatch, and
+Chromium against an HTTP fixture with a linked Studio session. Repeated browser
+tests and Runtime status/wait/url/logs/list leave the client, Studio identity,
+Compose bytes, and published-port fixture unchanged, with zero RDP launches or
+Compose recreations. The local GUI-owner path is covered separately. Missing,
+timed-out, malformed, wrong-session, wrong-schema, invalid-version, and stopped
+metadata fail with a bounded, retryable, path-free browser diagnostic.
+
+RDP loss plus missing/tampered reports preserves the Runtime across automatic
+keeper ticks. A later authenticated Studio-exit report permits one cleanup.
+Readiness timeout cases cover both available and missing owner metadata without
+guest diagnostics or teardown. Explicit guest discovery is still distinct from
+owner observation; the #99 authoritative-absence checks remain required.
+
+For an **already-running actual keeper-linked Studio F5 session**, run:
+
+```bash
+MENDIMARU_CONFIG_DIR=/absolute/test/config \
+MENDIMARU_CACHE_DIR=/absolute/test/cache \
+MENDIMARU_E2E_BINARY=/absolute/current/mendimaru \
+MENDIMARU_E2E_RUNTIME_SESSION_ID=runtime_0123456789abcdef0123456789abcdef \
+MENDIMARU_E2E_KEEPER_PID=12345 \
+MENDIMARU_E2E_BROWSER_SUITE=/absolute/read-only-smoke.browser.json \
+node scripts/test-browser-winboat-live.mjs
+```
+
+Choose a read-only suite that asserts the actual app's heading or another stable
+element. The gate requires HTTP-ready `studio-run-locally` mode and trusted keeper
+metadata. It executes two browser runs with strict console/network checks and ten
+Runtime status reads, sampling before/during/after and for three seconds afterward.
+It compares the actual container ID/status, Compose SHA-256, all published ports,
+Studio PID/start identity from the authenticated session owner, keeper PID/start
+identity, and current-user FreeRDP PID/parent/start identities. Samples run at
+500 ms intervals plus command duration; shorter-lived processes can escape this
+sampling, so the fixture's zero-launch assertion remains complementary evidence.
+The Studio identity is owner-reported, not an independent Windows process query.
+
+The gate emits a JSON report without process arguments, project paths, credentials,
+or Compose content. It never starts/stops Studio or restores Compose. Preparing
+or tearing down a live test session must follow the disposable-snapshot rules
+above; the existing-session observer itself needs no mutation opt-in. Missing
+prerequisites fail rather than silently substituting an HTTP-only or unlinked
+session. Automated gate fixtures do not count as an actual VM run.
+
+The [2026-09-15 verification record](issue-148-verification.md) includes an actual
+restored-VM browser run, missing-owner diagnostic, RDP loss, authenticated Studio
+stop, and original-environment restoration, with explicit app-test limitations.
+
 ## Contract schema upgrade checklist
 
 Whenever `CONTRACT_SCHEMA_VERSION`, a runtime schema, or a persisted WinBoat
@@ -108,3 +159,31 @@ record layout changes, add a PR item for each step below:
 Fixture builders must not bypass or weaken schema validation, file-type checks,
 permissions, bounded reads, hashes, or process identity checks. They also must
 not include real host paths, credentials, command lines, or remote output.
+
+## Frontend diagnosis without asset bypass (#144)
+
+The keeper observation fixture also executes `browser frontend-health`, checks
+Studio/HTTP/frontend fields separately and requires `assetBypass: false`.
+The client, Studio identity, Compose bytes and port inspection remain unchanged,
+with zero RDP launches or Compose recreations. The CLI/Chromium frontend matrix
+uses ordinary network resolution, including a failing shared UNC import; it
+does not use the existing browser-test mirror as frontend-health evidence.
+Runtime-linked and explicit `--winboat-use` URL diagnoses also hold browser
+navigation at a barrier while concurrent stop/start/recreate requests must
+return a busy precondition, preserving Studio, Compose and ports.
+
+## VM use across processes (#150)
+
+The ordinary Rust suite includes real subprocess reader/writer, different-cache/
+Compose-copy identity, writer competition, timeout/cancel/SIGKILL, simulated PID
+reuse, stale-generation, forbidden upgrade, and file-trust tests. Real Chromium fixtures for linked Runtime and plain URL targets in another cache
+hold navigation open while Runtime start/stop/recreate must return a
+structured busy precondition and preserve Compose, container inspection, and the
+keeper; after release, one cleanup succeeds. These fixtures do not mutate a real VM.
+
+No Runtime/session record fields or contract schemas change. Existing 3.0.0 legacy
+invalidation and 4.0.0 creation/discovery, authenticated post-success recovery,
+Compose rollback, maintenance locks, and keeper socket regressions remain in the
+ordinary suite. The new 16-byte lock-generation hint never determines process
+liveness, and empty/stale contents cannot evict a live owner. See the
+[identity, trust, and acquisition policy](winboat-vm-use.md).

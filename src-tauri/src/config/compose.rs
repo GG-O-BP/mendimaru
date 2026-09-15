@@ -1085,6 +1085,19 @@ pub(crate) fn winboat_compose_service_name(path: &Path) -> Result<String, String
     winboat_service_name(&compose).map_err(String::from)
 }
 
+/// A managed VM must have one explicit, stable Compose container name.
+#[cfg(target_os = "linux")]
+pub(crate) fn winboat_management_name(path: &Path) -> Result<String, String> {
+    let compose = read_compose(path)?;
+    let service = winboat_service_name(&compose).map_err(String::from)?;
+    service_value_named(&compose, &service)
+        .and_then(|service| service.get("container_name"))
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| "a managed WinBoat requires an explicit container name".to_string())
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) struct NvramMountPlan {
     pub directory: PathBuf,
