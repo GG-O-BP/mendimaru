@@ -68,6 +68,30 @@ pub(crate) async fn acquire_for(
 }
 
 #[cfg(target_os = "linux")]
+pub(crate) struct Observation {
+    key: String,
+    file: std::fs::File,
+}
+#[cfg(target_os = "linux")]
+impl Observation {
+    pub(crate) fn snapshot(&self) -> Option<(String, String)> {
+        use std::os::unix::fs::FileExt;
+        let mut bytes = [0u8; 16];
+        let length = self.file.read_at(&mut bytes, 0).ok()?;
+        let generation = match length {
+            0 => "uninitialized".into(),
+            16 => bytes.iter().map(|b| format!("{b:02x}")).collect(),
+            _ => return None,
+        };
+        Some((self.key.clone(), generation))
+    }
+}
+#[cfg(target_os = "linux")]
+pub(crate) fn observation() -> Option<Observation> {
+    linux::observation()
+}
+
+#[cfg(target_os = "linux")]
 fn error(capability: CapabilityId, message: &'static str) -> BackendError {
     let mut error = BackendError::operation(BackendId::LinuxWinboat, capability, message);
     error.code = BackendErrorCode::PreconditionFailed;
@@ -192,6 +216,21 @@ mod linux {
             return Err(UNTRUSTED);
         }
         Ok(file)
+    }
+
+    pub(super) fn observation() -> Option<Observation> {
+        HELD.try_with(|leases| {
+            let held = leases.last()?;
+            if held.owner != process_identity().ok()? {
+                return None;
+            }
+            Some(Observation {
+                key: held.key.clone(),
+                file: held._file.try_clone().ok()?,
+            })
+        })
+        .ok()
+        .flatten()
     }
 
     pub(super) async fn acquire(

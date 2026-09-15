@@ -100,6 +100,7 @@ enum CliCommand {
     BrowserDoctor,
     BrowserInstallChromium,
     BrowserTest {
+        build_marker: Option<String>,
         winboat_use: bool,
         base_url: Option<String>,
         runtime_session_id: Option<String>,
@@ -565,7 +566,7 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
                     --suite-path SUITE_JSON [options]\n\
              \n\
              Options include --winboat-use (protect the configured VM with --base-url),\n\
-             timeout controls, --record-video, --record-har,\n\
+             --build-marker FILE (updated on each WinBoat build), timeout controls, --record-video, --record-har,\n\
              --fail-on-console-error, --fail-on-network-failure,\n\
              --max-artifact-mib, and --retention-runs. See browser-testing.md.",
         ),
@@ -772,6 +773,7 @@ async fn run_command(
         CliCommand::BrowserTest {
             base_url: Some(base_url),
             runtime_session_id: None,
+            build_marker,
             winboat_use,
             suite_path,
             policy,
@@ -797,6 +799,7 @@ async fn run_command(
                 crate::application::browser_test_url(
                     capability_snapshot.manifest.backend,
                     vm_config.as_ref(),
+                    build_marker.as_deref(),
                     base_url,
                     suite_path,
                     policy.clone(),
@@ -1053,6 +1056,7 @@ async fn run_command(
         CliCommand::BrowserTest {
             base_url: None,
             runtime_session_id: Some(runtime_session_id),
+            build_marker,
             winboat_use: _,
             suite_path,
             policy,
@@ -1060,6 +1064,7 @@ async fn run_command(
             crate::application::browser_test_runtime(
                 &config,
                 runtime_session_id,
+                build_marker.as_deref(),
                 suite_path,
                 policy.clone(),
             )
@@ -2158,6 +2163,7 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
                     "--base-url",
                     "--runtime-session-id",
                     "--suite-path",
+                    "--build-marker",
                     "--navigation-timeout-ms",
                     "--action-timeout-ms",
                     "--assertion-timeout-ms",
@@ -2216,7 +2222,14 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
                     .transpose()?
                     .unwrap_or(DEFAULT_BROWSER_RETENTION_RUNS),
             };
+            let build_marker = options.get("--build-marker").cloned();
+            if build_marker.is_some() && !winboat_use && base_url.is_some() {
+                return Err(BackendError::invalid_request(
+                    "--build-marker requires a WinBoat target",
+                ));
+            }
             Ok(CliCommand::BrowserTest {
+                build_marker,
                 winboat_use,
                 base_url,
                 runtime_session_id,

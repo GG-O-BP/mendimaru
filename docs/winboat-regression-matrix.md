@@ -187,3 +187,10 @@ Compose rollback, maintenance locks, and keeper socket regressions remain in the
 ordinary suite. The new 16-byte lock-generation hint never determines process
 liveness, and empty/stale contents cannot evict a live owner. See the
 [identity, trust, and acquisition policy](winboat-vm-use.md).
+
+## Browser environment change evidence (#154)
+
+WinBoat browser runs now record bounded environment observations and interrupt on
+changes. See [environment generations](browser-environment-observation.md) for
+`--build-marker`, JSON comparability, preparation boundaries, observation limits,
+and the separate external-change fixture and disposable-VM gates.
