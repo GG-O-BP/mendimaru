@@ -226,7 +226,8 @@ try {
                         $ended = $true
                     }
                 } catch {
-                    $ended = $true
+                    # Preserve the session on an observation failure.
+                    continue
                 }
                 if ($ended) {
                     Write-SessionResult 'succeeded' 'Studio Pro session closed.' $null @()

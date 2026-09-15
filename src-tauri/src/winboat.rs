@@ -31,8 +31,8 @@ pub use container::{
 pub(crate) use operation::WindowsOperationFailure;
 pub(crate) use sessions::stop as stop_studio_session;
 pub(crate) use sessions::{
-    cleanup_dead_session_lock, close_all_registered_clients, registered_client_sessions,
-    stop_registered_client,
+    cleanup_dead_session_lock, close_all_registered_clients, disconnect_client, observed_session,
+    registered_client_sessions, registered_session_ended, stop_registered_client,
 };
 pub(crate) use sessions::{list as studio_sessions, reconnect as reconnect_studio_session};
 pub(crate) use staging::stage_installer;

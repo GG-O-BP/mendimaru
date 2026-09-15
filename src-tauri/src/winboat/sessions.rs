@@ -535,8 +535,11 @@ fn client_is_connected(session_id: &str) -> bool {
     let Ok(mut clients) = clients() else {
         return false;
     };
-    retain_live_clients(&mut clients);
-    if clients.contains_key(session_id) {
+    refresh_registered_clients(&mut clients);
+    if clients.get(session_id).is_some_and(|client| {
+        client.status.connection == StudioConnectionState::Connected
+            && client.status.state != StudioProcessState::Stopped
+    }) {
         return true;
     }
     drop(clients);
@@ -547,9 +550,10 @@ pub(crate) fn registered_client_sessions() -> Vec<StudioSessionStatus> {
     let Ok(mut clients) = clients() else {
         return Vec::new();
     };
-    retain_live_clients(&mut clients);
+    refresh_registered_clients(&mut clients);
     let mut sessions = clients
         .values()
+        .filter(|client| client.status.state != StudioProcessState::Stopped)
         .map(|client| client.status.clone())
         .collect::<Vec<_>>();
     drop(clients);
@@ -567,22 +571,62 @@ pub(crate) fn registered_client_sessions() -> Vec<StudioSessionStatus> {
     sessions
 }
 
-fn retain_live_clients(clients: &mut HashMap<String, RegisteredClient>) {
-    clients.retain(|session_id, client| {
-        match client.process.try_wait() {
-            Ok(Some(_)) => return false,
-            Err(_) => return true,
-            Ok(None) => {}
+fn refresh_registered_clients(clients: &mut HashMap<String, RegisteredClient>) {
+    for (session_id, client) in clients.iter_mut() {
+        if client.status.state == StudioProcessState::Stopped {
+            continue;
         }
+        // A lost RDP client is not evidence that Studio exited. Read the
+        // authenticated continuation even after disconnect, and retain its
+        // control state and project lease until termination is confirmed.
         match read_session_active(&mut client.control) {
             Ok(false) => {
                 terminate_client_process(&mut client.process);
                 forget_registered_project_session(session_id, client);
-                false
+                client.project_access.take();
+                client.status.state = StudioProcessState::Stopped;
             }
-            Ok(true) | Err(_) => true,
+            Ok(true) => {}
+            Err(_) => client.status.state = StudioProcessState::Unknown,
         }
-    });
+        if !matches!(client.process.try_wait(), Ok(None)) {
+            client.status.connection = StudioConnectionState::Disconnected;
+            if client.status.state != StudioProcessState::Stopped {
+                client.status.state = StudioProcessState::Unknown;
+            }
+            client.status.reconnectable = false;
+            client.status.reconnect_unavailable =
+                Some(StudioReconnectUnavailable::WindowUnavailable);
+        }
+    }
+}
+
+pub(crate) fn registered_session_ended(session_id: &str) -> bool {
+    let Ok(mut clients) = clients() else {
+        return false;
+    };
+    refresh_registered_clients(&mut clients);
+    clients
+        .get(session_id)
+        .is_some_and(|client| client.status.state == StudioProcessState::Stopped)
+}
+
+/// Observe an owned session without guest discovery or a new RDP connection.
+pub(crate) async fn observed_session(
+    session_id: &str,
+) -> Result<Option<StudioSessionStatus>, String> {
+    parse_session_id(session_id).map_err(|error| error.message)?;
+    {
+        let mut clients = clients().map_err(|error| error.message)?;
+        refresh_registered_clients(&mut clients);
+        if let Some(client) = clients.get(session_id) {
+            return Ok(Some(client.status.clone()));
+        }
+    }
+    let paths = crate::app_paths::AppPaths::discover_for_cli()?;
+    crate::cli::keeper_session(&paths, session_id)
+        .await
+        .map_err(|error| error.message)
 }
 
 fn read_session_active(control: &mut RegisteredControl) -> Result<bool, String> {
@@ -650,10 +694,7 @@ pub(crate) async fn stop_registered_client(
     let identity = parse_session_id(session_id)?;
     let mut client = {
         let mut clients = clients()?;
-        clients.retain(|_, client| match client.process.try_wait() {
-            Ok(Some(_)) => false,
-            Ok(None) | Err(_) => true,
-        });
+        refresh_registered_clients(&mut clients);
         let Some(client) = clients.remove(session_id) else {
             drop(clients);
             if stopping_sessions()?.contains_key(session_id) {
@@ -661,6 +702,9 @@ pub(crate) async fn stop_registered_client(
             }
             return Ok(false);
         };
+        if client.status.state == StudioProcessState::Stopped {
+            return Ok(true);
+        }
         match stopping_sessions() {
             Ok(mut stopping) => {
                 stopping.insert(session_id.to_string(), client.status.clone());
@@ -688,21 +732,14 @@ pub(crate) async fn stop_registered_client(
         return Ok(true);
     }
 
-    let connected = match client.process.try_wait() {
-        Ok(Some(_)) => false,
-        Ok(None) | Err(_) => true,
-    };
-    if connected {
-        match clients() {
-            Ok(mut clients) => {
-                if let Some(previous) = clients.insert(session_id.to_string(), client) {
-                    terminate_client(previous.process);
-                }
+    // A failed stop, including a disconnected transport, does not prove exit.
+    match clients() {
+        Ok(mut clients) => {
+            if let Some(previous) = clients.insert(session_id.to_string(), client) {
+                terminate_client(previous.process);
             }
-            Err(_) => terminate_client(client.process),
         }
-    } else {
-        let _ = client.process.wait();
+        Err(_) => terminate_client(client.process),
     }
     if let Ok(mut stopping) = stopping_sessions() {
         stopping.remove(session_id);
@@ -818,6 +855,7 @@ fn register_client(
             return Err(error);
         }
     };
+    clients.retain(|_, client| client.status.state != StudioProcessState::Stopped);
     if let Some(mut previous) = clients.insert(
         session_id.to_string(),
         RegisteredClient {
@@ -839,7 +877,7 @@ fn forget_registered_project_session(session_id: &str, client: &RegisteredClient
     }
 }
 
-fn disconnect_client(session_id: &str) {
+pub(crate) fn disconnect_client(session_id: &str) {
     if let Ok(mut clients) = clients() {
         if let Some(mut client) = clients.remove(session_id) {
             let _ = client.process.kill();

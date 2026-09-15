@@ -62,16 +62,23 @@ impl Fixture {
         let health_address = listener.local_addr().unwrap();
         let stopping = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stopped = stopping.clone();
+        let unready = path.join("http-unready");
         let health = thread::spawn(move || {
             while !stopped.load(std::sync::atomic::Ordering::Relaxed) {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(1)))
                     .unwrap();
-                let _ = stream.read(&mut [0; 2048]);
-                let _ = stream.write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-                );
+                let mut request = [0; 2048];
+                let _ = stream.read(&mut request);
+                let response = if unready.exists() && request.starts_with(b"GET / HTTP/") {
+                    b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .as_slice()
+                } else {
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                        .as_slice()
+                };
+                let _ = stream.write_all(response);
             }
         });
         let original = "services:\n  windows:\n    image: ghcr.io/dockur/windows:e2e-fixture\n    container_name: WinBoat\n    volumes:\n      - fixture-storage:/storage\n    ports:\n      - 127.0.0.1:47280:7148/tcp\nvolumes:\n  fixture-storage: {}\n".to_string();
@@ -146,6 +153,13 @@ case "$1" in
 esac
 "#).unwrap();
         fs::set_permissions(docker, fs::Permissions::from_mode(0o700)).unwrap();
+        let rdp = bin.join("xfreerdp3");
+        fs::write(
+            &rdp,
+            "#!/bin/sh\ntouch \"$MENDIMARU_STOP_FIXTURE_ROOT/unexpected-rdp\"\nexit 1\n",
+        )
+        .unwrap();
+        fs::set_permissions(rdp, fs::Permissions::from_mode(0o700)).unwrap();
         Self {
             root,
             original,
@@ -184,6 +198,52 @@ esac
             .unwrap_or_default()
             .lines()
             .count()
+    }
+
+    fn prepare_browser(&self) {
+        let record_path = self.path(&format!(
+            "cache/winboat-runtime/sessions/{RUNTIME_ID}/session.json"
+        ));
+        let mut record: Value = serde_json::from_slice(&fs::read(&record_path).unwrap()).unwrap();
+        record["hostPort"] = json!(self.health_address.port());
+        fs::write(record_path, serde_json::to_vec(&record).unwrap()).unwrap();
+        fs::write(self.path("inspect.json"), serde_json::to_vec(&json!([{
+            "Id": "unchanged-container-identity",
+            "State": {"Status": "running"},
+            "Mounts": [{"Source": "fixture-storage", "Destination": "/storage"}],
+            "NetworkSettings": {"Ports": {
+                "8080/tcp": [{"HostIp": "127.0.0.1", "HostPort": self.health_address.port().to_string()}]
+            }}
+        }])).unwrap()).unwrap();
+        let docker = self.path("bin/docker");
+        let script = fs::read_to_string(&docker).unwrap().replace(
+            "  inspect) printf",
+            "  inspect) cat inspect.json ;;\n  unused-inspect) printf",
+        );
+        fs::write(docker, script).unwrap();
+        fs::write(self.path("smoke.browser.json"), r#"{
+            "schemaVersion":"1.0.0", "name":"Keeper linked runtime",
+            "beforeEach":[{"action":"goto","path":"/"}],
+            "tests":[{"name":"HTTP content", "steps":[{
+                "action":"expectText", "locator":{"by":"text","value":"ok","exact":true}, "value":"ok"
+            }]}]
+        }"#).unwrap();
+    }
+
+    fn studio_status(&self) -> crate::contracts::StudioSessionStatus {
+        let paths = AppPaths::for_tests(self.root.path().into(), self.path("cache"));
+        tauri::async_runtime::block_on(keeper_session(&paths, STUDIO_ID))
+            .unwrap()
+            .unwrap()
+    }
+
+    fn confirm_studio_exit(&self) {
+        fs::write(
+            self.path("closed.tmp"),
+            crate::winboat::keeper_test_stop_report(),
+        )
+        .unwrap();
+        fs::rename(self.path("closed.tmp"), self.path("client-report.json")).unwrap();
     }
 
     fn result(&self, mode: &str) -> Value {
@@ -309,7 +369,7 @@ fn isolated_runtime_stop_process() {
         drop(listener);
         drop(guard);
         assert!(!socket.exists());
-    } else if mode == "keeper" {
+    } else if mode == "keeper" || mode == "keeper-observe" {
         let config =
             crate::application::load_config(&AppPaths::discover_for_cli().unwrap()).unwrap();
         let client = Command::new("sh")
@@ -321,19 +381,83 @@ fn isolated_runtime_stop_process() {
             .spawn()
             .unwrap();
         crate::winboat::register_keeper_test_client(&config, client);
+        if mode == "keeper" {
+            // #146 exercises concurrent cleanup after a confirmed Studio exit.
+            // RDP loss alone must no longer start cleanup (#148).
+            fs::write(
+                root.join("client-stop-report.json"),
+                crate::winboat::keeper_test_stop_report(),
+            )
+            .unwrap();
+            let report_root = root.clone();
+            thread::spawn(move || {
+                until(|| report_root.join("client-disconnected").exists());
+                fs::rename(
+                    report_root.join("client-stop-report.json"),
+                    report_root.join("client-report.json"),
+                )
+                .unwrap();
+            });
+        }
         assert_eq!(crate::winboat::registered_client_sessions().len(), 1);
         let (listener, guard, session_id) = prepare_session_keeper(STUDIO_ID).unwrap();
         fs::write(root.join("keeper-ready"), b"ready").unwrap();
         tauri::async_runtime::block_on(serve_session_keeper(listener, guard, &session_id));
         assert!(crate::winboat::registered_client_sessions().is_empty());
         fs::write(root.join("keeper-finished"), b"finished").unwrap();
+    } else if mode == "runtime-reads" {
+        for action in ["status", "wait", "url", "logs", "list"] {
+            let mut args = vec!["runtime", action, "--json", "--timeout-seconds", "15"];
+            if action != "list" {
+                args.extend(["--session-id", RUNTIME_ID]);
+            }
+            let execution =
+                execute(&args.into_iter().map(OsString::from).collect::<Vec<_>>()).unwrap();
+            assert_eq!(execution.exit_code, EXIT_OK, "{}", execution.stderr);
+        }
+    } else if mode == "browser" || mode == "browser-local" {
+        if mode == "browser-local" {
+            let config =
+                crate::application::load_config(&AppPaths::discover_for_cli().unwrap()).unwrap();
+            let client = Command::new("sleep").arg("60").spawn().unwrap();
+            crate::winboat::register_keeper_test_client(&config, client);
+        }
+        let suite = root.join("smoke.browser.json");
+        let execution = execute(
+            &[
+                "browser",
+                "test",
+                "--runtime-session-id",
+                RUNTIME_ID,
+                "--suite-path",
+                suite.to_str().unwrap(),
+                "--json",
+                "--timeout-seconds",
+                "15",
+            ]
+            .map(OsString::from),
+        )
+        .unwrap();
+        let output = if execution.exit_code == EXIT_OK {
+            execution.stdout
+        } else {
+            execution.stderr
+        };
+        fs::write(root.join(format!("{mode}.json")), output).unwrap();
+        if mode == "browser-local" {
+            crate::winboat::disconnect_client(STUDIO_ID);
+        }
     } else {
         let timeout = if mode == "timeout" { "1" } else { "15" };
         fs::write(root.join(format!("{mode}-started")), b"started").unwrap();
         let execution = execute(
             &[
                 "runtime",
-                "stop",
+                if mode == "runtime-wait" {
+                    "wait"
+                } else {
+                    "stop"
+                },
                 "--session-id",
                 RUNTIME_ID,
                 "--json",
@@ -350,6 +474,186 @@ fn isolated_runtime_stop_process() {
         };
         eprintln!("{mode}: {output}");
         fs::write(root.join(format!("{mode}.json")), output).unwrap();
+    }
+}
+
+#[test]
+fn browser_runtime_uses_the_live_keeper_without_replacing_its_client() {
+    let fixture = Fixture::new();
+    fixture.prepare_browser();
+    let mut keeper = fixture.spawn("keeper-observe");
+    until(|| fixture.path("keeper-ready").exists());
+    let before = fixture.studio_status();
+    let compose = fs::read(fixture.path("compose.yml")).unwrap();
+    let inspection = fs::read(fixture.path("inspect.json")).unwrap();
+    for _ in 0..2 {
+        fixture.spawn("browser").finish();
+        fixture.spawn("runtime-reads").finish();
+        let result = fixture.result("browser");
+        assert_eq!(result["data"]["outcome"], "passed", "{result}");
+        assert_eq!(result["data"]["passed"], 1);
+        assert_eq!(fixture.studio_status(), before);
+        assert_eq!(fs::read(fixture.path("compose.yml")).unwrap(), compose);
+        assert_eq!(fs::read(fixture.path("inspect.json")).unwrap(), inspection);
+        assert_eq!(fixture.calls(), 0);
+        assert!(!fixture.path("unexpected-rdp").exists());
+        assert!(keeper.0.try_wait().unwrap().is_none());
+    }
+    fixture.confirm_studio_exit();
+    keeper.finish();
+    fixture.assert_stopped(1);
+}
+
+#[test]
+fn browser_runtime_uses_the_gui_owned_local_session_metadata() {
+    let fixture = Fixture::new();
+    fixture.prepare_browser();
+    fixture.spawn("browser-local").finish();
+    let result = fixture.result("browser-local");
+    assert_eq!(result["data"]["outcome"], "passed", "{result}");
+    assert_eq!(fixture.calls(), 0);
+    assert!(!fixture.path("unexpected-rdp").exists());
+}
+
+#[test]
+fn runtime_wait_timeout_keeps_studio_and_reports_unavailable_metadata_as_unknown() {
+    for owned in [true, false] {
+        let fixture = Fixture::new();
+        fixture.prepare_browser();
+        fs::write(fixture.path("http-unready"), b"unready").unwrap();
+        let record_path = fixture.path(&format!(
+            "cache/winboat-runtime/sessions/{RUNTIME_ID}/session.json"
+        ));
+        let mut record: Value = serde_json::from_slice(&fs::read(&record_path).unwrap()).unwrap();
+        record["readinessTimeoutSeconds"] = json!(1);
+        fs::write(&record_path, serde_json::to_vec(&record).unwrap()).unwrap();
+        let mut keeper = owned.then(|| fixture.spawn("keeper-observe"));
+        if owned {
+            until(|| fixture.path("keeper-ready").exists());
+        }
+        let compose = fs::read(fixture.path("compose.yml")).unwrap();
+        fixture.spawn("runtime-wait").finish();
+        let result = fixture.result("runtime-wait");
+        assert_eq!(
+            result["error"]["code"], "runtime_readiness_timeout",
+            "{result}"
+        );
+        let record: Value = serde_json::from_slice(&fs::read(record_path).unwrap()).unwrap();
+        assert_eq!(
+            record["studioState"],
+            if owned { "running" } else { "unknown" }
+        );
+        assert_eq!(fs::read(fixture.path("compose.yml")).unwrap(), compose);
+        assert_eq!(fixture.calls(), 0);
+        assert!(!fixture.path("unexpected-rdp").exists());
+        if let Some(keeper) = keeper.as_mut() {
+            assert!(keeper.0.try_wait().unwrap().is_none());
+            fixture.confirm_studio_exit();
+            keeper.finish();
+            fixture.assert_stopped(1);
+        }
+    }
+}
+
+#[test]
+fn disconnected_keeper_preserves_runtime_until_an_authenticated_studio_exit() {
+    use crate::contracts::{StudioConnectionState, StudioProcessState};
+    let fixture = Fixture::new();
+    let mut keeper = fixture.spawn("keeper-observe");
+    until(|| fixture.path("keeper-ready").exists());
+    let identity = fixture.studio_status();
+    let compose = fs::read(fixture.path("compose.yml")).unwrap();
+    fs::write(fixture.path("client-disconnected"), b"disconnect").unwrap();
+    until(|| fixture.studio_status().connection == StudioConnectionState::Disconnected);
+    for report in [None, Some(b"{\"sessions\":[]}".as_slice())] {
+        match report {
+            None => fs::remove_file(fixture.path("client-report.json")).unwrap(),
+            Some(bytes) => fs::write(fixture.path("client-report.json"), bytes).unwrap(),
+        }
+        // Include the keeper's automatic timer, not only on-demand status.
+        thread::sleep(Duration::from_millis(1_200));
+        let status = fixture.studio_status();
+        assert_eq!(status.state, StudioProcessState::Unknown);
+        assert_eq!(status.process_id, identity.process_id);
+        assert_eq!(status.started_at, identity.started_at);
+        assert_eq!(fixture.calls(), 0);
+        assert_eq!(fs::read(fixture.path("compose.yml")).unwrap(), compose);
+        assert!(keeper.0.try_wait().unwrap().is_none());
+    }
+    fixture.confirm_studio_exit();
+    keeper.finish();
+    fixture.assert_stopped(1);
+}
+
+#[test]
+fn browser_metadata_failures_are_bounded_diagnostic_and_never_open_rdp() {
+    use std::os::unix::net::UnixListener;
+    for response in [
+        "absent",
+        "timeout",
+        "invalid",
+        "wrong-id",
+        "wrong-schema",
+        "wrong-version",
+        "stopped",
+    ] {
+        let fixture = Fixture::new();
+        fixture.prepare_browser();
+        let paths = AppPaths::for_tests(fixture.root.path().into(), fixture.path("cache"));
+        let directory = ensure_session_socket_directory(&paths).unwrap();
+        let server = if response == "absent" {
+            None
+        } else {
+            let listener =
+                UnixListener::bind(directory.join(session_socket_name(STUDIO_ID))).unwrap();
+            Some(thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let _ = stream.read(&mut [0; 32]);
+                if response == "timeout" {
+                    thread::sleep(Duration::from_secs(3));
+                } else if response == "invalid" {
+                    let _ = stream.write_all(b"invalid /private/secret\n");
+                } else {
+                    let mut session = json!({
+                        "schemaVersion": CONTRACT_SCHEMA_VERSION, "sessionId": STUDIO_ID,
+                        "version": "11.12.3", "state": "running", "processId": 4242,
+                        "startedAt": "2025-08-15T00:00:00Z", "connection": "connected", "reconnectable": false
+                    });
+                    match response {
+                        "wrong-id" => {
+                            session["sessionId"] = json!("studio-9000-638908128000000000")
+                        }
+                        "wrong-schema" => session["schemaVersion"] = json!("3.0.0"),
+                        "wrong-version" => session["version"] = json!("/private/secret"),
+                        "stopped" => session["state"] = json!("stopped"),
+                        _ => unreachable!(),
+                    }
+                    let mut bytes =
+                        serde_json::to_vec(&json!({"ok":true, "session":session})).unwrap();
+                    bytes.push(b'\n');
+                    let _ = stream.write_all(&bytes);
+                }
+            }))
+        };
+        let started = Instant::now();
+        fixture.spawn("browser").finish();
+        assert!(started.elapsed() < Duration::from_secs(8), "{response}");
+        if let Some(server) = server {
+            server.join().unwrap();
+        }
+        let result = fixture.result("browser");
+        assert_eq!(
+            result["error"]["code"], "precondition_failed",
+            "{response}: {result}"
+        );
+        assert_eq!(result["error"]["capability"], "browser.test");
+        assert_eq!(result["error"]["retryable"], true);
+        assert_eq!(
+            result["error"]["message"],
+            crate::application::BROWSER_STUDIO_METADATA_UNAVAILABLE
+        );
+        assert_eq!(fixture.calls(), 0);
+        assert!(!fixture.path("unexpected-rdp").exists());
     }
 }
 

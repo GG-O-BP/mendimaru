@@ -1585,16 +1585,14 @@ async fn serve_session_keeper(
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
     let Ok(listener) = tokio::net::UnixListener::from_std(listener) else {
-        cleanup_linked_runtimes(session_id).await;
-        crate::winboat::close_all_registered_clients().await;
         return;
     };
+    let mut observation = tokio::time::interval(Duration::from_secs(1));
+    observation.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             accepted = listener.accept() => {
                 let Ok((stream, _)) = accepted else {
-                    cleanup_linked_runtimes(session_id).await;
-                    crate::winboat::close_all_registered_clients().await;
                     return;
                 };
                 let (read_half, mut write_half) = stream.into_split();
@@ -1642,12 +1640,10 @@ async fn serve_session_keeper(
                     return;
                 }
             }
-            _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                if !crate::winboat::registered_client_sessions()
-                    .iter()
-                    .any(|session| session.session_id == session_id)
-                {
+            _ = observation.tick() => {
+                if crate::winboat::registered_session_ended(session_id) {
                     cleanup_linked_runtimes(session_id).await;
+                    crate::winboat::disconnect_client(session_id);
                     return;
                 }
             }
@@ -1705,7 +1701,7 @@ async fn keeper_sessions(
 }
 
 #[cfg(target_os = "linux")]
-async fn keeper_session(
+pub(crate) async fn keeper_session(
     paths: &AppPaths,
     session_id: &str,
 ) -> Result<Option<crate::contracts::StudioSessionStatus>, CommandError> {
@@ -1734,7 +1730,13 @@ async fn request_keeper_stop(paths: &AppPaths, session_id: &str) -> Result<bool,
     let Some(response) = request_session_keeper(&socket_path, "stop").await? else {
         return Ok(false);
     };
-    Ok(response.ok && response.session.is_none())
+    if response.ok && response.session.is_none() {
+        Ok(true)
+    } else {
+        Err(keeper_command_error(
+            "the session keeper did not confirm Studio stopped".to_string(),
+        ))
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -2497,7 +2499,7 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
 }
 
 fn sanitize_backend_error(error: BackendError) -> BackendError {
-    // Only these exact, path-free preflight messages may survive sanitization.
+    // Only these exact, path-free diagnostics may survive sanitization.
     let message = match (
         error.code,
         error.backend,
@@ -2516,6 +2518,12 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
             Some(CapabilityId::StudioStart),
             KEEPER_SOCKET_UNAVAILABLE,
         ) => KEEPER_SOCKET_UNAVAILABLE,
+        (
+            BackendErrorCode::PreconditionFailed,
+            Some(BackendId::LinuxWinboat | BackendId::WindowsNative),
+            Some(CapabilityId::BrowserTest),
+            crate::application::BROWSER_STUDIO_METADATA_UNAVAILABLE,
+        ) => crate::application::BROWSER_STUDIO_METADATA_UNAVAILABLE,
         _ => safe_error_message_for_backend(error.code, error.backend),
     };
     let diagnostic_ref = error
@@ -2903,7 +2911,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test(flavor = "current_thread")]
-    async fn an_unconfirmed_keeper_stop_remains_fallback_eligible() {
+    async fn an_unconfirmed_keeper_stop_cannot_open_a_fallback_rdp_connection() {
         use std::io::{BufRead, BufReader, Write};
         use std::os::unix::net::UnixListener;
 
@@ -2925,10 +2933,10 @@ mod tests {
         });
         let paths = AppPaths::for_tests(root.path().join("config"), root.path().join("cache"));
 
-        let stopped = request_keeper_stop(&paths, session_id)
+        let error = request_keeper_stop(&paths, session_id)
             .await
-            .expect("an unconfirmed keeper response is not a CLI transport error");
-        assert!(!stopped);
+            .expect_err("an unconfirmed stop must not fall back to another RDP connection");
+        assert!(error.message.contains("did not confirm Studio stopped"));
         server.join().expect("fixture keeper server completes");
     }
 
