@@ -118,6 +118,91 @@ fn run(config_directory: &std::path::Path, arguments: &[&str]) -> Output {
     run_with_environment(config_directory, arguments, &[])
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn studio_start_rejects_keeper_socket_failures_before_guest_access() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    let root = tempfile::tempdir_in("/tmp").unwrap();
+    let bin = root.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let docker = bin.join("docker");
+    fs::write(
+        &docker,
+        "#!/bin/sh\ntouch \"$MENDIMARU_CONFIG_DIR/guest-accessed\"\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&docker, fs::Permissions::from_mode(0o700)).unwrap();
+    let config = serde_json::to_vec(&fixture_config(root.path())).unwrap();
+    fs::write(root.path().join("config.json"), &config).unwrap();
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let long_cache = root.path().join("private-cache-".repeat(9));
+    let unsafe_cache = root.path().join("unsafe");
+    let target = root.path().join("target");
+    fs::create_dir_all(&unsafe_cache).unwrap();
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("preserve"), b"unrelated").unwrap();
+    symlink(&target, unsafe_cache.join("cli-sessions")).unwrap();
+    let project_id = format!("project_{}", "a".repeat(64));
+    for (cache, guidance) in [
+        (&long_cache, "107 bytes"),
+        (&unsafe_cache, "ownership, permissions"),
+    ] {
+        for project in [false, true] {
+            let mut arguments = vec!["studio", "start", "--version", "11.12.3", "--json"];
+            if project {
+                arguments.extend(["--project-id", &project_id]);
+            }
+            let output = run_with_environment(
+                root.path(),
+                &arguments,
+                &[
+                    ("PATH", path.as_os_str()),
+                    ("MENDIMARU_CACHE_DIR", cache.as_os_str()),
+                ],
+            );
+            let error = stderr_json(&output);
+            assert_eq!(output.status.code(), Some(1));
+            assert_eq!(error["error"]["code"], "precondition_failed");
+            assert_eq!(error["error"]["retryable"], false);
+            assert!(error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains(guidance));
+            assert!(error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("MENDIMARU_CACHE_DIR"));
+            assert!(!error.to_string().contains(root.path().to_str().unwrap()));
+            assert!(!root.path().join("guest-accessed").exists());
+            assert!(!root.path().join("operation-history.json").exists());
+            assert!(!cache.join("winboat-runtime").exists());
+        }
+    }
+    assert!(!long_cache.exists());
+    assert_eq!(fs::read(target.join("preserve")).unwrap(), b"unrelated");
+    assert_eq!(fs::read(root.path().join("config.json")).unwrap(), config);
+
+    // With a usable cache, the same command passes preflight and reaches the
+    // failing Docker fixture. No real daemon or Windows guest is contacted.
+    let output = run_with_environment(
+        root.path(),
+        &["studio", "start", "--version", "11.12.3", "--json"],
+        &[("PATH", path.as_os_str())],
+    );
+    assert_ne!(stderr_json(&output)["error"]["message"], "");
+    assert!(root.path().join("guest-accessed").exists());
+    assert_eq!(
+        fs::read_dir(root.path().join("isolated-cache/cli-sessions"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
 fn run_with_environment(
     config_directory: &Path,
     arguments: &[&str],

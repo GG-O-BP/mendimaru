@@ -24,6 +24,8 @@ const DEFAULT_BROWSER_ACTION_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_BROWSER_ASSERTION_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_BROWSER_ARTIFACT_MIB: u64 = 128;
 const DEFAULT_BROWSER_RETENTION_RUNS: u32 = 20;
+const KEEPER_SOCKET_PATH_TOO_LONG: &str = "the session keeper socket path exceeds the Linux limit of 107 bytes; set MENDIMARU_CACHE_DIR to a shorter absolute directory before starting Studio";
+const KEEPER_SOCKET_UNAVAILABLE: &str = "the session keeper socket could not be prepared; check MENDIMARU_CACHE_DIR ownership, permissions, and available space before starting Studio";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OutputFormat {
@@ -1178,14 +1180,16 @@ async fn start_with_session_keeper(
 
 #[cfg(target_os = "linux")]
 fn session_keeper_dispatch(arguments: &[OsString]) -> i32 {
+    finish_session_keeper_launch(session_keeper_response(arguments))
+}
+
+#[cfg(target_os = "linux")]
+fn finish_session_keeper_launch(mut response: SessionKeeperResponse) -> i32 {
     use std::io::{BufRead, Read};
 
-    let mut response = session_keeper_response(arguments);
-    let completed_operation_id = if response.ok {
-        response.operation_id.clone()
-    } else {
-        None
-    };
+    // Keep launch identities even when listener preparation or registration fails.
+    let completed_operation_id = response.operation_id.clone();
+    let launched_session_id = response.studio_session_id.clone();
     let prepared = if response.ok {
         response
             .studio_session_id
@@ -1205,6 +1209,12 @@ fn session_keeper_dispatch(arguments: &[OsString]) -> i32 {
         }
     }
     let successful = response.ok;
+    if !successful {
+        tauri::async_runtime::block_on(cleanup_unaccepted_keeper_launch(
+            completed_operation_id.as_deref(),
+            launched_session_id.as_deref(),
+        ));
+    }
     let serialized = serde_json::to_vec(&response).unwrap_or_else(|_| {
         br#"{"ok":false,"error":{"schemaVersion":"4.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
     });
@@ -1228,13 +1238,33 @@ fn session_keeper_dispatch(arguments: &[OsString]) -> i32 {
         tauri::async_runtime::block_on(serve_session_keeper(listener, socket_guard, &session_id));
         EXIT_OK
     } else {
-        if let (Some(operation_id), Ok(paths)) =
-            (completed_operation_id, AppPaths::discover_for_cli())
-        {
-            let _ = crate::operations::interrupt_completed_launch_with_paths(&paths, &operation_id);
+        if successful {
+            tauri::async_runtime::block_on(cleanup_unaccepted_keeper_launch(
+                completed_operation_id.as_deref(),
+                launched_session_id.as_deref(),
+            ));
         }
-        tauri::async_runtime::block_on(crate::winboat::close_all_registered_clients());
         EXIT_OPERATION_FAILED
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn cleanup_unaccepted_keeper_launch(operation_id: Option<&str>, session_id: Option<&str>) {
+    let mut session_ids = crate::winboat::registered_client_sessions()
+        .into_iter()
+        .map(|session| session.session_id)
+        .collect::<Vec<_>>();
+    if let Some(session_id) = session_id {
+        if !session_ids.iter().any(|id| id == session_id) {
+            session_ids.push(session_id.to_string());
+        }
+    }
+    if let (Some(operation_id), Ok(paths)) = (operation_id, AppPaths::discover_for_cli()) {
+        let _ = crate::operations::interrupt_completed_launch_with_paths(&paths, operation_id);
+    }
+    crate::winboat::close_all_registered_clients().await;
+    for session_id in session_ids {
+        cleanup_linked_runtimes(&session_id).await;
     }
 }
 
@@ -1274,6 +1304,11 @@ fn session_keeper_response(arguments: &[OsString]) -> SessionKeeperResponse {
             ))
         }
     };
+    // Exercise a real socket with the final name length before any guest launch
+    // or Runtime forwarding. A later filesystem race still uses launch cleanup.
+    if let Err(error) = preflight_session_keeper(&paths) {
+        return keeper_error(error);
+    }
     let config = match crate::application::load_config(&paths) {
         Ok(config) => config,
         Err(error) => {
@@ -1291,11 +1326,13 @@ fn session_keeper_response(arguments: &[OsString]) -> SessionKeeperResponse {
         Ok(operation_id) => {
             let sessions = crate::winboat::registered_client_sessions();
             if sessions.len() != 1 {
-                return keeper_error(BackendError::operation(
+                let mut response = keeper_error(BackendError::operation(
                     BackendId::LinuxWinboat,
                     CapabilityId::StudioStart,
                     "the launched Studio session could not be registered",
                 ));
+                response.operation_id = Some(operation_id);
+                return response;
             }
             SessionKeeperResponse {
                 ok: true,
@@ -1434,7 +1471,7 @@ fn cleanup_stale_session_keeper_sockets(
 fn prepare_session_keeper(
     session_id: &str,
 ) -> Result<(std::os::unix::net::UnixListener, SessionSocketGuard, String), String> {
-    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
     let paths = AppPaths::discover_for_cli()
         .map_err(|_| "the session keeper directory could not be resolved".to_string())?;
@@ -1451,18 +1488,58 @@ fn prepare_session_keeper(
         std::fs::remove_file(&socket_path)
             .map_err(|_| "a stale session keeper socket could not be removed".to_string())?;
     }
+    let (listener, guard) = bind_session_keeper_socket(socket_path)?;
+    Ok((listener, guard, session_id.to_string()))
+}
+
+#[cfg(target_os = "linux")]
+fn bind_session_keeper_socket(
+    socket_path: std::path::PathBuf,
+) -> Result<(std::os::unix::net::UnixListener, SessionSocketGuard), String> {
+    use std::os::unix::fs::PermissionsExt;
+
     let listener = std::os::unix::net::UnixListener::bind(&socket_path)
         .map_err(|_| "the session keeper socket could not be created".to_string())?;
+    // Own the path immediately, including configuration/permission failures.
+    let guard = SessionSocketGuard { path: socket_path };
     listener
         .set_nonblocking(true)
         .map_err(|_| "the session keeper socket could not be configured".to_string())?;
-    std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
+    std::fs::set_permissions(&guard.path, std::fs::Permissions::from_mode(0o600))
         .map_err(|_| "the session keeper socket permissions could not be secured".to_string())?;
-    Ok((
-        listener,
-        SessionSocketGuard { path: socket_path },
-        session_id.to_string(),
-    ))
+    Ok((listener, guard))
+}
+
+#[cfg(target_os = "linux")]
+fn preflight_session_keeper(paths: &AppPaths) -> Result<(), BackendError> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let precondition = |message: &str| BackendError {
+        code: BackendErrorCode::PreconditionFailed,
+        retryable: false,
+        ..BackendError::operation(BackendId::LinuxWinboat, CapabilityId::StudioStart, message)
+    };
+    let directory = paths.cache_directory().join("cli-sessions");
+    // Linux sockaddr_un.sun_path has 108 bytes including the terminating NUL.
+    if directory
+        .join(session_socket_name("preflight"))
+        .as_os_str()
+        .as_bytes()
+        .len()
+        > 107
+    {
+        return Err(precondition(KEEPER_SOCKET_PATH_TOO_LONG));
+    }
+    let directory = ensure_session_socket_directory(paths)
+        .map_err(|_| precondition(KEEPER_SOCKET_UNAVAILABLE))?;
+    let mut nonce = [0u8; 16];
+    getrandom::fill(&mut nonce).map_err(|_| precondition(KEEPER_SOCKET_UNAVAILABLE))?;
+    let name = session_socket_name(&format!("preflight-{nonce:?}"));
+    let (listener, guard) = bind_session_keeper_socket(directory.join(name))
+        .map_err(|_| precondition(KEEPER_SOCKET_UNAVAILABLE))?;
+    drop(listener);
+    drop(guard);
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -2420,13 +2497,34 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
 }
 
 fn sanitize_backend_error(error: BackendError) -> BackendError {
+    // Only these exact, path-free preflight messages may survive sanitization.
+    let message = match (
+        error.code,
+        error.backend,
+        error.capability,
+        error.message.as_str(),
+    ) {
+        (
+            BackendErrorCode::PreconditionFailed,
+            Some(BackendId::LinuxWinboat),
+            Some(CapabilityId::StudioStart),
+            KEEPER_SOCKET_PATH_TOO_LONG,
+        ) => KEEPER_SOCKET_PATH_TOO_LONG,
+        (
+            BackendErrorCode::PreconditionFailed,
+            Some(BackendId::LinuxWinboat),
+            Some(CapabilityId::StudioStart),
+            KEEPER_SOCKET_UNAVAILABLE,
+        ) => KEEPER_SOCKET_UNAVAILABLE,
+        _ => safe_error_message_for_backend(error.code, error.backend),
+    };
     let diagnostic_ref = error
         .diagnostic_ref
         .filter(|value| is_safe_artifact_reference(value));
     BackendError {
         schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
         code: error.code,
-        message: safe_error_message_for_backend(error.code, error.backend).to_string(),
+        message: message.to_string(),
         backend: error.backend,
         capability: error.capability,
         reason: None,
@@ -3122,6 +3220,86 @@ mod tests {
         symlink(&target, unsafe_paths.cache_directory().join("cli-sessions"))
             .expect("directory symlink");
         assert!(ensure_session_socket_directory(&unsafe_paths).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn keeper_preflight_matches_real_unix_socket_byte_boundaries_and_cleans_up() {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::net::UnixListener;
+
+        let root = tempfile::tempdir_in("/tmp").unwrap();
+        for (bytes, unicode) in [(107, false), (108, false), (156, false), (108, true)] {
+            let prefix = if unicode { "캐시" } else { "cache" };
+            let base = root.path().join(prefix);
+            let overhead = base
+                .join("cli-sessions")
+                .join(session_socket_name("fixture"))
+                .as_os_str()
+                .as_bytes()
+                .len();
+            let cache = root
+                .path()
+                .join(format!("{prefix}{}", "x".repeat(bytes - overhead)));
+            let paths = AppPaths::for_tests(root.path().join("config"), cache);
+            let directory = paths.cache_directory().join("cli-sessions");
+            std::fs::create_dir_all(&directory).unwrap();
+            let socket = directory.join(session_socket_name("fixture"));
+            assert_eq!(socket.as_os_str().as_bytes().len(), bytes);
+            let result = UnixListener::bind(&socket);
+            if bytes == 107 {
+                drop(result.expect("Linux accepts 107 pathname bytes"));
+                std::fs::remove_file(&socket).unwrap();
+                preflight_session_keeper(&paths).unwrap();
+                preflight_session_keeper(&paths).unwrap();
+            } else {
+                assert!(result.is_err(), "Linux must reject this pathname");
+                let error = preflight_session_keeper(&paths).unwrap_err();
+                assert_eq!(error.code, BackendErrorCode::PreconditionFailed);
+                assert_eq!(error.message, KEEPER_SOCKET_PATH_TOO_LONG);
+                assert!(!error.retryable);
+            }
+            assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 0);
+        }
+    }
+
+    #[test]
+    fn keeper_preflight_diagnostics_are_exactly_allowlisted() {
+        for message in [KEEPER_SOCKET_PATH_TOO_LONG, KEEPER_SOCKET_UNAVAILABLE] {
+            let error = BackendError {
+                code: BackendErrorCode::PreconditionFailed,
+                retryable: false,
+                ..BackendError::operation(
+                    BackendId::LinuxWinboat,
+                    CapabilityId::StudioStart,
+                    message,
+                )
+            };
+            assert_eq!(sanitize_backend_error(error.clone()).message, message);
+            assert_eq!(
+                command_error_to_backend(error.clone().into(), BackendId::LinuxWinboat).message,
+                message
+            );
+            for changed in [
+                BackendError {
+                    message: format!("{message}: /private/secret"),
+                    ..error.clone()
+                },
+                BackendError {
+                    capability: Some(CapabilityId::RuntimeStart),
+                    ..error.clone()
+                },
+                BackendError {
+                    backend: Some(BackendId::WindowsNative),
+                    ..error.clone()
+                },
+            ] {
+                assert_eq!(
+                    sanitize_backend_error(changed).message,
+                    safe_error_message(BackendErrorCode::PreconditionFailed)
+                );
+            }
+        }
     }
 
     #[cfg(target_os = "linux")]
