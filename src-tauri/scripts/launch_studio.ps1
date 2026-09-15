@@ -318,13 +318,16 @@ try {
     $lastControlSequence = [long]0
     while ($true) {
         try {
-            $current = Get-Process -Id $readyProcessId -ErrorAction Stop
+            $current = $readyProcess
             $current.Refresh()
-            if ($current.StartTime.ToUniversalTime().Ticks -ne $readyStartedTicks) {
+            if ($current.HasExited -or
+                $current.StartTime.ToUniversalTime().Ticks -ne $readyStartedTicks) {
                 break
             }
         } catch {
-            break
+            # An observation failure does not confirm process termination.
+            Start-Sleep -Milliseconds 500
+            continue
         }
         if (Test-Path -LiteralPath $controlPath) {
             try {

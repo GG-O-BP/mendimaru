@@ -1,9 +1,6 @@
 use super::container::{
     guest_is_online, recreate_container, runtime_host_binding, storage_mount_identity,
 };
-use super::operation::{run_windows_operation, WindowsOperationRequest};
-use super::scripts::runtime_port_probe_script;
-use super::studio::{secure_shared_directory, write_command_script};
 use crate::app_paths::AppPaths;
 use crate::config::{
     ensure_runtime_port_mapping, prepare_runtime_compose_baseline, restore_file,
@@ -16,7 +13,6 @@ use crate::contracts::{
     StudioProcessState, CONTRACT_SCHEMA_VERSION,
 };
 use crate::models::AppConfig;
-use crate::projects::linux_path_to_windows_share;
 use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -36,7 +32,6 @@ const MAX_LOG_BYTES: u64 = 4 * 1024 * 1024;
 const DEFAULT_GUEST_PORT: u16 = 8080;
 const HTTP_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(500);
-const PORT_DIAGNOSTIC_TIMEOUT_SECONDS: u64 = 30;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1320,27 +1315,18 @@ fn apply_http_only_readiness(record: &mut SessionRecord) {
     record.failure_code = None;
 }
 
-async fn observe_studio(config: &AppConfig, record: &mut SessionRecord) {
-    let sessions = match super::studio_sessions(config).await {
-        Ok(sessions) => sessions,
-        Err(_) => {
-            record.studio_state = StudioProcessState::Unknown;
-            record.studio_process_id = None;
-            return;
-        }
-    };
-    let selected = if let Some(session_id) = record.studio_session_id.as_deref() {
-        sessions
-            .into_iter()
-            .find(|session| session.session_id == session_id)
+async fn observe_studio(_config: &AppConfig, record: &mut SessionRecord) {
+    let session = if let Some(session_id) = record.studio_session_id.as_deref() {
+        super::observed_session(session_id).await.ok().flatten()
     } else {
         None
     };
-    if let Some(session) = selected {
+    if let Some(session) = session {
         record.studio_state = session.state;
         record.studio_process_id = session.process_id;
     } else {
-        record.studio_state = StudioProcessState::Stopped;
+        // Missing ownership metadata is not authoritative evidence of exit.
+        record.studio_state = StudioProcessState::Unknown;
         record.studio_process_id = None;
     }
 }
@@ -1355,61 +1341,9 @@ async fn diagnose_unready_runtime(config: &AppConfig, record: &SessionRecord) ->
     {
         return BackendErrorCode::RuntimePortForwardingInvalid;
     }
-    diagnostic_code(guest_port_diagnostic(config, record.guest_port).await)
-}
-
-fn diagnostic_code(diagnostic: Option<&str>) -> BackendErrorCode {
-    match diagnostic {
-        Some("MENDIMARU_RUNTIME_NOT_LISTENING") => BackendErrorCode::RuntimeNotListening,
-        Some("MENDIMARU_RUNTIME_FIREWALL_BLOCKED") | Some("MENDIMARU_RUNTIME_LISTENING") => {
-            BackendErrorCode::RuntimeFirewallBlocked
-        }
-        _ => BackendErrorCode::RuntimeReadinessTimeout,
-    }
-}
-
-async fn guest_port_diagnostic(config: &AppConfig, guest_port: u16) -> Option<&'static str> {
-    if !super::registered_client_sessions().is_empty() {
-        return None;
-    }
-    let identifier = secure_identifier("runtimeprobe").ok()?;
-    let operation_directory = secure_shared_directory(config, ".mendimaru/operations").ok()?;
-    let report_path = operation_directory.join(format!("{identifier}.json"));
-    let windows_report_path = linux_path_to_windows_share(
-        Path::new(&config.shared_directory),
-        &report_path,
-        &config.windows_shared_directory,
-    )
-    .ok()?;
-    let script = runtime_port_probe_script(guest_port, &windows_report_path);
-    let command = write_command_script(config, &identifier, &script).ok()?;
-    let outcome = run_windows_operation(
-        config,
-        WindowsOperationRequest {
-            script_path: &command.path,
-            script_sha256: &command.sha256,
-            label: "Diagnose Mendix Runtime port",
-            report_path: &report_path,
-            timeout_seconds: PORT_DIAGNOSTIC_TIMEOUT_SECONDS,
-            operation: "diagnosing the Mendix Runtime port",
-            keep_remote_app_alive: false,
-            cancellation: None,
-            project_access: None,
-        },
-        |_| {},
-    )
-    .await;
-    let _ = fs::remove_file(&command.path);
-    let _ = fs::remove_file(&report_path);
-    let mut temporary = report_path.as_os_str().to_os_string();
-    temporary.push(".tmp");
-    let _ = fs::remove_file(PathBuf::from(temporary));
-    match outcome.ok()?.report.message.as_str() {
-        "MENDIMARU_RUNTIME_NOT_LISTENING" => Some("MENDIMARU_RUNTIME_NOT_LISTENING"),
-        "MENDIMARU_RUNTIME_FIREWALL_BLOCKED" => Some("MENDIMARU_RUNTIME_FIREWALL_BLOCKED"),
-        "MENDIMARU_RUNTIME_LISTENING" => Some("MENDIMARU_RUNTIME_LISTENING"),
-        _ => None,
-    }
+    // Readiness diagnostics must not open a RemoteApp, even after timeout.
+    // HTTP alone cannot distinguish a missing listener from guest firewall rules.
+    BackendErrorCode::RuntimeReadinessTimeout
 }
 
 async fn rollback_compose(
@@ -2017,11 +1951,10 @@ fn set_file_permissions(path: &Path) -> Result<(), String> {
 mod tests {
     use super::{
         active_runtime_session_in_root, append_failure_diagnostic, compose_baseline_diagnostic,
-        diagnostic_code, existing_studio_runtime_disposition, forget_session_in_root,
-        is_loopback_host, port_conflict_message, runtime_probe_url, runtime_url,
-        session_summaries_in_root, studio_launch_port, valid_studio_session_id,
-        validate_runtime_session_id, ComposeBaselineGuard, ComposeTransaction,
-        ExistingStudioRuntimeDisposition, SessionRecord,
+        existing_studio_runtime_disposition, forget_session_in_root, is_loopback_host,
+        port_conflict_message, runtime_probe_url, runtime_url, session_summaries_in_root,
+        studio_launch_port, valid_studio_session_id, validate_runtime_session_id,
+        ComposeBaselineGuard, ComposeTransaction, ExistingStudioRuntimeDisposition, SessionRecord,
     };
     use crate::contracts::CapabilityId;
     use crate::contracts::{
@@ -2538,26 +2471,6 @@ mod tests {
         let error = super::configured_project_ports(&config, None)
             .expect_err("conflicting ports are rejected");
         assert_eq!(error.code, BackendErrorCode::RuntimePortForwardingInvalid);
-    }
-
-    #[test]
-    fn maps_guest_listener_and_firewall_diagnostics_to_distinct_codes() {
-        assert_eq!(
-            diagnostic_code(Some("MENDIMARU_RUNTIME_NOT_LISTENING")),
-            BackendErrorCode::RuntimeNotListening
-        );
-        assert_eq!(
-            diagnostic_code(Some("MENDIMARU_RUNTIME_FIREWALL_BLOCKED")),
-            BackendErrorCode::RuntimeFirewallBlocked
-        );
-        assert_eq!(
-            diagnostic_code(Some("MENDIMARU_RUNTIME_LISTENING")),
-            BackendErrorCode::RuntimeFirewallBlocked
-        );
-        assert_eq!(
-            diagnostic_code(None),
-            BackendErrorCode::RuntimeReadinessTimeout
-        );
     }
 
     #[test]

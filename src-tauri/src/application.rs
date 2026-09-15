@@ -421,10 +421,7 @@ pub(crate) async fn browser_test_runtime(
         RuntimeMode::ExternalUrl => None,
     };
     let studio_version = if let Some(session_id) = status.studio_session_id.as_deref() {
-        studio_session(config, session_id)
-            .await
-            .ok()
-            .map(|session| session.version)
+        Some(browser_studio_version(config, session_id).await?)
     } else {
         None
     };
@@ -463,6 +460,39 @@ pub(crate) async fn browser_test_runtime(
     crate::platform::run_browser_test(config, &request)
         .await
         .map_err(CommandError::from)
+}
+
+pub(crate) const BROWSER_STUDIO_METADATA_UNAVAILABLE: &str =
+    "Studio metadata is unavailable from the session owner; check studio status and retry (no RDP connection was opened)";
+
+async fn browser_studio_version(config: &AppConfig, session_id: &str) -> ApplicationResult<String> {
+    let unavailable = || {
+        precondition_error(
+            CapabilityId::BrowserTest,
+            BROWSER_STUDIO_METADATA_UNAVAILABLE,
+            true,
+        )
+    };
+    #[cfg(target_os = "linux")]
+    let session = {
+        let _ = config;
+        crate::winboat::observed_session(session_id)
+            .await
+            .map_err(|_| unavailable())?
+            .ok_or_else(unavailable)?
+    };
+    #[cfg(not(target_os = "linux"))]
+    let session = studio_session(config, session_id)
+        .await
+        .map_err(|_| unavailable())?;
+    if session.schema_version != crate::contracts::CONTRACT_SCHEMA_VERSION
+        || session.session_id != session_id
+        || session.state == crate::contracts::StudioProcessState::Stopped
+        || crate::platform::validate_version(&session.version).is_err()
+    {
+        return Err(unavailable());
+    }
+    Ok(session.version)
 }
 
 pub(crate) fn browser_artifacts(

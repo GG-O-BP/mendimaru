@@ -102,15 +102,15 @@ Runtime failures have stable codes:
 | `runtime_guest_offline`           | The Guest API cannot be reached.                                                                                               |
 | `runtime_port_conflict`           | The port is owned by another active Mendimaru Runtime session, or Docker/Podman could not allocate it for an external program. |
 | `runtime_port_forwarding_invalid` | The mapping is absent, duplicated, public, stale, or has no usable host port.                                                  |
-| `runtime_not_listening`           | The authenticated Windows probe found no guest TCP listener.                                                                   |
-| `runtime_firewall_blocked`        | A guest listener exists but Windows firewall or Mendix port security prevents host access.                                     |
-| `runtime_readiness_timeout`       | HTTP readiness expired and a more specific guest diagnosis was unavailable.                                                    |
+| `runtime_readiness_timeout`       | HTTP readiness expired; host observations cannot distinguish a missing listener from guest firewall restrictions.              |
 | `runtime_exited`                  | The explicitly linked Studio Pro process identity ended before readiness.                                                      |
 
-The Windows diagnosis runs as the existing hash-pinned, authenticated
-PowerShell operation. It inspects the exact numeric guest port and returns only
-an allowlisted diagnostic token; firewall rules, paths, credentials, and raw
-PowerShell output do not enter the common contract or logs.
+Readiness and terminal timeout diagnosis use host-side container/port checks and
+loopback HTTP. They never open a Windows PowerShell RemoteApp or a new RDP
+connection. Linked Studio metadata comes from the registered owner or bounded
+keeper IPC; unavailable metadata means `unknown`, not `stopped`. The legacy
+`runtime_not_listening` and `runtime_firewall_blocked` codes remain readable in
+existing records, but current readiness checks do not emit them.
 
 ## Stop and exposure boundary
 
@@ -123,7 +123,15 @@ Run Locally stop API yet. The managed Compose digest must still match; a
 concurrent user edit is preserved and stop returns
 `runtime_compose_recovery_failed` instead of overwriting it.
 
-Overlapping stops, including keeper cleanup after the RDP disconnect, take an
+The keeper automatically cleans up a linked Runtime only after an authenticated
+report confirms Studio exited, or after an explicit successful Studio stop.
+RDP disconnection, unreadable/tampered reports, and IPC observation failures
+preserve the Runtime and its Compose forwarding. A disconnected owner retains
+the Studio identity and project access lease, with process state `unknown`,
+until exit is confirmed. If its Windows monitor cannot confirm exit, an operator
+can use explicit `runtime stop` to recover through the disruptive boundary above.
+
+Overlapping stops, including keeper cleanup after confirmed Studio exit, take an
 exclusive process-shared lock in the Compose directory. The lock covers Compose
 restoration, recreation, guest/storage checks, and the final record write. A
 waiting caller reloads the record and returns success without another recreation

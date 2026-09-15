@@ -220,6 +220,20 @@ for the exact PID and process start tick through the retained connection and
 waits for Windows to report that process gone; killing only the local FreeRDP
 client never counts as a successful stop.
 
+`browser test --runtime-session-id` uses the registered owner or bounded keeper
+IPC for Studio version metadata. Missing, invalid, or timed-out metadata returns
+a retryable `precondition_failed` for `browser.test`, with the diagnostic
+`Studio metadata is unavailable from the session owner; check studio status and retry (no RDP connection was opened)`.
+There is no RDP discovery fallback on browser or Runtime observation paths,
+including a terminal `runtime wait` timeout. Explicit Studio discovery retains
+its guest-query behavior when no owned session is available.
+
+A disconnected RDP client leaves ownership and project access intact and reports
+Studio process state `unknown`. Only a newer authenticated successful report
+confirming Studio exit allows automatic linked Runtime cleanup. A failed keeper
+stop returns an error and preserves ownership; it cannot fall back to a second
+RDP connection. IPC listener failures likewise do not initiate Runtime teardown.
+
 Before launching Studio or changing Runtime forwarding, the keeper checks the
 socket pathname length in bytes and creates, configures, and removes a real
 private probe socket with the same filename length. Linux accepts at most 107

@@ -92,7 +92,9 @@ jobs:
 
       - name: Run strict Playwright browser E2E
         if: runner.os == 'Linux'
-        run: npm run test:browser
+        run: |
+          npm run test:browser
+          npm run test:browser:winboat:helpers
 
       - name: Run sandboxed Marketplace Chromium security gate
         if: runner.os == 'Linux'
