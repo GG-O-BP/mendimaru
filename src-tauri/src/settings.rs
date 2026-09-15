@@ -45,6 +45,16 @@ pub async fn save_settings(
         });
     }
 
+    // Preserve the existing typed Compose validation errors before attempting
+    // VM use, and identify the selected VM from the validated plan. The plan
+    // and revision are checked again under the lease before writing anything.
+    crate::config::plan_shared_mount(
+        &PathBuf::from(&config.compose_file),
+        &config.shared_directory,
+    )
+    .map_err(compose_command_error)?
+    .apply_detection(&mut config);
+
     let previous_config = crate::config::load_config(app).ok();
     let mut identities = vec![&config];
     if let Some(previous) = previous_config.as_ref() {
