@@ -24,14 +24,16 @@
         "nodeVersion": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 80
+          "maxLength": 80,
+          "pattern": "^(unavailable|[0-9]+\\.[0-9]+\\.[0-9]+)$"
         },
         "minimumNodeVersion": { "const": "22.22.2" },
         "nodeSupported": { "type": "boolean" },
         "playwrightVersion": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 80
+          "maxLength": 80,
+          "pattern": "^(unavailable|[0-9]+\\.[0-9]+\\.[0-9]+)$"
         },
         "chromium": {
           "type": "object",
@@ -43,11 +45,46 @@
             "version": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 80
+              "maxLength": 80,
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"
             }
           }
         },
-        "downloadPolicy": { "const": "explicit-only" }
+        "downloadPolicy": { "const": "explicit-only" },
+        "checks": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/prerequisiteCheck",
+              "type": "object",
+              "properties": { "id": { "const": "runner" } }
+            },
+            {
+              "$ref": "#/$defs/prerequisiteCheck",
+              "type": "object",
+              "properties": { "id": { "const": "node" } }
+            },
+            {
+              "$ref": "#/$defs/prerequisiteCheck",
+              "type": "object",
+              "properties": { "id": { "const": "node_version" } }
+            },
+            {
+              "$ref": "#/$defs/prerequisiteCheck",
+              "type": "object",
+              "properties": { "id": { "const": "js_dependencies" } }
+            },
+            {
+              "$ref": "#/$defs/prerequisiteCheck",
+              "type": "object",
+              "properties": { "id": { "const": "chromium" } }
+            }
+          ],
+          "items": false
+        },
+        "diagnostic": { "$ref": "#/$defs/doctorDiagnostic" }
       },
       "allOf": [
         {
@@ -66,11 +103,121 @@
                   "launchable": { "const": true },
                   "version": { "type": "string" }
                 }
+              },
+              "nodeVersion": {
+                "type": "string",
+                "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+              },
+              "playwrightVersion": {
+                "type": "string",
+                "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": { "status": { "const": "passed" } }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["checks"],
+            "properties": { "ready": { "const": false } }
+          },
+          "then": {
+            "required": ["diagnostic"],
+            "properties": {
+              "diagnostic": { "$ref": "#/$defs/doctorDiagnostic" },
+              "checks": {
+                "type": "array",
+                "contains": {
+                  "type": "object",
+                  "properties": { "status": { "const": "failed" } }
+                }
               }
             }
           }
         }
       ]
+    },
+    "prerequisiteCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "message", "action"],
+      "properties": {
+        "id": {
+          "enum": [
+            "runner",
+            "node",
+            "node_version",
+            "js_dependencies",
+            "chromium"
+          ]
+        },
+        "status": { "enum": ["passed", "failed", "skipped"] },
+        "code": {
+          "enum": [
+            "runner_missing",
+            "runner_unreadable",
+            "unsafe_override",
+            "node_missing",
+            "node_spawn_denied",
+            "node_spawn_failed",
+            "node_unsupported",
+            "node_probe_failed",
+            "probe_timeout",
+            "js_dependencies_missing",
+            "runner_failed",
+            "runner_output_invalid",
+            "chromium_unavailable"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "action": { "type": "string", "minLength": 1, "maxLength": 512 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "failed" } } },
+          "then": { "required": ["code"], "properties": { "code": true } },
+          "else": {
+            "not": { "required": ["code"], "properties": { "code": true } }
+          }
+        }
+      ]
+    },
+    "doctorDiagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "stored", "stderrTruncated", "stdoutTruncated"],
+      "properties": {
+        "reference": { "const": "browser-doctor-latest" },
+        "stored": { "type": "boolean" },
+        "stderrTruncated": { "type": "boolean" },
+        "stdoutTruncated": { "type": "boolean" },
+        "errorKind": {
+          "enum": [
+            "ERR_MODULE_NOT_FOUND",
+            "MODULE_NOT_FOUND",
+            "ERR_PACKAGE_PATH_NOT_EXPORTED",
+            "ERR_DLOPEN_FAILED",
+            "SyntaxError",
+            "TypeError",
+            "ReferenceError"
+          ]
+        },
+        "module": {
+          "enum": [
+            "@playwright/test",
+            "playwright-core",
+            "playwright",
+            "fflate",
+            "browser-artifact-safety.mjs"
+          ]
+        }
+      }
     },
     "outcome": { "enum": ["passed", "failed", "skipped"] },
     "testCase": {

@@ -296,6 +296,24 @@ fn browser_secret_variants(value: &str) -> Vec<Vec<u8>> {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn browser_doctor_prerequisite_failure_matrix() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let output = Command::new("node")
+        .arg(repository.join("scripts/test-browser-doctor-e2e.mjs"))
+        .arg(env!("CARGO_BIN_EXE_mendimaru"))
+        .output()
+        .expect("run browser doctor CLI matrix");
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    eprint!("{}", String::from_utf8_lossy(&output.stdout));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn real_binary_runs_playwright_and_publishes_secret_free_failure_evidence() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let config_directory = temporary.path().join("missing-config");
