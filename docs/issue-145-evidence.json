@@ -1,0 +1,250 @@
+{
+  "issue": 145,
+  "dateUtc": "2026-09-15",
+  "baseCommit": "b29b2a0",
+  "studioProVersion": "11.12.3",
+  "bundlerReproduction": {
+    "platform": "win32",
+    "nodeVersion": "v24.10.0",
+    "rspackVersion": "1.7.11",
+    "results": [
+      {
+        "name": "local-absolute",
+        "builds": [
+          {
+            "cssBytes": 47,
+            "cssSha256": "19530972504b080f60ec11acfd67aeb71a4932aecf3d51eb6ad70b4f7051ebee",
+            "externalCss": 0,
+            "warnings": 0
+          },
+          {
+            "cssBytes": 104,
+            "cssSha256": "baa7db7f3e2fe4930d7d6fcb26f939a904a442b5616f1e0c54285bb4e039b586",
+            "externalCss": 0,
+            "warnings": 0
+          }
+        ]
+      },
+      {
+        "name": "unc-forward",
+        "builds": [
+          {
+            "cssBytes": 0,
+            "cssSha256": null,
+            "externalCss": 1,
+            "warnings": 0
+          },
+          {
+            "cssBytes": 0,
+            "cssSha256": null,
+            "externalCss": 1,
+            "warnings": 0
+          }
+        ]
+      },
+      {
+        "name": "unc-native",
+        "builds": [
+          {
+            "cssBytes": 47,
+            "cssSha256": "19530972504b080f60ec11acfd67aeb71a4932aecf3d51eb6ad70b4f7051ebee",
+            "externalCss": 0,
+            "warnings": 0
+          },
+          {
+            "cssBytes": 104,
+            "cssSha256": "baa7db7f3e2fe4930d7d6fcb26f939a904a442b5616f1e0c54285bb4e039b586",
+            "externalCss": 0,
+            "warnings": 0
+          }
+        ]
+      },
+      {
+        "name": "unc-relative",
+        "builds": [
+          {
+            "cssBytes": 47,
+            "cssSha256": "19530972504b080f60ec11acfd67aeb71a4932aecf3d51eb6ad70b4f7051ebee",
+            "externalCss": 0,
+            "warnings": 0
+          },
+          {
+            "cssBytes": 104,
+            "cssSha256": "baa7db7f3e2fe4930d7d6fcb26f939a904a442b5616f1e0c54285bb4e039b586",
+            "externalCss": 0,
+            "warnings": 0
+          }
+        ]
+      },
+      {
+        "name": "no-css",
+        "builds": [
+          {
+            "cssBytes": 0,
+            "cssSha256": null,
+            "externalCss": 0,
+            "warnings": 0
+          },
+          {
+            "cssBytes": 0,
+            "cssSha256": null,
+            "externalCss": 0,
+            "warnings": 0
+          }
+        ]
+      }
+    ]
+  },
+  "browserReproduction": {
+    "browserVersion": "151.0.7922.34",
+    "cases": [
+      {
+        "name": "local-absolute",
+        "style": {
+          "color": "rgb(17, 34, 51)",
+          "background": "rgb(51, 34, 17)",
+          "text": "Loaded"
+        },
+        "networkFailures": 0,
+        "consoleErrors": 0,
+        "pageErrors": 0
+      },
+      {
+        "name": "unc-forward",
+        "style": {
+          "color": "rgb(0, 0, 0)",
+          "background": "rgba(0, 0, 0, 0)",
+          "text": "Loading"
+        },
+        "networkFailures": 3,
+        "consoleErrors": 2,
+        "pageErrors": 0
+      },
+      {
+        "name": "unc-native",
+        "style": {
+          "color": "rgb(17, 34, 51)",
+          "background": "rgb(51, 34, 17)",
+          "text": "Loaded"
+        },
+        "networkFailures": 0,
+        "consoleErrors": 0,
+        "pageErrors": 0
+      },
+      {
+        "name": "unc-relative",
+        "style": {
+          "color": "rgb(17, 34, 51)",
+          "background": "rgb(51, 34, 17)",
+          "text": "Loaded"
+        },
+        "networkFailures": 0,
+        "consoleErrors": 0,
+        "pageErrors": 0
+      },
+      {
+        "name": "no-css",
+        "style": {
+          "color": "rgb(0, 0, 0)",
+          "background": "rgba(0, 0, 0, 0)",
+          "text": "Loaded"
+        },
+        "networkFailures": 2,
+        "consoleErrors": 1,
+        "pageErrors": 0
+      }
+    ]
+  },
+  "mpkCssExtraction": [
+    {
+      "widget": "LanguageSelector",
+      "mpkSha256": "85238f7851be1bd703e672d08448246cb7f13c9e6766adad872e6e8f4bda1e07",
+      "cssBytes": 1514,
+      "cssSha256": "557ae7c3994b4bc980416e2787cb99124bf10e92dfdea882bca0d47c8ed5cae1",
+      "deploymentBytesMatch": true
+    },
+    {
+      "widget": "MendixIronCalc",
+      "mpkSha256": "d963b43ead1a1c14ca425ec0ff19de1be3342b7a0f82311e723ede04dbc7f9a1",
+      "cssBytes": 231718,
+      "cssSha256": "5d7e380c2893726c3dc3acc18a462f97752e90aed8691d245e6818d432ff01bd",
+      "deploymentBytesMatch": true
+    }
+  ],
+  "studioF5": {
+    "unc": {
+      "finishedAt": "2026-09-15T14:59:36.645Z",
+      "passed": 0,
+      "failed": 1,
+      "aggregateCssExists": false,
+      "aggregateCssHttpStatus": 404,
+      "diagnosticCode": "mendix_widget_css_missing",
+      "summaryIncludesDiagnostic": true,
+      "assetInterception": false
+    },
+    "local": {
+      "finishedAt": "2026-09-15T15:12:11.156Z",
+      "passed": 2,
+      "failed": 0,
+      "tests": [
+        "home presents every example",
+        "practical sample initializes and reloads"
+      ],
+      "aggregateCssHttpStatus": 200,
+      "language": {
+        "fontSize": "14px",
+        "marginRight": "6px"
+      },
+      "widget": {
+        "borderRadius": "6px",
+        "display": "flex"
+      },
+      "cssBytes": 111215,
+      "cssSha256": "6ee501373ecd3f2cc69d225bf57b68004d6402e5a3391a80ed7ccf382ced51dc",
+      "consoleNetworkAndPageErrors": [],
+      "assetInterception": false,
+      "sourceComparison": {
+        "mprSha256": "9301b868518c6d102b92f50f6402a523683c14793bff4521d549309355bffb48",
+        "mprEqualAfterBothF5Builds": true,
+        "mpksCompared": 34,
+        "allMpkHashesEqual": true
+      },
+      "buildWarning": {
+        "type": "ESModulesLinkingWarning",
+        "widget": "DatagridDateFilter",
+        "missingReactDomExport": "findDOMNode",
+        "affectedWidgetPageNotExercised": true
+      }
+    },
+    "localRerun": {
+      "finishedAt": "2026-09-15T15:14:09.013Z",
+      "passed": 2,
+      "failed": 0,
+      "studioWatchResumeAndRebuildObserved": true,
+      "cssBytes": 111215,
+      "cssSha256": "6ee501373ecd3f2cc69d225bf57b68004d6402e5a3391a80ed7ccf382ced51dc"
+    }
+  },
+  "rawReportSha256": {
+    "browser-repro.json": "b6737d439bd81f96d83db750d7dc52f796577dd6a615c2df07bdfd9858cbb838",
+    "unc-browser/summary.json": "134d85ae7181f954e91bd3ccb01611a2a3cd3b0cd220f8ed666c964a0ae5e510",
+    "unc-browser/network-failures.json": "3b35cf8aa83a15bf2681c6eefd50bb27813812a905955a83311c13e5190038b6",
+    "shared/mendimaru-css-145-IyJ9lS/report.json": "944548bdebe12e75c8658e227490f566af78f0ddc1683475e276455176d695d6",
+    "local-browser/summary.json": "c87f22a8fc73e805ef8e6fee87eba60e9489120fd0da5ccdc6ab3656a48acf24",
+    "local-browser/network-failures.json": "364b37738032a28a72829f4d2192b70bd9353c9ee8dddfc5b70c2785f995d6ac",
+    "local-styles.json": "25aa2bd6d8d1da445f3bd7be65df2b3dd5309da3bbd56162f3d799b5bbb8eefa",
+    "shared/local-app_bundle_log.txt": "61fe620662619eea91b3cc706379f580d9aebd1c28bf3472f2f2c7f9ba6dc33c",
+    "local-rerun-browser/summary.json": "88d72ff1799a505e2c128eca29802a841be9a988bae9cc4c0ade610c25c3fa6f",
+    "local-rerun-browser/network-failures.json": "364b37738032a28a72829f4d2192b70bd9353c9ee8dddfc5b70c2785f995d6ac"
+  },
+  "testedRunnerCommit": "3fe271a",
+  "validation": {
+    "frontendTestsPassed": 108,
+    "strictBrowserScenariosPassed": 23,
+    "artifactSafetyTestsPassed": 7,
+    "winboatLiveHelperTestsPassed": 2,
+    "frontendBuildPassed": true,
+    "eslintPassed": true,
+    "formatPassed": true
+  }
+}

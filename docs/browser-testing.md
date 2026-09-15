@@ -217,8 +217,10 @@ non-GET/HEAD requests, traversal, symlinks, directories, and files over 64 MiB
 are rejected. The mirror is destroyed with the browser run and never exposes a
 LAN listener, project paths, or model files.
 
-This makes Studio Run Locally E2E work without administrator privileges. A
-system-wide `curl http://host.lan/...` installation remains a deployment
+This serves eligible UNC assets within the automated browser context. It does
+not repair missing aggregate CSS or CSS imported as JavaScript by the generated
+client; see [widget CSS diagnostics and the upstream reproduction](widget-css-diagnostics.md).
+A system-wide `curl http://host.lan/...` installation remains a deployment
 decision: an administrator can separately provide loopback name resolution and
 a socket-activated port-80 proxy with the same path restrictions. Mendimaru
 does not silently change host name resolution or acquire privileged socket
