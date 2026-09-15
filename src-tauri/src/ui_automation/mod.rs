@@ -188,7 +188,7 @@ impl Request {
             if self.action == Some(UiActionKind::KeyboardInput)
                 && !matches!(
                     self.value.as_deref(),
-                    Some("Tab" | "F5" | "Ctrl+G" | "Ctrl+S")
+                    Some("Tab" | "F5" | "Ctrl+G" | "Ctrl+S" | "Enter" | "Right" | "Escape")
                 )
             {
                 return Err(invalid());

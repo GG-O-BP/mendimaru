@@ -231,7 +231,7 @@ function Tree {
         $windows.Add(@{elementId=(Register $root);handle=$h.ToInt64().ToString();name=(Short $root.Current.Name);modal=(Modal $root);minimized=[MendimaruUiNative]::IsIconic($h);foreground=([MendimaruUiNative]::GetForegroundWindow() -eq $h);dpi=[MendimaruUiNative]::GetDpiForWindow($h)})
     }
     $state=State $scan;$script:Revision++
-    return @{sessionId=$script:Identity.sessionId;revision=$script:Revision;root=@{schemaVersion='5.0.0';hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';adapter=$script:Identity.fileVersion;generation=$script:Generation;processId=$p.Id;startedTicks=$script:Identity.startedTicks;interactiveSessionId=$p.SessionId;helperProcessId=$PID;helperSessionId=(Get-Process -Id $PID).SessionId;foregroundWindow=[MendimaruUiNative]::GetForegroundWindow().ToInt64().ToString();state=$state.state;statusTexts=$state.statusTexts;dialogs=$state.dialogs;windows=$windows.ToArray();nodes=$nodes.ToArray();truncated=$scan.truncated;limits=@{nodes=3000;depth=48;windows=16};fallbacks=@{coordinates=$false;keyboard=@('Tab','F5','Ctrl+G','Ctrl+S');setValue='Properties Name only'}}}
+    return @{sessionId=$script:Identity.sessionId;revision=$script:Revision;root=@{schemaVersion='5.0.0';hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';adapter=$script:Identity.fileVersion;generation=$script:Generation;processId=$p.Id;startedTicks=$script:Identity.startedTicks;interactiveSessionId=$p.SessionId;helperProcessId=$PID;helperSessionId=(Get-Process -Id $PID).SessionId;foregroundWindow=[MendimaruUiNative]::GetForegroundWindow().ToInt64().ToString();state=$state.state;statusTexts=$state.statusTexts;dialogs=$state.dialogs;windows=$windows.ToArray();nodes=$nodes.ToArray();truncated=$scan.truncated;limits=@{nodes=3000;depth=48;windows=16};fallbacks=@{coordinates=$false;keyboard=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');setValue='Properties Name only'}}}
 }
 function Input-Guard($e,[bool]$needsForeground) {
     $null=Target;Supported-Version
@@ -291,12 +291,16 @@ function Act($r) {
         'click' {
             # A semantic click selects a UIA SelectionItem and verifies its
             # selection. Canvas/image coordinate clicking is not enabled.
-            if(-not $e.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pattern)){throw 'ui-unsupported-element'}
-            $pattern.Select();if(-not $pattern.Current.IsSelected){throw 'ui-effect-unverified'}
+            if($e.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pattern)){
+                $pattern.Select();if(-not $pattern.Current.IsSelected){throw 'ui-effect-unverified'}
+            }elseif($e.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern,[ref]$pattern)){
+                $before=$pattern.Current.ToggleState;$pattern.Toggle()
+                if($pattern.Current.ToggleState -eq $before){throw 'ui-effect-unverified'}
+            }else{throw 'ui-unsupported-element'}
         }
         'keyboard-input' {
             if($e.Current.FrameworkId -cnotin @('WPF','WinForm','Win32')){throw 'ui-unsupported-element'}
-            $keys=@{'Tab'='{TAB}';'F5'='{F5}';'Ctrl+G'='^g';'Ctrl+S'='^s'}
+            $keys=@{'Tab'='{TAB}';'F5'='{F5}';'Ctrl+G'='^g';'Ctrl+S'='^s';'Enter'='{ENTER}';'Right'='{RIGHT}';'Escape'='{ESC}'}
             if(-not $keys.ContainsKey([string]$r.value)){throw 'ui-unsupported-element'}
             if($r.value -eq 'F5'){
                 if((State (Scan)).state -cne 'project-ready'){throw 'ui-effect-unverified'}
@@ -338,7 +342,7 @@ function Execute($r) {
     $null=Target
     Supported-Version
     switch -CaseSensitive ($r.operation) {
-        'capabilities' {return @{sessionId=$r.sessionId;actions=@('invoke','click','focus','set-value','keyboard-input');adapter=$script:Identity.fileVersion;hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';coordinates=$false;setValue='Properties Name only';keys=@('Tab','F5','Ctrl+G','Ctrl+S');conditions=@('project-ready','building','deploying','starting-runtime','running','modal')}}
+        'capabilities' {return @{sessionId=$r.sessionId;actions=@('invoke','click','focus','set-value','keyboard-input');adapter=$script:Identity.fileVersion;hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';coordinates=$false;setValue='Properties Name only';keys=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');conditions=@('project-ready','building','deploying','starting-runtime','running','modal')}}
         'tree' {return Tree}
         'find' {return ,@(Find-Elements $r.selector | ForEach-Object { foreach($e in $_){Public-Element $e} })}
         'action' {return Act $r}

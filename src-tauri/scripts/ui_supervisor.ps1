@@ -9,6 +9,13 @@ $script:UiIdentity = $null
 $script:UiSequence = [long]0
 $script:UiVerified = $false
 
+function Send-MendimaruUiLine($Process,[string]$Line) {
+    # Process.StandardInput uses the parent's console code page on .NET
+    # Framework. Write UTF-8 bytes directly to match the worker's input stream.
+    $bytes=[Text.Encoding]::UTF8.GetBytes($Line+"`n")
+    $Process.StandardInput.BaseStream.Write($bytes,0,$bytes.Length)
+    $Process.StandardInput.BaseStream.Flush()
+}
 function Initialize-MendimaruUi($Process, [string]$SessionId) {
     $script:UiIdentity = @{hostPlatform='linux';interactiveSessionId=[int]$Process.SessionId;sessionId=$SessionId;processId=[int]$Process.Id;startedTicks=$Process.StartTime.ToUniversalTime().Ticks.ToString();executable=$Process.Path;fileVersion=$Process.MainModule.FileVersionInfo.FileVersion}
 }
@@ -88,7 +95,7 @@ public sealed class MendimaruUiJob : IDisposable {
     $script:UiJob=New-Object MendimaruUiJob($script:UiWorker.Handle)
     # Drain initialization diagnostics privately; never forward guest exceptions.
     $script:UiWorker.BeginErrorReadLine()
-    $script:UiWorker.StandardInput.WriteLine((ConvertTo-Json -InputObject $script:UiIdentity -Compress))
+    Send-MendimaruUiLine $script:UiWorker (ConvertTo-Json -InputObject $script:UiIdentity -Compress)
 }
 function Write-MendimaruUiResult($Response) {
     $resultPath=$controlPath+'.ui.report'
@@ -154,7 +161,7 @@ function Service-MendimaruUi {
         }
         if($message.request.operation -cnotin @('capabilities','tree','find','action','wait','screenshot')){Write-MendimaruUiResult @{ok=$false;reason='ui-invalid-request'};return}
         Start-MendimaruUi
-        $script:UiWorker.StandardInput.WriteLine($auth.Json)
+        Send-MendimaruUiLine $script:UiWorker $auth.Json
         $script:UiTask=$script:UiWorker.StandardOutput.ReadLineAsync()
     }catch{
         Stop-MendimaruUi
