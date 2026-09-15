@@ -276,3 +276,11 @@ requires the Linux WinBoat backend and a URL target. Lifecycle lock acquisition
 waits at most three seconds per VM (or the shorter command timeout) and returns
 `precondition_failed` with a retryable, path-free busy message on contention.
 See [WinBoat VM use](winboat-vm-use.md) for identity, generations, and limitations.
+
+## Foreground generated-asset repair (Linux)
+
+`mendimaru assets watch --project-id ID --rewrite-generated-assets` keeps Studio's
+generated widget imports relative across rebuilds. It emits a dedicated NDJSON
+status stream until Ctrl+C/SIGTERM, outside the normal command timeout/envelope.
+See [WinBoat assets](winboat-assets.md) for its opt-in, exact write scope,
+lifecycle, limits, and ordinary-browser validation.

@@ -1,4 +1,6 @@
 mod asset_mirror;
+#[cfg(target_os = "linux")]
+pub(crate) mod asset_normalizer;
 mod client;
 mod container;
 pub(crate) mod maintenance;

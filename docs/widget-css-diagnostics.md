@@ -116,8 +116,10 @@ was not exercised here. This report does not certify all widget compatibility or
 general UNC browser support. The report and reproducer are ready for a Mendix
 Support submission; no external support ticket has been filed by this change.
 
-Until an upstream fix or a verified integration is available, use a clean local
-Windows copy for this affected configuration and validate the actual widget
-pages. General Linux browser support for UNC widget assets remains tracked by
-[#63](https://github.com/GG-O-BP/mendimaru/issues/63). A Windows-local copy is an
-explicit workflow workaround, not automatic project relocation by Mendimaru.
+For this UNC-import configuration, [the opt-in generated-import watcher](winboat-assets.md)
+from #63 keeps imports relative across Studio regeneration and lets Rspack extract
+the real CSS. Its separate live validation covers ordinary Linux Chrome after F5
+and Clean Deployment plus F5. Follow its supported-scope and build-completion
+instructions; it does not repair other causes of a missing aggregate.
+A clean Windows-local copy remains an explicit alternative workflow; Mendimaru
+does not automatically relocate projects.

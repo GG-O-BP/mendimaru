@@ -13,6 +13,8 @@ use std::io::Write;
 use std::str::FromStr;
 use std::time::Duration;
 
+mod assets;
+
 const EXIT_OK: i32 = 0;
 const EXIT_OPERATION_FAILED: i32 = 1;
 const EXIT_INVALID_REQUEST: i32 = 2;
@@ -267,6 +269,9 @@ pub fn dispatch_from_env() -> Option<i32> {
     let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
     if arguments.is_empty() {
         return None;
+    }
+    if arguments.first().and_then(|value| value.to_str()) == Some("assets") {
+        return Some(assets::dispatch(&arguments[1..]));
     }
     if matches!(
         arguments.first().and_then(|value| value.to_str()),
@@ -639,6 +644,8 @@ Usage: mendimaru [--json | --ndjson] [--backend ID] [--timeout-seconds SECONDS] 
 
 Commands:
   capabilities                     Print the backend capability snapshot
+  assets watch --project-id ID --rewrite-generated-assets
+                                    Normalize generated UNC widget imports until Ctrl+C (Linux)
   env status                       Report the current environment status
   env ensure                       Ensure required environment dependencies are ready
   studio list                      List installed Studio Pro versions

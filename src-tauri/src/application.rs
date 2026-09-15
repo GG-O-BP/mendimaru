@@ -861,7 +861,7 @@ fn safe_project(project: &crate::models::MendixProject) -> Result<SafeProject, S
     })
 }
 
-fn resolve_project(
+pub(crate) fn resolve_project(
     config: &AppConfig,
     project_id: &str,
 ) -> ApplicationResult<crate::models::MendixProject> {
