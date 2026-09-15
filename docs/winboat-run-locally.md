@@ -147,3 +147,12 @@ bindings, host networking, a missing `/storage` volume, and a caller-selected
 host port are rejected. Native Windows and macOS adapters do not read or change
 Compose; their future `studio-run-locally` implementations own native port and
 process handling.
+
+## VM use across caches and worktrees
+
+Runtime start/stop, Studio launch, VM startup, settings Compose transactions, and
+UEFI recovery now acquire VM-wide exclusive use in addition to their existing
+locks. WinBoat browser tests hold shared use through completion. A competing
+lifecycle operation waits at most three seconds per VM, then returns a retryable
+busy precondition without modifying Compose. Release shared use before retrying.
+See [VM use and lifecycle exclusion](winboat-vm-use.md) for the complete policy.

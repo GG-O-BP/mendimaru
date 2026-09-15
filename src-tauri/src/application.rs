@@ -372,6 +372,29 @@ pub(crate) async fn browser_install_chromium(
 
 pub(crate) async fn browser_test_url(
     backend: BackendId,
+    vm_config: Option<&AppConfig>,
+    base_url: &str,
+    suite_path: &str,
+    policy: BrowserTestPolicy,
+) -> ApplicationResult<BrowserTestSummary> {
+    if let Some(config) = vm_config {
+        let lease = crate::winboat::vm_use::acquire(
+            config,
+            crate::winboat::vm_use::Mode::Shared,
+            CapabilityId::BrowserTest,
+        )
+        .await?;
+        return lease
+            .run(browser_test_url_with_lease(
+                backend, base_url, suite_path, policy,
+            ))
+            .await;
+    }
+    browser_test_url_with_lease(backend, base_url, suite_path, policy).await
+}
+
+async fn browser_test_url_with_lease(
+    backend: BackendId,
     base_url: &str,
     suite_path: &str,
     policy: BrowserTestPolicy,
@@ -400,6 +423,32 @@ pub(crate) async fn browser_test_url(
 }
 
 pub(crate) async fn browser_test_runtime(
+    config: &AppConfig,
+    runtime_session_id: &str,
+    suite_path: &str,
+    policy: BrowserTestPolicy,
+) -> ApplicationResult<BrowserTestSummary> {
+    #[cfg(target_os = "linux")]
+    if crate::winboat::runtime::session_exists(runtime_session_id) {
+        let lease = crate::winboat::vm_use::acquire(
+            config,
+            crate::winboat::vm_use::Mode::Shared,
+            crate::contracts::CapabilityId::BrowserTest,
+        )
+        .await?;
+        return lease
+            .run(browser_test_runtime_with_lease(
+                config,
+                runtime_session_id,
+                suite_path,
+                policy,
+            ))
+            .await;
+    }
+    browser_test_runtime_with_lease(config, runtime_session_id, suite_path, policy).await
+}
+
+async fn browser_test_runtime_with_lease(
     config: &AppConfig,
     runtime_session_id: &str,
     suite_path: &str,

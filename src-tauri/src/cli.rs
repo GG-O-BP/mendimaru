@@ -92,6 +92,7 @@ enum CliCommand {
     BrowserDoctor,
     BrowserInstallChromium,
     BrowserTest {
+        winboat_use: bool,
         base_url: Option<String>,
         runtime_session_id: Option<String>,
         suite_path: String,
@@ -546,7 +547,8 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
             "Usage: mendimaru browser test (--base-url URL | --runtime-session-id ID)\n\
                     --suite-path SUITE_JSON [options]\n\
              \n\
-             Options include timeout controls, --record-video, --record-har,\n\
+             Options include --winboat-use (protect the configured VM with --base-url),\n\
+             timeout controls, --record-video, --record-har,\n\
              --fail-on-console-error, --fail-on-network-failure,\n\
              --max-artifact-mib, and --retention-runs. See browser-testing.md.",
         ),
@@ -732,12 +734,31 @@ async fn run_command(
         CliCommand::BrowserTest {
             base_url: Some(base_url),
             runtime_session_id: None,
+            winboat_use,
             suite_path,
             policy,
         } => {
+            let vm_config = if *winboat_use {
+                if capability_snapshot.manifest.backend != BackendId::LinuxWinboat {
+                    return Err(BackendError::invalid_request(
+                        "--winboat-use requires the linux-winboat backend",
+                    )
+                    .into());
+                }
+                let paths = AppPaths::discover_for_cli().map_err(|_| {
+                    CommandError::new(
+                        CommandErrorCode::ConfigLoadFailed,
+                        "the application directories could not be resolved".into(),
+                    )
+                })?;
+                Some(crate::application::load_config(&paths)?)
+            } else {
+                None
+            };
             return CommandOutput::data(
                 crate::application::browser_test_url(
                     capability_snapshot.manifest.backend,
+                    vm_config.as_ref(),
                     base_url,
                     suite_path,
                     policy.clone(),
@@ -979,6 +1000,7 @@ async fn run_command(
         CliCommand::BrowserTest {
             base_url: None,
             runtime_session_id: Some(runtime_session_id),
+            winboat_use: _,
             suite_path,
             policy,
         } => CommandOutput::data(
@@ -1992,6 +2014,7 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
                     "--fail-on-network-failure",
                     "--record-video",
                     "--record-har",
+                    "--winboat-use",
                 ],
             )?;
             let base_url = options.get("--base-url").cloned();
@@ -1999,6 +2022,12 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
             if base_url.is_some() == runtime_session_id.is_some() {
                 return Err(BackendError::invalid_request(
                     "exactly one of --base-url or --runtime-session-id is required",
+                ));
+            }
+            let winboat_use = flags.contains("--winboat-use");
+            if winboat_use && base_url.is_none() {
+                return Err(BackendError::invalid_request(
+                    "--winboat-use requires --base-url; Runtime targets acquire use automatically",
                 ));
             }
             let policy = BrowserTestPolicy {
@@ -2033,6 +2062,7 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
                     .unwrap_or(DEFAULT_BROWSER_RETENTION_RUNS),
             };
             Ok(CliCommand::BrowserTest {
+                winboat_use,
                 base_url,
                 runtime_session_id,
                 suite_path: required_map_option(&options, "--suite-path")?,
@@ -2524,6 +2554,14 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
             Some(CapabilityId::BrowserTest),
             crate::application::BROWSER_STUDIO_METADATA_UNAVAILABLE,
         ) => crate::application::BROWSER_STUDIO_METADATA_UNAVAILABLE,
+        (
+            BackendErrorCode::PreconditionFailed,
+            Some(BackendId::LinuxWinboat),
+            Some(_),
+            message @ (crate::winboat::vm_use::BUSY
+            | crate::winboat::vm_use::UNTRUSTED
+            | crate::winboat::vm_use::UPGRADE),
+        ) => message,
         _ => safe_error_message_for_backend(error.code, error.backend),
     };
     let diagnostic_ref = error
@@ -2761,6 +2799,55 @@ mod tests {
             );
             assert!(!execution.stdout.contains("schemaVersion"));
             assert!(!execution.stdout.contains("snapshotId"));
+        }
+    }
+
+    #[test]
+    fn winboat_use_flag_requires_a_url_and_diagnostics_are_exactly_allowlisted() {
+        let parsed = parse(&args(&[
+            "browser",
+            "test",
+            "--base-url",
+            "http://127.0.0.1:8080/",
+            "--suite-path",
+            "suite.json",
+            "--winboat-use",
+        ]))
+        .unwrap();
+        assert!(matches!(
+            parsed.command,
+            CliCommand::BrowserTest {
+                winboat_use: true,
+                ..
+            }
+        ));
+        assert!(parse(&args(&[
+            "browser",
+            "test",
+            "--runtime-session-id",
+            "runtime_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--suite-path",
+            "suite.json",
+            "--winboat-use"
+        ]))
+        .is_err());
+        for message in [
+            crate::winboat::vm_use::BUSY,
+            crate::winboat::vm_use::UNTRUSTED,
+            crate::winboat::vm_use::UPGRADE,
+        ] {
+            let mut error = BackendError::operation(
+                BackendId::LinuxWinboat,
+                CapabilityId::RuntimeStop,
+                message,
+            );
+            error.code = BackendErrorCode::PreconditionFailed;
+            assert_eq!(sanitize_backend_error(error.clone()).message, message);
+            error.message.push_str(" /private/credential=secret");
+            assert_eq!(
+                sanitize_backend_error(error).message,
+                safe_error_message(BackendErrorCode::PreconditionFailed)
+            );
         }
     }
 

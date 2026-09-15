@@ -20,6 +20,7 @@ mod studio;
 
 pub(crate) use asset_mirror::AssetMirrorServer;
 mod version_cache;
+pub(crate) mod vm_use;
 
 use crate::models::{AppConfig, StudioVersion};
 

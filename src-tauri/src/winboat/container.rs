@@ -605,11 +605,38 @@ const fn container_status_name(status: ContainerStatus) -> &'static str {
 }
 
 pub async fn recreate_container(config: &AppConfig) -> Result<(), String> {
+    let lease = crate::winboat::vm_use::acquire(
+        config,
+        crate::winboat::vm_use::Mode::Exclusive,
+        crate::contracts::CapabilityId::RuntimeStart,
+    )
+    .await
+    .map_err(|error| error.message)?;
+    lease.run(recreate_container_with_lease(config)).await
+}
+
+async fn recreate_container_with_lease(config: &AppConfig) -> Result<(), String> {
     let service_name = winboat_compose_service_name(Path::new(&config.compose_file))?;
     recreate_compose_service(config, &service_name).await
 }
 
 pub async fn recreate_compose_service(
+    config: &AppConfig,
+    service_name: &str,
+) -> Result<(), String> {
+    let lease = crate::winboat::vm_use::acquire(
+        config,
+        crate::winboat::vm_use::Mode::Exclusive,
+        crate::contracts::CapabilityId::RuntimeStart,
+    )
+    .await
+    .map_err(|error| error.message)?;
+    lease
+        .run(recreate_compose_service_with_lease(config, service_name))
+        .await
+}
+
+async fn recreate_compose_service_with_lease(
     config: &AppConfig,
     service_name: &str,
 ) -> Result<(), String> {
