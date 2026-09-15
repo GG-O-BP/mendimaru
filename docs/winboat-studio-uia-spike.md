@@ -1,6 +1,94 @@
 # Studio Pro UI automation spike — Linux + WinBoat (#16)
 
-## Checkpoint: 2026-09-15, awaiting host reboot
+## Current checkpoint: 2026-09-15, tools prepared; #148 uses the guest first
+
+The reboot blocker is resolved. The user's follow-up explicitly gives the
+existing #148 WinBoat experiment priority and asks #16 to prepare tools first.
+Do not start another RDP connection, Studio launch, capture campaign, guest
+configuration change or Runtime operation until that experiment has finished.
+Native Windows remains deferred. **No representative UI trial has run**;
+there is still no Studio UI feasibility decision, PR, merge or issue closure.
+
+### Fresh observations after reboot
+
+| Check                             | Observation                                                                           |
+| --------------------------------- | ------------------------------------------------------------------------------------- |
+| Host kernel and installed modules | Both `7.2.6-arch2-1`                                                                  |
+| WinBoat                           | Already running; no start or Compose change needed                                    |
+| `mendimaru env status`            | Guest API, RDP and all readiness checks passed                                        |
+| FreeRDP                           | `3.31.1 (63b948ca5c)`                                                                 |
+| Guest OS                          | Windows 11 Pro, `10.0.26100`, build `26100`                                           |
+| Interactive helper                | RDP session `2`; no Studio process in the inventory                                   |
+| Proposed exact comparison pair    | File versions `10.24.26.0` and `11.12.4.0`; matching disposable projects still needed |
+| Other installed file versions     | `10.24.9.0`, `11.12.3.0`, `11.6.10.0`                                                 |
+| Windows UI culture                | `ko-KR`; actual Studio language/theme have not been checked                           |
+| Requested RemoteApp size          | `1280x800`, desktop scaling `100`                                                     |
+| Actual guest screen               | `1920x1080`; `/size` alone did not establish the intended screen size                 |
+| Existing product projects         | Not opened, converted or modified                                                     |
+
+The initial RemoteApp inventory did not finish inside the host's 60-second
+observation window. Its report arrived later. One RDP client returned exit 12
+with `ERRINFO_RPC_INITIATED_DISCONNECT` while another connection was made.
+The cause has **not** been attributed to #148. These are preflight observations,
+not measured cold/warm Studio trials. Avoid recursively scanning entire Studio
+installations in a UI scenario; discover once and use verified exact paths.
+
+The private inventory is retained under
+`~/.local/state/mendimaru/issue-16/preflight-20260915/`, with a SHA-256 manifest.
+It includes account/session information and is not a publishable example UI
+artifact. The temporary diagnostic MessageBox was closed and #16's diagnostic
+FreeRDP process was terminated. Do not reuse its cached session/PID identity.
+
+### Additional preparation
+
+- `capture.ps1` now requires a fixed NTFS drive and rejects UNC output, missing parent directories and linked
+  output ancestors before applying a local Windows ACL. Collect on local NTFS
+  and export reviewed files afterwards. It rejects a truncated snapshot as
+  `partial-capture`, preserving that snapshot for diagnosis.
+- `capture-worker.ps1` checks the input desktop's name before and after capture,
+  records top-level window truncation, PowerShell version and bounded pattern
+  state (value/read-only, selection, toggle, expansion, focus). Password values
+  are omitted. **These changes have only passed Linux syntax checks, not live
+  Windows behavior checks.** Local NTFS/ACL support and lock/reconnect behavior
+  remain explicit validation gates.
+- `scripts/spikes/studio-uia/candidates.json` pins `winappCli 0.6.0`,
+  `FlaUI.Core/UIA3 5.0.0`, `Interop.UIAutomationClient 10.19041.0`, and
+  `System.Management 8.0.0`. The WinApp digest comes from release metadata;
+  NuGet SHA-256 values were calculated from the official downloads, as labeled.
+  They are reproducibility pins, not a claim that package signatures were checked.
+- All five package files are downloaded and verified in the private host cache
+  `~/.local/state/mendimaru/issue-16/tools/`. None has been installed or executed
+  in the guest. For FlaUI on Windows PowerShell 5.1, stage the .NET Framework
+  4.8 assets and their interop dependency, retaining license files.
+
+Recheck package bytes before guest staging:
+
+```bash
+node scripts/spikes/studio-uia/verify-candidates.mjs \
+  "$HOME/.local/state/mendimaru/issue-16/tools"
+node --test scripts/spikes/studio-uia/*.node-test.mjs
+```
+
+The verifier reads files only, rejects unexpected size/hash, non-regular files
+and unsafe filenames, and does not download, extract, install or execute them.
+For a fresh machine, download the exact URLs in the manifest to a private
+directory under their specified filenames, then run the same verification.
+
+Preparation validation: eight Node tests passed; all five downloaded package
+files matched the pinned byte count and SHA-256; changed JavaScript passed
+ESLint with zero warnings and Prettier checks. Both PowerShell scripts parsed
+with the digest-verified PowerShell 7.6.6 on Linux. These checks do not validate
+Windows APIs, Windows PowerShell 5.1 behavior, candidate loading, UI locators,
+screen captures or Studio actions. Full product tests were not run because
+this checkpoint changes only experimental tools and documentation.
+
+After #148 completes, repeat environment/session discovery. Establish the real
+screen size (a dedicated 1280×800 Linux test display is a candidate, not yet a
+verified fix), DPI, Studio language and theme. Select disposable exact-version
+projects, validate the collectors in the guest, then follow steps 4–9 below.
+Keep all incomplete attempts and preserve Windows native as deferred scope.
+
+## Historical checkpoint: 2026-09-15, awaiting host reboot
 
 This is an **incomplete investigation**, not a Go/Limited Go/No-Go result.
 The user requested Linux + WinBoat only and explicitly deferred native Windows.

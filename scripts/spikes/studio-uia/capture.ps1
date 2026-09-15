@@ -11,6 +11,18 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'windows-guest-required' }
+# SMB permissions do not necessarily implement Windows ACLs. Collect on local
+# NTFS first; copy reviewed artifacts to the host only after the worker exits.
+if ($OutputDirectory -notmatch '^[A-Za-z]:\\' -or $OutputDirectory.Substring(2).Contains(':')) { throw 'local-output-required' }
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+$drive = New-Object IO.DriveInfo ([IO.Path]::GetPathRoot($OutputDirectory))
+if ($drive.DriveType -ne [IO.DriveType]::Fixed -or $drive.DriveFormat -ne 'NTFS') { throw 'local-ntfs-output-required' }
+$ancestor = [IO.Directory]::GetParent($OutputDirectory)
+while ($null -ne $ancestor) {
+    if (-not $ancestor.Exists) { throw 'output-parent-missing' }
+    if ($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'linked-output-ancestor' }
+    $ancestor = $ancestor.Parent
+}
 if (Test-Path -LiteralPath $OutputDirectory) { throw 'output-already-exists' }
 $directory = New-Item -ItemType Directory -Path $OutputDirectory
 if ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'linked-output' }
@@ -43,8 +55,13 @@ try {
         $null = $child.WaitForExit(5000)
         $result.reason = 'provider-timeout'
     } elseif ($child.ExitCode -eq 0 -and (Test-Path -LiteralPath (Join-Path $directory.FullName 'snapshot.json'))) {
-        $result.status = 'captured'
-        $result.reason = 'requires-artifact-review'
+        $snapshot = Get-Content -LiteralPath (Join-Path $directory.FullName 'snapshot.json') -Raw | ConvertFrom-Json
+        if ($snapshot.windowsTruncated -or @($snapshot.windows | Where-Object { $_.truncated }).Count -gt 0) {
+            $result.reason = 'partial-capture'
+        } else {
+            $result.status = 'captured'
+            $result.reason = 'requires-artifact-review'
+        }
     } else {
         $result.reason = 'worker-failed'
     }

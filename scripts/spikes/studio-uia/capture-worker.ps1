@@ -14,6 +14,7 @@ try {
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class StudioUiaCapture {
     public delegate bool EnumProc(IntPtr hwnd, IntPtr parameter);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr parameter);
@@ -25,12 +26,23 @@ public static class StudioUiaCapture {
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] public static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
     [DllImport("user32.dll")] public static extern bool CloseDesktop(IntPtr desktop);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder value, uint length, out uint needed);
+    public static bool IsDefaultInputDesktop() {
+        var desktop = OpenInputDesktop(0, false, 1);
+        if (desktop == IntPtr.Zero) return false;
+        try {
+            var name = new StringBuilder(256); uint needed;
+            return GetUserObjectInformation(desktop, 2, name, 512, out needed) && name.ToString() == "Default";
+        } finally { CloseDesktop(desktop); }
+    }
     public static IntPtr[] Windows(uint pid) {
         var result = new List<IntPtr>();
         EnumWindows((hwnd, parameter) => {
             uint owner; GetWindowThreadProcessId(hwnd, out owner);
             if (owner == pid && IsWindowVisible(hwnd)) result.Add(hwnd);
-            return result.Count < 8;
+            // The ninth window is a sentinel: never silently report eight as
+            // a complete top-level inventory when more windows are present.
+            return result.Count < 9;
         }, IntPtr.Zero);
         return result.ToArray();
     }
@@ -49,16 +61,15 @@ public static class StudioUiaCapture {
     }
     $target = Get-Target
     $reason = 'no-interactive-desktop'
-    $desktop = [StudioUiaCapture]::OpenInputDesktop(0, $false, 1)
-    if ($desktop -eq [IntPtr]::Zero) { throw $reason }
-    $null = [StudioUiaCapture]::CloseDesktop($desktop)
+    if (-not [StudioUiaCapture]::IsDefaultInputDesktop()) { throw $reason }
     $reason = 'no-visible-window'
     $windows = @([StudioUiaCapture]::Windows([uint32]$StudioProcessId))
     if ($windows.Count -eq 0) { throw $reason }
+    $windowsTruncated = $windows.Count -gt 8
     $snapshots = New-Object Collections.Generic.List[object]
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $walker = [Windows.Automation.TreeWalker]::RawViewWalker
-    foreach ($handle in $windows) {
+    foreach ($handle in @($windows | Select-Object -First 8)) {
         $null = Get-Target
         $reason = 'provider-failed'
         $root = [Windows.Automation.AutomationElement]::FromHandle($handle)
@@ -78,14 +89,33 @@ public static class StudioUiaCapture {
             if ($automationId.Length -gt 256) { $automationId = $automationId.Substring(0, 256) }
             $rect = $current.BoundingRectangle
             $nodeId = $nodes.Count
+            $state = [ordered]@{}
+            $supported = @($element.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName })
+            if (-not $current.IsPassword -and $supported -contains 'ValuePatternIdentifiers.Pattern') {
+                $value = ([Windows.Automation.ValuePattern]$element.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern)).Current
+                $state.readOnly = $value.IsReadOnly
+                $text = $value.Value
+                $state.valueTruncated = $text.Length -gt 256
+                $state.value = $text.Substring(0, [Math]::Min($text.Length, 256))
+            }
+            if ($supported -contains 'SelectionItemPatternIdentifiers.Pattern') {
+                $state.selected = ([Windows.Automation.SelectionItemPattern]$element.GetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern)).Current.IsSelected
+            }
+            if ($supported -contains 'TogglePatternIdentifiers.Pattern') {
+                $state.toggle = ([Windows.Automation.TogglePattern]$element.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)).Current.ToggleState.ToString()
+            }
+            if ($supported -contains 'ExpandCollapsePatternIdentifiers.Pattern') {
+                $state.expansion = ([Windows.Automation.ExpandCollapsePattern]$element.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern)).Current.ExpandCollapseState.ToString()
+            }
             $nodes.Add([ordered]@{
                 id = $nodeId; parent = $item.parent; depth = $item.depth
                 name = $name; automationId = $automationId; controlType = $current.ControlType.ProgrammaticName
                 className = $current.ClassName; frameworkId = $current.FrameworkId
                 processId = $current.ProcessId; enabled = $current.IsEnabled; offscreen = $current.IsOffscreen
                 password = $current.IsPassword; keyboardFocusable = $current.IsKeyboardFocusable
+                keyboardFocused = $current.HasKeyboardFocus; state = $state
                 bounds = @($rect.X, $rect.Y, $rect.Width, $rect.Height)
-                patterns = @($element.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName })
+                patterns = $supported
             })
             $child = $walker.GetFirstChild($element)
             if ($item.depth -ge 18) {
@@ -126,12 +156,16 @@ public static class StudioUiaCapture {
         })
     }
     $null = Get-Target
+    $reason = 'desktop-changed-during-capture'
+    if (-not [StudioUiaCapture]::IsDefaultInputDesktop()) { throw $reason }
     $report = [ordered]@{
         schemaVersion = 1; status = 'captured'; provider = 'dotnet-framework-uia'
         collectedAtUtc = [DateTime]::UtcNow.ToString('o'); elapsedMs = $clock.ElapsedMilliseconds
         studioProcessId = $StudioProcessId; startTimeUtcTicks = $StartTimeUtcTicks
         fileVersion = $FileVersion; sessionId = $target.SessionId; helperSessionId = (Get-Process -Id $PID).SessionId
         culture = [Globalization.CultureInfo]::CurrentUICulture.Name
+        powershellVersion = $PSVersionTable.PSVersion.ToString()
+        windowsTruncated = $windowsTruncated
         screenBounds = @([Windows.Forms.Screen]::AllScreens | ForEach-Object {
             @{ width = $_.Bounds.Width; height = $_.Bounds.Height; primary = $_.Primary }
         })
