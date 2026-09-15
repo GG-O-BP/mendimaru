@@ -971,9 +971,13 @@ mod tests {
         crate::i18n::initialize("en-US").expect("localization initializes");
         let executable_root = tempfile::tempdir().expect("temporary executable root");
         let fake_browser = executable_root.path().join("fake-browser");
+        // Chromiumoxide races child exit against reading stderr. Close stderr
+        // while the child is still alive so it reads the diagnostic before EOF;
+        // Browser::launch then kills and reaps this process on the launch error.
+        // An immediate exit can win that race and discard the diagnostic.
         std::fs::write(
             &fake_browser,
-            "#!/bin/sh\necho 'No usable sandbox!' >&2\nexit 1\n",
+            "#!/bin/sh\necho 'No usable sandbox!' >&2\nexec 2>&-\nexec sleep 30\n",
         )
         .expect("write fake browser");
         std::fs::set_permissions(&fake_browser, std::fs::Permissions::from_mode(0o700))
