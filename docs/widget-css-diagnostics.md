@@ -83,6 +83,39 @@ and the same behavior after Studio regenerates output. Also handle the separate
 no-CSS-input case consistently with the client's unconditional aggregate link.
 A generated-file edit is a diagnostic experiment; Studio can overwrite it.
 
+### Verified results (2026-09-15 UTC)
+
+The [evidence summary](issue-145-evidence.json) records the versions, hashes,
+CSS sizes, browser results, and private raw-report hashes. In an isolated Windows
+VM, Studio Pro **11.12.3** F5 built UNC and Windows-local copies of
+IronCalcSpreadUIShowcase. Their model-file hashes and all **34 MPK hashes** match
+after both builds. No widget or model edits were needed.
+
+| Actual F5 build     | Aggregate CSS             | Strict Linux Chromium result                                                                     |
+| ------------------- | ------------------------- | ------------------------------------------------------------------------------------------------ |
+| UNC share           | Absent; HTTP 404          | Home fails; the network artifact and failed-heading summary include `mendix_widget_css_missing`. |
+| Windows local drive | 111,215 bytes; HTTP 200   | Home and practical widget sample pass (2/2), with zero console, network, or page errors.         |
+| Local F5 rerun      | Same CSS size and SHA-256 | Studio's log confirms watch resume and rebuild; both browser tests pass again (2/2).             |
+
+The local aggregate contains both LanguageSelector and IronCalc rules. Computed
+styles confirm LanguageSelector's 14 px font and 6 px right margin, and an
+IronCalc button's 6 px border radius and flex display. The widget renders its
+sample and reloads it. These browser runs use the direct loopback URL without
+asset interception or a mirror.
+
+The separate minimized watch comparison used the installation's Node **24.10.0**
+and Rspack **1.7.11**. Local absolute, native UNC and relative UNC imports produced
+47-byte CSS, then 104-byte CSS after the test stylesheet changed. Forward-slash
+UNC imports remained external and produced no CSS in either build. The no-CSS
+control also produced no aggregate. Chromium confirmed the initial and added
+styles for all three successful cases; negative controls retained their failures.
+
+Validation covers the named pages and configuration. The local F5 build also
+reports a `DatagridDateFilter` `findDOMNode` linking warning; that widget's page
+was not exercised here. This report does not certify all widget compatibility or
+general UNC browser support. The report and reproducer are ready for a Mendix
+Support submission; no external support ticket has been filed by this change.
+
 Until an upstream fix or a verified integration is available, use a clean local
 Windows copy for this affected configuration and validate the actual widget
 pages. General Linux browser support for UNC widget assets remains tracked by
