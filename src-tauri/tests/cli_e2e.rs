@@ -1496,7 +1496,15 @@ impl WinboatRuntimeFixture {
         let temporary = tempfile::tempdir().expect("WinBoat Runtime fixture");
         let root = temporary.path();
         // Independent fake VMs must not share the host-wide management lease.
-        let container_name = mendimaru_lib::contracts::secure_identifier("vm").unwrap();
+        let mut management_id = [0_u8; 16];
+        getrandom::fill(&mut management_id).unwrap();
+        let container_name = format!(
+            "vm_{}",
+            management_id
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
         let config_directory = root.join("config");
         let workspace = root.join("workspace");
         let fake_bin = root.join("bin");
