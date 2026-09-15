@@ -21,9 +21,10 @@ In another terminal, open the **same selected project** normally with
 `studio start --version 11.12.3 --project-id ...` (or the desktop application),
 prepare Runtime forwarding as usual, and use Studio's Run Locally/F5 action.
 Wait for Rspack's build to complete, then open the ordinary Runtime URL in Chrome.
-After a rebuild, wait for both the watcher's `normalized` event and Rspack's
-subsequent successful build before reloading a page. A first load during that
-interval may still observe the previous failed bundle and need a reload.
+If the watcher reports `normalized`, wait for Rspack's subsequent successful
+build before reloading a page. If the inputs are already relative, no repair
+event is needed; wait for the normal Studio build completion. A first load during
+that interval may still observe the previous failed bundle and need a reload.
 
 The command requires the explicit `--rewrite-generated-assets` opt-in. It changes
 **only generated `.js` files under `deployment/web/layouts` and
@@ -66,8 +67,10 @@ removed/regenerated deployment directories. Only changed files are read.
 Directory descriptors anchor traversal; symlinks and hardlinked/nonregular
 JavaScript files are rejected. Limits are eight nested directory levels, 10,000
 entries, 8 MiB per JavaScript file, and 64 MiB of candidate source bytes per scan.
-Unsafe paths, unsupported widget import forms, invalid UTF-8, permission errors,
-and exceeded limits stop the command visibly. Correct the reported condition
+Unsafe paths in matched widget imports, invalid UTF-8, permission errors, and
+exceeded limits stop the command visibly. Only single-line static imports in the
+generated form (with a semicolon and `.js`, `.mjs`, or `.css` target) are supported;
+other forms and quoted/commented lookalikes are left intact. Correct the reported condition
 and restart it before F5. File-system regeneration can briefly race a browser
 load; the command does not claim that its `normalized` event means Rspack has
 already finished rebuilding.
@@ -83,5 +86,6 @@ or widget files is necessary.
 The ordinary Rust suite checks opt-in parsing, correct nested relative imports,
 source/dist preservation, unchanged-file scans, repeated generation, full
 replacement of deployment, and traversal/symlink/hardlink/size rejection.
-Actual Studio F5 and ordinary-browser evidence is recorded separately; a fixture
-or intercepted browser success must not be described as live application success.
+Actual Studio F5 and ordinary-browser evidence is recorded in
+[PR #162](https://github.com/GG-O-BP/mendimaru/pull/162). A fixture or intercepted
+browser success must not be described as live application success.
