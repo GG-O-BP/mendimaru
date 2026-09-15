@@ -14,6 +14,9 @@ use std::str::FromStr;
 use std::time::Duration;
 
 mod assets;
+mod ui;
+#[cfg(target_os = "linux")]
+pub(crate) use ui::request_keeper_ui;
 
 const EXIT_OK: i32 = 0;
 const EXIT_OPERATION_FAILED: i32 = 1;
@@ -38,6 +41,10 @@ enum OutputFormat {
 #[derive(Debug, PartialEq, Eq)]
 enum CliCommand {
     Capabilities,
+    Ui {
+        request: crate::ui_automation::Request,
+        read_value: bool,
+    },
     EnvironmentStatus,
     EnvironmentEnsure,
     StudioList,
@@ -126,6 +133,7 @@ impl CliCommand {
     fn name(&self) -> &'static str {
         match self {
             Self::Capabilities => "capabilities",
+            Self::Ui { request, .. } => request.operation.name(),
             Self::EnvironmentStatus => "env.status",
             Self::EnvironmentEnsure => "env.ensure",
             Self::StudioList => "studio.list",
@@ -423,6 +431,15 @@ fn help_execution(arguments: &[OsString]) -> Option<CliExecution> {
 fn subcommand_help(values: &[&str]) -> Option<&'static str> {
     let subcommand = values.get(1).copied();
     match (values.first().copied(), subcommand) {
+        (Some("ui"), _) => Some(
+            "Usage: mendimaru ui capabilities|tree|find|action|wait|screenshot|release --session-id ID [--timeout-ms 15000]\n\
+             find/wait: --role ROLE --name NAME --automation-id ID [--scope-id ELEMENT]\n\
+             wait: alternatively --condition project-ready|building|running|modal\n\
+             action: --element-id ELEMENT --action invoke|click|focus|set-value|keyboard-input\n\
+             set-value: --value-stdin; keyboard-input: --key Tab|F5|Ctrl+G|Ctrl+S\n\
+             screenshot: [--window-id ELEMENT] [--region x,y,width,height]\n\
+             Linux+WinBoat requires a session started by this version of the CLI. Windows native is deferred.",
+        ),
         (Some("capabilities"), None) => Some(
             "Usage: mendimaru capabilities [--backend BACKEND]\n\
              \n\
@@ -655,6 +672,7 @@ Mendimaru headless CLI
 Usage: mendimaru [--json | --ndjson] [--backend ID] [--timeout-seconds SECONDS] COMMAND
 
 Commands:
+  ui                               Inspect and control a selected Studio session
   capabilities                     Print the backend capability snapshot
   assets watch --project-id ID --rewrite-generated-assets
                                     Normalize generated UNC widget imports until Ctrl+C (Linux)
@@ -821,6 +839,10 @@ async fn run_command(
     let config = crate::application::load_config(&paths)?;
     match command {
         CliCommand::Capabilities => unreachable!("handled without configuration"),
+        CliCommand::Ui {
+            request,
+            read_value,
+        } => ui::run_ui(&config, request, *read_value).await,
         CliCommand::BrowserFrontendHealth {
             target,
             navigation_ms,
@@ -1291,7 +1313,7 @@ fn finish_session_keeper_launch(mut response: SessionKeeperResponse) -> i32 {
         ));
     }
     let serialized = serde_json::to_vec(&response).unwrap_or_else(|_| {
-        br#"{"ok":false,"error":{"schemaVersion":"4.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
+        br#"{"ok":false,"error":{"schemaVersion":"5.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
     });
     let written = std::io::stdout()
         .write_all(&serialized)
@@ -1670,13 +1692,18 @@ async fn serve_session_keeper(
                 let Ok((stream, _)) = accepted else {
                     return;
                 };
+                if stream.peer_cred().ok().is_none_or(|cred| cred.uid() != unsafe { libc::geteuid() }) { continue; }
                 let (read_half, mut write_half) = stream.into_split();
-                let mut reader = BufReader::new(read_half).take(32);
+                let mut reader = BufReader::new(read_half).take(crate::ui_automation::MAX_REQUEST + 16);
                 let mut request = String::new();
                 let read = tokio::time::timeout(
                     Duration::from_secs(2),
                     reader.read_line(&mut request),
                 ).await;
+                if matches!(read, Ok(Ok(count)) if count > 0) && request.starts_with("ui ") && request.ends_with('\n') {
+                    ui::serve_ui(&request, session_id, &mut reader, &mut write_half).await;
+                    continue;
+                }
                 let mut should_stop = false;
                 let response = if matches!(read, Ok(Ok(count)) if count > 0)
                     && request.trim_end() == "status"
@@ -2000,6 +2027,7 @@ fn parse(arguments: &[OsString]) -> Result<ParsedCli, BackendError> {
 fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
     match values.first().map(String::as_str) {
         Some("capabilities") if values.len() == 1 => Ok(CliCommand::Capabilities),
+        Some("ui") => ui::parse_ui(&values[1..]),
         Some("env") => match values.get(1).map(String::as_str) {
             Some("status") if values.len() == 2 => Ok(CliCommand::EnvironmentStatus),
             Some("ensure") if values.len() == 2 => Ok(CliCommand::EnvironmentEnsure),
@@ -2719,6 +2747,19 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
             | crate::winboat::vm_use::UNTRUSTED
             | crate::winboat::vm_use::UPGRADE),
         ) => message,
+        (_, Some(BackendId::LinuxWinboat), Some(capability), message)
+            if matches!(
+                capability,
+                CapabilityId::UiCapabilities
+                    | CapabilityId::UiTree
+                    | CapabilityId::UiFind
+                    | CapabilityId::UiAction
+                    | CapabilityId::UiWait
+                    | CapabilityId::UiScreenshot
+            ) && crate::ui_automation::safe_reason(message).is_some() =>
+        {
+            crate::ui_automation::safe_reason(message).unwrap()
+        }
         _ => safe_error_message_for_backend(error.code, error.backend),
     };
     let diagnostic_ref = error
@@ -2852,13 +2893,23 @@ fn json_line<T: Serialize>(value: &T) -> String {
 fn is_headless_command(argument: Option<&OsString>) -> bool {
     matches!(
         argument.and_then(|value| value.to_str()),
-        Some("capabilities" | "env" | "studio" | "runtime" | "browser" | "project" | "operation")
+        Some(
+            "capabilities"
+                | "env"
+                | "studio"
+                | "runtime"
+                | "browser"
+                | "project"
+                | "operation"
+                | "ui"
+        )
     )
 }
 
 fn bootstrap_command_name(arguments: &[OsString]) -> &'static str {
     match arguments.first().and_then(|value| value.to_str()) {
         Some("capabilities") => "capabilities",
+        Some("ui") => "ui",
         Some("env") => "env",
         Some("studio") => "studio",
         Some("runtime") => "runtime",

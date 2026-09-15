@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use tempfile::TempDir;
 
-pub(crate) const CURRENT_SCHEMA: &str = "4.0.0";
+pub(crate) const CURRENT_SCHEMA: &str = "5.0.0";
 pub(crate) const LEGACY_SCHEMA: &str = "3.0.0";
 pub(crate) const LEGACY_SESSION_ID: &str = "runtime_2dc6d67e680e1fda66e95b01f2891075";
 

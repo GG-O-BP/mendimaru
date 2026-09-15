@@ -154,6 +154,11 @@ jobs:
         if: runner.os == 'Windows'
         run: npm run lint:rust:all-features
 
+      - name: Test bounded Windows UI helper transport
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./scripts/test-ui-helper.ps1
+
       - name: Test Windows bundle smoke helpers
         if: runner.os == 'Windows'
         run: npm run test:e2e:windows:powershell

@@ -315,6 +315,15 @@ pub fn validate_version(version: &str) -> Result<(), String> {
     }
 }
 
+pub(crate) async fn ui_request(
+    config: &AppConfig,
+    request: &crate::ui_automation::Request,
+) -> crate::contracts::BackendResult<serde_json::Value> {
+    backend::active_backend(config, None)?
+        .ui_request(request)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{capabilities, validate_studio_session_id, validate_version};

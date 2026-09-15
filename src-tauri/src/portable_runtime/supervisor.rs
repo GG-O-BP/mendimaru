@@ -1699,7 +1699,7 @@ fn load_session(
                 false,
             )
         })?;
-    if record.schema_version != CONTRACT_SCHEMA_VERSION
+    if !crate::contracts::compatible_record_schema(&record.schema_version)
         || record.session_id != session_id
         || record.backend != backend
     {

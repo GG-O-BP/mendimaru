@@ -266,7 +266,7 @@ try {
   // including an unavailable browser that cannot establish a launch identity.
   for (const field of ["nodeVersion", "playwrightVersion", "chromium"]) {
     const data = {
-      schemaVersion: "4.0.0",
+      schemaVersion: "5.0.0",
       runnerVersion: "1.0.0",
       ready: false,
       nodeVersion: process.versions.node,

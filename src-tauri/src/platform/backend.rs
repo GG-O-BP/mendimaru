@@ -116,6 +116,13 @@ pub trait RuntimeBackend: BackendIdentity {
 }
 
 pub trait UiAutomationBackend: BackendIdentity {
+    fn ui_request<'a>(
+        &'a self,
+        request: &'a crate::ui_automation::Request,
+    ) -> BackendFuture<'a, serde_json::Value> {
+        unsupported(self.backend_id(), request.operation.capability())
+    }
+
     fn capabilities<'a>(
         &'a self,
         _session_id: &'a str,
@@ -278,6 +285,20 @@ fn capability_for(backend: BackendId, id: CapabilityId, architecture: &str) -> C
         && matches!(
             id,
             CapabilityId::BrowserTest | CapabilityId::BrowserArtifacts
+        )
+    {
+        return Capability::supported(id, required_permissions(backend, id));
+    }
+
+    if backend == BackendId::LinuxWinboat
+        && matches!(
+            id,
+            CapabilityId::UiCapabilities
+                | CapabilityId::UiTree
+                | CapabilityId::UiFind
+                | CapabilityId::UiAction
+                | CapabilityId::UiWait
+                | CapabilityId::UiScreenshot
         )
     {
         return Capability::supported(id, required_permissions(backend, id));
@@ -648,7 +669,105 @@ impl RuntimeBackend for LinuxWinboatBackend<'_> {
     }
 }
 #[cfg(target_os = "linux")]
-impl UiAutomationBackend for LinuxWinboatBackend<'_> {}
+impl UiAutomationBackend for LinuxWinboatBackend<'_> {
+    fn ui_request<'a>(
+        &'a self,
+        request: &'a crate::ui_automation::Request,
+    ) -> BackendFuture<'a, serde_json::Value> {
+        Box::pin(crate::ui_automation::linux_request(self.config, request))
+    }
+    fn capabilities<'a>(
+        &'a self,
+        session_id: &'a str,
+    ) -> BackendFuture<'a, UiAutomationCapabilities> {
+        Box::pin(async move {
+            ui_decode(
+                self.ui_request(&crate::ui_automation::Request::new(
+                    session_id,
+                    crate::ui_automation::Operation::Capabilities,
+                ))
+                .await?,
+            )
+        })
+    }
+    fn tree<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, UiTree> {
+        Box::pin(async move {
+            ui_decode(
+                self.ui_request(&crate::ui_automation::Request::new(
+                    session_id,
+                    crate::ui_automation::Operation::Tree,
+                ))
+                .await?,
+            )
+        })
+    }
+    fn find<'a>(&'a self, request: &'a UiFindRequest) -> BackendFuture<'a, Vec<UiElement>> {
+        Box::pin(async move {
+            let mut r = crate::ui_automation::Request::new(
+                &request.session_id,
+                crate::ui_automation::Operation::Find,
+            );
+            r.selector = Some(crate::ui_automation::Selector {
+                role: request.role.clone(),
+                name: request.name.clone(),
+                automation_id: request.automation_id.clone(),
+                scope_id: None,
+            });
+            ui_decode(self.ui_request(&r).await?)
+        })
+    }
+    fn action<'a>(&'a self, request: &'a UiActionRequest) -> BackendFuture<'a, UiElement> {
+        Box::pin(async move {
+            let mut r = crate::ui_automation::Request::new(
+                &request.session_id,
+                crate::ui_automation::Operation::Action,
+            );
+            r.element_id = Some(request.element_id.clone());
+            r.action = Some(request.action);
+            r.value = request.value.clone();
+            ui_decode(self.ui_request(&r).await?)
+        })
+    }
+    fn wait<'a>(&'a self, request: &'a UiWaitRequest) -> BackendFuture<'a, UiElement> {
+        Box::pin(async move {
+            let mut r = crate::ui_automation::Request::new(
+                &request.session_id,
+                crate::ui_automation::Operation::Wait,
+            );
+            r.timeout_ms = request.timeout_milliseconds;
+            if request.condition.starts_with('{') {
+                r.selector = Some(
+                    serde_json::from_str(&request.condition)
+                        .map_err(|_| BackendError::invalid_request("invalid UI wait selector"))?,
+                );
+            } else {
+                r.condition = Some(request.condition.clone());
+            }
+            ui_decode(self.ui_request(&r).await?)
+        })
+    }
+    fn screenshot<'a>(&'a self, session_id: &'a str) -> BackendFuture<'a, ArtifactDescriptor> {
+        Box::pin(async move {
+            ui_decode(
+                self.ui_request(&crate::ui_automation::Request::new(
+                    session_id,
+                    crate::ui_automation::Operation::Screenshot,
+                ))
+                .await?,
+            )
+        })
+    }
+}
+#[cfg(target_os = "linux")]
+fn ui_decode<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> BackendResult<T> {
+    serde_json::from_value(value).map_err(|_| {
+        BackendError::operation(
+            BackendId::LinuxWinboat,
+            CapabilityId::UiCapabilities,
+            "ui-provider-failed",
+        )
+    })
+}
 #[cfg(target_os = "linux")]
 impl BrowserBackend for LinuxWinboatBackend<'_> {
     fn test<'a>(
@@ -1128,7 +1247,14 @@ mod tests {
                 ) || (backend == BackendId::LinuxWinboat
                     && matches!(
                         capability,
-                        CapabilityId::BrowserTest | CapabilityId::BrowserArtifacts
+                        CapabilityId::BrowserTest
+                            | CapabilityId::BrowserArtifacts
+                            | CapabilityId::UiCapabilities
+                            | CapabilityId::UiTree
+                            | CapabilityId::UiFind
+                            | CapabilityId::UiAction
+                            | CapabilityId::UiWait
+                            | CapabilityId::UiScreenshot
                     ));
                 assert_eq!(manifest.supports(capability), expected);
             }

@@ -1,13 +1,13 @@
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::fmt;
 
 use super::scripts::powershell_literal;
 
 const ENVELOPE_SCHEMA_VERSION: u32 = 1;
-pub(super) const MAX_REPORT_BYTES: u64 = 128 * 1024;
+pub(crate) const MAX_REPORT_BYTES: u64 = 128 * 1024;
 const MAX_PAYLOAD_BYTES: usize = 96 * 1024;
 const OPERATION_KEY_BYTES: usize = 32;
 const ID_BYTES: usize = 16;
@@ -15,7 +15,7 @@ const ID_BYTES: usize = 16;
 type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Clone)]
-pub(super) struct OperationSecurity {
+pub(crate) struct OperationSecurity {
     request_id: String,
     nonce: String,
     key: [u8; OPERATION_KEY_BYTES],
@@ -23,7 +23,7 @@ pub(super) struct OperationSecurity {
 }
 
 impl OperationSecurity {
-    pub(super) fn generate(script_sha256: &str) -> Result<Self, String> {
+    pub(crate) fn generate(script_sha256: &str) -> Result<Self, String> {
         if !is_lower_hex(script_sha256, 64) {
             return Err("the prepared script SHA-256 is invalid".to_string());
         }
@@ -42,7 +42,7 @@ impl OperationSecurity {
     }
 
     #[cfg(test)]
-    pub(super) fn fixture() -> Self {
+    pub(crate) fn fixture() -> Self {
         Self {
             request_id: "00112233445566778899aabbccddeeff".to_string(),
             nonce: "ffeeddccbbaa99887766554433221100".to_string(),
@@ -53,14 +53,14 @@ impl OperationSecurity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct AuthenticatedPayload {
-    pub(super) sequence: u64,
-    pub(super) payload: Vec<u8>,
-    pub(super) mac: [u8; 32],
+pub(crate) struct AuthenticatedPayload {
+    pub(crate) sequence: u64,
+    pub(crate) payload: Vec<u8>,
+    pub(crate) mac: [u8; 32],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum ReportAuthenticationError {
+pub(crate) enum ReportAuthenticationError {
     Oversized,
     InvalidEnvelope(String),
     UnsupportedSchema(u32),
@@ -95,18 +95,18 @@ impl fmt::Display for ReportAuthenticationError {
 }
 
 #[derive(Default)]
-pub(super) struct ReportSequenceTracker {
+pub(crate) struct ReportSequenceTracker {
     last: Option<(u64, [u8; 32])>,
 }
 
 impl ReportSequenceTracker {
-    pub(super) fn after(report: &AuthenticatedPayload) -> Self {
+    pub(crate) fn after(report: &AuthenticatedPayload) -> Self {
         Self {
             last: Some((report.sequence, report.mac)),
         }
     }
 
-    pub(super) fn accept(
+    pub(crate) fn accept(
         &mut self,
         report: &AuthenticatedPayload,
     ) -> Result<bool, ReportAuthenticationError> {
@@ -138,11 +138,20 @@ struct ReportEnvelope {
     mac: String,
 }
 
-pub(super) fn authenticate_report(
+pub(crate) fn authenticate_report(
     content: &[u8],
     security: &OperationSecurity,
 ) -> Result<AuthenticatedPayload, ReportAuthenticationError> {
-    if content.len() as u64 > MAX_REPORT_BYTES {
+    authenticate_bounded_report(content, security, MAX_REPORT_BYTES, MAX_PAYLOAD_BYTES)
+}
+
+pub(crate) fn authenticate_bounded_report(
+    content: &[u8],
+    security: &OperationSecurity,
+    max_report: u64,
+    max_payload: usize,
+) -> Result<AuthenticatedPayload, ReportAuthenticationError> {
+    if content.len() as u64 > max_report {
         return Err(ReportAuthenticationError::Oversized);
     }
     let content = std::str::from_utf8(content)
@@ -168,7 +177,7 @@ pub(super) fn authenticate_report(
     let payload = BASE64_STANDARD
         .decode(&envelope.payload)
         .map_err(|error| ReportAuthenticationError::InvalidPayload(error.to_string()))?;
-    if payload.len() > MAX_PAYLOAD_BYTES {
+    if payload.len() > max_payload {
         return Err(ReportAuthenticationError::Oversized);
     }
     let mac_bytes = hex_decode(&envelope.mac).ok_or(ReportAuthenticationError::InvalidMac)?;
@@ -194,7 +203,28 @@ pub(super) fn authenticate_report(
     })
 }
 
-pub(super) fn secure_powershell_launcher(
+/// The RDP argument contains a digest and a fixed redirected path, never an
+/// operation key. The private bootstrap is read once into bounded memory,
+/// hash-checked before execution, then removed through the redirected drive.
+pub(crate) fn redirected_bootstrap_launcher(source: &[u8]) -> String {
+    let digest = format!("{:x}", Sha256::digest(source));
+    format!(
+        r#"$ErrorActionPreference='Stop'
+$p='\\tsclient\MendimaruAuth\bootstrap.ps1'
+$t=[DateTime]::UtcNow.AddSeconds(60)
+while(-not (Test-Path -LiteralPath $p)){{if([DateTime]::UtcNow -ge $t){{throw 'MENDIMARU_BOOTSTRAP_UNAVAILABLE'}};Start-Sleep -Milliseconds 50}}
+$f=[IO.File]::OpenRead($p)
+try{{if($f.Length -gt 16384){{throw 'MENDIMARU_BOOTSTRAP_INVALID'}};$b=New-Object byte[] ([int]$f.Length);$n=0;while($n -lt $b.Length){{$c=$f.Read($b,$n,$b.Length-$n);if($c -eq 0){{throw 'MENDIMARU_BOOTSTRAP_INVALID'}};$n+=$c}}}}finally{{$f.Dispose()}}
+$h=[Security.Cryptography.SHA256]::Create()
+try{{$d=([BitConverter]::ToString($h.ComputeHash($b))).Replace('-','').ToLowerInvariant()}}finally{{$h.Dispose()}}
+if($d -cne '{digest}'){{throw 'MENDIMARU_BOOTSTRAP_INVALID'}}
+Remove-Item -LiteralPath $p -Force
+try{{& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($b)))}}finally{{[Array]::Clear($b,0,$b.Length)}}
+"#
+    )
+}
+
+pub(crate) fn secure_powershell_launcher(
     windows_script_path: &str,
     security: &OperationSecurity,
 ) -> String {
@@ -256,7 +286,7 @@ fn authenticated_message(request_id: &str, nonce: &str, sequence: u64, payload: 
     format!("{request_id}\n{nonce}\n{sequence}\n{payload}")
 }
 
-pub(super) fn authenticated_envelope(
+pub(crate) fn authenticated_envelope(
     security: &OperationSecurity,
     sequence: u64,
     payload: &[u8],
@@ -313,7 +343,7 @@ fn is_lower_hex(value: &str, length: usize) -> bool {
 }
 
 #[cfg(test)]
-pub(super) fn authenticated_report_fixture(
+pub(crate) fn authenticated_report_fixture(
     security: &OperationSecurity,
     sequence: u64,
     payload: &[u8],
@@ -425,6 +455,25 @@ mod tests {
         assert!(launcher.contains("ReparsePoint"));
         assert!(!launcher.contains("ExecutionPolicy Bypass"));
         assert!(!launcher.contains("& '\\\\host.lan\\Data"));
+    }
+
+    #[test]
+    fn rdp_guest_arguments_never_contain_bootstrap_credentials() {
+        let security = OperationSecurity::fixture();
+        let private_source =
+            secure_powershell_launcher(r"\\host.lan\Data\operation.ps1", &security);
+        let arguments = redirected_bootstrap_launcher(private_source.as_bytes());
+        for secret in [
+            BASE64_STANDARD.encode(security.key),
+            security.nonce,
+            security.request_id,
+        ] {
+            assert!(!arguments.contains(&secret));
+        }
+        assert!(arguments.contains("MENDIMARU_BOOTSTRAP_INVALID"));
+        assert!(arguments.contains("Remove-Item -LiteralPath $p -Force"));
+        assert!(arguments.contains("$f.Length -gt 16384"));
+        assert!(private_source.len() <= 16384);
     }
 
     #[test]

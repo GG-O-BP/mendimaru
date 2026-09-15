@@ -132,7 +132,8 @@ Windows user and the executable path of the detected installation before a
 session can be shown or closed. Runtime versions are exact-policy gated and the
 manifest records all supported Runtime modes independently of the Windows
 Studio backend.
-UI automation remains explicitly unsupported. Linux `x86_64` and `aarch64`
+Linux WinBoat UI automation is bounded to the adapters described below; native UI
+automation remains explicitly unsupported. Linux `x86_64` and `aarch64`
 support browser test execution and integrity-checked artifact lookup for both
 Portable and WinBoat Runtime URLs. Windows/macOS browser execution remains
 explicitly unsupported until issue #27 validates native parity. `mac-native` is
@@ -214,11 +215,14 @@ launcher details remain private. See
 
 ## Compatibility and versioning
 
-The current schema version is `4.0.0` and follows semantic versioning. Version
+The current schema version is `5.0.0` and follows semantic versioning. Version
 2 added multi-mode capability discovery, explicit Runtime backend/readiness,
 WinBoat Run Locally status fields, and its distinct failure codes. Version 3
 adds the first supported browser-test contract and optional Runtime version
-metadata. Version 4 adds external-process failure enum values. These are major
+metadata. Version 4 adds external-process failure enum values. Version 5 adds
+the supported Linux WinBoat UI provider and CLI command variants. Its Runtime,
+build, and browser readers also accept unchanged v4 persisted records, retaining
+original artifact/snapshot versions. These are major
 versions because they add serialized fields or enum values and, for version 3,
 give the previously unsupported browser result a complete shape:
 
@@ -293,3 +297,9 @@ Hosted CI has no live WinBoat VM, so it runs the portable component gates. It
 still runs the fixture-backed native WebView gate, React flow, browser policy
 suite, and Rust tests; those layers are not presented as proof of the live
 install-to-delete boundary.
+
+## Linux WinBoat UI provider
+
+The UI capability IDs are implemented for keeper-owned Studio sessions. See
+[commands, limits, ownership, and error semantics](winboat-ui-automation.md).
+Windows native UI remains deferred; its capabilities are unsupported.

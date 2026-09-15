@@ -1,3 +1,9 @@
+const UI_SUPERVISOR: &str = include_str!("../../scripts/ui_supervisor.ps1");
+const UI_WORKER: &str = include_str!("../../scripts/ui_worker.ps1");
+fn ui_preamble() -> String {
+    UI_SUPERVISOR.replace("__UI_WORKER_BASE64__", &BASE64_STANDARD.encode(UI_WORKER))
+}
+
 const LAUNCH_STUDIO_TEMPLATE: &str = include_str!("../../scripts/launch_studio.ps1");
 const ABORT_STUDIO_LAUNCH_TEMPLATE: &str = include_str!("../../scripts/abort_studio_launch.ps1");
 const INSTALL_STUDIO_TEMPLATE: &str = include_str!("../../scripts/install_studio.ps1");
@@ -35,6 +41,7 @@ pub(super) fn launch_studio_script(
             "__PROJECT_READY_TIMEOUT_SECONDS__",
             &project_ready_timeout_seconds.to_string(),
         )
+        .replace("__UI_PREAMBLE__", &ui_preamble())
         .replace("__SECURITY_PREAMBLE__", OPERATION_SECURITY_PREAMBLE)
 }
 
@@ -141,6 +148,7 @@ pub(super) fn studio_sessions_script(
             &powershell_literal(windows_control_path),
         )
         .replace("__INSTALL_ROOT__", &powershell_literal(install_root))
+        .replace("__UI_PREAMBLE__", &ui_preamble())
         .replace("__SECURITY_PREAMBLE__", OPERATION_SECURITY_PREAMBLE))
 }
 

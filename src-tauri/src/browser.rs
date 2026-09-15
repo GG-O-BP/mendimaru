@@ -704,13 +704,13 @@ pub(crate) fn artifacts(
         .iter()
         .map(|artifact| artifact.descriptor.clone())
         .collect::<Vec<_>>();
-    if record.schema_version != CONTRACT_SCHEMA_VERSION
+    if !crate::contracts::compatible_record_schema(&record.schema_version)
         || record.backend != backend
-        || record.summary.schema_version != CONTRACT_SCHEMA_VERSION
+        || !crate::contracts::compatible_record_schema(&record.summary.schema_version)
         || record.summary.session_id != session_id
         || record.summary.artifacts != indexed_descriptors
         || record.artifacts.iter().any(|artifact| {
-            artifact.descriptor.schema_version != CONTRACT_SCHEMA_VERSION
+            !crate::contracts::compatible_record_schema(&artifact.descriptor.schema_version)
                 || artifact.descriptor.session_id != session_id
                 || artifact.descriptor.backend != backend
         })

@@ -26,6 +26,7 @@ mod projects;
 mod settings;
 mod studio_cache;
 mod studio_trace;
+pub mod ui_automation;
 #[cfg_attr(target_os = "windows", allow(dead_code, unused_imports))]
 mod winboat;
 

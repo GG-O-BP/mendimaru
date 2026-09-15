@@ -503,7 +503,7 @@ fn runtime_record_incompatibility(
     envelope: &SessionRecordEnvelope,
     expected_session_id: &str,
 ) -> Option<&'static str> {
-    if envelope.schema_version != CONTRACT_SCHEMA_VERSION {
+    if !crate::contracts::compatible_record_schema(&envelope.schema_version) {
         Some("schema_version_mismatch")
     } else if envelope.session_id != expected_session_id {
         Some("session_identity_mismatch")
@@ -1624,7 +1624,7 @@ fn load_session(
                 None,
             )
         })?;
-    if record.schema_version != CONTRACT_SCHEMA_VERSION
+    if !crate::contracts::compatible_record_schema(&record.schema_version)
         || record.session_id != session_id
         || record.backend != BackendId::LinuxWinboat
         || record.mode != RuntimeMode::StudioRunLocally
@@ -2136,6 +2136,29 @@ mod tests {
         assert!(incompatible.0.join("invalidation.json").is_file());
         assert!(!incompatible.0.join("session.json").is_file());
         assert!(stopped.0.join("session.json").is_file());
+    }
+
+    #[test]
+    fn v4_runtime_is_reused_without_rewriting_its_snapshot_or_record() {
+        let temporary = tempfile::tempdir().unwrap();
+        let sessions = temporary.path().join("sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        let (directory, id) = write_runtime_fixture(
+            &sessions,
+            &format!("runtime_{}", "e".repeat(32)),
+            "4.0.0",
+            RuntimeState::Starting,
+            8080,
+        );
+        let path = directory.join("session.json");
+        let original = fs::read(&path).unwrap();
+        let (_, record) = active_runtime_session_in_root(&sessions, 8080)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.session_id, id);
+        assert_eq!(record.schema_version, "4.0.0");
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert!(!directory.join("invalidation.json").exists());
     }
 
     #[test]

@@ -11,6 +11,7 @@ $knownStudiosJson = [Text.Encoding]::UTF8.GetString(
 $knownStudios = @($knownStudiosJson | ConvertFrom-Json)
 
 __SECURITY_PREAMBLE__
+__UI_PREAMBLE__
 
 if (-not ('Mendimaru.ProcessSecurity' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -215,9 +216,11 @@ try {
             $process = Get-Process -Id ([int]$session.processId) -ErrorAction Stop
             $process.Refresh()
             Write-SessionResult 'succeeded' 'Studio Pro session is ready to reconnect.' $null @($session)
+            Initialize-MendimaruUi $process $session.sessionId
             $lastControlSequence = [long]0
             while ($true) {
-                Start-Sleep -Milliseconds 500
+                Start-Sleep -Milliseconds 50
+                Service-MendimaruUi
                 $ended = $false
                 try {
                     $process.Refresh()
@@ -230,6 +233,7 @@ try {
                     continue
                 }
                 if ($ended) {
+                    Close-MendimaruUi
                     Write-SessionResult 'succeeded' 'Studio Pro session closed.' $null @()
                     exit 0
                 }

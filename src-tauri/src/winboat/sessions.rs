@@ -1013,6 +1013,22 @@ fn remove_regular_file(path: &Path) {
     }
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn ui_channel(session_id: &str) -> Result<(PathBuf, OperationSecurity, u64), ()> {
+    let mut registry = clients().map_err(|_| ())?;
+    let client = registry.get_mut(session_id).ok_or(())?;
+    if client.process.try_wait().map_err(|_| ())?.is_some() {
+        return Err(());
+    }
+    let sequence = client.control.next_sequence;
+    client.control.next_sequence = sequence.checked_add(1).ok_or(())?;
+    Ok((
+        client.control.control_path.clone(),
+        client.control.security.clone(),
+        sequence,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
