@@ -45,6 +45,7 @@ fn live_environment_generation_gate() {
         .await
         .unwrap();
         lease.run(async {
+            crate::winboat::startup::ensure_guest_online(&config).await.expect("restored disposable guest must boot and become healthy");
             let mut reports = Vec::new();
             for scenario in ["read-only", "compose", "recreate", "ports", "build"] {
                 let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
@@ -90,6 +91,7 @@ fn live_environment_generation_gate() {
                     fail_on_console_error: false, fail_on_network_failure: false, record_video: false, record_har: false, max_artifact_bytes: 32*1024*1024, retention_runs: 20,
                 }).await;
                 server.await.unwrap();
+                let after_controller = Source { config: config.clone(), management: crate::winboat::vm_use::observation(), runtime_id: None, studio_id: None, build: None, build_requested: false }.snapshot().await;
                 std::fs::write(&config.compose_file, &compose).unwrap();
                 let result = result.unwrap();
                 let report = result.environment.as_ref().unwrap();
@@ -104,11 +106,19 @@ fn live_environment_generation_gate() {
                     assert_eq!(report.baseline.published_ports, report.latest.published_ports);
                 } else {
                     assert_eq!(result.outcome, BrowserTestOutcome::Failed);
-                    let expected = match scenario { "compose" => Component::Compose, "build" => Component::Build, "ports" => Component::PublishedPorts, _ => Component::Container };
+                    let expected = match scenario { "compose" => Component::Compose, "build" => Component::Build, _ => Component::Container };
                     assert!(report.events.iter().any(|e| e.component == expected), "{scenario}: {report:?}");
                 }
-                reports.push(serde_json::json!({"scenario":scenario,"summary":result}));
-                std::fs::write(&output, serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+                if scenario == "ports" {
+                    assert!(after_controller.published_ports.is_some());
+                    assert_ne!(report.baseline.published_ports, after_controller.published_ports);
+                }
+                if matches!(scenario, "ports" | "recreate") {
+                    assert!(after_controller.container.is_some());
+                    assert_ne!(report.baseline.container, after_controller.container);
+                }
+                reports.push(serde_json::json!({"scenario":scenario,"summary":result,"afterController":after_controller}));
+                std::fs::write(&output, serde_json::to_vec_pretty(&serde_json::json!({"restoredGuestBootVerified":true,"runs":reports})).unwrap()).unwrap();
             }
         }).await;
     });

@@ -100,3 +100,27 @@ Actual VM changes require the regression matrix's explicit mutation opt-in and a
 verified, restorable disposable snapshot. Reserve that VM exclusively for the
 whole gate; independent normal test workers must not join it. Read-only baseline
 checks, external changes, and their artifact evidence belong in separate runs.
+
+Run the VM gate with a separate configuration whose container name begins with
+`Mendimaru154`. It boots and verifies the restored guest under an exclusive lease,
+then tests read-only stability, Compose change, recreation, changed port mappings,
+and marker replacement. Its browser page is a host HTTP fixture; this gate does
+not claim Studio/Runtime or real F5 app coverage. Recreation can interrupt the run
+before the controller finishes; `afterController` is a separate observation of the
+resulting incarnation, never folded into the old run's comparison.
+
+```bash
+MENDIMARU_CONFIG_DIR=/absolute/disposable/config \
+MENDIMARU_CACHE_DIR=/absolute/disposable/cache \
+MENDIMARU_E2E_ALLOW_MUTATION=1 \
+MENDIMARU_E2E_DISPOSABLE_SNAPSHOT=verified-restorable-snapshot-id \
+MENDIMARU_E2E_OBSERVATION_REPORT=/absolute/disposable/report.json \
+  npm run test:browser:environment:live
+```
+
+`MENDIMARU_E2E_VERSION` must be absent. The opt-in acknowledges an independently
+verified snapshot; it does not create/verify one for the operator. The gate restores
+Compose bytes and retains the disposable VM for inspection; finish any owned
+Studio/Runtime session and explicitly stop that disposable Compose project afterward.
+The [September 16 verification evidence](issue-154-live-evidence.json) records the
+actual five-scenario VM run and its coverage boundary.

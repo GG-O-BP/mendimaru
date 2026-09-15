@@ -1,3 +1,4 @@
+import process from "node:process";
 import { readFile } from "node:fs/promises";
 import Ajv from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -132,3 +133,128 @@ test("the public environment schema rejects unbounded/private evidence and accep
   });
   assert.equal(validate(bad), false);
 });
+
+test(
+  "a final environment change preserves the original browser assertion and matching manifest evidence",
+  { skip: process.platform !== "linux", timeout: 30000 },
+  async () => {
+    const { spawn } = await import("node:child_process");
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const { setTimeout: delay } = await import("node:timers/promises");
+    const directory = await mkdtemp(join(tmpdir(), "mm154-browser-"));
+    const baseline = report();
+    let changed = false;
+    const server = createServer(async (request, response) => {
+      if (request.url.startsWith("/observation_")) {
+        const current = structuredClone(baseline);
+        if (changed) {
+          // Let the app assertion fail first; a later observation must augment it.
+          await delay(500);
+          current.latest.observedAt = new Date().toISOString();
+          current.latest.container = "0".repeat(64);
+          current.events = [
+            {
+              classification: "environment-changed",
+              component: "container",
+              observation: current.latest,
+            },
+          ];
+          current.comparable = false;
+          current.observations += 1;
+        }
+        response.end(JSON.stringify(current));
+      } else {
+        changed = true;
+        response.writeHead(200, { "Content-Type": "text/html" });
+        response.end("<!doctype html><html><body><p>ready</p></body></html>");
+      }
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const baseUrl = `http://127.0.0.1:${server.address().port}/`;
+    const request = {
+      schemaVersion: "4.0.0",
+      sessionId: `session_${"c".repeat(32)}`,
+      baseUrl,
+      outputDirectory: directory,
+      environmentObserverUrl: `${baseUrl}observation_${"a".repeat(32)}`,
+      runtimeContext: {
+        hostPlatform: "linux",
+        studioPlatform: "windows",
+        backend: "linux-winboat",
+        runtimeMode: "external-url",
+      },
+      policy: {
+        navigationTimeoutMilliseconds: 5000,
+        actionTimeoutMilliseconds: 1000,
+        assertionTimeoutMilliseconds: 100,
+        failOnConsoleError: false,
+        failOnNetworkFailure: false,
+        recordVideo: false,
+        recordHar: false,
+        maxArtifactBytes: 32 * 1024 * 1024,
+        retentionRuns: 5,
+      },
+      suite: {
+        schemaVersion: "1.0.0",
+        name: "original failure",
+        beforeEach: [{ action: "goto", path: "/" }],
+        tests: [
+          {
+            name: "assertion",
+            steps: [
+              {
+                action: "expectText",
+                locator: { by: "text", value: "never-visible", exact: true },
+                value: "never-visible",
+              },
+            ],
+          },
+        ],
+      },
+    };
+    try {
+      const child = spawn(
+        process.execPath,
+        [fileURLToPath(new URL("browser-runner.mjs", import.meta.url)), "run"],
+        { stdio: ["pipe", "pipe", "pipe"] },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      child.stdin.end(JSON.stringify(request));
+      const code = await new Promise((resolve) => child.on("close", resolve));
+      assert.equal(code, 0, stderr);
+      const result = JSON.parse(stdout).data;
+      assert.equal(result.outcome, "failed");
+      assert.equal(result.failed, 1);
+      assert.match(result.tests[0].failure, /never-visible/);
+      assert.doesNotMatch(
+        result.tests[0].failure,
+        /environment observation interrupted/,
+      );
+      assert.equal(
+        result.environment.events[0].classification,
+        "environment-changed",
+      );
+      assert.equal(result.environment.comparable, false);
+      for (const filename of ["summary.json", "artifact-manifest.json"]) {
+        const artifact = JSON.parse(
+          await readFile(join(directory, filename), "utf8"),
+        );
+        assert.deepEqual(artifact.environment, result.environment);
+        assert(!JSON.stringify(artifact.environment).includes(baseUrl));
+      }
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
