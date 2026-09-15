@@ -26,6 +26,13 @@ const MAX_SUITE_TESTS = 100;
 const MAX_STEPS_PER_TEST = 500;
 const MAX_EVENT_ENTRIES = 500;
 const MAX_TEXT_LENGTH = 8_192;
+const WIDGET_CSS_DIAGNOSTIC = {
+  code: "mendix_widget_css_missing",
+  message:
+    "The Mendix aggregate widget stylesheet returned 404. Check MPK CSS and generated CSS imports; compare a clean build of a copy on a Windows local drive when using a UNC share. Do not create empty CSS or ignore this failure.",
+  documentation:
+    "https://github.com/GG-O-BP/mendimaru/blob/main/docs/widget-css-diagnostics.md",
+};
 const PRIVATE_STYLE = `
   input[type="password"],
   [data-mendimaru-private="true"],
@@ -376,7 +383,14 @@ async function runTest({
   const consoleEntries = [];
   const pageErrors = [];
   const networkFailures = [];
-  attachDiagnostics(page, consoleEntries, pageErrors, networkFailures, secrets);
+  attachDiagnostics(
+    page,
+    consoleEntries,
+    pageErrors,
+    networkFailures,
+    secrets,
+    baseUrl,
+  );
   let outcome = "passed";
   let failure = null;
   let completedSteps = 0;
@@ -418,6 +432,14 @@ async function runTest({
       error instanceof Error ? error.message : "browser test failed",
       secrets,
     ).slice(0, MAX_TEXT_LENGTH);
+    if (
+      networkFailures.some(
+        ({ diagnostic }) => diagnostic?.code === WIDGET_CSS_DIAGNOSTIC.code,
+      )
+    ) {
+      const hint = ` ${WIDGET_CSS_DIAGNOSTIC.message} ${WIDGET_CSS_DIAGNOSTIC.documentation}`;
+      failure = failure.slice(0, MAX_TEXT_LENGTH - hint.length) + hint;
+    }
     await captureFailureArtifacts({
       context,
       files,
@@ -491,6 +513,7 @@ function attachDiagnostics(
   pageErrors,
   networkFailures,
   secrets,
+  baseUrl,
 ) {
   page.on("console", (message) => {
     if (consoleEntries.length >= MAX_EVENT_ENTRIES) return;
@@ -529,8 +552,22 @@ function attachDiagnostics(
       url: safeUrl(response.url()),
       status: response.status(),
       reason: "http-error-status",
+      ...(isMissingWidgetCss(response, baseUrl)
+        ? { diagnostic: WIDGET_CSS_DIAGNOSTIC }
+        : {}),
     });
   });
+}
+
+function isMissingWidgetCss(response, baseUrl) {
+  const url = new URL(response.url());
+  return (
+    response.status() === 404 &&
+    response.request().method() === "GET" &&
+    response.request().resourceType() === "stylesheet" &&
+    url.origin === baseUrl.origin &&
+    url.pathname.endsWith("/dist/widgets.css")
+  );
 }
 
 async function executeStep(page, baseUrl, step, policy, secrets) {

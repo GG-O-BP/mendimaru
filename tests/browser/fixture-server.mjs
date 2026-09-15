@@ -86,6 +86,47 @@ const COMPRESSIBLE_CHUNK = Buffer.alloc(64 * 1024, 0x61);
 
 const server = http.createServer((request, response) => {
   const url = new URL(request.url, "http://127.0.0.1");
+  if (url.pathname === "/widget-css-fixture") {
+    const kind = url.searchParams.get("kind");
+    const target =
+      kind === "present"
+        ? "/present/dist/widgets.css"
+        : kind === "unavailable"
+          ? "/unavailable/dist/widgets.css"
+          : kind === "unrelated"
+            ? "/other.css"
+            : kind === "nested"
+              ? "/app/dist/widgets.css"
+              : "/dist/widgets.css";
+    const href =
+      kind === "foreign"
+        ? `http://localhost:${server.address().port}${target}`
+        : target;
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end(`<!doctype html><link rel="icon" href="data:,"><h1>Loading</h1>
+      <script>
+        const done = () => { document.querySelector('h1').textContent = 'Loaded'; };
+        ${
+          kind === "fetch"
+            ? `fetch('${href}').then(done);`
+            : `
+        const css = document.createElement('link');
+        css.rel = 'stylesheet'; css.href = '${href}?build-stamp=private-stamp';
+        css.onload = css.onerror = done; document.head.append(css);`
+        }
+      </script>`);
+    return;
+  }
+  if (url.pathname === "/present/dist/widgets.css") {
+    response.writeHead(200, { "content-type": "text/css" });
+    response.end("h1 { color: rgb(17, 34, 51); }");
+    return;
+  }
+  if (url.pathname === "/unavailable/dist/widgets.css") {
+    response.writeHead(503, { "content-type": "text/plain" });
+    response.end("unavailable");
+    return;
+  }
   if (url.pathname === "/api/save" && request.method === "POST") {
     request.resume();
     response.writeHead(200, { "content-type": "application/json" });

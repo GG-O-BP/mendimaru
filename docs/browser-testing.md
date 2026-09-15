@@ -214,9 +214,17 @@ The older `browser test --runtime-session-id` path still starts an ephemeral
 loopback-only asset mirror and installs a Chromium route for
 `http(s)://host.lan/Data/**`. This is an automation-only compatibility path; it
 must not be used as evidence that ordinary Chrome works. Requests are restricted
-to direct generated web files with bounded sizes, and the mirror ends with the
-browser run. For #63 acceptance, exercise the normalizer with an ordinary browser
-or direct-URL browser suite, without that route.
+to `<shared-directory>/<project>/deployment/web/**`. Query-bearing paths,
+non-GET/HEAD requests, traversal, symlinks, directories, and files over 64 MiB
+are rejected. The mirror is destroyed with the browser run and never exposes a
+LAN listener, project paths, or model files.
+
+The mirror does not repair missing aggregate CSS or CSS imported as JavaScript by the generated
+client; see [widget CSS diagnostics and the upstream reproduction](widget-css-diagnostics.md).
+For #63 acceptance, exercise the normalizer with an ordinary browser or
+direct-URL browser suite, without that route. The normalizer requires no
+system-wide `curl http://host.lan/...` installation because Rspack bundles the
+normalized imports into assets served by the normal Runtime URL.
 
 Test credentials are never CLI arguments or suite literals. A suite may read
 only environment variables named `MENDIMARU_TEST_<NAME>`:
