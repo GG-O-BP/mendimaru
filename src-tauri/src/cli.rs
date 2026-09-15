@@ -2013,6 +2013,54 @@ fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
     }
 }
 
+#[cfg(test)]
+#[test]
+fn frontend_health_rejects_ambiguous_targets_and_unbounded_options() {
+    for arguments in [
+        vec!["frontend-health"],
+        vec![
+            "frontend-health",
+            "--base-url",
+            "http://localhost",
+            "--runtime-session-id",
+            "runtime_00000000000000000000000000000000",
+        ],
+        vec!["frontend-health", "--runtime-session-id", "runtime_bad"],
+        vec![
+            "frontend-health",
+            "--base-url",
+            "runtime_00000000000000000000000000000000",
+        ],
+        vec![
+            "frontend-health",
+            "--base-url",
+            "http://localhost",
+            "--observation-ms",
+            "10001",
+        ],
+        vec![
+            "frontend-health",
+            "--base-url",
+            "http://localhost",
+            "--navigation-timeout-ms",
+            "30001",
+        ],
+        vec![
+            "frontend-health",
+            "--base-url",
+            "http://localhost",
+            "--asset-mirror-url",
+            "http://localhost",
+        ],
+    ] {
+        let args = arguments
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>();
+        assert!(parse_browser_command(&args).is_err(), "{arguments:?}");
+    }
+}
+
 fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> {
     match values.first().map(String::as_str) {
         Some("frontend-health") => {

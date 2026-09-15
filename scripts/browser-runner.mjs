@@ -1,4 +1,3 @@
-import { diagnoseFrontend } from "./browser-frontend-health.mjs";
 import { spawn } from "node:child_process";
 import { Buffer } from "node:buffer";
 import { createHash, randomBytes } from "node:crypto";
@@ -18,6 +17,7 @@ import {
   StreamingPatternScanner,
   unzipArchiveBounded,
 } from "./browser-artifact-safety.mjs";
+import { diagnoseFrontend } from "./browser-frontend-health.mjs";
 
 const SCHEMA_VERSION = "4.0.0";
 const RUNNER_VERSION = "1.0.0";
