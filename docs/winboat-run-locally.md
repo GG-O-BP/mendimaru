@@ -156,3 +156,10 @@ locks. WinBoat browser tests hold shared use through completion. A competing
 lifecycle operation waits at most three seconds per VM, then returns a retryable
 busy precondition without modifying Compose. Release shared use before retrying.
 See [VM use and lifecycle exclusion](winboat-vm-use.md) for the complete policy.
+
+## Browser environment change evidence (#154)
+
+WinBoat browser runs now record bounded environment observations and interrupt on
+changes. See [environment generations](browser-environment-observation.md) for
+`--build-marker`, JSON comparability, preparation boundaries, observation limits,
+and the separate external-change fixture and disposable-VM gates.

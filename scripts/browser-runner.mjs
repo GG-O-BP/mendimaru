@@ -1,3 +1,4 @@
+import { EnvironmentMonitor, observerUrl } from "./browser-environment.mjs";
 import { spawn } from "node:child_process";
 import { Buffer } from "node:buffer";
 import { createHash, randomBytes } from "node:crypto";
@@ -168,10 +169,16 @@ async function run(rawRequest) {
   const assetMirrorUrl = validateOptionalAssetMirrorUrl(request.assetMirrorUrl);
   const { secrets, storageState } = await collectSecrets(suite);
   const startedAt = new Date().toISOString();
+  const environment = new EnvironmentMonitor(
+    request.environmentObserverUrl,
+    request.sessionId,
+  );
+  await environment.start();
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
   } catch {
+    await environment.finish();
     throw new RunnerError(
       "chromium_unavailable",
       "the pinned Playwright Chromium build is unavailable",
@@ -186,7 +193,17 @@ async function run(rawRequest) {
   const allNetworkFailures = [];
   try {
     for (let index = 0; index < suite.tests.length; index += 1) {
+      if (environment.interrupted) {
+        results.push({
+          name: suite.tests[index].name,
+          outcome: "skipped",
+          completedSteps: 0,
+          totalSteps: suite.beforeEach.length + suite.tests[index].steps.length,
+        });
+        continue;
+      }
       const result = await runTest({
+        environment,
         browser,
         baseUrl,
         assetMirrorUrl,
@@ -206,6 +223,7 @@ async function run(rawRequest) {
     }
   } finally {
     await browser.close().catch(() => {});
+    await environment.finish();
   }
 
   await writeJsonArtifact(
@@ -237,7 +255,8 @@ async function run(rawRequest) {
   const passed = results.filter(({ outcome }) => outcome === "passed").length;
   const failed = results.filter(({ outcome }) => outcome === "failed").length;
   const skipped = results.filter(({ outcome }) => outcome === "skipped").length;
-  const outcome = failed === 0 ? "passed" : "failed";
+  const outcome =
+    failed === 0 && !environment.interrupted ? "passed" : "failed";
   const summary = {
     schemaVersion: SCHEMA_VERSION,
     sessionId: request.sessionId,
@@ -251,6 +270,7 @@ async function run(rawRequest) {
     browserVersion,
     playwrightVersion,
     tests: results,
+    ...(environment.report ? { environment: environment.report } : {}),
   };
   await writeJsonArtifact(
     outputDirectory,
@@ -298,6 +318,7 @@ async function run(rawRequest) {
     },
     policy: request.policy,
     artifacts: describedFiles,
+    ...(environment.report ? { environment: environment.report } : {}),
   };
   await writeTextFile(
     path.join(outputDirectory, "artifact-manifest.json"),
@@ -314,6 +335,7 @@ async function run(rawRequest) {
 }
 
 async function runTest({
+  environment,
   browser,
   baseUrl,
   assetMirrorUrl,
@@ -404,7 +426,9 @@ async function runTest({
   try {
     for (const step of [...suite.beforeEach, ...test.steps]) {
       await applyPrivateMasks(page, suite.maskLocators);
-      await executeStep(page, baseUrl, step, policy, secrets);
+      await environment.step(() =>
+        executeStep(page, baseUrl, step, policy, secrets),
+      );
       assertSameOrigin(page, baseUrl);
       await applyPrivateMasks(page, suite.maskLocators);
       completedSteps += 1;
@@ -833,6 +857,7 @@ function validateRequest(value) {
       "sessionId",
       "baseUrl",
       "assetMirrorUrl",
+      "environmentObserverUrl",
       "outputDirectory",
       "runtimeContext",
       "policy",
@@ -849,6 +874,7 @@ function validateRequest(value) {
       "invalid browser session identity",
     );
   }
+  observerUrl(value.environmentObserverUrl);
   validateRuntimeContext(value.runtimeContext);
   validatePolicy(value.policy);
   if (value.assetMirrorUrl !== undefined) {

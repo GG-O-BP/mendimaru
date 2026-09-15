@@ -290,3 +290,10 @@ lifecycle, limits, and ordinary-browser validation.
 bypass; HTTP readiness retains its lightweight contract. See the
 [frontend diagnosis contract](browser-testing.md#opt-in-frontend-health-144)
 for state meanings, limits and exit codes.
+
+## Browser environment change evidence (#154)
+
+WinBoat browser runs now record bounded environment observations and interrupt on
+changes. See [environment generations](browser-environment-observation.md) for
+`--build-marker`, JSON comparability, preparation boundaries, observation limits,
+and the separate external-change fixture and disposable-VM gates.

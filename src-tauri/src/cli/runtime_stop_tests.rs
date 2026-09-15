@@ -224,8 +224,8 @@ esac
         record["hostPort"] = json!(self.health_address.port());
         fs::write(record_path, serde_json::to_vec(&record).unwrap()).unwrap();
         fs::write(self.path("inspect.json"), serde_json::to_vec(&json!([{
-            "Id": "unchanged-container-identity",
-            "State": {"Status": "running"},
+            "Id": "a".repeat(64),
+            "State": {"Status": "running", "Running": true},
             "Mounts": [{"Source": "fixture-storage", "Destination": "/storage"}],
             "NetworkSettings": {"Ports": {
                 "8080/tcp": [{"HostIp": "127.0.0.1", "HostPort": self.health_address.port().to_string()}]
@@ -234,7 +234,7 @@ esac
         let docker = self.path("bin/docker");
         let script = fs::read_to_string(&docker).unwrap().replace(
             "  inspect) printf",
-            "  inspect) cat inspect.json ;;\n  unused-inspect) printf",
+            "  inspect) if [ \"$2\" = --format ]; then python3 -c 'import json; d=json.load(open(\"inspect.json\"))[0]; print(json.dumps(dict(id=d[\"Id\"],running=d[\"State\"][\"Running\"],ports=d[\"NetworkSettings\"][\"Ports\"])))'; else cat inspect.json; fi ;;\n  unused-inspect) printf",
         );
         fs::write(docker, script).unwrap();
         fs::write(self.path("smoke.browser.json"), r#"{
@@ -512,7 +512,7 @@ fn isolated_runtime_stop_process() {
             },
         )
         .unwrap();
-    } else if mode == "browser" || mode == "browser-local" {
+    } else if mode == "browser" || mode == "browser-local" || mode == "browser-build" {
         if mode == "browser-local" {
             let config =
                 crate::application::load_config(&AppPaths::discover_for_cli().unwrap()).unwrap();
@@ -520,22 +520,23 @@ fn isolated_runtime_stop_process() {
             crate::winboat::register_keeper_test_client(&config, client);
         }
         let suite = root.join("smoke.browser.json");
-        let execution = execute(
-            &[
-                "browser",
-                "test",
-                "--runtime-session-id",
-                RUNTIME_ID,
-                "--suite-path",
-                suite.to_str().unwrap(),
-                "--json",
-                "--timeout-seconds",
-                "15",
-            ]
-            .map(OsString::from),
-        )
-        .unwrap();
-        let output = if execution.exit_code == EXIT_OK {
+        let marker = root.join("build-generation");
+        let mut args = vec![
+            "browser",
+            "test",
+            "--runtime-session-id",
+            RUNTIME_ID,
+            "--suite-path",
+            suite.to_str().unwrap(),
+            "--json",
+            "--timeout-seconds",
+            "30",
+        ];
+        if mode == "browser-build" {
+            args.extend(["--build-marker", marker.to_str().unwrap()]);
+        }
+        let execution = execute(&args.into_iter().map(OsString::from).collect::<Vec<_>>()).unwrap();
+        let output = if !execution.stdout.is_empty() {
             execution.stdout
         } else {
             execution.stderr
@@ -564,7 +565,7 @@ fn isolated_runtime_stop_process() {
             .map(OsString::from),
         )
         .unwrap();
-        let output = if execution.exit_code == EXIT_OK {
+        let output = if !execution.stdout.is_empty() {
             execution.stdout
         } else {
             execution.stderr
@@ -944,4 +945,83 @@ fn assert_browser_protects_vm(browser_mode: &str) {
     fixture.confirm_studio_exit();
     keeper.finish();
     fixture.assert_stopped(1);
+}
+
+// Intentional external-control simulation is a separate gate, never an ordinary
+// lifecycle test or a claim about Docker/Windows itself.
+#[test]
+#[ignore = "external change fixture gate; run explicitly with --ignored"]
+fn external_environment_changes_preserve_browser_evidence() {
+    for component in ["container", "published-ports", "build", "runtime"] {
+        let fixture = Fixture::new();
+        fixture.prepare_browser();
+        fs::write(fixture.path("build-generation"), b"build-one").unwrap();
+        let suite = fixture.path("smoke.browser.json");
+        fs::write(
+            &suite,
+            fs::read_to_string(&suite)
+                .unwrap()
+                .replace("\"path\":\"/\"", "\"path\":\"/hold\""),
+        )
+        .unwrap();
+        let mut keeper = fixture.spawn("keeper-observe");
+        until(|| fixture.path("keeper-ready").exists());
+        let compose = fs::read(fixture.path("compose.yml")).unwrap();
+        let mut browser = fixture.spawn("browser-build");
+        until(|| fixture.path("browser-held").exists());
+        if component == "build" {
+            fs::write(fixture.path("next-build"), b"build-one").unwrap();
+            fs::rename(fixture.path("next-build"), fixture.path("build-generation")).unwrap();
+        } else if component == "runtime" {
+            let file = fixture.path(&format!(
+                "cache/winboat-runtime/sessions/{RUNTIME_ID}/session.json"
+            ));
+            let mut record: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+            record["startedAt"] = json!("2026-09-09T00:00:00Z");
+            fs::write(file, serde_json::to_vec(&record).unwrap()).unwrap();
+        } else {
+            let file = fixture.path("inspect.json");
+            let mut inspection: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+            if component == "container" {
+                inspection[0]["Id"] = json!("b".repeat(64));
+            } else {
+                inspection[0]["NetworkSettings"]["Ports"]["3389/tcp"] =
+                    json!([{"HostIp":"127.0.0.1","HostPort":"12345"}]);
+            }
+            fs::write(file, serde_json::to_vec(&inspection).unwrap()).unwrap();
+        }
+        // Leave navigation pending long enough for the periodic observer to
+        // interrupt it, then unblock the fixture server for orderly shutdown.
+        thread::sleep(Duration::from_secs(3));
+        fs::write(fixture.path("browser-release"), b"").unwrap();
+        browser.finish();
+        let result = fixture.result("browser-build");
+        let data = &result["data"];
+        assert_eq!(data["outcome"], "failed", "{result}");
+        assert_eq!(data["environment"]["comparable"], false);
+        assert_eq!(data["environment"]["missing"], json!([]));
+        assert_eq!(data["environment"]["actor"], "unknown");
+        assert!(
+            data["environment"]["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["component"] == component),
+            "{result}"
+        );
+        assert!(!data["environment"]
+            .to_string()
+            .contains(fixture.root.path().to_str().unwrap()));
+        assert!(data["tests"][0]["failure"]
+            .as_str()
+            .unwrap()
+            .contains("environment observation"));
+        assert_eq!(fixture.calls(), 0);
+        assert_eq!(fs::read(fixture.path("compose.yml")).unwrap(), compose);
+        assert!(!fixture.path("unexpected-rdp").exists());
+        assert!(keeper.0.try_wait().unwrap().is_none());
+        fixture.confirm_studio_exit();
+        keeper.finish();
+        fixture.assert_stopped(1);
+    }
 }

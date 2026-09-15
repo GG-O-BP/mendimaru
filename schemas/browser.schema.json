@@ -3,6 +3,207 @@
   "$id": "https://github.com/GG-O-BP/mendimaru/schemas/browser.schema.json",
   "title": "Mendimaru browser test contracts",
   "$defs": {
+    "environmentSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observedAt",
+        "managedVm",
+        "managementGeneration",
+        "container",
+        "containerRunning",
+        "compose",
+        "publishedPorts",
+        "runtime",
+        "studio",
+        "build",
+        "buildWatchGeneration"
+      ],
+      "properties": {
+        "observedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "managedVm": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "managementGeneration": {
+          "type": ["string", "null"],
+          "pattern": "^(uninitialized|[a-f0-9]{32})$"
+        },
+        "container": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "containerRunning": {
+          "type": ["boolean", "null"]
+        },
+        "compose": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "publishedPorts": {
+          "type": ["array", "null"],
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["guest", "protocol", "host", "addressDigest"],
+            "properties": {
+              "guest": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "protocol": {
+                "enum": ["tcp", "udp", "sctp"]
+              },
+              "host": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "addressDigest": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          }
+        },
+        "runtime": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "studio": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["processId", "startedAt", "running"],
+              "properties": {
+                "processId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4294967295
+                },
+                "startedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "running": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        },
+        "build": {
+          "type": ["string", "null"],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "buildWatchGeneration": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "preparationId",
+        "baseline",
+        "latest",
+        "observations",
+        "events",
+        "comparable",
+        "missing",
+        "actor",
+        "intervalMilliseconds"
+      ],
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "preparationId": {
+          "type": "string",
+          "pattern": "^preparation_[a-f0-9]{32}$"
+        },
+        "baseline": {
+          "$ref": "#/$defs/environmentSnapshot"
+        },
+        "latest": {
+          "$ref": "#/$defs/environmentSnapshot"
+        },
+        "observations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "events": {
+          "type": "array",
+          "maxItems": 7,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["classification", "component", "observation"],
+            "properties": {
+              "classification": {
+                "enum": [
+                  "environment-changed",
+                  "session-lost",
+                  "build-changed",
+                  "observation-unavailable"
+                ]
+              },
+              "component": {
+                "enum": [
+                  "managed-vm",
+                  "container",
+                  "compose",
+                  "published-ports",
+                  "runtime",
+                  "studio",
+                  "build"
+                ]
+              },
+              "observation": {
+                "$ref": "#/$defs/environmentSnapshot"
+              }
+            }
+          }
+        },
+        "comparable": {
+          "type": "boolean"
+        },
+        "missing": {
+          "type": "array",
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "managed-vm",
+              "container",
+              "compose",
+              "published-ports",
+              "runtime",
+              "studio",
+              "build"
+            ]
+          }
+        },
+        "actor": {
+          "const": "unknown"
+        },
+        "intervalMilliseconds": {
+          "const": 1000
+        }
+      }
+    },
     "doctor": {
       "type": "object",
       "additionalProperties": false,
@@ -294,6 +495,7 @@
         "artifacts"
       ],
       "properties": {
+        "environment": { "$ref": "#/$defs/environment" },
         "schemaVersion": { "const": "4.0.0" },
         "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
         "outcome": { "$ref": "#/$defs/outcome" },
@@ -343,6 +545,7 @@
         "artifacts"
       ],
       "properties": {
+        "environment": { "$ref": "#/$defs/environment" },
         "schemaVersion": { "const": "4.0.0" },
         "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
         "createdAt": { "type": "string", "format": "date-time" },

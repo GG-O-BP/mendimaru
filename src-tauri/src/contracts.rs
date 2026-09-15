@@ -810,6 +810,8 @@ pub struct BrowserTestRequest {
     pub base_url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset_mirror_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_observer_url: Option<String>,
     pub suite_path: String,
     pub runtime_context: BrowserRuntimeContext,
     pub policy: BrowserTestPolicy,
@@ -879,6 +881,8 @@ pub struct BrowserTestSummary {
     pub playwright_version: String,
     pub tests: Vec<BrowserTestCaseSummary>,
     pub artifacts: Vec<ArtifactDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<crate::browser::environment::Report>,
 }
 
 #[cfg(test)]

@@ -19,6 +19,7 @@ use tokio::io::AsyncWriteExt;
 use zip::{CompressionMethod, ZipArchive};
 
 mod doctor;
+pub mod environment;
 pub(crate) mod frontend;
 
 const STORE_DIRECTORY: &str = "browser-tests";
@@ -192,6 +193,8 @@ struct RunnerSummary {
     playwright_version: String,
     tests: Vec<BrowserTestCaseSummary>,
     files: Vec<RunnerArtifact>,
+    #[serde(default)]
+    environment: Option<environment::Report>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -224,6 +227,8 @@ struct RunnerManifest {
     suite: RunnerSuiteIdentity,
     policy: BrowserTestPolicy,
     artifacts: Vec<RunnerManifestArtifact>,
+    #[serde(default)]
+    environment: Option<environment::Report>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -257,6 +262,8 @@ struct RunnerRequest<'a> {
     session_id: &'a str,
     base_url: &'a str,
     asset_mirror_url: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    environment_observer_url: Option<&'a str>,
     output_directory: &'a Path,
     runtime_context: &'a crate::contracts::BrowserRuntimeContext,
     policy: &'a crate::contracts::BrowserTestPolicy,
@@ -532,6 +539,7 @@ pub(crate) async fn test(
         session_id: &request.session_id,
         base_url: &request.base_url,
         asset_mirror_url: request.asset_mirror_url.as_deref(),
+        environment_observer_url: request.environment_observer_url.as_deref(),
         output_directory: &staging,
         runtime_context: &request.runtime_context,
         policy: &request.policy,
@@ -613,6 +621,7 @@ pub(crate) async fn test(
         browser_version: runner.browser_version,
         playwright_version: runner.playwright_version,
         tests: runner.tests,
+        environment: runner.environment,
         artifacts: artifacts
             .iter()
             .map(|record| record.descriptor.clone())
@@ -988,6 +997,11 @@ fn validate_runner_summary(
     {
         return Err("the browser runner returned an invalid summary".to_string());
     }
+    if request.environment_observer_url.is_some() != summary.environment.is_some()
+        || summary.environment.as_ref().is_some_and(|e| !e.valid())
+    {
+        return Err("invalid environment observation".into());
+    }
     for (actual, expected) in summary.tests.iter().zip(expected_tests) {
         let expected_name = expected.get("name").and_then(Value::as_str).unwrap_or("");
         let test_steps = expected
@@ -1031,7 +1045,12 @@ fn validate_runner_summary(
         .filter(|test| test.outcome == BrowserTestOutcome::Skipped)
         .count() as u32;
     if (summary.passed, summary.failed, summary.skipped) != (passed, failed, skipped)
-        || (summary.failed == 0) != (summary.outcome == BrowserTestOutcome::Passed)
+        || (summary.failed == 0
+            && !summary
+                .environment
+                .as_ref()
+                .is_some_and(|e| e.interrupted()))
+            != (summary.outcome == BrowserTestOutcome::Passed)
     {
         return Err("browser result counts are inconsistent".to_string());
     }
@@ -1138,6 +1157,7 @@ fn verify_runner_manifest(
         || manifest.runner_version != RUNNER_VERSION
         || manifest.suite.name != suite_name
         || manifest.suite.tests != suite_tests
+        || manifest.environment != summary.environment
         || manifest.policy != request.policy
     {
         return Err("the browser artifact manifest metadata is inconsistent".to_string());
@@ -2088,6 +2108,7 @@ mod tests {
             session_id: format!("session_{}", "ab".repeat(16)),
             base_url: "http://127.0.0.1:8080".to_string(),
             asset_mirror_url: None,
+            environment_observer_url: None,
             suite_path: suite_path.to_string_lossy().to_string(),
             runtime_context: BrowserRuntimeContext {
                 host_platform: PlatformId::Linux,

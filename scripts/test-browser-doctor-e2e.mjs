@@ -199,6 +199,7 @@ try {
   // This fixture must diagnose the missing package, not a missing helper file.
   for (const resource of [
     "browser-artifact-safety.mjs",
+    "browser-environment.mjs",
     "browser-frontend-health.mjs",
   ]) {
     await file(
