@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "status": "reviewed-examples",
+  "transport": "linux-winboat",
+  "nativeWindows": "deferred",
+  "artifacts": [
+    {
+      "file": "10-preview-screen.png",
+      "sha256": "453710166a308565cf1f90b15bcbbd8efffd50ed71e7020155f6486c7339b25f",
+      "source": "page10-preview-screen.png",
+      "review": "Reviewed: disposable template or generic Studio notification only; no account, private project list or credentials.",
+      "version": "10.24.26.0",
+      "phase": "pilot"
+    },
+    {
+      "file": "10-toast-printwindow.png",
+      "sha256": "7a931d5031177750839ba5ff04fe719b859fddb291299d64c7c0b006932a1f57",
+      "source": "page10-dotnet/window-0.png",
+      "review": "Reviewed: disposable template or generic Studio notification only; no account, private project list or credentials.",
+      "version": "10.24.26.0",
+      "phase": "pilot"
+    },
+    {
+      "file": "10-toast-linux.png",
+      "sha256": "9806952d477993f861d6bb9e1b38dff3d2e78aed9990ead7de812fc62af29709",
+      "source": "slow-bundling-linux-toast10.png",
+      "review": "Reviewed: disposable template or generic Studio notification only; no account, private project list or credentials.",
+      "version": "10.24.26.0",
+      "phase": "pilot"
+    },
+    {
+      "file": "11-design-properties-printwindow.png",
+      "version": "11.12.4.0",
+      "phase": "pilot",
+      "method": "PrintWindow",
+      "sha256": "ae30350bd1b51576e34744dd9d4228bc547705bc02f444f932ff84e3edebccf8",
+      "source": "page11-dotnet/window-0.png",
+      "review": "Reviewed: disposable local template, signed-out Studio, no account identity, private project list or credentials."
+    },
+    {
+      "file": "11-errors-wgc.png",
+      "version": "11.12.4.0",
+      "phase": "pilot",
+      "method": "winapp WGC",
+      "sha256": "4a7fe475240bc5c2b47252593fe0744ed922a90863c21f109147ff96d954131c",
+      "source": "11-errors-wgc.png",
+      "review": "Reviewed: disposable local template, signed-out Studio, no account identity, private project list or credentials."
+    },
+    {
+      "file": "11-cold-trial1-linux.png",
+      "version": "11.12.4.0",
+      "phase": "campaign-trial-1-after",
+      "method": "Linux X11 root capture",
+      "sha256": "ebbd170b0ef5bde45fe6de70b9081a1d2d14d8718a3bbadf6c79f2c43e28bf9e",
+      "source": "campaign-linux/campaign-winboat-20260916-11-01-after.png",
+      "review": "Reviewed: disposable local template, signed-out Studio, no account identity, private project list or credentials."
+    },
+    {
+      "file": "11-structure-linux.png",
+      "version": "11.12.4.0",
+      "phase": "campaign-trial-6-after-failure",
+      "method": "Linux X11 root capture",
+      "sha256": "b0adc40ceb197fc85c0f6cf83d1a93d257446bde1b27036a2138cf721b87cdae",
+      "source": "campaign-linux/campaign-winboat-20260916-11-06-after.png",
+      "review": "Reviewed: disposable template and inherited layout in Structure mode, signed-out Studio; no account identity or private project list."
+    }
+  ],
+  "manifestUpdatedAtUtc": "2026-09-15T16:35:48.863905+00:00"
+}

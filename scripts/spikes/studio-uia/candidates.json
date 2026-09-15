@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "artifacts": [
+    {
+      "file": "winappcli-x64.zip",
+      "version": "0.6.0",
+      "url": "https://github.com/microsoft/winappCli/releases/download/v0.6.0/winappcli-x64.zip",
+      "bytes": 46672666,
+      "sha256": "f6dc42e3b4e4709c8f617003008e2cfdd9a51735e04e7170d60edda258db78a8",
+      "digestSource": "github-release-metadata"
+    },
+    {
+      "file": "flaui.core.5.0.0.nupkg",
+      "version": "5.0.0",
+      "url": "https://api.nuget.org/v3-flatcontainer/flaui.core/5.0.0/flaui.core.5.0.0.nupkg",
+      "bytes": 484569,
+      "sha256": "191cc65ea82036b77f1872e6d4ebf743d3d120895bba2fa5248d126cd6f568a7",
+      "digestSource": "observed-official-download-2026-09-15"
+    },
+    {
+      "file": "flaui.uia3.5.0.0.nupkg",
+      "version": "5.0.0",
+      "url": "https://api.nuget.org/v3-flatcontainer/flaui.uia3/5.0.0/flaui.uia3.5.0.0.nupkg",
+      "bytes": 156431,
+      "sha256": "d5d2e083539a04bf6c9053781dfd47332854a76faeb8e9c3c68cc82109f711f2",
+      "digestSource": "observed-official-download-2026-09-15"
+    },
+    {
+      "file": "interop.uiautomationclient.10.19041.0.nupkg",
+      "version": "10.19041.0",
+      "url": "https://api.nuget.org/v3-flatcontainer/interop.uiautomationclient/10.19041.0/interop.uiautomationclient.10.19041.0.nupkg",
+      "bytes": 245385,
+      "sha256": "0d2ed17db2cb13a262f0580ab992db87577651c25a9899053df4114b4d9ff3b1",
+      "digestSource": "observed-official-download-2026-09-15"
+    },
+    {
+      "file": "system.management.8.0.0.nupkg",
+      "version": "8.0.0",
+      "url": "https://api.nuget.org/v3-flatcontainer/system.management/8.0.0/system.management.8.0.0.nupkg",
+      "bytes": 791455,
+      "sha256": "1f0a5f0dbfbeabbfefc51eaae7b986160979534bf1cbea1127aa2b14a3917cfd",
+      "digestSource": "observed-official-download-2026-09-15"
+    }
+  ]
+}

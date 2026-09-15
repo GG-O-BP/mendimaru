@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "transport": "linux-winboat",
+  "nativeWindows": "deferred",
+  "complete": true,
+  "targets": [
+    {
+      "version": "10.24.26.0",
+      "planned": 20,
+      "executed": 20,
+      "counts": {
+        "pass": 1,
+        "fail": 19,
+        "blocked": 0,
+        "not-run": 0
+      },
+      "phaseCounts": {
+        "cold": {
+          "planned": 4,
+          "executed": 4,
+          "passed": 0
+        },
+        "warm": {
+          "planned": 16,
+          "executed": 16,
+          "passed": 1
+        }
+      },
+      "successRate": 0.05,
+      "complete": true,
+      "failureStepCounts": {
+        "page-editor-control-not-ready": 10,
+        "earlier-step-failed": 89,
+        "wrong-widget-selected": 8,
+        "toolbox-search-not-ready": 1
+      }
+    },
+    {
+      "version": "11.12.4.0",
+      "planned": 20,
+      "executed": 20,
+      "counts": {
+        "pass": 17,
+        "fail": 3,
+        "blocked": 0,
+        "not-run": 0
+      },
+      "phaseCounts": {
+        "cold": {
+          "planned": 4,
+          "executed": 4,
+          "passed": 2
+        },
+        "warm": {
+          "planned": 16,
+          "executed": 16,
+          "passed": 15
+        }
+      },
+      "successRate": 0.85,
+      "complete": true,
+      "failureStepCounts": {
+        "toolbox-search-not-ready": 1,
+        "earlier-step-failed": 13,
+        "page-editor-control-not-ready": 2
+      }
+    }
+  ]
+}

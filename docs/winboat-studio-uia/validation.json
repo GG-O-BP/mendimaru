@@ -1,0 +1,302 @@
+{
+  "schemaVersion": 1,
+  "transport": "linux-winboat",
+  "nativeWindows": "deferred",
+  "scope": "Supplemental pilot and post-campaign checks; excluded from the 20-trial counts.",
+  "modelPersistence": [
+    {
+      "runtimeCount": 0,
+      "sourceStableDuringCopy": true,
+      "sha256": "35eceeefa741ddcf891b11edb6d139ae61720341008040d89c37c4538bbbb999",
+      "version": "10.24.26.0",
+      "utc": "2026-09-15T18:05:02.4897055Z",
+      "savedBodyWidgetName": "uia16T10_19",
+      "independentReader": "mxcli DESCRIBE PAGE MyFirstModule.Home_Web",
+      "descriptionSha256": "6145554d47a4e74863be1209f557ff9e80ff6936d4ad89b69b899c534e5c9f89",
+      "source": {
+        "path": "final-model10.json",
+        "sha256": "d77a16a63b48903615a8c3074e5072aaee991e09cd3a5f0d1fe61f33cfdeb923"
+      }
+    },
+    {
+      "runtimeCount": 0,
+      "sourceStableDuringCopy": true,
+      "sha256": "67f2f835aa8680c17accfd496e18124bc6b51caf91545b5851d8ccdf5f70b355",
+      "version": "11.12.4.0",
+      "utc": "2026-09-15T17:26:37.3741268Z",
+      "savedBodyWidgetName": "uia16T11_20",
+      "independentReader": "mxcli DESCRIBE PAGE MyFirstModule.Home_Web",
+      "descriptionSha256": "b6db6d32ed6774f029fdab83619d593c823ed2771d2b9601b2c3657d27a148b2",
+      "source": {
+        "path": "final-model11.json",
+        "sha256": "ca3b53b80a71455c88c9f74f007756bdd363d6b726f67903ffb1da30bc1452b9"
+      }
+    }
+  ],
+  "preferences": [
+    {
+      "version": "10.24.26.0",
+      "language": "한국어(대한민국)",
+      "studioClosed": true,
+      "themeBasis": "recorded original Korean Auto radio IsSelected=true",
+      "selectionReadback": true,
+      "preferencesSaved": true,
+      "theme": "Auto (System theme)",
+      "utc": "2026-09-15T18:06:55.3982054Z",
+      "source": {
+        "path": "preferences10-restored.json",
+        "sha256": "74ea1eac6660c1924c94c4d51aae1239d46e56df9e55674dcad91a2a12b25dfe"
+      }
+    },
+    {
+      "version": "11.12.4.0",
+      "language": "한국어(대한민국)",
+      "studioClosed": true,
+      "themeBasis": "inferred: original Auto and Light SelectionItem states both false; user clarification unanswered",
+      "selectionReadback": true,
+      "preferencesSaved": true,
+      "theme": "Dark",
+      "utc": "2026-09-15T17:40:46.0963008Z",
+      "source": {
+        "path": "preferences11-restored.json",
+        "sha256": "2ff2bec4319027f00638a3a3264730e8c54e43f09fe9151ac0e96925513317f0"
+      }
+    }
+  ],
+  "collector": [
+    {
+      "version": "10.24.26.0",
+      "observation": {
+        "workerExited": true,
+        "status": "fail",
+        "schemaVersion": 1,
+        "reason": "stale-or-wrong-process",
+        "workerProcessId": 568
+      },
+      "source": {
+        "path": "stale10-dotnet/supervisor.json",
+        "sha256": "7f62aac02dc912d8577b055595167d8cb7da2a42abd089177bd86141468eb32d"
+      }
+    },
+    {
+      "version": "10.24.26.0",
+      "observation": {
+        "workerExited": true,
+        "status": "fail",
+        "schemaVersion": 1,
+        "reason": "provider-timeout",
+        "workerProcessId": 6824
+      },
+      "source": {
+        "path": "timeout10-dotnet/supervisor.json",
+        "sha256": "3f9078dc5c922341e1a8371f3335e1cd2ffb6317f9c31d831eb1126c901daba3"
+      }
+    },
+    {
+      "version": "10.24.26.0",
+      "observation": {
+        "status": "fail",
+        "schemaVersion": 1,
+        "reason": "no-interactive-desktop"
+      },
+      "source": {
+        "path": "locked10-dotnet/worker-failure.json",
+        "sha256": "9cd89b38cc28e53fff7c0ecef20a52085df59863acdce30a7c7ecb4d5059fd22"
+      }
+    },
+    {
+      "version": "11.12.4.0",
+      "observation": {
+        "workerExited": true,
+        "status": "fail",
+        "schemaVersion": 1,
+        "reason": "stale-or-wrong-process",
+        "workerProcessId": 4136
+      },
+      "source": {
+        "path": "final11-stale/supervisor.json",
+        "sha256": "dcdb5f35a19b6d8cb8a7bdc3962ef994e2906ac649164ef47a2318b0e4eb11c4"
+      }
+    },
+    {
+      "version": "11.12.4.0",
+      "observation": {
+        "workerExited": true,
+        "status": "fail",
+        "schemaVersion": 1,
+        "reason": "provider-timeout",
+        "workerProcessId": 8912
+      },
+      "source": {
+        "path": "final11-timeout/supervisor.json",
+        "sha256": "3ed52f682a55e86d15b11390f87c54bcf6219487a0e5b18af0c22a21990ac33d"
+      }
+    },
+    {
+      "version": "11.12.4.0",
+      "observation": {
+        "workerExited": true,
+        "status": "captured",
+        "schemaVersion": 1,
+        "reason": "requires-artifact-review",
+        "workerProcessId": 7508
+      },
+      "source": {
+        "path": "final11-normal/supervisor.json",
+        "sha256": "f13c9c06119ef53d53b4857a0760c1df214639e539f02d1a82475b8569be23d0"
+      }
+    }
+  ],
+  "dpiPilot": {
+    "fileVersion": "10.24.26.0",
+    "systemDpi": 120,
+    "threadDpiContextAccepted": true,
+    "screenBounds": [
+      {
+        "primary": true,
+        "width": 1280,
+        "height": 800
+      }
+    ],
+    "source": {
+      "path": "dpi125-dotnet/snapshot.json",
+      "sha256": "fcb5ec1f91e3699f3df5d27e05077d3cfb5cb02a856b6d3c5c54e99af439130d"
+    },
+    "windows": [
+      {
+        "targetDpi": 96,
+        "monitor": {
+          "dpiY": 120,
+          "dpiQueryHResult": 0,
+          "scaleQueryHResult": 0,
+          "scalePercent": 125,
+          "dpiX": 120
+        }
+      }
+    ]
+  },
+  "additionalPilots": [
+    {
+      "observation": {
+        "structureFramework": "WPF",
+        "restored": "uia16Probe",
+        "designDocument": "MyFirstModule.Home_Web",
+        "requestedScale": 125,
+        "after": "uia16Dpi",
+        "before": "uia16Probe",
+        "utc": "2026-09-15T15:16:46.3376642Z"
+      },
+      "source": {
+        "path": "dpi125-actions.json",
+        "sha256": "dd1fa53703b688b7d693952547b5b610820b6fa47cdf06f6646979063889ceca"
+      }
+    },
+    {
+      "observation": {
+        "provider": "FlaUI.UIA3 5.0.0",
+        "before": "uia16T11_99",
+        "version": "11.12.4.0",
+        "restored": true,
+        "after": "uia16FlaUI"
+      },
+      "source": {
+        "path": "flaui11-action.json",
+        "sha256": "4f12a759e20a8f2fa1fcbd3761b534db5973bd551efd406a2ef89f1927922580"
+      }
+    },
+    {
+      "version": "10.24.26.0",
+      "action": "run-locally",
+      "http": 200,
+      "studioPid": 8312,
+      "runtimePid": 2616,
+      "fixtureDeploymentInCommandLine": true,
+      "listenerOwnerVerified": true,
+      "sources": [
+        {
+          "path": "runtime10-ready.json",
+          "sha256": "95f94b777d3767282959259d291d540a4db10a76703dc692e1c4820de886247e"
+        },
+        {
+          "path": "runtime10-diagnostic-processes.json",
+          "sha256": "6d36c324c6b761733e847ecbc344d98c468a3ca07cf11238652f4cfa93092cdd"
+        },
+        {
+          "path": "runtime10-listeners.json",
+          "sha256": "04da037935e47c5c568553ff8d9c339ddcf6b16c6213e18643ad11ca232e0f4c"
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "guest": {
+      "observation": {
+        "utc": "2026-09-15T18:07:17.5468544Z",
+        "campaignHeldPackageCount": 0,
+        "fixtureRuntimeCount": 0,
+        "studios": [
+          {
+            "originalProcessExited": true,
+            "pid": 8032,
+            "startTicks": "639250919635352515",
+            "version": "10.24.26.0",
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+          },
+          {
+            "originalProcessExited": true,
+            "pid": 9028,
+            "startTicks": "639250891552283294",
+            "version": "11.12.4.0",
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+          }
+        ]
+      },
+      "source": {
+        "path": "guest-cleanup.json",
+        "sha256": "f6f5160829f14daa067e67328b75db82390b6595b2ccd87dfde8b73d086639e8"
+      }
+    },
+    "agent": {
+      "observation": {
+        "originalAgentExited": true,
+        "agentStartTicks": "639250908987675130",
+        "observerPid": 2784,
+        "agentPid": 9028,
+        "utc": "2026-09-15T18:07:36.6023466Z"
+      },
+      "source": {
+        "path": "agent-exit.json",
+        "sha256": "a533c0a20e906f81dcbeb9635c0e27088131194efcd6c690b1e8d2cc1a9385cf"
+      }
+    },
+    "host": {
+      "observation": {
+        "utc": "2026-09-15T18:08:09.443087+00:00",
+        "display": ":116",
+        "processes": [
+          {
+            "pid": 199179,
+            "process": "xfreerdp3",
+            "exited": true,
+            "alreadyExited": true
+          },
+          {
+            "pid": 125315,
+            "process": "xfwm4",
+            "exited": true,
+            "signal": "SIGTERM"
+          },
+          {
+            "pid": 35419,
+            "process": "Xvfb",
+            "exited": true,
+            "signal": "SIGTERM"
+          }
+        ],
+        "scope": "Only this lab client, window manager and Xvfb; VM retained."
+      },
+      "sourceSha256": "4132ff09e69c41ebdbf7afa287b9a8747aeed6142537fc871f49b04290b1f96f"
+    }
+  },
+  "exportedAtUtc": "2026-09-15T18:08:48.838340+00:00"
+}
