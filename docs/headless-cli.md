@@ -220,6 +220,18 @@ for the exact PID and process start tick through the retained connection and
 waits for Windows to report that process gone; killing only the local FreeRDP
 client never counts as a successful stop.
 
+Before launching Studio or changing Runtime forwarding, the keeper checks the
+socket pathname length in bytes and creates, configures, and removes a real
+private probe socket with the same filename length. Linux accepts at most 107
+pathname bytes, including `<cache>/cli-sessions/s-<32 hex>.sock`. An unsupported
+path returns `precondition_failed` (exit `1`, `retryable: false`) with guidance to
+set `MENDIMARU_CACHE_DIR` to a shorter absolute directory; directory or socket
+preparation failures instead advise checking ownership, permissions, and free
+space. These messages never include the configured path. A failure after launch,
+including a filesystem change between preflight and final bind or a missing CLI
+acknowledgement, interrupts the completed launch record, requests Studio shutdown,
+and attempts linked Runtime cleanup through the normal serialized stop path.
+
 External host project selection remains GUI-only. The headless CLI continues to
 resolve opaque project IDs from a fresh configured-workspace scan and accepts no
 raw host path option. An external-project Studio session whose temporary drive

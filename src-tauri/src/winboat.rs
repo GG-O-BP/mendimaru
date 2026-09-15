@@ -72,6 +72,16 @@ pub(crate) fn register_keeper_test_client(config: &AppConfig, child: std::proces
     .expect("register a live keeper client");
 }
 
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) fn keeper_test_stop_report() -> Vec<u8> {
+    security::authenticated_envelope(
+        &security::OperationSecurity::fixture(),
+        2,
+        br#"{"state":"succeeded","timestamp":"2026-09-15T00:00:00Z","sessions":[]}"#,
+    )
+    .unwrap()
+}
+
 #[cfg(test)]
 use client::parse_studio_versions;
 #[cfg(test)]

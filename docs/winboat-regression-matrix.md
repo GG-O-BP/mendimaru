@@ -71,6 +71,22 @@ explicit Runtime stop, and verify both processes exit, Compose is restored, the
 configured container name is running, and the Runtime record is stopped. A
 second stop must succeed without another recreation.
 
+## Keeper socket preflight and failed launch cleanup (#147)
+
+The ordinary Rust suite binds real Linux Unix sockets at 107, 108, and 156
+pathname bytes and checks multibyte cache names, repeated preflight cleanup, and
+the exact diagnostic allowlist. A real CLI subprocess test checks both plain
+and project launches with long cache paths and untrusted socket directories:
+the error is actionable and path-free, and no guest command, launch history, or
+Runtime state is created. A short-cache control reaches the fake Docker command.
+
+`cli::runtime_stop_tests` also injects a final socket collision after successful
+preflight/launch and a missing caller acknowledgement. Registered RDP stand-ins
+receive stop requests and exit, the completed launch becomes interrupted, linked
+Runtime forwarding is restored with one serialized Compose recreation, untrusted
+files survive, and the same socket path can be bound on retry. These isolated
+fixtures do not claim a live Studio Pro or VM reproduction.
+
 ## Contract schema upgrade checklist
 
 Whenever `CONTRACT_SCHEMA_VERSION`, a runtime schema, or a persisted WinBoat

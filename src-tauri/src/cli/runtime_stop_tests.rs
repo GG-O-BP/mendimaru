@@ -242,6 +242,73 @@ fn isolated_runtime_stop_process() {
         fs2::FileExt::lock_exclusive(&file).unwrap();
         fs::write(root.join("lock-owned"), b"owned").unwrap();
         thread::sleep(Duration::from_secs(60));
+    } else if mode == "keeper-prepare-failed" || mode == "keeper-unaccepted" {
+        use crate::models::{OperationKind, OperationStage, OperationState};
+
+        let paths = AppPaths::discover_for_cli().unwrap();
+        let config = crate::application::load_config(&paths).unwrap();
+        preflight_session_keeper(&paths).unwrap();
+        let tracker = crate::operations::OperationTracker::begin_with_paths(
+            &paths,
+            &config,
+            OperationKind::Launch,
+            "11.12.3",
+            true,
+            OperationStage::Launching,
+            None,
+        )
+        .unwrap();
+        let operation_id = tracker.id().to_string();
+        tracker.succeed().unwrap();
+        fs::write(
+            root.join("client-stop-report.json"),
+            crate::winboat::keeper_test_stop_report(),
+        )
+        .unwrap();
+        // The RDP stand-in exits when the real cleanup writes its stop request.
+        let client = Command::new("sh")
+            .args([
+                "-c",
+                "while [ ! -f client-control.json ]; do sleep 0.05; done; mv client-stop-report.json client-report.json; touch client-exited",
+            ])
+            .current_dir(&root)
+            .spawn()
+            .unwrap();
+        crate::winboat::register_keeper_test_client(&config, client);
+        let socket = ensure_session_socket_directory(&paths)
+            .unwrap()
+            .join(session_socket_name(STUDIO_ID));
+        if mode == "keeper-prepare-failed" {
+            // A path becomes unusable after preflight and a completed launch.
+            fs::write(&socket, b"preserve-untrusted-file").unwrap();
+        }
+        let exit = finish_session_keeper_launch(SessionKeeperResponse {
+            ok: true,
+            operation_id: Some(operation_id.clone()),
+            studio_session_id: Some(STUDIO_ID.into()),
+            error: None,
+        });
+        assert_eq!(exit, EXIT_OPERATION_FAILED);
+        assert!(root.join("client-exited").exists());
+        assert!(crate::winboat::registered_client_sessions().is_empty());
+        let records = crate::operations::list_with_paths(&paths, &config).unwrap();
+        let operation = records
+            .iter()
+            .find(|record| record.id == operation_id)
+            .unwrap();
+        assert_eq!(operation.state, OperationState::Interrupted);
+        assert!(!operation.retryable);
+        if mode == "keeper-prepare-failed" {
+            assert_eq!(fs::read(&socket).unwrap(), b"preserve-untrusted-file");
+            fs::remove_file(&socket).unwrap();
+        } else {
+            assert!(!socket.exists());
+        }
+        // Retry can acquire the same session path after the failed handshake.
+        let (listener, guard, _) = prepare_session_keeper(STUDIO_ID).unwrap();
+        drop(listener);
+        drop(guard);
+        assert!(!socket.exists());
     } else if mode == "keeper" {
         let config =
             crate::application::load_config(&AppPaths::discover_for_cli().unwrap()).unwrap();
@@ -283,6 +350,15 @@ fn isolated_runtime_stop_process() {
         };
         eprintln!("{mode}: {output}");
         fs::write(root.join(format!("{mode}.json")), output).unwrap();
+    }
+}
+
+#[test]
+fn failed_keeper_preparation_and_unaccepted_launch_clean_up_runtime_and_operation() {
+    for mode in ["keeper-prepare-failed", "keeper-unaccepted"] {
+        let fixture = Fixture::new();
+        fixture.spawn(mode).finish();
+        fixture.assert_stopped(1);
     }
 }
 
