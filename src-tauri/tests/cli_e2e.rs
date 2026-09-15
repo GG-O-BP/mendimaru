@@ -1495,6 +1495,8 @@ impl WinboatRuntimeFixture {
     fn new() -> Self {
         let temporary = tempfile::tempdir().expect("WinBoat Runtime fixture");
         let root = temporary.path();
+        // Independent fake VMs must not share the host-wide management lease.
+        let container_name = mendimaru_lib::contracts::secure_identifier("vm").unwrap();
         let config_directory = root.join("config");
         let workspace = root.join("workspace");
         let fake_bin = root.join("bin");
@@ -1524,14 +1526,14 @@ impl WinboatRuntimeFixture {
         .expect("fixture launch settings");
         let compose_path = root.join("docker-compose.yml");
         let original_compose = format!(
-            "services:\n  windows:\n    image: ghcr.io/dockur/windows:e2e-fixture\n    container_name: MendimaruE2EWinBoat\n    volumes:\n      - winboat-storage:/storage\n      - {}:/shared\n    ports:\n      - 127.0.0.1:47280:7148\n      - 127.0.0.1:47300:3389\nvolumes:\n  winboat-storage: {{}}\n",
+            "services:\n  windows:\n    image: ghcr.io/dockur/windows:e2e-fixture\n    container_name: {container_name}\n    volumes:\n      - winboat-storage:/storage\n      - {}:/shared\n    ports:\n      - 127.0.0.1:47280:7148\n      - 127.0.0.1:47300:3389\nvolumes:\n  winboat-storage: {{}}\n",
             workspace.to_string_lossy()
         );
         fs::write(&compose_path, &original_compose).expect("Compose fixture");
 
         let mut config = fixture_config(&workspace);
         config.compose_file = compose_path.to_string_lossy().into_owned();
-        config.container_name = "MendimaruE2EWinBoat".into();
+        config.container_name = container_name;
         config.api_url = format!("http://127.0.0.1:{guest_api_port}");
         config.startup_timeout_seconds = 3;
         fs::write(

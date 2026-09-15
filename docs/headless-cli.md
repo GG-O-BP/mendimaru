@@ -268,6 +268,16 @@ diagnostic observations are excluded from CLI DTOs, operation records, and
 checked-in fixtures. Backend diagnostic text is reduced to stable error codes
 and allowlisted messages before serialization.
 
+## WinBoat VM use
+
+`browser test --runtime-session-id` automatically holds shared use for a WinBoat
+Runtime. `browser test --base-url <url> --winboat-use` joins the configured VM for
+the complete command without requiring a Runtime record in this cache. The flag
+requires the Linux WinBoat backend and a URL target. Lifecycle lock acquisition
+waits at most three seconds per VM (or the shorter command timeout) and returns
+`precondition_failed` with a retryable, path-free busy message on contention.
+See [WinBoat VM use](winboat-vm-use.md) for identity, generations, and limitations.
+
 ## Foreground generated-asset repair (Linux)
 
 `mendimaru assets watch --project-id ID --rewrite-generated-assets` keeps Studio's

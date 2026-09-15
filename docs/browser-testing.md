@@ -342,6 +342,12 @@ mendimaru browser frontend-health \
   --navigation-timeout-ms 15000 --observation-ms 3000 --json
 ```
 
+WinBoat Runtime targets hold shared VM use through the complete diagnosis.
+For a plain URL in the configured VM, add `--winboat-use`; a plain URL without
+this flag remains external. In the desktop, use the Runtime session ID for VM
+protection. The lease does not enable asset bypass or RDP discovery. See
+[shared VM use](winboat-vm-use.md).
+
 Exactly one target is required. Navigation accepts 100–30000 ms (default 15000),
 and observation accepts 100–10000 ms (default 3000). The desktop uses these
 defaults. The runner has a separate bounded process-tree supervisor, 128 KiB
@@ -406,3 +412,12 @@ timeouts, event floods and privacy. The ordinary Rust suite runs those same
 pages through the compiled CLI, validates Runtime observation against a real
 keeper socket and checks zero RDP launches or Compose recreations. These are
 controlled fixtures, not a new live Windows VM acceptance claim.
+
+## Shared WinBoat use
+
+WinBoat Runtime targets automatically hold shared VM use for the complete browser
+command. For a plain URL in the configured VM, add `--winboat-use`; separate
+config/cache directories still coordinate through the same management identity.
+Lifecycle changes return a bounded, retryable busy precondition while tests hold
+use. See [VM use policy and boundaries](winboat-vm-use.md) for modes, timeout and
+cancellation, generations, and the advisory trust boundary.

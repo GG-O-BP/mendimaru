@@ -291,6 +291,16 @@ impl StartupDriver for ContainerDriver<'_> {
 }
 
 pub async fn ensure_guest_online(config: &AppConfig) -> Result<(), BackendError> {
+    let lease = crate::winboat::vm_use::acquire(
+        config,
+        crate::winboat::vm_use::Mode::Exclusive,
+        crate::contracts::CapabilityId::StudioStart,
+    )
+    .await?;
+    lease.run(ensure_guest_online_with_lease(config)).await
+}
+
+async fn ensure_guest_online_with_lease(config: &AppConfig) -> Result<(), BackendError> {
     let _maintenance = super::maintenance::shared(config)
         .map_err(|_| failure(BackendErrorCode::PreconditionFailed))?;
     ensure_guest_online_unlocked(config).await

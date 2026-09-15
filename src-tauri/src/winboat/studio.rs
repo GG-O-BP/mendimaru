@@ -83,6 +83,28 @@ pub async fn launch_studio(
     operation_id: &str,
     project_mpr_path: Option<&str>,
 ) -> Result<(), WindowsOperationFailure> {
+    let lease = crate::winboat::vm_use::acquire(
+        config,
+        crate::winboat::vm_use::Mode::Exclusive,
+        crate::contracts::CapabilityId::StudioStart,
+    )
+    .await?;
+    lease
+        .run(launch_studio_with_lease(
+            config,
+            version,
+            operation_id,
+            project_mpr_path,
+        ))
+        .await
+}
+
+async fn launch_studio_with_lease(
+    config: &AppConfig,
+    version: &str,
+    operation_id: &str,
+    project_mpr_path: Option<&str>,
+) -> Result<(), WindowsOperationFailure> {
     validate_operation_id(operation_id)?;
     ensure_no_registered_remote_app()?;
     ensure_guest_online(config).await?;
