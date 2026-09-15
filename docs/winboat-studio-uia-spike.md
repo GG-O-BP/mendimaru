@@ -1,215 +1,263 @@
-# Studio Pro UI automation spike — Linux + WinBoat (#16)
+# Studio Pro UI automation — Linux + WinBoat (#16)
 
-## Current checkpoint: 2026-09-15, tools prepared; #148 uses the guest first
+**Linux + WinBoat investigation complete.** Decision: **Limited Go** for a
+bounded Windows helper, with the frozen unattended flow **not ready for product
+use**. Native Windows is deferred at the user's request; #16 remains open for
+that transport. This spike does not enable product UI capabilities.
+[Earlier checkpoints](winboat-studio-uia/history.md) are historical, including the
+resolved reboot and guest reservation blockers.
 
-The reboot blocker is resolved. The user's follow-up explicitly gives the
-existing #148 WinBoat experiment priority and asks #16 to prepare tools first.
-Do not start another RDP connection, Studio launch, capture campaign, guest
-configuration change or Runtime operation until that experiment has finished.
-Native Windows remains deferred. **No representative UI trial has run**;
-there is still no Studio UI feasibility decision, PR, merge or issue closure.
+## Environment and fixtures
 
-### Fresh observations after reboot
+| Item                 | Measured configuration                                             |
+| -------------------- | ------------------------------------------------------------------ |
+| Host                 | Linux `7.2.6-arch2-1`, dedicated X11 display, 1280×800             |
+| Transport            | WinBoat, FreeRDP `3.31.1 (63b948ca5c)`, same interactive session 2 |
+| Guest                | Windows 11 Pro, build 26100; Windows PowerShell 5.1.26100.4202     |
+| Studio file versions | **10.24.26.0**, **11.12.4.0**                                      |
+| Studio presentation  | English (United States), Light, 100% / 96 DPI baseline             |
+| Candidates           | .NET Framework UIA; FlaUI UIA3 5.0.0; winappCli 0.6.0              |
+| Projects             | Disposable local Blank Web App and a separately converted copy     |
 
-| Check                             | Observation                                                                           |
-| --------------------------------- | ------------------------------------------------------------------------------------- |
-| Host kernel and installed modules | Both `7.2.6-arch2-1`                                                                  |
-| WinBoat                           | Already running; no start or Compose change needed                                    |
-| `mendimaru env status`            | Guest API, RDP and all readiness checks passed                                        |
-| FreeRDP                           | `3.31.1 (63b948ca5c)`                                                                 |
-| Guest OS                          | Windows 11 Pro, `10.0.26100`, build `26100`                                           |
-| Interactive helper                | RDP session `2`; no Studio process in the inventory                                   |
-| Proposed exact comparison pair    | File versions `10.24.26.0` and `11.12.4.0`; matching disposable projects still needed |
-| Other installed file versions     | `10.24.9.0`, `11.12.3.0`, `11.6.10.0`                                                 |
-| Windows UI culture                | `ko-KR`; actual Studio language/theme have not been checked                           |
-| Requested RemoteApp size          | `1280x800`, desktop scaling `100`                                                     |
-| Actual guest screen               | `1920x1080`; `/size` alone did not establish the intended screen size                 |
-| Existing product projects         | Not opened, converted or modified                                                     |
+Exact candidate bytes are pinned in
+[`candidates.json`](../scripts/spikes/studio-uia/candidates.json). Discovery must
+use the running container's port mappings; persisted RDP/API ports differed.
+No original product project was opened or converted. The Studio 10 baseline MPR
+SHA-256 is `489c356920d21e577ba7c6b696a33191da2fc9945722aef23e5f90305c9cc89a`;
+it was verified unchanged after converting the separate Studio 11 copy. Preserve
+`UIA16_10.mpr` as the basename in both directories: renaming only the v2 MPR
+caused an opening failure because `mprcontents` still referenced that basename.
+PID, start time, executable path and exact file version distinguish the apps.
+The independently described Studio 11 baseline also contains `uia16Probe`; its
+MPR SHA-256 is `f03e6cf616a567dd1d3c17f29ed5bc3fe339e8f76382442dd8ab2212f6fc1932`.
 
-The initial RemoteApp inventory did not finish inside the host's 60-second
-observation window. Its report arrived later. One RDP client returned exit 12
-with `ERRINFO_RPC_INITIATED_DISCONNECT` while another connection was made.
-The cause has **not** been attributed to #148. These are preflight observations,
-not measured cold/warm Studio trials. Avoid recursively scanning entire Studio
-installations in a UI scenario; discover once and use verified exact paths.
+## Pilot compatibility findings
 
-The private inventory is retained under
-`~/.local/state/mendimaru/issue-16/preflight-20260915/`, with a SHA-256 manifest.
-It includes account/session information and is not a publishable example UI
-artifact. The temporary diagnostic MessageBox was closed and #16's diagnostic
-FreeRDP process was terminated. Do not reuse its cached session/PID identity.
+These findings describe this fixture and the exact versions above. They are not
+a guarantee for all widgets, properties, layouts or future Studio releases.
 
-### Additional preparation
+| Area/action             | 10.24.26.0                                 | 11.12.4.0                                | Locator/effect requirement                                                                   |
+| ----------------------- | ------------------------------------------ | ---------------------------------------- | -------------------------------------------------------------------------------------------- |
+| App Explorer            | Native WPF tree                            | Native WPF tree                          | `DataItem`, document name; disambiguate by module                                            |
+| Open page               | Ctrl+G, Go To modal                        | Same                                     | Native File-menu focus; unique modal search editor; verify page document                     |
+| Design preview          | Chrome document `MyFirstModule.Home_Web`   | Same                                     | Scope text lookup to page document; intersect bounds with its viewport                       |
+| Select demo text widget | Semantic text lookup + UIA-derived click   | Same                                     | Verify selected widget's Properties Name                                                     |
+| Properties Name         | Unnamed ValuePattern editor under Name row | Parent/child Name labels both exposed    | Scope to Properties, resolve row editors, deduplicate by full runtime ID                     |
+| Commit property         | SetValue, focus, Tab, reacquire            | Same                                     | Read back new value; save; old element/runtime slug may be stale                             |
+| Structure               | WPF toolbar / WinForms canvas              | WPF toolbar / WinForms canvas            | Verify WPF Design-mode button after transition; generic canvas children remain limited       |
+| Design                  | Invoke mode button                         | Same                                     | Verify Chrome page document after transition                                                 |
+| Toolbox search          | `Search...`, `DataItem` Rating             | `Search…`, `ListItem` Rating             | Version-specific locator, scoped to Toolbox tab                                              |
+| F4                      | Native-focus keyboard fallback             | Same                                     | Remove unused Rating MPK, verify disappearance, restore identical bytes, verify reappearance |
+| Run Locally             | Native-focus F5                            | Same                                     | HTTP 200 plus port ownership by fixture-specific Studio child runtime                        |
+| Stop runtime            | Console Stop InvokePattern                 | Same                                     | Verify that owned runtime process exits                                                      |
+| Consistency errors      | Readable native rows, 10 → 0 errors        | Same                                     | Remove/restore used Data grid 2 MPK; rows are virtualized                                    |
+| Dialogs                 | Go To/preferences available                | Sign In Later/conversion/Go To available | Resolve a known dialog before resuming; never dismiss an unknown dialog blindly              |
 
-- `capture.ps1` now requires a fixed NTFS drive and rejects UNC output, missing parent directories and linked
-  output ancestors before applying a local Windows ACL. Collect on local NTFS
-  and export reviewed files afterwards. It rejects a truncated snapshot as
-  `partial-capture`, preserving that snapshot for diagnosis.
-- `capture-worker.ps1` checks the input desktop's name before and after capture,
-  records top-level window truncation, PowerShell version and bounded pattern
-  state (value/read-only, selection, toggle, expansion, focus). Password values
-  are omitted. **These changes have only passed Linux syntax checks, not live
-  Windows behavior checks.** Local NTFS/ACL support and lock/reconnect behavior
-  remain explicit validation gates.
-- `scripts/spikes/studio-uia/candidates.json` pins `winappCli 0.6.0`,
-  `FlaUI.Core/UIA3 5.0.0`, `Interop.UIAutomationClient 10.19041.0`, and
-  `System.Management 8.0.0`. The WinApp digest comes from release metadata;
-  NuGet SHA-256 values were calculated from the official downloads, as labeled.
-  They are reproducibility pins, not a claim that package signatures were checked.
-- All five package files are downloaded and verified in the private host cache
-  `~/.local/state/mendimaru/issue-16/tools/`. None has been installed or executed
-  in the guest. For FlaUI on Windows PowerShell 5.1, stage the .NET Framework
-  4.8 assets and their interop dependency, retaining license files.
+The final saved models were copied with stable source hashes and independently
+described with mxcli: Studio 10 `uia16T10_19`, Studio 11 `uia16T11_20`.
+These are the last successful Name writes, including writes before a later failed
+step; the failed whole-flow results remain failures.
+FlaUI UIA3 also changed the Studio 11 Name, and .NET UIA independently read back
+and verified its restoration. Plain winapp selectors can return duplicate matches
+for one popup runtime ID; generic ancestor Invoke may target an unintended
+container. Input delivery or exit code zero is insufficient proof.
 
-Recheck package bytes before guest staging:
+The frozen runner uses the native File menu for Ctrl+G/F4/F5 focus. Studio 10
+pilots also used the native Properties Name editor for F4/F5 focus. Initial shortcuts
+sent with WebView focus had no verified effect. F4 sometimes left RemoteApp's
+marker window foreground; the input guard rejected this until native focus was
+reacquired. Name labels, page names and text snippets alone are not global keys.
 
-```bash
-node scripts/spikes/studio-uia/verify-candidates.mjs \
-  "$HOME/.local/state/mendimaru/issue-16/tools"
-node --test scripts/spikes/studio-uia/*.node-test.mjs
+## Capture and session boundaries
+
+| Probe                              | Observation                                                                                                    | Consequence                                                                                                |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Raw UIA depth                      | Depth 18 missed WebView nodes; depth 48 reached depth 40 in Studio 10                                          | Bound depth, nodes and wall time; report truncation explicitly                                             |
+| .NET/FlaUI                         | Both captured 982 nodes without truncation on a later Studio 10 screen                                         | Both can expose the relevant page/property state; timings were not controlled speed comparisons            |
+| Studio 11                          | A later matched baseline capture produced 802 nodes with both .NET UIA and FlaUI, without truncation           | Matching coverage for this state; instrumentation and host load were not controlled for speed ranking      |
+| Windows PrintWindow                | Rendered Design/WebView in both versions                                                                       | Review pixels; a true API return alone is not a usable-image guarantee                                     |
+| winapp WGC                         | Rendered main and owned windows                                                                                | Its multi-window image is a side-by-side composite, not actual screen occlusion                            |
+| Linux notification, compositor off | Transparent notification area became a black rectangle over Properties                                         | Linux pixels can obscure a UIA-accessible region                                                           |
+| Minimize/restore pilot (10)        | Windows captures rendered while Linux output became blank; reconnect recovered it                              | Preserve native window state and transport state separately; cause not isolated                            |
+| Reconnect pilot (11)               | UIA and Windows captures worked while Linux stayed white; normal/maximize and compositor-on did not recover it | Fresh Studio process restored Linux rendering; reconnect alone is insufficient evidence of a usable screen |
+| Lock (10)                          | Default input desktop unavailable; collector rejected; winapp input returned `no_interactive_desktop`          | Fail closed; no lock-screen input fallback                                                                 |
+| Reconnect (10)                     | Same Studio PID/start ticks and session survived                                                               | Revalidate identity and reacquire UIA elements                                                             |
+| 125% (10)                          | Monitor/helper 120 DPI, running Studio still 96 DPI; property readback and both modes passed                   | Record monitor scale, system DPI and target DPI; use per-monitor-aware physical bounds                     |
+| Stale identity                     | Live collector rejected wrong start ticks                                                                      | Do not attach by PID alone                                                                                 |
+| Five-second capture budget         | Supervisor rejected timeout and reported worker exited                                                         | Isolate provider calls in a killable MTA child; retain partial evidence                                    |
+
+The isolated FreeRDP client also exited with `ERRINFO_LOGOFF_BY_USER` during
+pilots. Its cause was not attributed to another task. The dedicated display's
+screensaver was disabled; this did not repair an existing blank surface.
+Compositor-on notification behavior was not isolated in a separate probe. These are
+Linux/WinBoat observations, **not native Windows measurements**.
+
+## Representative results
+
+Twenty actual trials per exact version used the same frozen harness. Trials 1,
+6, 11 and 16 started a fresh Studio process; the other 16 retained it. “Cold”
+means Studio process cold, with existing VM, OS and build caches. Each flow opens
+Home_Web, selects its body text, changes and saves a unique Name with readback,
+changes to Structure and Design, verifies F4 removal/restoration, then starts and
+stops its own runtime. All seven effects and runtime cleanup are required to pass.
+HTTP 200 plus the owned JVM/listener verifies the server, not browser rendering.
+
+The [protocol](winboat-studio-uia/protocol.json) fixes the harness hash, environment
+and fixture baselines before trial 1. The [ledger](winboat-studio-uia/ledger.json),
+[summary](winboat-studio-uia/summary.json) and
+[observations](winboat-studio-uia/observations.json) retain all 40 attempts and the
+source hashes for their proofs. Failures were not replaced with successful retries.
+
+| Studio file version | Overall         | Cold | Warm  |
+| ------------------- | --------------- | ---- | ----- |
+| 10.24.26.0          | **1/20 (5%)**   | 0/4  | 1/16  |
+| 11.12.4.0           | **17/20 (85%)** | 2/4  | 15/16 |
+
+| Version    | Failed trial IDs          | Step             | Observed failure                |
+| ---------- | ------------------------- | ---------------- | ------------------------------- |
+| 10.24.26.0 | 1, 5, 11, 12, 16, 17      | `open-page`      | `page-editor-control-not-ready` |
+| 10.24.26.0 | 2, 6, 14, 19              | `structure-mode` | `page-editor-control-not-ready` |
+| 10.24.26.0 | 3, 4, 7, 8, 9, 10, 15, 20 | `select-widget`  | `wrong-widget-selected`         |
+| 10.24.26.0 | 18                        | `synchronize-f4` | `toolbox-search-not-ready`      |
+| 11.12.4.0  | 1                         | `synchronize-f4` | `toolbox-search-not-ready`      |
+| 11.12.4.0  | 6, 8                      | `open-page`      | `page-editor-control-not-ready` |
+
+A failed step stops that attempt; downstream steps stay `not-run`. These are
+whole-flow rates for this fixture, inherited per-version UI layout and harness,
+not UIA capability ceilings or a causal ranking of Studio versions. Read-only
+reviews between failed attempts are retained separately and do not change scores.
+No live readiness fixes were inserted into the frozen measured script.
+
+Both versions exposed one-shot readiness gaps around the Design button and
+the initial Toolbox search. The expected controls appeared on
+later inspection. Studio 10 additionally outlined the preview text while
+Properties reported page Name `Home_Web`; later readback still returned the page
+Name. This mismatch is not demonstrated proof of a delayed property update.
+
+Host load was not isolated from other repository verification VMs. Durations in
+the observations include polling, UI inspection/capture and, on cold requests,
+Studio launch. They are operational observations, not candidate speed benchmarks.
+
+## State model and minimum command draft
+
+```mermaid
+stateDiagram-v2
+  [*] --> Unbound
+  Unbound --> Ready: exact process / active session / Default desktop
+  Ready --> Busy: command starts
+  Busy --> Ready: effect and cleanup verified
+  Busy --> KnownDialog: owned modal
+  KnownDialog --> Ready: explicit supported resolution
+  Ready --> Unavailable: lock / disconnect / stale identity
+  Busy --> Unavailable: timeout / lost foreground / occlusion
+  Unavailable --> Unbound: reconnect or relaunch; discard element handles
 ```
 
-The verifier reads files only, rejects unexpected size/hash, non-regular files
-and unsafe filenames, and does not download, extract, install or execute them.
-For a fresh machine, download the exact URLs in the manifest to a private
-directory under their specified filenames, then run the same verification.
+A future Windows helper should expose the following bounded commands, with a
+common identity envelope (PID, UTC start ticks, executable path/version, session
+and window generation), timeout, cancellation and structured failure reason:
 
-Preparation validation: eight Node tests passed; all five downloaded package
-files matched the pinned byte count and SHA-256; changed JavaScript passed
-ESLint with zero warnings and Prettier checks. Both PowerShell scripts parsed
-with the digest-verified PowerShell 7.6.6 on Linux. These checks do not validate
-Windows APIs, Windows PowerShell 5.1 behavior, candidate loading, UI locators,
-screen captures or Studio actions. Full product tests were not run because
-this checkpoint changes only experimental tools and documentation.
+- **Bind/status**: verify the exact process and interactive desktop; enumerate
+  owned windows/dialogs and report minimized, foreground and DPI state.
+- **Inspect**: bounded raw tree with parent IDs, relevant pattern state and
+  explicit truncation; omit password values. A partial tree is not absence proof.
+- **Capture**: record method, window/monitor bounds and state, return a private
+  artifact requiring review; distinguish window composites from screen capture.
+- **Invoke/read/set**: resolve one scoped element, require its actual pattern,
+  reject unsupported/read-only/stale targets, reacquire after changes and verify
+  the app effect. Initial write scope should be the demonstrated Name editor.
+- **Keyboard fallback**: require known native focus, foreground ownership,
+  active desktop and an explicit effect verifier for the supported shortcut.
+- **Cancel/release**: stop the owned helper child and free UIA/GDI resources;
+  preserve results and never terminate an unrelated Studio/runtime process.
 
-After #148 completes, repeat environment/session discovery. Establish the real
-screen size (a dedicated 1280×800 Linux test display is a candidate, not yet a
-verified fix), DPI, Studio language and theme. Select disposable exact-version
-projects, validate the collectors in the guest, then follow steps 4–9 below.
-Keep all incomplete attempts and preserve Windows native as deferred scope.
+Transport connection ownership, reconnect, Linux window mapping and Linux
+capture belong to the Linux transport. A product implementation must integrate
+[shared VM use](winboat-vm-use.md) and subsequent UI arbitration; this private
+external lab does not automatically participate in application VM leases. UIA tree/action logic and Windows capture
+belong to the Windows helper. The latter sharing is a design proposal until the
+native Windows transport is measured.
 
-## Historical checkpoint: 2026-09-15, awaiting host reboot
+## Decision and follow-up scope
 
-This is an **incomplete investigation**, not a Go/Limited Go/No-Go result.
-The user requested Linux + WinBoat only and explicitly deferred native Windows.
-Do not close #16 or enable product UI capabilities based on this checkpoint.
+**Limited Go for a bounded Windows helper; No-Go for shipping the frozen runner
+as an unattended default.** Tree inspection, Windows capture and the demonstrated
+semantic commands justify the helper work in #21. The representative failures
+prevent claiming a reliable general Studio automation flow. Generic canvas
+editing, arbitrary widgets/properties and a default image-driven action loop
+remain unproven.
 
-- Issue: <https://github.com/GG-O-BP/mendimaru/issues/16>
-- Start comment: <https://github.com/GG-O-BP/mendimaru/issues/16#issuecomment-5680500584>
-- Branch: `spike/16-winboat-uia`
-- Worktree: sibling `mendimaru-issue-16` of the main checkout.
-- Base: `cdc0d77` (`origin/main` when the worktree was created).
-- No PR or merge yet. User has authorized both after verified Linux work.
-- No applicable `AGENTS.md` was found in this repository or its ancestor directories.
+**Fixed coordinates are not the default.** A click derived from a unique semantic
+element is conditional on fresh bounds, viewport/screen intersection, visibility,
+foreground/window ownership and effect readback. Preview highlighting alone does
+not prove that Properties describes the intended widget. Unsupported targets
+must return a structured failure rather than continuing with guessed input.
 
-### Actual preflight findings
+The next provider implementation should:
 
-| Check                    | Observation                                            |
-| ------------------------ | ------------------------------------------------------ |
-| Linux running kernel     | `7.2.4-arch1-2`                                        |
-| Installed kernel modules | Only `7.2.6-arch2-1`                                   |
-| FreeRDP                  | `3.31.1 (63b948ca5c)`                                  |
-| Linux display            | X11, `:0`                                              |
-| Configured container     | `WinBoat`, Docker, `ghcr.io/dockur/windows:5.14`       |
-| Initial container state  | Exited; no running Docker containers                   |
-| `docker start WinBoat`   | Failed creating a veth pair: `operation not supported` |
-| `modprobe -n -v veth`    | No module directory for the running kernel             |
-| CLI `env status`         | Connectivity false; Studio/project readiness false     |
-| Administrator access     | `sudo -n true` requires a password                     |
-| User's recovery choice   | Reboot, then continue this task                        |
+1. Start with bounded inspect/capture and exact process/session ownership.
+2. Pin the demonstrated locators to the exact Studio versions and scope them to
+   the document, panel or owned modal; reacquire elements after changes.
+3. Poll for explicit document, mode and panel readiness within the command's
+   deadline, replacing the frozen runner's one-shot readiness assumptions.
+4. Verify selected widget and property state together before a write, then verify
+   readback and save. Diagnose the Studio 10 mismatch before enabling that flow.
+5. Preserve Windows capture and Linux transport visibility as separate evidence;
+   integrate cancellation, reconnect invalidation and UI input arbitration.
+6. Run a new, separately identified repeated campaign before enabling product
+   capabilities. The current failures remain immutable evidence.
 
-The matching old kernel package exists in the package cache, but no system
-module restoration was attempted. Compose, guest disks, user projects, app
-settings and existing Studio sessions were not modified. The start attempt
-failed before guest boot. No UI scenario ran: **zero measured trials**. Do not
-represent this infrastructure failure as a Studio UI No-Go or as 0/20 UI
-successes.
+Native Windows interactive Studio validation stays deferred in #16. Repository
+CI on Windows checks the application and bundle; it does not supply the missing
+native Studio UI automation measurements.
 
-## Work prepared, not yet validated in the Windows guest
+## Evidence and validation
 
-`scripts/spikes/studio-uia/capture.ps1` supervises an isolated MTA PowerShell
-worker with a wall-clock timeout. `capture-worker.ps1` checks Studio PID, UTC
-start ticks, exact executable file version and matching nonzero interactive
-session, then collects bounded raw UIA trees and PrintWindow PNGs for visible
-windows belonging to that PID. Captures require visual review; PrintWindow
-returning true does not prove that a WebView/canvas was rendered. These are
-read-only PoC tools, not the #21 product provider. They have **not run on
-Windows**. Review and test their behavior before using them for evidence.
+[Reviewed screenshot examples](winboat-studio-uia/artifacts.json) identify their
+pilot or campaign phase. [UI tree excerpts](winboat-studio-uia/tree-examples.json)
+retain selected original nodes and their ancestry, with raw source hashes.
+[Structure excerpts](winboat-studio-uia/structure-tree-examples.json) expose the
+WPF toolbar and WinForms canvas/scrollbars; their viewport has no widget children.
+[Capture review](winboat-studio-uia/capture-review.json) covers 98 tree captures.
+Studio 10 trial 6's property capture contains only a save Progress dialog, so
+that tree does not prove the property value. The frozen flow read the Name before
+save, and trial 13 read the same `uia16T10_06` after a fresh Studio launch. The
+coverage gap remains explicit; successful capture exit alone is insufficient.
+Private raw requests, trees, captures and failures remain in the dedicated
+`issue-16/live-20260915` lab. The disposable experimental bridge had serialization,
+sequence, child-timeout and command-line-length defects; these failed attempts
+are retained and excluded from representative counts. The bridge is not a
+product provider. Long signed requests now execute from the private guest NTFS
+lab instead of exceeding Windows' command-line limit.
 
-`evidence.mjs` validates a ledger of two exact versions (one 10.x and one 11.x),
-20 planned trials each, cold/warm counts and seven explicit flow steps. Its
-synthetic Node tests are bookkeeping tests, not Studio acceptance evidence.
-Blocked/unexecuted trials cannot become successful UI measurements. Private
-artifact paths and an `effectVerified` flag are required for passing steps;
-the validator cannot establish whether an artifact actually proves an effect.
+The experimental collector is under
+[`scripts/spikes/studio-uia`](../scripts/spikes/studio-uia/). It writes to a new,
+private local NTFS directory and rejects UNC, linked ancestors and reused
+outputs. Only reviewed artifacts should be copied out. `evidence.mjs` checks
+ledger consistency, not whether a screenshot proves an assertion.
 
-No version-specific locators, property changes, F4 actions or Run Locally flows
-have been implemented or measured yet. No target 10.x/11.x pair has been chosen.
-Local read-only MPR metadata inspection found existing sample projects at
-11.12.0, 11.12.2 and an 11.12.0 alpha; these are discovery hints only, not approved
-or measured targets. Keep other repositories, especially pantosDemoAgGrid,
-outside this spike. Use disposable project copies.
+## Cleanup and checks
 
-## Resume after reboot
+[Supplemental validation](winboat-studio-uia/validation.json) records independent
+saved-model reads, collector boundaries and cleanup. Studio 10 was restored to
+Korean/Auto. Studio 11 was restored to Korean/Dark: Dark is an **inference** from
+the original Auto and Light radios both being unselected; the optional user
+clarification was unanswered. Selection readback and preference save succeeded.
+Both fixture Studios and all fixture runtimes exited, and both Rating packages
+match their original hash. The private guest agent, dedicated FreeRDP client,
+xfwm4 and Xvfb exited. The VM and private evidence were retained.
 
-1. Read this checkpoint, #16's full body/comments, repository instructions and
-   `CONTRIBUTING.md`. Check branch/worktree status and `origin/main` drift.
-2. Check `uname -r`, the matching `/usr/lib/modules` directory, `docker ps -a`,
-   FreeRDP and `mendimaru env status`. Start only the configured WinBoat guest.
-   Verify guest API and RDP readiness before calling anything a live test.
-3. Discover installed Studio versions and choose exact supported 10.x/11.x
-   projects. Make disposable copies, record source hashes and avoid conversion
-   of originals. Fix English UI, theme, 1280×800 resolution and 100% scaling;
-   record actual guest OS/build, DPI, screen and executable versions.
-4. Run Studio and the helper in the same interactive RDP session. Verify
-   PID/start ticks/window ownership. Test failure paths: stale PID/start time,
-   wrong session, missing window, hung provider, ambiguous/missing locator,
-   modal dialog, read-only property, lost foreground and cleanup.
-5. Collect App Explorer, Page Editor, Design/Structure mode, Properties,
-   consistency errors and modal UI trees/screenshots. Inspect Properties and
-   Preview separately. Compare .NET UIA with a pinned UIA3-based candidate and
-   `winapp ui` against the same windows.
-6. Author measured locators. Repeat the same representative flow **20 times
-   per exact version**, including cold process launches and warm runs. Record
-   page open, widget selection, property change with readback, Design and
-   Structure modes, F4 synchronization with verified effect, and Run Locally
-   with verified readiness. Keep every failed and incomplete attempt. Do not
-   treat input delivery/exit zero as the intended app effect.
-7. Compare Windows window captures with Linux RemoteApp captures, including
-   canvas/WebView contents, occlusion and minimized windows. Explicitly test
-   screen lock, RDP disconnect/reconnect and changed DPI. Reacquire elements
-   after reconnect; record failures without extrapolating to native Windows.
-8. Publish a version/locator/action compatibility table, reviewed and sanitized
-   example artifacts, measured rates/failure reasons, session/window/dialog
-   state model, minimum helper command contract and a justified decision.
-   Decide explicitly whether coordinates can be a default (current proposal:
-   no; this is not yet an experimentally justified decision).
-9. Test/lint/format changed tools, review the diff, create a PR, wait for relevant
-   checks, merge into main and update #16. Preserve native Windows as deferred
-   follow-up scope; do not claim it was measured or silently close its scope.
+Validation completed:
 
-## Candidate references checked during preparation
+- All 40 attempts satisfy the ledger schema and frozen protocol identity; source
+  hashes, screenshots and the 98 captured trees were reviewed with the one
+  explicitly documented capture coverage gap.
+- Eight Node tests passed for candidate verification, failure accounting and
+  ledger checks; all five candidate downloads matched their pinned bytes.
+- Changed PowerShell tools parsed successfully; live collector checks rejected
+  stale identity and five-second timeouts, with child exit confirmed. The final
+  collector cleanup-race fix also passed normal/stale/timeout checks in Studio 11.
+- JavaScript lint and changed-file formatting checks passed. Product lifecycle,
+  runtime schema and capability code are outside this change.
 
-- [Microsoft UI Automation CLI](https://learn.microsoft.com/en-us/windows/apps/dev-tools/winapp-cli/ui-automation): pattern actions and input injection have different desktop requirements; capture output needs review in this application.
-- [FlaUI](https://github.com/FlaUI/FlaUI): .NET UIA2/UIA3 candidate to compare, not a measured Studio result.
-- [UIA threading](https://learn.microsoft.com/en-us/dotnet/framework/ui-automation/ui-automation-threading-issues): keep provider calls off UI threads; a separate process supplies the hard timeout.
-- [Mendix keyboard shortcuts](https://docs.mendix.com/refguide/keyboard-shortcuts/): confirm exact-version shortcuts and effects before replaying them.
-- [Mendix Preview APIs](https://docs.mendix.com/apidocs-mxsdk/apidocs/pluggable-widgets-studio-apis/): these configure widget preview appearance; they are not evidence for external GUI control.
-
-The inspected `winappCli` release is `v0.6.0`; x64 ZIP SHA-256 is
-`f6dc42e3b4e4709c8f617003008e2cfdd9a51735e04e7170d60edda258db78a8`
-from GitHub release metadata. It has not been installed or executed. Use
-version-pinned documentation and verify downloaded assets before the comparison.
-
-## Checkpoint validation
-
-- Five synthetic ledger/classification Node tests passed.
-- Changed JavaScript passed ESLint with zero warnings and Prettier formatting.
-- Both PowerShell files parsed with PowerShell 7.6.6 on Linux; this does **not**
-  validate Windows PowerShell 5.1, Windows APIs, ACLs, UIA or capture behavior.
-- The parser download was verified against its GitHub release SHA-256
-  `ddbc4a2d113bbd46d283cfedcbcd117a70caefd7673f41f2b4e0000badf103bc`.
-- Full application tests were not run: no product code or capability changed.
-- Before live use, review the prepared collector's output ACL/ancestor paths,
-  locked/secure desktop identification, partial/truncated output, exact-version
-  comparison and timeout cleanup. Keep it experimental until those cases pass.
+Native Windows Studio validation remains the unresolved part of #16.

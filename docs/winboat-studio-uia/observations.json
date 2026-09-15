@@ -1,0 +1,6137 @@
+{
+  "schemaVersion": 1,
+  "transport": "linux-winboat",
+  "nativeWindows": "deferred",
+  "exportedAtUtc": "2026-09-15T18:04:34.021653+00:00",
+  "scope": "Observed fixture-specific assertions from the frozen harness, with private source hashes; full raw trees and Linux captures remain in the private lab.",
+  "trials": [
+    {
+      "id": "10-01",
+      "phase": "cold",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "reason": "page-editor-control-not-ready",
+          "status": "fail",
+          "elapsedMs": 8955
+        },
+        {
+          "id": "select-widget",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 1,
+        "phase": "cold",
+        "requestId": "0113",
+        "startedAtUtc": "2026-09-15T17:41:50.084356+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:43:10.405730+00:00",
+        "elapsedMs": 75930,
+        "passed": false
+      },
+      "request": {
+        "id": "0113",
+        "elapsedMs": 75930,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "87faf42c921845e75a1271a82d1a205510b6193ce1388526947bbe90b83cbff6",
+      "flowSourceSha256": "b4f9964563b669ee522c6dbaa2eba1462e3aa98f6e5bb9362342a2df8ec40569",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 5888,
+        "startTicks": "639250909154936019",
+        "trialName": "uia16T10_01",
+        "utc": "2026-09-15T17:43:09.2803828Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "runtimeCount": 0,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T17:43:43.3157855Z",
+          "laterDesignButton": "Design mode",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+          "starRatingPresent": true,
+          "laterChromeDocumentCount": 1
+        },
+        "sourceSha256": "4241a441e1d89fa22db51e341cb1b5ca0b43015e7cb0c996346e0d531e9ac54e",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5888,
+        "startTicks": "639250909154936019",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "launch": {
+        "version": "10.24.26.0",
+        "defenderNotificationClosed": true,
+        "utc": "2026-09-15T17:42:59.3187675Z",
+        "previousPid": 8312,
+        "previousStartTicks": "639250789008120031",
+        "startTicks": "639250909154936019",
+        "elapsedMs": 64087,
+        "pid": 5888,
+        "signInLater": false
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-01/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-01/flow.json",
+          "sha256": "b4f9964563b669ee522c6dbaa2eba1462e3aa98f6e5bb9362342a2df8ec40569"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-01/preflight.json",
+          "sha256": "b2da4d9418c7708c946098563d91946e41a06f3df009dd25fb17ab5acdf46cba"
+        }
+      ]
+    },
+    {
+      "id": "10-02",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7463
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16Probe",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4041
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.5888.4468590",
+            "before": "uia16Probe",
+            "readbackRuntimeId": "7.5888.39721305",
+            "mprSha256": "f16d01966dba6930dcf9524c825271616b0fd428f7e31297be37b84019603fec",
+            "after": "uia16T10_02"
+          },
+          "status": "pass",
+          "elapsedMs": 8868
+        },
+        {
+          "id": "structure-mode",
+          "reason": "page-editor-control-not-ready",
+          "status": "fail",
+          "elapsedMs": 4387
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 2,
+        "phase": "warm",
+        "requestId": "0115",
+        "startedAtUtc": "2026-09-15T17:44:01.175265+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:44:32.443715+00:00",
+        "elapsedMs": 27047,
+        "passed": false
+      },
+      "request": {
+        "id": "0115",
+        "elapsedMs": 27047,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "a9faeebac31735c743a83462abaf3e0302200d28c80a5ba9437dba2cfd27ed83",
+      "flowSourceSha256": "65dd662feeece31308266e22b5ec368c96da939cca409a803dd7f4f2bfc78319",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 5888,
+        "startTicks": "639250909154936019",
+        "trialName": "uia16T10_02",
+        "utc": "2026-09-15T17:44:31.0555392Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "runtimeCount": 0,
+          "designFramework": "WPF",
+          "utc": "2026-09-15T17:44:50.1409831Z",
+          "laterDesignButton": "Design mode",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+          "starRatingPresent": true,
+          "laterChromeDocumentCount": 0
+        },
+        "sourceSha256": "fd49f22937acf358b9f5402f1cd002720b9c5051bf806ce6fa99fd20b7eab7bf",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5888,
+        "startTicks": "639250909154936019",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-02/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-02/flow.json",
+          "sha256": "65dd662feeece31308266e22b5ec368c96da939cca409a803dd7f4f2bfc78319"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-02/preflight.json",
+          "sha256": "b2da4d9418c7708c946098563d91946e41a06f3df009dd25fb17ab5acdf46cba"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-02/property.json",
+          "sha256": "3effa4adb88b9f906f95372584a65a27bda5b8dded012652c0fb3ed3254c4f46"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-02/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "10-03",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7646
+        },
+        {
+          "id": "select-widget",
+          "reason": "wrong-widget-selected",
+          "status": "fail",
+          "elapsedMs": 5123
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 3,
+        "phase": "warm",
+        "requestId": "0117",
+        "startedAtUtc": "2026-09-15T17:45:03.591093+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:45:21.371919+00:00",
+        "elapsedMs": 15021,
+        "passed": false
+      },
+      "request": {
+        "id": "0117",
+        "elapsedMs": 15021,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "0139f4f8ffe79597046b898625838f0aed952307e093c531826427f2762db319",
+      "flowSourceSha256": "d9945451889a63bf8bdb510fa3f7526ef522ebfe4736783c9f200f33782ecb48",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 5888,
+        "startTicks": "639250909154936019",
+        "trialName": "uia16T10_03",
+        "utc": "2026-09-15T17:45:20.7717982Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T17:46:11.5268639Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "83ad294f322987134cb17d6cd349ff33997f13ce1872ab00e05df10613071421",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5888,
+        "startTicks": "639250909154936019",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-03/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-03/flow.json",
+          "sha256": "d9945451889a63bf8bdb510fa3f7526ef522ebfe4736783c9f200f33782ecb48"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-03/preflight.json",
+          "sha256": "b2da4d9418c7708c946098563d91946e41a06f3df009dd25fb17ab5acdf46cba"
+        }
+      ]
+    },
+    {
+      "id": "10-04",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7395
+        },
+        {
+          "id": "select-widget",
+          "reason": "wrong-widget-selected",
+          "status": "fail",
+          "elapsedMs": 5064
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 4,
+        "phase": "warm",
+        "requestId": "0119",
+        "startedAtUtc": "2026-09-15T17:46:22.043543+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:46:42.095216+00:00",
+        "elapsedMs": 14588,
+        "passed": false
+      },
+      "request": {
+        "id": "0119",
+        "elapsedMs": 14588,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "2e90e8395792131a2f093962b39d04a92e8f1c44599c9efd88e48e7290cf78f7",
+      "flowSourceSha256": "ea1fcb1671dd9eb74a3f6fdde8865ab292f47c971bc9bde3a241bf6c7e27b6e1",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 5888,
+        "startTicks": "639250909154936019",
+        "trialName": "uia16T10_04",
+        "utc": "2026-09-15T17:46:41.5744290Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T17:47:52.6751729Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "9fc6048a0ac669b75cf5c006981ad0d556b13f5c0cc46dca5ed4b8fb362e64ab",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5888,
+        "startTicks": "639250909154936019",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-04/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-04/flow.json",
+          "sha256": "ea1fcb1671dd9eb74a3f6fdde8865ab292f47c971bc9bde3a241bf6c7e27b6e1"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-04/preflight.json",
+          "sha256": "b2da4d9418c7708c946098563d91946e41a06f3df009dd25fb17ab5acdf46cba"
+        }
+      ]
+    },
+    {
+      "id": "10-05",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "reason": "page-editor-control-not-ready",
+          "status": "fail",
+          "elapsedMs": 10138
+        },
+        {
+          "id": "select-widget",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 5,
+        "phase": "warm",
+        "requestId": "0121",
+        "startedAtUtc": "2026-09-15T17:48:03.527953+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:48:21.055398+00:00",
+        "elapsedMs": 12406,
+        "passed": false
+      },
+      "request": {
+        "id": "0121",
+        "elapsedMs": 12406,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "d742f985f2bb49275f0bd41cb175945ec31567d4f994ce5f6cf677077d6d6dd4",
+      "flowSourceSha256": "77f9a9a758edef27b3e40eb1504e76ca7dfabc021e0f550fc667778cbf33af76",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 5888,
+        "startTicks": "639250909154936019",
+        "trialName": "uia16T10_05",
+        "utc": "2026-09-15T17:48:20.5268996Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T17:49:11.1128520Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "fec2fcb356c32a4d9b2c9f70db4ce3308738f16c502ce4d9341aa8bd7995705d",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5888,
+        "startTicks": "639250909154936019",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-05/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-05/flow.json",
+          "sha256": "77f9a9a758edef27b3e40eb1504e76ca7dfabc021e0f550fc667778cbf33af76"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-05/preflight.json",
+          "sha256": "b2da4d9418c7708c946098563d91946e41a06f3df009dd25fb17ab5acdf46cba"
+        }
+      ]
+    },
+    {
+      "id": "10-06",
+      "phase": "cold",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 11127
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T10_02",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4614
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.5824.55413527",
+            "before": "uia16T10_02",
+            "readbackRuntimeId": "7.5824.9926414",
+            "mprSha256": "3f67265ed2fadb8c21504489c2151f01257e2e88003c5b1ab7413b8e75899a04",
+            "after": "uia16T10_06"
+          },
+          "status": "pass",
+          "elapsedMs": 4957
+        },
+        {
+          "id": "structure-mode",
+          "reason": "page-editor-control-not-ready",
+          "status": "fail",
+          "elapsedMs": 3718
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 6,
+        "phase": "cold",
+        "requestId": "0123",
+        "startedAtUtc": "2026-09-15T17:49:11.744842+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:50:28.030531+00:00",
+        "elapsedMs": 70542,
+        "passed": false
+      },
+      "request": {
+        "id": "0123",
+        "elapsedMs": 70542,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "831040a514e7a18cfcb165cbb2a6c762b996a979f8f323451560df79f7c01d83",
+      "flowSourceSha256": "597099d3ae04a9bbe8a07944a1be38870fe50007c28cc83cee503b2d6cda6779",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 5824,
+        "startTicks": "639250913648959377",
+        "trialName": "uia16T10_06",
+        "utc": "2026-09-15T17:50:26.9236457Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 0,
+          "starRatingPresent": true,
+          "designFramework": "WPF",
+          "utc": "2026-09-15T17:50:47.3578993Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "uia16T10_06",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "f29e63c9a97cad8298d333811df0904baa8e3fbc931c3b505a8d393a93f90898",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5824,
+        "startTicks": "639250913648959377",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "launch": {
+        "version": "10.24.26.0",
+        "defenderNotificationClosed": true,
+        "utc": "2026-09-15T17:50:01.6945461Z",
+        "previousPid": 5888,
+        "previousStartTicks": "639250909154936019",
+        "startTicks": "639250913648959377",
+        "elapsedMs": 44033,
+        "pid": 5824,
+        "signInLater": false
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-06/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-06/flow.json",
+          "sha256": "597099d3ae04a9bbe8a07944a1be38870fe50007c28cc83cee503b2d6cda6779"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-06/preflight.json",
+          "sha256": "c6c29775fbad2536d0b7175eb16e5de4acbe3d8f5db88ac67cc435205398014d"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-06/property.json",
+          "sha256": "47e98b917b0ea5f1caed7af16344cd466085c2193bb0a1cd4e9f818719b48ca4"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-06/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "10-07",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7570
+        },
+        {
+          "id": "select-widget",
+          "reason": "wrong-widget-selected",
+          "status": "fail",
+          "elapsedMs": 4546
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 7,
+        "phase": "warm",
+        "requestId": "0125",
+        "startedAtUtc": "2026-09-15T17:50:47.976704+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:51:07.755771+00:00",
+        "elapsedMs": 14505,
+        "passed": false
+      },
+      "request": {
+        "id": "0125",
+        "elapsedMs": 14505,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "420d8c3827830ba64968b33859d43b28008f179ab392d12c0d435ee44d46234f",
+      "flowSourceSha256": "89dd997bf42058649c44aee72ca831efb2bd074471ec48da66d79cf9f88bb530",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 5824,
+        "startTicks": "639250913648959377",
+        "trialName": "uia16T10_07",
+        "utc": "2026-09-15T17:51:07.1729147Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T17:51:37.7605666Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "82a0d03e6c2e76c7ff42157a4991c6cce045eff2542f8fdbf38d1508f76fab04",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5824,
+        "startTicks": "639250913648959377",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-07/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-07/flow.json",
+          "sha256": "89dd997bf42058649c44aee72ca831efb2bd074471ec48da66d79cf9f88bb530"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-07/preflight.json",
+          "sha256": "c6c29775fbad2536d0b7175eb16e5de4acbe3d8f5db88ac67cc435205398014d"
+        }
+      ]
+    },
+    {
+      "id": "10-08",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7460
+        },
+        {
+          "id": "select-widget",
+          "reason": "wrong-widget-selected",
+          "status": "fail",
+          "elapsedMs": 5023
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 8,
+        "phase": "warm",
+        "requestId": "0127",
+        "startedAtUtc": "2026-09-15T17:51:38.410144+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:51:58.189321+00:00",
+        "elapsedMs": 14516,
+        "passed": false
+      },
+      "request": {
+        "id": "0127",
+        "elapsedMs": 14516,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "b2f31a14975d9f0075337997ae940f46d974581218bcb37a50ba9b2e291d755a",
+      "flowSourceSha256": "a26c0a19d9384e21dbe4100ff07fcd5c1d93f89f96af40a1f0690493129b4e67",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 5824,
+        "startTicks": "639250913648959377",
+        "trialName": "uia16T10_08",
+        "utc": "2026-09-15T17:51:57.6775204Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T17:52:07.8129678Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "dd5b9129f6e58c9cbe3e243c5725108510d06bbaad70c9d035ec892ae07cce60",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5824,
+        "startTicks": "639250913648959377",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-08/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-08/flow.json",
+          "sha256": "a26c0a19d9384e21dbe4100ff07fcd5c1d93f89f96af40a1f0690493129b4e67"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-08/preflight.json",
+          "sha256": "c6c29775fbad2536d0b7175eb16e5de4acbe3d8f5db88ac67cc435205398014d"
+        }
+      ]
+    },
+    {
+      "id": "10-09",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7744
+        },
+        {
+          "id": "select-widget",
+          "reason": "wrong-widget-selected",
+          "status": "fail",
+          "elapsedMs": 5028
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 9,
+        "phase": "warm",
+        "requestId": "0129",
+        "startedAtUtc": "2026-09-15T17:52:08.382561+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:52:28.647944+00:00",
+        "elapsedMs": 14981,
+        "passed": false
+      },
+      "request": {
+        "id": "0129",
+        "elapsedMs": 14981,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "0ec65fd6057873966dba4e5b2eba13efb53f46eb251d3c7d197293e981df04d7",
+      "flowSourceSha256": "916cc47c88d02fb960322b23d5881d25ec92e0c094550072a8d05219124c0cd1",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 5824,
+        "startTicks": "639250913648959377",
+        "trialName": "uia16T10_09",
+        "utc": "2026-09-15T17:52:28.1741101Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T17:52:38.8966431Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "3c5ed88401f722f45fdf8acb54c1c16ee0a27d135360fafcbd82589da481e59b",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5824,
+        "startTicks": "639250913648959377",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-09/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-09/flow.json",
+          "sha256": "916cc47c88d02fb960322b23d5881d25ec92e0c094550072a8d05219124c0cd1"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-09/preflight.json",
+          "sha256": "c6c29775fbad2536d0b7175eb16e5de4acbe3d8f5db88ac67cc435205398014d"
+        }
+      ]
+    },
+    {
+      "id": "10-10",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7542
+        },
+        {
+          "id": "select-widget",
+          "reason": "wrong-widget-selected",
+          "status": "fail",
+          "elapsedMs": 5045
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 10,
+        "phase": "warm",
+        "requestId": "0131",
+        "startedAtUtc": "2026-09-15T17:52:39.588094+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:52:59.612385+00:00",
+        "elapsedMs": 14755,
+        "passed": false
+      },
+      "request": {
+        "id": "0131",
+        "elapsedMs": 14755,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "dc00d1fec6a0fe2089b2f3aa2e7cddd72477068b79aa9d895edc12b9f0d27e6e",
+      "flowSourceSha256": "09058eaf0b9118a97e01629b28900c203210f4dc19bff8f7324579b1a915dd1b",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 5824,
+        "startTicks": "639250913648959377",
+        "trialName": "uia16T10_10",
+        "utc": "2026-09-15T17:52:59.1487995Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T17:53:09.2173254Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "b22a22d92a577fe273d39a4dcde54d5cfcb5ad307f4343b2dce2c9139762c0c8",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5824,
+        "startTicks": "639250913648959377",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-10/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-10/flow.json",
+          "sha256": "09058eaf0b9118a97e01629b28900c203210f4dc19bff8f7324579b1a915dd1b"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-10/preflight.json",
+          "sha256": "c6c29775fbad2536d0b7175eb16e5de4acbe3d8f5db88ac67cc435205398014d"
+        }
+      ]
+    },
+    {
+      "id": "10-11",
+      "phase": "cold",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "reason": "page-editor-control-not-ready",
+          "status": "fail",
+          "elapsedMs": 9333
+        },
+        {
+          "id": "select-widget",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 11,
+        "phase": "cold",
+        "requestId": "0133",
+        "startedAtUtc": "2026-09-15T17:53:09.834446+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:54:07.164865+00:00",
+        "elapsedMs": 51739,
+        "passed": false
+      },
+      "request": {
+        "id": "0133",
+        "elapsedMs": 51739,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "9507f370fe72da34fe708caf93dcaf143e34494ffd5f86f9e8de0ddb10d4ea88",
+      "flowSourceSha256": "39a4bc2da42a4ab9e40fa57eeecc283607cbf9945e7ebb2618fa5a79495eb5b7",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 8852,
+        "startTicks": "639250915999039510",
+        "trialName": "uia16T10_11",
+        "utc": "2026-09-15T17:54:05.4681943Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T17:54:16.8193373Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "f10ff030cac546baaed464193e0599e7a86ed963e62f9a1f22a95b9c4a51f1a3",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 8852,
+        "startTicks": "639250915999039510",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "launch": {
+        "version": "10.24.26.0",
+        "defenderNotificationClosed": true,
+        "utc": "2026-09-15T17:53:55.0095605Z",
+        "previousPid": 5824,
+        "previousStartTicks": "639250913648959377",
+        "startTicks": "639250915999039510",
+        "elapsedMs": 39253,
+        "pid": 8852,
+        "signInLater": false
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-11/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-11/flow.json",
+          "sha256": "39a4bc2da42a4ab9e40fa57eeecc283607cbf9945e7ebb2618fa5a79495eb5b7"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-11/preflight.json",
+          "sha256": "177350dc1ff02a7f7644383500cedced1c203fb13c42296324b482f429a35cd7"
+        }
+      ]
+    },
+    {
+      "id": "10-12",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "reason": "page-editor-control-not-ready",
+          "status": "fail",
+          "elapsedMs": 10064
+        },
+        {
+          "id": "select-widget",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 12,
+        "phase": "warm",
+        "requestId": "0135",
+        "startedAtUtc": "2026-09-15T17:54:17.410142+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:54:34.940784+00:00",
+        "elapsedMs": 12303,
+        "passed": false
+      },
+      "request": {
+        "id": "0135",
+        "elapsedMs": 12303,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "f6cf5f7744c4720d4e4b85831b2fbfe3d6175eff44a35274ad21087a8a3be2fb",
+      "flowSourceSha256": "1d870ac844dca64d5a4b373635bfc1894c5a74eda7a19d8a9c9c5dbb16534e66",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 8852,
+        "startTicks": "639250915999039510",
+        "trialName": "uia16T10_12",
+        "utc": "2026-09-15T17:54:34.4305392Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T17:54:44.4118569Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "ad4af4e4d0ccb8596235e880a28c71572b8ec044e9914e348c0cda626811c61c",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 8852,
+        "startTicks": "639250915999039510",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-12/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-12/flow.json",
+          "sha256": "1d870ac844dca64d5a4b373635bfc1894c5a74eda7a19d8a9c9c5dbb16534e66"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-12/preflight.json",
+          "sha256": "177350dc1ff02a7f7644383500cedced1c203fb13c42296324b482f429a35cd7"
+        }
+      ]
+    },
+    {
+      "id": "10-13",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7489
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T10_06",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4297
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.8852.59943272",
+            "before": "uia16T10_06",
+            "readbackRuntimeId": "7.8852.46383679",
+            "mprSha256": "1be35da18d7d0f72049ac8b02790ea03c6a01df1608d76cbd86088da68d53e73",
+            "after": "uia16T10_13"
+          },
+          "status": "pass",
+          "elapsedMs": 9160
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 9276
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 2039
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 34706
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 7320,
+            "readyAfterMs": 103197,
+            "http": 200,
+            "parentPid": 8852
+          },
+          "status": "pass",
+          "elapsedMs": 104633
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 13,
+        "phase": "warm",
+        "requestId": "0137",
+        "startedAtUtc": "2026-09-15T17:54:44.910832+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:57:50.210553+00:00",
+        "elapsedMs": 179482,
+        "passed": true
+      },
+      "request": {
+        "id": "0137",
+        "elapsedMs": 179482,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "9e86ae82b5a5841db515dc133e4a7d494206abf0165203890e642f727c883a8a",
+      "flowSourceSha256": "36dcf64f9b0f2cfd3b1f689443a6109b26568443535995c240188a06d0282a33",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 8852,
+        "startTicks": "639250915999039510",
+        "trialName": "uia16T10_13",
+        "utc": "2026-09-15T17:57:49.1624669Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 8852,
+        "startTicks": "639250915999039510",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-13/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-13/f4-removed.json",
+          "sha256": "51aae186a5e56abfafa3f23ee9534cb4c6da905731c2fbc0dfe00d12fd5c3063"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-13/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-13/f4-restored.json",
+          "sha256": "87652b82d841f82535fa061f060345b071370ac1fcfa254033aa7423a15c8f8b"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-13/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-13/flow.json",
+          "sha256": "36dcf64f9b0f2cfd3b1f689443a6109b26568443535995c240188a06d0282a33"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-13/preflight.json",
+          "sha256": "177350dc1ff02a7f7644383500cedced1c203fb13c42296324b482f429a35cd7"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-13/property.json",
+          "sha256": "82f7e217bc7eab62f622704deda9a467366267e776c17427f9b4bcdc830e0305"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-13/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-13/runtime-ready.json",
+          "sha256": "0c00845c71ae1b2ee17aad4e90e231b530e5e427176ccbc24bfd1c34932480b1"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-13/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-13/structure.json",
+          "sha256": "0139e98193e94d174031650bd92d25c005fe80323fa5a7465b12f488e424a198"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-13/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "10-14",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7883
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T10_13",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 5005
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.8852.8298412",
+            "before": "uia16T10_13",
+            "readbackRuntimeId": "7.8852.44503254",
+            "mprSha256": "f44e8449cb8d9e7886de0e99294acdbd881bc6cee9f7865515cf36411e6a417a",
+            "after": "uia16T10_14"
+          },
+          "status": "pass",
+          "elapsedMs": 11196
+        },
+        {
+          "id": "structure-mode",
+          "reason": "page-editor-control-not-ready",
+          "status": "fail",
+          "elapsedMs": 6417
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 14,
+        "phase": "warm",
+        "requestId": "0138",
+        "startedAtUtc": "2026-09-15T17:57:50.397976+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:58:28.716670+00:00",
+        "elapsedMs": 32823,
+        "passed": false
+      },
+      "request": {
+        "id": "0138",
+        "elapsedMs": 32823,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "307fdd633fcb0f58f510c3220dd6376445568ef7fdb9567edc7655e9ce41edb7",
+      "flowSourceSha256": "dd6696484cd54d35451ca6e888b5922ed59612be41762c9536e7c0c6d1762742",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 8852,
+        "startTicks": "639250915999039510",
+        "trialName": "uia16T10_14",
+        "utc": "2026-09-15T17:58:27.5055802Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 0,
+          "starRatingPresent": true,
+          "designFramework": "WPF",
+          "utc": "2026-09-15T17:58:38.3015846Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "uia16T10_14",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "718ef13ea791026968d648c99c9c8601835cabff1e9f58ff09d1498185e733d0",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 8852,
+        "startTicks": "639250915999039510",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-14/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-14/flow.json",
+          "sha256": "dd6696484cd54d35451ca6e888b5922ed59612be41762c9536e7c0c6d1762742"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-14/preflight.json",
+          "sha256": "177350dc1ff02a7f7644383500cedced1c203fb13c42296324b482f429a35cd7"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-14/property.json",
+          "sha256": "42d4cdfda8219a59d8470a11f2bdb5a727f2603aec87e60f8dd3c926898ef7c5"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-14/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "10-15",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 9420
+        },
+        {
+          "id": "select-widget",
+          "reason": "wrong-widget-selected",
+          "status": "fail",
+          "elapsedMs": 5747
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 15,
+        "phase": "warm",
+        "requestId": "0140",
+        "startedAtUtc": "2026-09-15T17:58:38.925158+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T17:59:02.203428+00:00",
+        "elapsedMs": 17439,
+        "passed": false
+      },
+      "request": {
+        "id": "0140",
+        "elapsedMs": 17439,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "bfcaf4fd02fa3ffdbe578eeea7e5d8ecd5ee967dc52b4a5ebbb6c7dc3f88b82c",
+      "flowSourceSha256": "50a28a9a8ea667ab43922334c1b43b87cbe8446fe9dd68e2d52715502ecf474e",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 8852,
+        "startTicks": "639250915999039510",
+        "trialName": "uia16T10_15",
+        "utc": "2026-09-15T17:59:01.1178941Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T17:59:11.9348855Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "29ecd694d6e0656240a481845e2d6dec8559bd58e39a4ffad9f63b1d6065079c",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 8852,
+        "startTicks": "639250915999039510",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-15/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-15/flow.json",
+          "sha256": "50a28a9a8ea667ab43922334c1b43b87cbe8446fe9dd68e2d52715502ecf474e"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-15/preflight.json",
+          "sha256": "177350dc1ff02a7f7644383500cedced1c203fb13c42296324b482f429a35cd7"
+        }
+      ]
+    },
+    {
+      "id": "10-16",
+      "phase": "cold",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "reason": "page-editor-control-not-ready",
+          "status": "fail",
+          "elapsedMs": 9909
+        },
+        {
+          "id": "select-widget",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 16,
+        "phase": "cold",
+        "requestId": "0142",
+        "startedAtUtc": "2026-09-15T17:59:12.435235+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T18:00:11.723773+00:00",
+        "elapsedMs": 53331,
+        "passed": false
+      },
+      "request": {
+        "id": "0142",
+        "elapsedMs": 53331,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "947f36313e12e3bcade2a22e1a78981e7917d8618e22826cac223d06d20345e0",
+      "flowSourceSha256": "6ab0f8d2115e075c6d1befb4e5eae7fb8da9f2e4cc82cd910a57f176bba1b695",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 8032,
+        "startTicks": "639250919635352515",
+        "trialName": "uia16T10_16",
+        "utc": "2026-09-15T18:00:10.7128013Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T18:00:20.9078643Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "7a4b9129708a317944908a2c220ad1612b9c307cda8832e3eafa7a6a2667d5ed",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 8032,
+        "startTicks": "639250919635352515",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "launch": {
+        "version": "10.24.26.0",
+        "defenderNotificationClosed": true,
+        "utc": "2026-09-15T17:59:59.8754824Z",
+        "previousPid": 8852,
+        "previousStartTicks": "639250915999039510",
+        "startTicks": "639250919635352515",
+        "elapsedMs": 41056,
+        "pid": 8032,
+        "signInLater": false
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-16/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-16/flow.json",
+          "sha256": "6ab0f8d2115e075c6d1befb4e5eae7fb8da9f2e4cc82cd910a57f176bba1b695"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-16/preflight.json",
+          "sha256": "55634c32515296f5d9fc61db59415df0b3194a9d13191c61e092f3329532262e"
+        }
+      ]
+    },
+    {
+      "id": "10-17",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "reason": "page-editor-control-not-ready",
+          "status": "fail",
+          "elapsedMs": 9833
+        },
+        {
+          "id": "select-widget",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 17,
+        "phase": "warm",
+        "requestId": "0144",
+        "startedAtUtc": "2026-09-15T18:00:21.444241+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T18:00:38.981518+00:00",
+        "elapsedMs": 12051,
+        "passed": false
+      },
+      "request": {
+        "id": "0144",
+        "elapsedMs": 12051,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "c78a51fd565bf1dfc9c6106513a75c7435bf0f4a9eba6cd06042a4b67cf14d38",
+      "flowSourceSha256": "b169c3f97f85630ed129ed05c69926fcb6a6af7e68c9e4d43da9d36e0fac26c0",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 8032,
+        "startTicks": "639250919635352515",
+        "trialName": "uia16T10_17",
+        "utc": "2026-09-15T18:00:38.3116731Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T18:00:48.3120274Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "811c6fa5a8d3a00f4bde9a9f6cb8fbe654916b20485abff6b32856e5557d087f",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 8032,
+        "startTicks": "639250919635352515",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-17/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-17/flow.json",
+          "sha256": "b169c3f97f85630ed129ed05c69926fcb6a6af7e68c9e4d43da9d36e0fac26c0"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-17/preflight.json",
+          "sha256": "55634c32515296f5d9fc61db59415df0b3194a9d13191c61e092f3329532262e"
+        }
+      ]
+    },
+    {
+      "id": "10-18",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7900
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T10_14",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4082
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.8032.56095929",
+            "before": "uia16T10_14",
+            "readbackRuntimeId": "7.8032.33899144",
+            "mprSha256": "fe22afa69879568d799a6f9acecb71ddbfb0e852910346e65eb13bc84cfc72fb",
+            "after": "uia16T10_18"
+          },
+          "status": "pass",
+          "elapsedMs": 9332
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 9187
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 2025
+        },
+        {
+          "id": "synchronize-f4",
+          "reason": "toolbox-search-not-ready",
+          "status": "fail",
+          "elapsedMs": 3597
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 18,
+        "phase": "warm",
+        "requestId": "0146",
+        "startedAtUtc": "2026-09-15T18:00:48.925133+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T18:01:33.219002+00:00",
+        "elapsedMs": 38550,
+        "passed": false
+      },
+      "request": {
+        "id": "0146",
+        "elapsedMs": 38550,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "800b828367bd2f86b0617f9ed2fa8c0907f8836e1fc46e446e38b318bd93aa09",
+      "flowSourceSha256": "2e9054bb15a5f5eb7fd681d59e4ca51cef82e7ea7f6ded088d81a4ee5854f4fc",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 8032,
+        "startTicks": "639250919635352515",
+        "trialName": "uia16T10_18",
+        "utc": "2026-09-15T18:01:32.2258831Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "starRatingPresent": true,
+          "runtimeCount": 0,
+          "searchValue": "",
+          "laterSearchPresent": true,
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+          "searchName": "Search...",
+          "utc": "2026-09-15T18:02:16.3030025Z"
+        },
+        "sourceSha256": "0da9c85c31ae0cdcee73d4bf3e59f1faad15f2a31d40111b28da480239b9a51c",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 8032,
+        "startTicks": "639250919635352515",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-18/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-18/flow.json",
+          "sha256": "2e9054bb15a5f5eb7fd681d59e4ca51cef82e7ea7f6ded088d81a4ee5854f4fc"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-18/preflight.json",
+          "sha256": "55634c32515296f5d9fc61db59415df0b3194a9d13191c61e092f3329532262e"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-18/property.json",
+          "sha256": "2f3953a9921cbb20f2dd5fca1fda61853e617e5e08d7bd2b267c56ce2b30ae5c"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-18/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-18/structure.json",
+          "sha256": "c3bfda5b2f655808cb6a2fe73feae200cd95c477ac40f1a55f5902f517a888b6"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-18/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "10-19",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7058
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T10_18",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4255
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.8032.1743118",
+            "before": "uia16T10_18",
+            "readbackRuntimeId": "7.8032.30329971",
+            "mprSha256": "35eceeefa741ddcf891b11edb6d139ae61720341008040d89c37c4538bbbb999",
+            "after": "uia16T10_19"
+          },
+          "status": "pass",
+          "elapsedMs": 9246
+        },
+        {
+          "id": "structure-mode",
+          "reason": "page-editor-control-not-ready",
+          "status": "fail",
+          "elapsedMs": 6183
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 19,
+        "phase": "warm",
+        "requestId": "0148",
+        "startedAtUtc": "2026-09-15T18:02:49.779582+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T18:03:23.050573+00:00",
+        "elapsedMs": 29177,
+        "passed": false
+      },
+      "request": {
+        "id": "0148",
+        "elapsedMs": 29177,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "d1d63e88b3dfcd8fbbcc00ba826e21a20d304d7f2bd96730c8477e62ce5235ed",
+      "flowSourceSha256": "e5d1ee76b2fa7131b138811e1289799af4a6ec6763ce809d0eea5e3fd0a76172",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 8032,
+        "startTicks": "639250919635352515",
+        "trialName": "uia16T10_19",
+        "utc": "2026-09-15T18:03:21.6850835Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 0,
+          "starRatingPresent": true,
+          "designFramework": "WPF",
+          "utc": "2026-09-15T18:03:52.3948822Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "uia16T10_19",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "7571b1c765ff64fdfe0ea36d1a198f01030abd436d95783737d5ec49c5f83750",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 8032,
+        "startTicks": "639250919635352515",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-19/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-19/flow.json",
+          "sha256": "e5d1ee76b2fa7131b138811e1289799af4a6ec6763ce809d0eea5e3fd0a76172"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-19/preflight.json",
+          "sha256": "55634c32515296f5d9fc61db59415df0b3194a9d13191c61e092f3329532262e"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-19/property.json",
+          "sha256": "983c6cde6d3315d48ab9ef043f8a61d337803c041494a4cfab65722606dddec5"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-19/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "10-20",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7785
+        },
+        {
+          "id": "select-widget",
+          "reason": "wrong-widget-selected",
+          "status": "fail",
+          "elapsedMs": 5182
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 10,
+        "trial": 20,
+        "phase": "warm",
+        "requestId": "0150",
+        "startedAtUtc": "2026-09-15T18:03:53.046788+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 199179,
+        "finishedAtUtc": "2026-09-15T18:04:14.321920+00:00",
+        "elapsedMs": 15337,
+        "passed": false
+      },
+      "request": {
+        "id": "0150",
+        "elapsedMs": 15337,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "eedfc6f9bd0ec3d37bebed2a73e80febb46f7ae0f5a882bca57fed3b02091ff3",
+      "flowSourceSha256": "53a55706f39b18b6ebed5a822dc0de077b81b3f6319b52d3a1fe8599545a17b3",
+      "identity": {
+        "version": "10.24.26.0",
+        "pid": 8032,
+        "startTicks": "639250919635352515",
+        "trialName": "uia16T10_20",
+        "utc": "2026-09-15T18:04:13.1007488Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "laterChromeDocumentCount": 1,
+          "starRatingPresent": true,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T18:04:28.5914198Z",
+          "laterDesignButton": "Design mode",
+          "runtimeCount": 0,
+          "laterName": "Home_Web",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36"
+        },
+        "sourceSha256": "94f15317b9dfed2c2eee8d71e6d4708a6074c83660a21488b15f03c340f3dcf3",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "10.24.26.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 8032,
+        "startTicks": "639250919635352515",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-10-20/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-20/flow.json",
+          "sha256": "53a55706f39b18b6ebed5a822dc0de077b81b3f6319b52d3a1fe8599545a17b3"
+        },
+        {
+          "path": "campaign-winboat-20260916-10-20/preflight.json",
+          "sha256": "55634c32515296f5d9fc61db59415df0b3194a9d13191c61e092f3329532262e"
+        }
+      ]
+    },
+    {
+      "id": "11-01",
+      "phase": "cold",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 11637
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16Probe",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4558
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.3796.41787177",
+            "before": "uia16Probe",
+            "readbackRuntimeId": "7.3796.58254114",
+            "mprSha256": "1aa49cb6ec25e0dca591775af66a8bf765e067da5f21ae6d3cda0ff918bf8cc0",
+            "after": "uia16T11_01"
+          },
+          "status": "pass",
+          "elapsedMs": 9909
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 8686
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 2020
+        },
+        {
+          "id": "synchronize-f4",
+          "reason": "toolbox-search-not-ready",
+          "status": "fail",
+          "elapsedMs": 2829
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 1,
+        "phase": "cold",
+        "requestId": "0082",
+        "startedAtUtc": "2026-09-15T16:25:51.970116+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T16:27:33.258768+00:00",
+        "elapsedMs": 95263,
+        "passed": false
+      },
+      "request": {
+        "id": "0082",
+        "elapsedMs": 95263,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "59509867163a77c6169a73f54b4a6d7c88a1d22fd58cc6b637a7bdf2ff3c07ac",
+      "flowSourceSha256": "041cf50ed84493520ba770fc3542c997a00c2a108f3669c6815e7e76dbadd323",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 3796,
+        "startTicks": "639250863631983920",
+        "trialName": "uia16T11_01",
+        "utc": "2026-09-15T16:27:30.4790953Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "starRatingPresent": true,
+          "runtimeCount": 0,
+          "searchValue": "",
+          "laterSearchPresent": true,
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+          "searchName": "Search\u2026",
+          "utc": "2026-09-15T16:29:21.9978003Z"
+        },
+        "sourceSha256": "f3ee205896556281de42d366eefc2b9ef43b9b0d3d61f496266d9c6d40f19ec6",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 3796,
+        "startTicks": "639250863631983920",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "launch": {
+        "version": "11.12.4.0",
+        "defenderNotificationClosed": true,
+        "utc": "2026-09-15T16:26:45.9218374Z",
+        "previousPid": 9048,
+        "previousStartTicks": "639250856668927269",
+        "startTicks": "639250863631983920",
+        "elapsedMs": 47848,
+        "pid": 3796,
+        "signInLater": true
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-01/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-01/flow.json",
+          "sha256": "041cf50ed84493520ba770fc3542c997a00c2a108f3669c6815e7e76dbadd323"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-01/preflight.json",
+          "sha256": "1de93781f1383d2d319da53168fdb585d3db00b1b5560b39548a092629dbb9c5"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-01/property.json",
+          "sha256": "69150508e6539f1138495f64161f7a5272ef04c458ef2a4a880ffba3df19997e"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-01/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-01/structure.json",
+          "sha256": "4dbd3a2416b02553e9c97c5d2355fdb36061f314e95aea74662c6978fcccc652"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-01/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-02",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7627
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_01",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4264
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.3796.36863903",
+            "before": "uia16T11_01",
+            "readbackRuntimeId": "7.3796.30999096",
+            "mprSha256": "0ee710707b103b84744971e8258ddcf0056ac755b6987068dd0efa32242cd1a6",
+            "after": "uia16T11_02"
+          },
+          "status": "pass",
+          "elapsedMs": 9216
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7333
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 1964
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 34280
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 6416,
+            "readyAfterMs": 112391,
+            "http": 200,
+            "parentPid": 3796
+          },
+          "status": "pass",
+          "elapsedMs": 114042
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 2,
+        "phase": "warm",
+        "requestId": "0084",
+        "startedAtUtc": "2026-09-15T16:30:23.993455+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T16:33:35.306273+00:00",
+        "elapsedMs": 186290,
+        "passed": true
+      },
+      "request": {
+        "id": "0084",
+        "elapsedMs": 186290,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "9a772f7c45d7a50c5c7d3ae3546ddb108fec930793c02e94775923cd0a8e2d94",
+      "flowSourceSha256": "4f799e0b29a2bfbf6e6f3c79d4ab86ada1fa7a9573987b6005e5f48df4b63450",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 3796,
+        "startTicks": "639250863631983920",
+        "trialName": "uia16T11_02",
+        "utc": "2026-09-15T16:33:34.0321773Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 3796,
+        "startTicks": "639250863631983920",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-02/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-02/f4-removed.json",
+          "sha256": "2a36a5018d31b4b21e01e127afcdc813fc2fe971df2f2c8b353075dfa3863329"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-02/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-02/f4-restored.json",
+          "sha256": "dee41a1b10deca0db15a63a8d87f7c231e219336f4c27ec4fc03a06fe86d9ab1"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-02/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-02/flow.json",
+          "sha256": "4f799e0b29a2bfbf6e6f3c79d4ab86ada1fa7a9573987b6005e5f48df4b63450"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-02/preflight.json",
+          "sha256": "1de93781f1383d2d319da53168fdb585d3db00b1b5560b39548a092629dbb9c5"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-02/property.json",
+          "sha256": "7989d2ddc3eef04be6aa656e4ab9bc1093ac9972e713953bafd0c5d57eb20d4d"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-02/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-02/runtime-ready.json",
+          "sha256": "365d7ec9a39aff818045b6dc039e5b1129194335d5d1862f9d3812fc5ce335ee"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-02/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-02/structure.json",
+          "sha256": "d74933d5a8a7ab45bfc02d5db3fcc9138a56716a78140565553fe643465911dc"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-02/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-03",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7015
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_02",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4122
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.3796.65515880",
+            "before": "uia16T11_02",
+            "readbackRuntimeId": "7.3796.58194357",
+            "mprSha256": "5c2dd4a8813689975e46f047d1300e73d50a5545a59ad1c4d70ca403aa71723a",
+            "after": "uia16T11_03"
+          },
+          "status": "pass",
+          "elapsedMs": 8892
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7630
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 2045
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 41015
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 9148,
+            "readyAfterMs": 64321,
+            "http": 200,
+            "parentPid": 3796
+          },
+          "status": "pass",
+          "elapsedMs": 65852
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 3,
+        "phase": "warm",
+        "requestId": "0085",
+        "startedAtUtc": "2026-09-15T16:33:35.480968+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T16:36:03.809823+00:00",
+        "elapsedMs": 143257,
+        "passed": true
+      },
+      "request": {
+        "id": "0085",
+        "elapsedMs": 143257,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "12b9e635f4c0d6273a32054c2e4565ad573b32c1ca742d5b0edc20074fd4fec8",
+      "flowSourceSha256": "80d54f7057cafeeda232c66bc328a3c599a5e4958bee35ec3363cf372fd03a5c",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 3796,
+        "startTicks": "639250863631983920",
+        "trialName": "uia16T11_03",
+        "utc": "2026-09-15T16:36:03.0295465Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 3796,
+        "startTicks": "639250863631983920",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-03/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-03/f4-removed.json",
+          "sha256": "6ff83b77eb3a4fdfbfcb6a73276e9b5670a8b8c1b482d67fa055aff3379ccb86"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-03/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-03/f4-restored.json",
+          "sha256": "0b4fc798a5e264434e7ab2ee5f6417d566ddf83d8698e3f8bf3ce1357e8f0b4f"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-03/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-03/flow.json",
+          "sha256": "80d54f7057cafeeda232c66bc328a3c599a5e4958bee35ec3363cf372fd03a5c"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-03/preflight.json",
+          "sha256": "1de93781f1383d2d319da53168fdb585d3db00b1b5560b39548a092629dbb9c5"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-03/property.json",
+          "sha256": "b5bbcadd96beec9f815eb9c239adbdafc8791f258daf87ce1e0846d5e6baf9f9"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-03/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-03/runtime-ready.json",
+          "sha256": "5980886ad337ad9c534b4444b326ed89364082873ed006e0ae1750c219ecc422"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-03/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-03/structure.json",
+          "sha256": "c3f95dcd205bdae8e001835b7ba1f427b2836c5547cc53a92c14cbf03a9206db"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-03/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-04",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 6880
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_03",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4379
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.3796.46489913",
+            "before": "uia16T11_03",
+            "readbackRuntimeId": "7.3796.29471302",
+            "mprSha256": "7cf72a76d3e42d1e02b2a78b03959e97152a056fcdb9adff79c6a2ffd68671d2",
+            "after": "uia16T11_04"
+          },
+          "status": "pass",
+          "elapsedMs": 11654
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 9320
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 2280
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 35306
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 9080,
+            "readyAfterMs": 64186,
+            "http": 200,
+            "parentPid": 3796
+          },
+          "status": "pass",
+          "elapsedMs": 65940
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 4,
+        "phase": "warm",
+        "requestId": "0086",
+        "startedAtUtc": "2026-09-15T16:36:03.976011+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T16:38:31.324727+00:00",
+        "elapsedMs": 142131,
+        "passed": true
+      },
+      "request": {
+        "id": "0086",
+        "elapsedMs": 142131,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "de85ce63195453cab4aff94ae652b16a3bb42098686a93147f1521a2dad55366",
+      "flowSourceSha256": "93beae6bd7e91939dee366ee5647d205343d3668d7709a2f4355f569dad8b822",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 3796,
+        "startTicks": "639250863631983920",
+        "trialName": "uia16T11_04",
+        "utc": "2026-09-15T16:38:30.5206165Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 3796,
+        "startTicks": "639250863631983920",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-04/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-04/f4-removed.json",
+          "sha256": "e5999cd3110def9ce7f12edda317be8b15998ebad6d9833e295eca38e7346110"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-04/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-04/f4-restored.json",
+          "sha256": "ef21f78aadc5c789a67e9c3fd10c2c5265da0831e96e67db814eb6a70180fe8d"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-04/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-04/flow.json",
+          "sha256": "93beae6bd7e91939dee366ee5647d205343d3668d7709a2f4355f569dad8b822"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-04/preflight.json",
+          "sha256": "1de93781f1383d2d319da53168fdb585d3db00b1b5560b39548a092629dbb9c5"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-04/property.json",
+          "sha256": "90d5b2c5e5dc737af84362432b98c6373b080e4466d2cfb1fd926b47b0dab448"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-04/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-04/runtime-ready.json",
+          "sha256": "d26be61ff5a69a64ebd524559bd6dd40ee009977002720fb4781767d8f92ecb7"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-04/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-04/structure.json",
+          "sha256": "29322cfe62c43d3450dab169f750e2b921a423ff5aa462d4a5629792e14a64b1"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-04/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-05",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 6651
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_04",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4071
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.3796.65807820",
+            "before": "uia16T11_04",
+            "readbackRuntimeId": "7.3796.25099741",
+            "mprSha256": "662553c853da95fdf25bb72167a3dd55bfcd7426a86892d5cfd2b3211fa534f5",
+            "after": "uia16T11_05"
+          },
+          "status": "pass",
+          "elapsedMs": 10041
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 8037
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 2107
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 43944
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 6264,
+            "readyAfterMs": 85087,
+            "http": 200,
+            "parentPid": 3796
+          },
+          "status": "pass",
+          "elapsedMs": 87847
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 5,
+        "phase": "warm",
+        "requestId": "0087",
+        "startedAtUtc": "2026-09-15T16:38:31.497633+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T16:41:27.091389+00:00",
+        "elapsedMs": 169480,
+        "passed": true
+      },
+      "request": {
+        "id": "0087",
+        "elapsedMs": 169480,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "f4af0a85e0cea4d672588377020ad13f607f4ffe6802bf882c3624e22b9d2fd5",
+      "flowSourceSha256": "5f2d66235a140ade6d392fed03dc39336d200c1fc39235e7ea368010c0e765aa",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 3796,
+        "startTicks": "639250863631983920",
+        "trialName": "uia16T11_05",
+        "utc": "2026-09-15T16:41:25.4409576Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 3796,
+        "startTicks": "639250863631983920",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-05/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-05/f4-removed.json",
+          "sha256": "8912c3c62e3dff2e94b0ad214d60eebe94d44a20bd4aa1c3d4329a59f0378ce6"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-05/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-05/f4-restored.json",
+          "sha256": "574299e24456b402a4fb5b55d77041e4f65ed7c5e67bc7b30892b32baa2c0dec"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-05/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-05/flow.json",
+          "sha256": "5f2d66235a140ade6d392fed03dc39336d200c1fc39235e7ea368010c0e765aa"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-05/preflight.json",
+          "sha256": "1de93781f1383d2d319da53168fdb585d3db00b1b5560b39548a092629dbb9c5"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-05/property.json",
+          "sha256": "22650a0eea807288b450527c1c7c9f44e645463cfd155f0bdbc59be5729af76c"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-05/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-05/runtime-ready.json",
+          "sha256": "674f85806ff84053de7b72b3b16e112501f5942f51f08730598e8b36d1a62a1f"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-05/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-05/structure.json",
+          "sha256": "3898052ed032f096e1f8a4195395a2e54e39c9774cae825567ae8597eb89d653"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-05/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-06",
+      "phase": "cold",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "reason": "page-editor-control-not-ready",
+          "status": "fail",
+          "elapsedMs": 11102
+        },
+        {
+          "id": "select-widget",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 6,
+        "phase": "cold",
+        "requestId": "0088",
+        "startedAtUtc": "2026-09-15T16:41:27.268080+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T16:42:42.805701+00:00",
+        "elapsedMs": 70932,
+        "passed": false
+      },
+      "request": {
+        "id": "0088",
+        "elapsedMs": 70932,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "8b8ab60b2704e7051d728cdea92e66a1d48e1235ffefebca94f0acf2ba8a2a6a",
+      "flowSourceSha256": "618345698d27345e088a066882f65f893d4ac8ea521a030b92616b025a38a59c",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 2720,
+        "startTicks": "639250872968046471",
+        "trialName": "uia16T11_06",
+        "utc": "2026-09-15T16:42:41.6610089Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "runtimeCount": 0,
+          "designFramework": "WPF",
+          "utc": "2026-09-15T16:46:28.0869808Z",
+          "laterDesignButton": "Design mode",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+          "starRatingPresent": true,
+          "laterChromeDocumentCount": 0
+        },
+        "sourceSha256": "8a7cd0dfc558cc9e41de414f0bf36c59fcf53ca5823b68ccd71ceec5e98aff4a",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 2720,
+        "startTicks": "639250872968046471",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "launch": {
+        "version": "11.12.4.0",
+        "defenderNotificationClosed": true,
+        "utc": "2026-09-15T16:42:26.7385554Z",
+        "previousPid": 3796,
+        "previousStartTicks": "639250863631983920",
+        "startTicks": "639250872968046471",
+        "elapsedMs": 54135,
+        "pid": 2720,
+        "signInLater": true
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-06/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-06/flow.json",
+          "sha256": "618345698d27345e088a066882f65f893d4ac8ea521a030b92616b025a38a59c"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-06/preflight.json",
+          "sha256": "3f4d62fe0ac87d029103d8d21df9e72c5bc50dff3ea9a7f5259171f678d507bd"
+        }
+      ]
+    },
+    {
+      "id": "11-07",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 18759
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_05",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 5984
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.2720.32636966",
+            "before": "uia16T11_05",
+            "readbackRuntimeId": "7.2720.59826266",
+            "mprSha256": "a2e3ce150da41b3d4ab8059ad2a6fe1584160db5e95829dbc46a5719ebdbea27",
+            "after": "uia16T11_07"
+          },
+          "status": "pass",
+          "elapsedMs": 13710
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 11818
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 2641
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 33064
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 7224,
+            "readyAfterMs": 95461,
+            "http": 200,
+            "parentPid": 2720
+          },
+          "status": "pass",
+          "elapsedMs": 96875
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 7,
+        "phase": "warm",
+        "requestId": "0091",
+        "startedAtUtc": "2026-09-15T16:46:56.152503+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T16:50:10.566704+00:00",
+        "elapsedMs": 191046,
+        "passed": true
+      },
+      "request": {
+        "id": "0091",
+        "elapsedMs": 191046,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "cc3f6224e2ca2c09e6a7177cdf669beae942f94ab33497b5383ff3ed363c07f1",
+      "flowSourceSha256": "a84ab5f8cda5b1df9b95f87d0294e5bb0b1f5586c3429631ecd6fea1ea8707fa",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 2720,
+        "startTicks": "639250872968046471",
+        "trialName": "uia16T11_07",
+        "utc": "2026-09-15T16:50:09.7518039Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 2720,
+        "startTicks": "639250872968046471",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-07/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-07/f4-removed.json",
+          "sha256": "fc343a69ee011cecb1e924f500351916d1c62771c1dceb08f155f8fba9dcd654"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-07/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-07/f4-restored.json",
+          "sha256": "d887b013a680303cceb04bb1a9fe2518abcfddf8f197d3a55ddfc73c0e131858"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-07/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-07/flow.json",
+          "sha256": "a84ab5f8cda5b1df9b95f87d0294e5bb0b1f5586c3429631ecd6fea1ea8707fa"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-07/preflight.json",
+          "sha256": "3f4d62fe0ac87d029103d8d21df9e72c5bc50dff3ea9a7f5259171f678d507bd"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-07/property.json",
+          "sha256": "03bf8282abd0ecd9b5c3f45a14da9de6382fe0d9334444793ffb1e0b98de7951"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-07/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-07/runtime-ready.json",
+          "sha256": "90a5a6c500df82dae16ffb375027cfbfec235b62e4b09d54fdb3b4d105c6d64f"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-07/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-07/structure.json",
+          "sha256": "50d895f21a4f3fa34891af35cc59b98da7c91ccc841441cf2e1f3955c72ffe18"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-07/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-08",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "reason": "page-editor-control-not-ready",
+          "status": "fail",
+          "elapsedMs": 10067
+        },
+        {
+          "id": "select-widget",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "change-property",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "structure-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "design-mode",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "synchronize-f4",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        },
+        {
+          "id": "run-locally",
+          "status": "not-run",
+          "elapsedMs": 0,
+          "reason": "earlier-step-failed"
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 8,
+        "phase": "warm",
+        "requestId": "0092",
+        "startedAtUtc": "2026-09-15T16:50:10.724595+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T16:50:28.020574+00:00",
+        "elapsedMs": 12259,
+        "passed": false
+      },
+      "request": {
+        "id": "0092",
+        "elapsedMs": 12259,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "a4559f7674771c830fa06c314e0f1d347d967e235161534d7bf89c5d9304801f",
+      "flowSourceSha256": "dbc15188d47fa8efb2e73b8046655da82f30e8077bee663efcc6aa27a242d759",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 2720,
+        "startTicks": "639250872968046471",
+        "trialName": "uia16T11_08",
+        "utc": "2026-09-15T16:50:27.5500970Z"
+      },
+      "lateReadOnlyReview": {
+        "observation": {
+          "runtimeCount": 0,
+          "designFramework": "Chrome",
+          "utc": "2026-09-15T16:53:52.3411243Z",
+          "laterDesignButton": "Design mode",
+          "starRatingSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+          "starRatingPresent": true,
+          "laterChromeDocumentCount": 1
+        },
+        "sourceSha256": "23bf055bd06e55ac8c01710c5b350ec8a617e06827c72d42d767a2b7b6e19349",
+        "countsAsRetry": false
+      },
+      "cleanup": {
+        "runtimeCount": 0
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 2720,
+        "startTicks": "639250872968046471",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-08/cleanup.json",
+          "sha256": "78aef677150b2237e1e4195245c14c7acf1781e815f69c286ff589d670485e39"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-08/flow.json",
+          "sha256": "dbc15188d47fa8efb2e73b8046655da82f30e8077bee663efcc6aa27a242d759"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-08/preflight.json",
+          "sha256": "3f4d62fe0ac87d029103d8d21df9e72c5bc50dff3ea9a7f5259171f678d507bd"
+        }
+      ]
+    },
+    {
+      "id": "11-09",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7360
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_07",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 3988
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.2720.47232681",
+            "before": "uia16T11_07",
+            "readbackRuntimeId": "7.2720.6741475",
+            "mprSha256": "78928effc6865eebe9c0430915cbe36a980dd24e8caf4fd4898aa2b4e50fb7f0",
+            "after": "uia16T11_09"
+          },
+          "status": "pass",
+          "elapsedMs": 8692
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7255
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 1996
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 36044
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 3160,
+            "readyAfterMs": 78468,
+            "http": 200,
+            "parentPid": 2720
+          },
+          "status": "pass",
+          "elapsedMs": 79833
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 9,
+        "phase": "warm",
+        "requestId": "0094",
+        "startedAtUtc": "2026-09-15T16:54:40.632362+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T16:57:17.319223+00:00",
+        "elapsedMs": 152430,
+        "passed": true
+      },
+      "request": {
+        "id": "0094",
+        "elapsedMs": 152430,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "985f1f39aedcdb88d9e06e3e74207be08abc6659771465c5c577a7dd65ad6066",
+      "flowSourceSha256": "98cf4636a31aafed66772618493c83272bf270910af425b60764c2ecbd325f3f",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 2720,
+        "startTicks": "639250872968046471",
+        "trialName": "uia16T11_09",
+        "utc": "2026-09-15T16:57:16.2277719Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 2720,
+        "startTicks": "639250872968046471",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-09/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-09/f4-removed.json",
+          "sha256": "3f16dd780d8d75bd3c7313f9c0bccdfd2ac064cdabaee0225659be5905776a24"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-09/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-09/f4-restored.json",
+          "sha256": "8ec8eca2c3037fa40e5333afd7724b3ad78fc8ead9585d29556a061444198ea6"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-09/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-09/flow.json",
+          "sha256": "98cf4636a31aafed66772618493c83272bf270910af425b60764c2ecbd325f3f"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-09/preflight.json",
+          "sha256": "3f4d62fe0ac87d029103d8d21df9e72c5bc50dff3ea9a7f5259171f678d507bd"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-09/property.json",
+          "sha256": "b5f1cbd0de55ce7d1d7f7dba6cdd6e7109ba4a98b2bba56da9767b3d85b8f478"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-09/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-09/runtime-ready.json",
+          "sha256": "59db6b573ef10002d7335debbcd4f50e1cf7c47d50a4aa7e8fedbffecc3f127c"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-09/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-09/structure.json",
+          "sha256": "f341acb1fb570c78748cd016c95346b45abdaf874653254078fec9556ca1c1f1"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-09/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-10",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 6835
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_09",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 3967
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.2720.9389157",
+            "before": "uia16T11_09",
+            "readbackRuntimeId": "7.2720.34244168",
+            "mprSha256": "0cd8a4adfcfb3d9d748d9e372410496f38b478800c1b69a1613779e6f6f25797",
+            "after": "uia16T11_10"
+          },
+          "status": "pass",
+          "elapsedMs": 9216
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7261
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 1915
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 37055
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 8964,
+            "readyAfterMs": 57774,
+            "http": 200,
+            "parentPid": 2720
+          },
+          "status": "pass",
+          "elapsedMs": 59242
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 10,
+        "phase": "warm",
+        "requestId": "0095",
+        "startedAtUtc": "2026-09-15T16:57:17.513337+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T16:59:34.813215+00:00",
+        "elapsedMs": 132106,
+        "passed": true
+      },
+      "request": {
+        "id": "0095",
+        "elapsedMs": 132106,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "ad3a4bf95377d91394be8a5ac1ce65039717688b5aa009fe43f985ea11bda559",
+      "flowSourceSha256": "0ebd5dbb087edf3312780eb215a410699cf757a37a0f0fc91410363b9415164c",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 2720,
+        "startTicks": "639250872968046471",
+        "trialName": "uia16T11_10",
+        "utc": "2026-09-15T16:59:33.7280597Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 2720,
+        "startTicks": "639250872968046471",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-10/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-10/f4-removed.json",
+          "sha256": "225ea7423224773a65d08b8da76cf82edaa7de4b33738ffbbc882f23a437a33c"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-10/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-10/f4-restored.json",
+          "sha256": "0fdb8054eb2a628128124ae37ebd538d524dac2e766ec67d0e110af758f79f1e"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-10/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-10/flow.json",
+          "sha256": "0ebd5dbb087edf3312780eb215a410699cf757a37a0f0fc91410363b9415164c"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-10/preflight.json",
+          "sha256": "3f4d62fe0ac87d029103d8d21df9e72c5bc50dff3ea9a7f5259171f678d507bd"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-10/property.json",
+          "sha256": "0acb91477e774ad513dd4bb853c1ff196100cb0e9590123307e4c198a88e4679"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-10/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-10/runtime-ready.json",
+          "sha256": "4aa74331bab13e595e2a8f87b880855779cea50215493a703c1d84e6ccb0fd18"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-10/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-10/structure.json",
+          "sha256": "504dae3bd4697994d4507d5bc2398d4248cf8bd974b120daedcbd2d01076a5dd"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-10/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-11",
+      "phase": "cold",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 17371
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_10",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4254
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.5024.25322036",
+            "before": "uia16T11_10",
+            "readbackRuntimeId": "7.5024.10671408",
+            "mprSha256": "12d0896302c997b41ee85740b694b2843835e2e268e7201489c8cfca56dbccbe",
+            "after": "uia16T11_11"
+          },
+          "status": "pass",
+          "elapsedMs": 9744
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 8037
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 1965
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 31034
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 3028,
+            "readyAfterMs": 96680,
+            "http": 200,
+            "parentPid": 5024
+          },
+          "status": "pass",
+          "elapsedMs": 97929
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 11,
+        "phase": "cold",
+        "requestId": "0096",
+        "startedAtUtc": "2026-09-15T16:59:34.976541+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T17:03:28.326016+00:00",
+        "elapsedMs": 228470,
+        "passed": true
+      },
+      "request": {
+        "id": "0096",
+        "elapsedMs": 228470,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "7616ddc86b1abc5d00b4e2e543585b8ff433efe1bd58698a7625afa7e6022d3b",
+      "flowSourceSha256": "dd659504347183ef091ae01eb5e07d2c0dfe01063e603d07e6f2c0382033099d",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 5024,
+        "startTicks": "639250883883571477",
+        "trialName": "uia16T11_11",
+        "utc": "2026-09-15T17:03:27.5470060Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5024,
+        "startTicks": "639250883883571477",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "launch": {
+        "version": "11.12.4.0",
+        "defenderNotificationClosed": true,
+        "utc": "2026-09-15T17:00:31.8424134Z",
+        "previousPid": 2720,
+        "previousStartTicks": "639250872968046471",
+        "startTicks": "639250883883571477",
+        "elapsedMs": 51150,
+        "pid": 5024,
+        "signInLater": true
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-11/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-11/f4-removed.json",
+          "sha256": "67fee32dd82d45f0af342a91de08334c0907cd1e6b3f6801be751a3774e2c214"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-11/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-11/f4-restored.json",
+          "sha256": "b661974832b0998813b7d9142548ad74d37d888f9b0a69da1d9b25fdced00371"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-11/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-11/flow.json",
+          "sha256": "dd659504347183ef091ae01eb5e07d2c0dfe01063e603d07e6f2c0382033099d"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-11/preflight.json",
+          "sha256": "4499edef2779d6214ee55ef666d9abb973e06c03d36dcc38f6b39b8e3ad2fd63"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-11/property.json",
+          "sha256": "eb98c8f8aaa46e10776cf675337cc030e174f613c6be0d5dcb43a647edde3efe"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-11/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-11/runtime-ready.json",
+          "sha256": "148e9b2157941cf614b3d77776b6c7145fce95f6ef384c40ab2f8ef531b97e81"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-11/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-11/structure.json",
+          "sha256": "2db530d6f21cad5de9de163fb0bc80b6d81fa045e8dbc62d54e7f0bc6195a6b7"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-11/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-12",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7034
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_11",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 3958
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.5024.23460033",
+            "before": "uia16T11_11",
+            "readbackRuntimeId": "7.5024.58262256",
+            "mprSha256": "4a808eedddb577f19964dcbece1c8ebfee211574f2f9d3c4b13f737fbe746a09",
+            "after": "uia16T11_12"
+          },
+          "status": "pass",
+          "elapsedMs": 8826
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7478
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 1989
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 29518
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 8160,
+            "readyAfterMs": 59658,
+            "http": 200,
+            "parentPid": 5024
+          },
+          "status": "pass",
+          "elapsedMs": 61035
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 12,
+        "phase": "warm",
+        "requestId": "0097",
+        "startedAtUtc": "2026-09-15T17:03:28.501312+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T17:05:39.825891+00:00",
+        "elapsedMs": 126159,
+        "passed": true
+      },
+      "request": {
+        "id": "0097",
+        "elapsedMs": 126159,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "c423cdb764eec64c6176dc2a992873f46b5a199c86cd833cd2b3d280e3e34c59",
+      "flowSourceSha256": "f2d2f77fe7c8130c5fa722d0ae6c22551f0c2808fdd3e5752980ed5a5280cc9a",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 5024,
+        "startTicks": "639250883883571477",
+        "trialName": "uia16T11_12",
+        "utc": "2026-09-15T17:05:39.1331819Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5024,
+        "startTicks": "639250883883571477",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-12/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-12/f4-removed.json",
+          "sha256": "8309418c1cf0a096a985b4ba40db7028a7c0076422a4eaf2607e0d51ac56bc31"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-12/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-12/f4-restored.json",
+          "sha256": "0167ad933847be084501a2a39ac0c5a54326e9e86530cce8ad5f51a82ca9cf06"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-12/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-12/flow.json",
+          "sha256": "f2d2f77fe7c8130c5fa722d0ae6c22551f0c2808fdd3e5752980ed5a5280cc9a"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-12/preflight.json",
+          "sha256": "4499edef2779d6214ee55ef666d9abb973e06c03d36dcc38f6b39b8e3ad2fd63"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-12/property.json",
+          "sha256": "773696c27281b19ad31ce0f5e08a4bfa018388b976ae588f3208d7b0c5f66432"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-12/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-12/runtime-ready.json",
+          "sha256": "6ce68f32f94a856b938001dd8f33f94a952e24a490b1c35aa9044b00a4fbd9a0"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-12/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-12/structure.json",
+          "sha256": "6798149f58999154c39087b23586972296cb3b93cf3a4e1edbf0cc3b15da2c04"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-12/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-13",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 6764
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_12",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 3984
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.5024.44602708",
+            "before": "uia16T11_12",
+            "readbackRuntimeId": "7.5024.36996523",
+            "mprSha256": "938cb70f506f65c0023c32feada5f32c7a64e03c9d5e4002ba7b9a28f6b5f8fd",
+            "after": "uia16T11_13"
+          },
+          "status": "pass",
+          "elapsedMs": 9390
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7252
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 1983
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 29241
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 4404,
+            "readyAfterMs": 59334,
+            "http": 200,
+            "parentPid": 5024
+          },
+          "status": "pass",
+          "elapsedMs": 60875
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 13,
+        "phase": "warm",
+        "requestId": "0098",
+        "startedAtUtc": "2026-09-15T17:05:40.004215+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T17:07:52.330899+00:00",
+        "elapsedMs": 126362,
+        "passed": true
+      },
+      "request": {
+        "id": "0098",
+        "elapsedMs": 126362,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "f861e6ed7ceb35749c33c0504f12f6e192bd35f7407d297e29164f5b088d4479",
+      "flowSourceSha256": "9fc314ab366cbe7683da3a465f7354a0b820e9b01d1863ee736b53c3d0c88cce",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 5024,
+        "startTicks": "639250883883571477",
+        "trialName": "uia16T11_13",
+        "utc": "2026-09-15T17:07:50.9511954Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5024,
+        "startTicks": "639250883883571477",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-13/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-13/f4-removed.json",
+          "sha256": "061209957bc51f79128988322b031289a87c6d5c77813468d6a2b7c9e2723150"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-13/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-13/f4-restored.json",
+          "sha256": "ba49dbdcf4508cea9cb88148bca2ff29c818ceaca658fe198c42b1c7fd48e38b"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-13/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-13/flow.json",
+          "sha256": "9fc314ab366cbe7683da3a465f7354a0b820e9b01d1863ee736b53c3d0c88cce"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-13/preflight.json",
+          "sha256": "4499edef2779d6214ee55ef666d9abb973e06c03d36dcc38f6b39b8e3ad2fd63"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-13/property.json",
+          "sha256": "44df2f23795c0187e8f94b7324cd1fab465df21ba2ece7e6c65afea4687e913e"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-13/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-13/runtime-ready.json",
+          "sha256": "3500d10d6dd4b59c106907649d16200addbf77bcd435f1e2634aabaf2bfdd088"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-13/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-13/structure.json",
+          "sha256": "a945bc5305c3b7a2a481048b59cdfe92331cf40cee9e01d07d21868224f9899b"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-13/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-14",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 6764
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_13",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4040
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.5024.1835546",
+            "before": "uia16T11_13",
+            "readbackRuntimeId": "7.5024.48322955",
+            "mprSha256": "5a94b79a53d148ae7288d3d0a63f78bcb61fcac7ffacb66a00acda4614940ee3",
+            "after": "uia16T11_14"
+          },
+          "status": "pass",
+          "elapsedMs": 9177
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7375
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 1961
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 35622
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 6052,
+            "readyAfterMs": 63856,
+            "http": 200,
+            "parentPid": 5024
+          },
+          "status": "pass",
+          "elapsedMs": 65178
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 14,
+        "phase": "warm",
+        "requestId": "0099",
+        "startedAtUtc": "2026-09-15T17:07:52.508168+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T17:10:13.812758+00:00",
+        "elapsedMs": 136864,
+        "passed": true
+      },
+      "request": {
+        "id": "0099",
+        "elapsedMs": 136864,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "2ed45c43fd8310dd206b121e27cbca7f482b24b230d231e19011746117ea7a4c",
+      "flowSourceSha256": "f361d25368b516967d14242a0e0e13d44a3a4e20c34eec3de55c13074836fe5f",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 5024,
+        "startTicks": "639250883883571477",
+        "trialName": "uia16T11_14",
+        "utc": "2026-09-15T17:10:13.2502723Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5024,
+        "startTicks": "639250883883571477",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-14/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-14/f4-removed.json",
+          "sha256": "64a463fcc629ca63b22141ebb45e227da0475d47321606f40c88f80820098ec8"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-14/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-14/f4-restored.json",
+          "sha256": "14546553fdd317e214e4552e099c1d03ec8f5ad47d24bf22466295d0ea4988ac"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-14/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-14/flow.json",
+          "sha256": "f361d25368b516967d14242a0e0e13d44a3a4e20c34eec3de55c13074836fe5f"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-14/preflight.json",
+          "sha256": "4499edef2779d6214ee55ef666d9abb973e06c03d36dcc38f6b39b8e3ad2fd63"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-14/property.json",
+          "sha256": "2fcb0208c93a9de202a425268bf7986288c85ff56a3392cf6a829204c7b02b1a"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-14/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-14/runtime-ready.json",
+          "sha256": "82fc25794d4238f035c42aba376b1045af22fca6f6d5d0d46ac7cfef81fdf6cf"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-14/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-14/structure.json",
+          "sha256": "b16a6a93d0dc2eb1284dd66ae9fd75180eae573c600429d72cf3e981458ce3e4"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-14/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-15",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 7388
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_14",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 3943
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.5024.8555402",
+            "before": "uia16T11_14",
+            "readbackRuntimeId": "7.5024.49220360",
+            "mprSha256": "b36dce5deba6ef8ae65fe55b344eaf92961e9ff894866823878aee4efe0c76fa",
+            "after": "uia16T11_15"
+          },
+          "status": "pass",
+          "elapsedMs": 9272
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7216
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 1948
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 28689
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 3016,
+            "readyAfterMs": 59028,
+            "http": 200,
+            "parentPid": 5024
+          },
+          "status": "pass",
+          "elapsedMs": 60508
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 15,
+        "phase": "warm",
+        "requestId": "0100",
+        "startedAtUtc": "2026-09-15T17:10:13.983080+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T17:12:25.311018+00:00",
+        "elapsedMs": 125709,
+        "passed": true
+      },
+      "request": {
+        "id": "0100",
+        "elapsedMs": 125709,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "3947af09ced231f33351876cf94083f333094512f9ff28f3131ab73040c08162",
+      "flowSourceSha256": "cbd9469d254ae32ec0c78bcf9bedd075cf5ef9158bcf0f7f9ab98f3dba1097e5",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 5024,
+        "startTicks": "639250883883571477",
+        "trialName": "uia16T11_15",
+        "utc": "2026-09-15T17:12:24.2560526Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 5024,
+        "startTicks": "639250883883571477",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-15/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-15/f4-removed.json",
+          "sha256": "3731cea2f2b33351b29b9373509786a302ff2e7fef378d1dde0e37975f713bda"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-15/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-15/f4-restored.json",
+          "sha256": "12a711978c7b5c00ad9769e4eae89b2af2ca1e73485c206d726b779bdadb2298"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-15/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-15/flow.json",
+          "sha256": "cbd9469d254ae32ec0c78bcf9bedd075cf5ef9158bcf0f7f9ab98f3dba1097e5"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-15/preflight.json",
+          "sha256": "4499edef2779d6214ee55ef666d9abb973e06c03d36dcc38f6b39b8e3ad2fd63"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-15/property.json",
+          "sha256": "677afa5432ce632eb9c9199b06847267d0b956ad2373f9fccac87d5cdbffb59b"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-15/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-15/runtime-ready.json",
+          "sha256": "33dae9addcdbc0a7dca806b2d3d3631ceb39d606c170fdb7e7499fa2c9b52564"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-15/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-15/structure.json",
+          "sha256": "cac121614f8e15c3ca4896036a0f0b33c3ef3c88e500c2480b3fe163f58ad48c"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-15/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-16",
+      "phase": "cold",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 12592
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_15",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 4183
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.9028.20366437",
+            "before": "uia16T11_15",
+            "readbackRuntimeId": "7.9028.25846561",
+            "mprSha256": "6405502c1a6e274360ee2591d368a15775c710d8527bd0eb43a66777e1c302cd",
+            "after": "uia16T11_16"
+          },
+          "status": "pass",
+          "elapsedMs": 9915
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7800
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 1938
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 31525
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 5344,
+            "readyAfterMs": 100106,
+            "http": 200,
+            "parentPid": 9028
+          },
+          "status": "pass",
+          "elapsedMs": 101330
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 16,
+        "phase": "cold",
+        "requestId": "0101",
+        "startedAtUtc": "2026-09-15T17:12:25.496031+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T17:16:15.810941+00:00",
+        "elapsedMs": 225028,
+        "passed": true
+      },
+      "request": {
+        "id": "0101",
+        "elapsedMs": 225028,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "414213f1b0d8be4e1c1ca7f1f8f48efa7fa220aede12f1a19a8d6c9f8e4deac1",
+      "flowSourceSha256": "be9dc7d61854688ec6cef65b4bd78a956f431b7190b4027ab9c4ef36bc1f0c72",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 9028,
+        "startTicks": "639250891552283294",
+        "trialName": "uia16T11_16",
+        "utc": "2026-09-15T17:16:14.5559657Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 9028,
+        "startTicks": "639250891552283294",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "launch": {
+        "version": "11.12.4.0",
+        "defenderNotificationClosed": true,
+        "utc": "2026-09-15T17:13:19.8521358Z",
+        "previousPid": 5024,
+        "previousStartTicks": "639250883883571477",
+        "startTicks": "639250891552283294",
+        "elapsedMs": 48705,
+        "pid": 9028,
+        "signInLater": true
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-16/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-16/f4-removed.json",
+          "sha256": "23638750fd89eb16c024122649fb26319def4115c1cfb0b8f3d5252c25bf65f2"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-16/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-16/f4-restored.json",
+          "sha256": "8ef76199bd57aa041989e65e813cb4159026b77d5585ef1b87db1b3401a60cb0"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-16/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-16/flow.json",
+          "sha256": "be9dc7d61854688ec6cef65b4bd78a956f431b7190b4027ab9c4ef36bc1f0c72"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-16/preflight.json",
+          "sha256": "ae6eb8f1f3a7c6476114675681e01a4804979142fdd8b3ac88d2f6faa7952af1"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-16/property.json",
+          "sha256": "bc2b02e3fc04dd341c9a9273c1740ab55e4f58a7b923eae9786a445e82cdb80e"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-16/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-16/runtime-ready.json",
+          "sha256": "35e4f459bdf921de82f618102cba600eec53c3d2aaef20059be90f5410faa51f"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-16/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-16/structure.json",
+          "sha256": "57358c9fc178cd554ab4bf8d49a8d9915b1eda641ffc31803a9c22d1d4757fba"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-16/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-17",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 6752
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_16",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 3974
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.9028.28594553",
+            "before": "uia16T11_16",
+            "readbackRuntimeId": "7.9028.25661907",
+            "mprSha256": "acdf457f9702034cc377278dce2d3504a94af8ae62fdbe7ef5058122ddc89a65",
+            "after": "uia16T11_17"
+          },
+          "status": "pass",
+          "elapsedMs": 9282
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7411
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 2078
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 29482
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 1512,
+            "readyAfterMs": 57739,
+            "http": 200,
+            "parentPid": 9028
+          },
+          "status": "pass",
+          "elapsedMs": 59551
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 17,
+        "phase": "warm",
+        "requestId": "0102",
+        "startedAtUtc": "2026-09-15T17:16:15.983610+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T17:18:26.302924+00:00",
+        "elapsedMs": 125162,
+        "passed": true
+      },
+      "request": {
+        "id": "0102",
+        "elapsedMs": 125162,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "9b908ab3cc9934fa45ad38c71cf6b4661d74b71aa1678fcb8665c0fa909eaea8",
+      "flowSourceSha256": "1ec81742cecbd64f668720137d2c19d937363c0fea378997baf71386ebacf9a4",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 9028,
+        "startTicks": "639250891552283294",
+        "trialName": "uia16T11_17",
+        "utc": "2026-09-15T17:18:25.1942407Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 9028,
+        "startTicks": "639250891552283294",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-17/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-17/f4-removed.json",
+          "sha256": "da56cd0c1f62bd0f636981df99e6cca160f8853bb1b9b305b82c59abd093b584"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-17/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-17/f4-restored.json",
+          "sha256": "ebefa26cbafaa685ed2a84da4a062d91451caeda54e2dfffd29b580042773423"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-17/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-17/flow.json",
+          "sha256": "1ec81742cecbd64f668720137d2c19d937363c0fea378997baf71386ebacf9a4"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-17/preflight.json",
+          "sha256": "ae6eb8f1f3a7c6476114675681e01a4804979142fdd8b3ac88d2f6faa7952af1"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-17/property.json",
+          "sha256": "5f37e38961644d7e548e6dc854e5ca8359e4bf16fa87af97215672f0766013d0"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-17/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-17/runtime-ready.json",
+          "sha256": "6831e47c85287f5dc2750d1de9ba7bde088c85c86163d1bcdc6b634856ee6653"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-17/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-17/structure.json",
+          "sha256": "fa93feb79a1a38491e25698b85c38f98a38a8c36633b2bfd71a30bfddda075e5"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-17/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-18",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 6873
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_17",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 3898
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.9028.41939441",
+            "before": "uia16T11_17",
+            "readbackRuntimeId": "7.9028.28496834",
+            "mprSha256": "2b87a161ab7880a0919fb7629afaa4863eb067eb07d91c58091b923dcc7b3ed8",
+            "after": "uia16T11_18"
+          },
+          "status": "pass",
+          "elapsedMs": 9360
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7354
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 1945
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 30004
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 8232,
+            "readyAfterMs": 59134,
+            "http": 200,
+            "parentPid": 9028
+          },
+          "status": "pass",
+          "elapsedMs": 60925
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 18,
+        "phase": "warm",
+        "requestId": "0103",
+        "startedAtUtc": "2026-09-15T17:18:26.472594+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T17:20:38.790421+00:00",
+        "elapsedMs": 127410,
+        "passed": true
+      },
+      "request": {
+        "id": "0103",
+        "elapsedMs": 127410,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "918b0a0543b9c5d816e086f6468cbff5c45f08fb0acd2584f3a63246368ee8e3",
+      "flowSourceSha256": "a8d2df4efbe40987b98d13f185833fb2a6e4499eab4dee3a950a112ae82bee03",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 9028,
+        "startTicks": "639250891552283294",
+        "trialName": "uia16T11_18",
+        "utc": "2026-09-15T17:20:38.0472099Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 9028,
+        "startTicks": "639250891552283294",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-18/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-18/f4-removed.json",
+          "sha256": "45ab5743f0899e76ce8c5dd94e0577521c051bc981b88312c5a0dd0b3235b20f"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-18/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-18/f4-restored.json",
+          "sha256": "bfb6da62aed696fad76dd56cac025623dee1c75246d926ffee48ed70ba82e367"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-18/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-18/flow.json",
+          "sha256": "a8d2df4efbe40987b98d13f185833fb2a6e4499eab4dee3a950a112ae82bee03"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-18/preflight.json",
+          "sha256": "ae6eb8f1f3a7c6476114675681e01a4804979142fdd8b3ac88d2f6faa7952af1"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-18/property.json",
+          "sha256": "27de7ed35b446772911788ce01416cc0c7afab6ca5961e9ea72cb123c05f59c8"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-18/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-18/runtime-ready.json",
+          "sha256": "f231d99d907f634294a14b728ec1fdf25f6cb5583e97193d929d7f1158613b40"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-18/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-18/structure.json",
+          "sha256": "f62bbcb11decc4554abb0bd9468b8f6a71921810a6492b1331a430098cdd5684"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-18/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-19",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 6750
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_18",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 3989
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.9028.30744890",
+            "before": "uia16T11_18",
+            "readbackRuntimeId": "7.9028.18168744",
+            "mprSha256": "6d229c27e6046f0c114259562b4b565334b511e6c2616daeeb6611b72547cc51",
+            "after": "uia16T11_19"
+          },
+          "status": "pass",
+          "elapsedMs": 9153
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7378
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 1987
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 29841
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 7580,
+            "readyAfterMs": 57951,
+            "http": 200,
+            "parentPid": 9028
+          },
+          "status": "pass",
+          "elapsedMs": 59635
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 19,
+        "phase": "warm",
+        "requestId": "0104",
+        "startedAtUtc": "2026-09-15T17:20:38.948903+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T17:22:49.230083+00:00",
+        "elapsedMs": 125100,
+        "passed": true
+      },
+      "request": {
+        "id": "0104",
+        "elapsedMs": 125100,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "1f8831c2f1a87629957ebe70d9d3253c11e6c1a5976ec38d88d75886d9e98e54",
+      "flowSourceSha256": "73a24e1639f7a9fdc21f1b2fbb27273a888dd628217547549e8f1d99a17424d3",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 9028,
+        "startTicks": "639250891552283294",
+        "trialName": "uia16T11_19",
+        "utc": "2026-09-15T17:22:48.5926384Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 9028,
+        "startTicks": "639250891552283294",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-19/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-19/f4-removed.json",
+          "sha256": "7292c0d2a0971cc0b1ebc0e648e655deb6dc14ea4dd763f702b3fc015132a578"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-19/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-19/f4-restored.json",
+          "sha256": "9d5b630f5ceaa267040b34ae9948bf2b8a23734566cb98eee54e3d8de606ac5e"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-19/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-19/flow.json",
+          "sha256": "73a24e1639f7a9fdc21f1b2fbb27273a888dd628217547549e8f1d99a17424d3"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-19/preflight.json",
+          "sha256": "ae6eb8f1f3a7c6476114675681e01a4804979142fdd8b3ac88d2f6faa7952af1"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-19/property.json",
+          "sha256": "20c3970f84c2557c39e1425c203b56261629da836fdfdb754bc870511abeb2cd"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-19/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-19/runtime-ready.json",
+          "sha256": "dc9e8fbb245bad8086e2b94c40e03549fe50c8f2faa0b480e3c1e9e221167a59"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-19/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-19/structure.json",
+          "sha256": "8207eab505763de0c754478d13ba4d9bf90a811d33dd4d39275b4b5bf85568e5"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-19/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "id": "11-20",
+      "phase": "warm",
+      "complete": true,
+      "steps": [
+        {
+          "id": "open-page",
+          "proof": {
+            "document": "MyFirstModule.Home_Web",
+            "language": "en-US",
+            "framework": "Chrome",
+            "theme": "Light"
+          },
+          "status": "pass",
+          "elapsedMs": 6598
+        },
+        {
+          "id": "select-widget",
+          "proof": {
+            "name": "uia16T11_19",
+            "locator": "page-document/text-prefix + properties-name-row"
+          },
+          "status": "pass",
+          "elapsedMs": 3809
+        },
+        {
+          "id": "change-property",
+          "proof": {
+            "previousRuntimeId": "7.9028.55562453",
+            "before": "uia16T11_19",
+            "readbackRuntimeId": "7.9028.51554725",
+            "mprSha256": "67f2f835aa8680c17accfd496e18124bc6b51caf91545b5851d8ccdf5f70b355",
+            "after": "uia16T11_20"
+          },
+          "status": "pass",
+          "elapsedMs": 8790
+        },
+        {
+          "id": "structure-mode",
+          "proof": {
+            "toolbarFramework": "WPF",
+            "mode": "Structure"
+          },
+          "status": "pass",
+          "elapsedMs": 7149
+        },
+        {
+          "id": "design-mode",
+          "proof": {
+            "framework": "Chrome",
+            "document": "MyFirstModule.Home_Web",
+            "mode": "Design"
+          },
+          "status": "pass",
+          "elapsedMs": 1941
+        },
+        {
+          "id": "synchronize-f4",
+          "proof": {
+            "packageSha256": "f719d660e413079ee1785becef6a74824d6d0b926328cc7649e2dd3981493d36",
+            "before": 1,
+            "removed": 0,
+            "restored": 1
+          },
+          "status": "pass",
+          "elapsedMs": 37263
+        },
+        {
+          "id": "run-locally",
+          "proof": {
+            "port": 8080,
+            "runtimePid": 5500,
+            "readyAfterMs": 59826,
+            "http": 200,
+            "parentPid": 9028
+          },
+          "status": "pass",
+          "elapsedMs": 61513
+        }
+      ],
+      "host": {
+        "major": 11,
+        "trial": 20,
+        "phase": "warm",
+        "requestId": "0105",
+        "startedAtUtc": "2026-09-15T17:22:49.402385+00:00",
+        "harnessSha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+        "rdpPid": 124729,
+        "finishedAtUtc": "2026-09-15T17:25:07.716486+00:00",
+        "elapsedMs": 132865,
+        "passed": true
+      },
+      "request": {
+        "id": "0105",
+        "elapsedMs": 132865,
+        "exitCode": 0,
+        "timedOut": false,
+        "session": 2
+      },
+      "requestSourceSha256": "39f017b0a56992fe4ac48cf0d6c264b9b17178365523c80929f9478696f0181c",
+      "flowSourceSha256": "a53c2b77e0092a91cbe9d57432578a485d026c4af6d99b355c3a7a9add5212e7",
+      "identity": {
+        "version": "11.12.4.0",
+        "pid": 9028,
+        "startTicks": "639250891552283294",
+        "trialName": "uia16T11_20",
+        "utc": "2026-09-15T17:25:06.7673030Z"
+      },
+      "cleanup": {
+        "runtimeStopped": true
+      },
+      "preflight": {
+        "width": 1280,
+        "height": 800,
+        "version": "11.12.4.0",
+        "desktop": "Default",
+        "wtsState": 0,
+        "pid": 9028,
+        "startTicks": "639250891552283294",
+        "dpi": 96,
+        "session": 2,
+        "systemDpi": 96
+      },
+      "sourceFiles": [
+        {
+          "path": "campaign-winboat-20260916-11-20/cleanup.json",
+          "sha256": "65b9db74995c2e9a268d3cf999d7db74d65467b620740facd7e19c9747bf8027"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-20/f4-removed.json",
+          "sha256": "3c819c81b7d57f060e8014566b9e70308ba12a932ffd2e4d5dd6eb58dd71a023"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-20/f4-removed.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-20/f4-restored.json",
+          "sha256": "0df23f103ffca15f5fa9d3b5a943d896e49008b222457eef97ef4f93bd5b43bc"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-20/f4-restored.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-20/flow.json",
+          "sha256": "a53c2b77e0092a91cbe9d57432578a485d026c4af6d99b355c3a7a9add5212e7"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-20/preflight.json",
+          "sha256": "ae6eb8f1f3a7c6476114675681e01a4804979142fdd8b3ac88d2f6faa7952af1"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-20/property.json",
+          "sha256": "9a09ed894f412678cf15d29ecf659101f67094e685dd3211eff441ecc433c0f2"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-20/property.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-20/runtime-ready.json",
+          "sha256": "14455bb866ad9e238795fb855bc4481f51fb6ee79be6b22cbb2e722b7eb89c9d"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-20/runtime-ready.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-20/structure.json",
+          "sha256": "795feb372bb1f023eddd6580cfd7f092ab704ac84a03d4ec34e5dadcf2437295"
+        },
+        {
+          "path": "campaign-winboat-20260916-11-20/structure.stderr",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    }
+  ]
+}

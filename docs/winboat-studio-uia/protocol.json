@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "campaignId": "winboat-20260916",
+  "frozenAtUtc": "2026-09-15T16:25:07.180590+00:00",
+  "transport": "linux-winboat",
+  "nativeWindows": "deferred",
+  "harness": {
+    "path": "scripts/spikes/studio-uia/run-trial.ps1",
+    "sha256": "876e6806514276c8c3cb10db1875fbfe6098e90c7544a2caf1a19d20233c0a2c",
+    "outerTimeoutSeconds": 600
+  },
+  "environment": {
+    "screen": [1280, 800],
+    "systemDpi": 96,
+    "studioLanguage": "en-US",
+    "studioTheme": "Light",
+    "guestBuild": "26100",
+    "interactiveSession": 2,
+    "freeRdp": "3.31.1 (63b948ca5c)",
+    "x11Compositor": "xfwm4 on"
+  },
+  "definition": {
+    "trialsPerVersion": 20,
+    "coldTrialIds": [1, 6, 11, 16],
+    "cold": "Fresh Studio process; existing VM and build caches. Launch evidence is retained separately.",
+    "warm": "Existing Studio process. Each flow starts and stops its fixture runtime.",
+    "steps": [
+      "open-page",
+      "select-widget",
+      "change-property",
+      "structure-mode",
+      "design-mode",
+      "synchronize-f4",
+      "run-locally"
+    ],
+    "pass": "All seven effects verified; owned runtime cleanup must succeed.",
+    "failures": "Retain each attempt. No replacement by retries. Stop orchestration for review on failure.",
+    "latency": "Observed operational durations, not isolated performance comparisons."
+  },
+  "targets": [
+    {
+      "version": "10.24.26.0",
+      "projectSha256": "489c356920d21e577ba7c6b696a33191da2fc9945722aef23e5f90305c9cc89a"
+    },
+    {
+      "version": "11.12.4.0",
+      "projectSha256": "f03e6cf616a567dd1d3c17f29ed5bc3fe339e8f76382442dd8ab2212f6fc1932"
+    }
+  ]
+}

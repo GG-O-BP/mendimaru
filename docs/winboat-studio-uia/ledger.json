@@ -1,0 +1,2259 @@
+{
+  "schemaVersion": 1,
+  "transport": "linux-winboat",
+  "nativeWindows": "deferred",
+  "targets": [
+    {
+      "version": "10.24.26.0",
+      "projectSha256": "489c356920d21e577ba7c6b696a33191da2fc9945722aef23e5f90305c9cc89a",
+      "trials": [
+        {
+          "id": 1,
+          "phase": "cold",
+          "observationId": "10-01",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "fail",
+              "elapsedMs": 8955,
+              "artifacts": ["observations.json"],
+              "reason": "page-editor-control-not-ready"
+            },
+            {
+              "id": "select-widget",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "phase": "warm",
+          "observationId": "10-02",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7463,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4041,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 8868,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "fail",
+              "elapsedMs": 4387,
+              "artifacts": ["observations.json"],
+              "reason": "page-editor-control-not-ready"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "phase": "warm",
+          "observationId": "10-03",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7646,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "fail",
+              "elapsedMs": 5123,
+              "artifacts": ["observations.json"],
+              "reason": "wrong-widget-selected"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "phase": "warm",
+          "observationId": "10-04",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7395,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "fail",
+              "elapsedMs": 5064,
+              "artifacts": ["observations.json"],
+              "reason": "wrong-widget-selected"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "phase": "warm",
+          "observationId": "10-05",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "fail",
+              "elapsedMs": 10138,
+              "artifacts": ["observations.json"],
+              "reason": "page-editor-control-not-ready"
+            },
+            {
+              "id": "select-widget",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "phase": "cold",
+          "observationId": "10-06",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 11127,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4614,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 4957,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "fail",
+              "elapsedMs": 3718,
+              "artifacts": ["observations.json"],
+              "reason": "page-editor-control-not-ready"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "phase": "warm",
+          "observationId": "10-07",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7570,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "fail",
+              "elapsedMs": 4546,
+              "artifacts": ["observations.json"],
+              "reason": "wrong-widget-selected"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "phase": "warm",
+          "observationId": "10-08",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7460,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "fail",
+              "elapsedMs": 5023,
+              "artifacts": ["observations.json"],
+              "reason": "wrong-widget-selected"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "phase": "warm",
+          "observationId": "10-09",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7744,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "fail",
+              "elapsedMs": 5028,
+              "artifacts": ["observations.json"],
+              "reason": "wrong-widget-selected"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "phase": "warm",
+          "observationId": "10-10",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7542,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "fail",
+              "elapsedMs": 5045,
+              "artifacts": ["observations.json"],
+              "reason": "wrong-widget-selected"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "phase": "cold",
+          "observationId": "10-11",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "fail",
+              "elapsedMs": 9333,
+              "artifacts": ["observations.json"],
+              "reason": "page-editor-control-not-ready"
+            },
+            {
+              "id": "select-widget",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "phase": "warm",
+          "observationId": "10-12",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "fail",
+              "elapsedMs": 10064,
+              "artifacts": ["observations.json"],
+              "reason": "page-editor-control-not-ready"
+            },
+            {
+              "id": "select-widget",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "phase": "warm",
+          "observationId": "10-13",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7489,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4297,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9160,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 9276,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 2039,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 34706,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 104633,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 14,
+          "phase": "warm",
+          "observationId": "10-14",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7883,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 5005,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 11196,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "fail",
+              "elapsedMs": 6417,
+              "artifacts": ["observations.json"],
+              "reason": "page-editor-control-not-ready"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 15,
+          "phase": "warm",
+          "observationId": "10-15",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 9420,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "fail",
+              "elapsedMs": 5747,
+              "artifacts": ["observations.json"],
+              "reason": "wrong-widget-selected"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 16,
+          "phase": "cold",
+          "observationId": "10-16",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "fail",
+              "elapsedMs": 9909,
+              "artifacts": ["observations.json"],
+              "reason": "page-editor-control-not-ready"
+            },
+            {
+              "id": "select-widget",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 17,
+          "phase": "warm",
+          "observationId": "10-17",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "fail",
+              "elapsedMs": 9833,
+              "artifacts": ["observations.json"],
+              "reason": "page-editor-control-not-ready"
+            },
+            {
+              "id": "select-widget",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 18,
+          "phase": "warm",
+          "observationId": "10-18",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7900,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4082,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9332,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 9187,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 2025,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "fail",
+              "elapsedMs": 3597,
+              "artifacts": ["observations.json"],
+              "reason": "toolbox-search-not-ready"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 19,
+          "phase": "warm",
+          "observationId": "10-19",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7058,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4255,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9246,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "fail",
+              "elapsedMs": 6183,
+              "artifacts": ["observations.json"],
+              "reason": "page-editor-control-not-ready"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 20,
+          "phase": "warm",
+          "observationId": "10-20",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7785,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "fail",
+              "elapsedMs": 5182,
+              "artifacts": ["observations.json"],
+              "reason": "wrong-widget-selected"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "11.12.4.0",
+      "projectSha256": "f03e6cf616a567dd1d3c17f29ed5bc3fe339e8f76382442dd8ab2212f6fc1932",
+      "trials": [
+        {
+          "id": 1,
+          "phase": "cold",
+          "observationId": "11-01",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 11637,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4558,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9909,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 8686,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 2020,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "fail",
+              "elapsedMs": 2829,
+              "artifacts": ["observations.json"],
+              "reason": "toolbox-search-not-ready"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "phase": "warm",
+          "observationId": "11-02",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7627,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4264,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9216,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7333,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 1964,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 34280,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 114042,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "phase": "warm",
+          "observationId": "11-03",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7015,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4122,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 8892,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7630,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 2045,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 41015,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 65852,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "phase": "warm",
+          "observationId": "11-04",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 6880,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4379,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 11654,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 9320,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 2280,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 35306,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 65940,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "phase": "warm",
+          "observationId": "11-05",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 6651,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4071,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 10041,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 8037,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 2107,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 43944,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 87847,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "phase": "cold",
+          "observationId": "11-06",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "fail",
+              "elapsedMs": 11102,
+              "artifacts": ["observations.json"],
+              "reason": "page-editor-control-not-ready"
+            },
+            {
+              "id": "select-widget",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "phase": "warm",
+          "observationId": "11-07",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 18759,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 5984,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 13710,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 11818,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 2641,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 33064,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 96875,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "phase": "warm",
+          "observationId": "11-08",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "fail",
+              "elapsedMs": 10067,
+              "artifacts": ["observations.json"],
+              "reason": "page-editor-control-not-ready"
+            },
+            {
+              "id": "select-widget",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "change-property",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "structure-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "design-mode",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            },
+            {
+              "id": "run-locally",
+              "status": "not-run",
+              "elapsedMs": 0,
+              "artifacts": [],
+              "reason": "earlier-step-failed"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "phase": "warm",
+          "observationId": "11-09",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7360,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 3988,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 8692,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7255,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 1996,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 36044,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 79833,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "phase": "warm",
+          "observationId": "11-10",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 6835,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 3967,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9216,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7261,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 1915,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 37055,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 59242,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "phase": "cold",
+          "observationId": "11-11",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 17371,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4254,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9744,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 8037,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 1965,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 31034,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 97929,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "phase": "warm",
+          "observationId": "11-12",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7034,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 3958,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 8826,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7478,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 1989,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 29518,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 61035,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "phase": "warm",
+          "observationId": "11-13",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 6764,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 3984,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9390,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7252,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 1983,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 29241,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 60875,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 14,
+          "phase": "warm",
+          "observationId": "11-14",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 6764,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4040,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9177,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7375,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 1961,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 35622,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 65178,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 15,
+          "phase": "warm",
+          "observationId": "11-15",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 7388,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 3943,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9272,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7216,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 1948,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 28689,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 60508,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 16,
+          "phase": "cold",
+          "observationId": "11-16",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 12592,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 4183,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9915,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7800,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 1938,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 31525,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 101330,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 17,
+          "phase": "warm",
+          "observationId": "11-17",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 6752,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 3974,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9282,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7411,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 2078,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 29482,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 59551,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 18,
+          "phase": "warm",
+          "observationId": "11-18",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 6873,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 3898,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9360,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7354,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 1945,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 30004,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 60925,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 19,
+          "phase": "warm",
+          "observationId": "11-19",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 6750,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 3989,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 9153,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7378,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 1987,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 29841,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 59635,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        },
+        {
+          "id": 20,
+          "phase": "warm",
+          "observationId": "11-20",
+          "steps": [
+            {
+              "id": "open-page",
+              "status": "pass",
+              "elapsedMs": 6598,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "select-widget",
+              "status": "pass",
+              "elapsedMs": 3809,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "change-property",
+              "status": "pass",
+              "elapsedMs": 8790,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "structure-mode",
+              "status": "pass",
+              "elapsedMs": 7149,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "design-mode",
+              "status": "pass",
+              "elapsedMs": 1941,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "synchronize-f4",
+              "status": "pass",
+              "elapsedMs": 37263,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            },
+            {
+              "id": "run-locally",
+              "status": "pass",
+              "elapsedMs": 61513,
+              "artifacts": ["observations.json"],
+              "effectVerified": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

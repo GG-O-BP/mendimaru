@@ -2,7 +2,10 @@ param(
     [Parameter(Mandatory = $true)][int]$StudioProcessId,
     [Parameter(Mandatory = $true)][string]$StartTimeUtcTicks,
     [Parameter(Mandatory = $true)][string]$FileVersion,
-    [Parameter(Mandatory = $true)][string]$OutputDirectory
+    [Parameter(Mandatory = $true)][string]$OutputDirectory,
+    [ValidateRange(1, 64)][int]$MaxDepth = 48,
+    [ValidateRange(100, 10000)][int]$MaxNodes = 3000,
+    [ValidateRange(1000, 45000)][int]$BudgetMs = 30000
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +26,17 @@ public static class StudioUiaCapture {
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr dc, uint flags);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern uint GetDpiForSystem();
+    [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+    [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
+    [DllImport("shcore.dll")] static extern int GetScaleFactorForMonitor(IntPtr monitor, out int factor);
+    public static int[] DisplayMetrics(IntPtr hwnd) {
+        var monitor = MonitorFromWindow(hwnd, 2); uint x, y; int factor;
+        var dpiResult = GetDpiForMonitor(monitor, 0, out x, out y);
+        var scaleResult = GetScaleFactorForMonitor(monitor, out factor);
+        return new int[] { (int)x, (int)y, factor, dpiResult, scaleResult };
+    }
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] public static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
     [DllImport("user32.dll")] public static extern bool CloseDesktop(IntPtr desktop);
@@ -49,6 +63,10 @@ public static class StudioUiaCapture {
 }
 '@
     $null = [StudioUiaCapture]::SetProcessDpiAwarenessContext([IntPtr](-4))
+    # A running system-aware Studio can retain 96 DPI after RDP reconnects at
+    # 125%, while the monitor and a new helper use 120 DPI. Record both, and
+    # use physical coordinates on the worker thread (per-monitor v2).
+    $dpiContext = [StudioUiaCapture]::SetThreadDpiAwarenessContext([IntPtr](-4))
     $reason = 'stale-or-wrong-process'
     function Get-Target {
         $target = Get-Process -Id $StudioProcessId -ErrorAction Stop
@@ -78,7 +96,7 @@ public static class StudioUiaCapture {
         $nodes = New-Object Collections.Generic.List[object]
         $truncated = $false
         while ($queue.Count -gt 0) {
-            if ($nodes.Count -ge 2000 -or $clock.ElapsedMilliseconds -ge 12000) { $truncated = $true; break }
+            if ($nodes.Count -ge $MaxNodes -or $clock.ElapsedMilliseconds -ge $BudgetMs) { $truncated = $true; break }
             $item = $queue.Dequeue()
             $element = $item.element
             $current = $element.Current
@@ -118,12 +136,12 @@ public static class StudioUiaCapture {
                 patterns = $supported
             })
             $child = $walker.GetFirstChild($element)
-            if ($item.depth -ge 18) {
+            if ($item.depth -ge $MaxDepth) {
                 if ($null -ne $child) { $truncated = $true }
                 continue
             }
             while ($null -ne $child) {
-                if ($queue.Count + $nodes.Count -ge 2000 -or $clock.ElapsedMilliseconds -ge 12000) { $truncated = $true; break }
+                if ($queue.Count + $nodes.Count -ge $MaxNodes -or $clock.ElapsedMilliseconds -ge $BudgetMs) { $truncated = $true; break }
                 $queue.Enqueue(@{ element = $child; parent = $nodeId; depth = $item.depth + 1 })
                 $child = $walker.GetNextSibling($child)
             }
@@ -150,8 +168,10 @@ public static class StudioUiaCapture {
                 } else { $screenshot.reason = 'printwindow-rejected' }
             } finally { $bitmap.Dispose() }
         }
+        $display = [StudioUiaCapture]::DisplayMetrics($handle)
         $snapshots.Add([ordered]@{
             hwnd = $handle.ToInt64().ToString(); dpi = [StudioUiaCapture]::GetDpiForWindow($handle)
+            monitor = @{ dpiX = $display[0]; dpiY = $display[1]; scalePercent = $display[2]; dpiQueryHResult = $display[3]; scaleQueryHResult = $display[4] }
             modal = $modal; truncated = $truncated; nodes = @($nodes.ToArray()); screenshot = $screenshot
         })
     }
@@ -165,6 +185,9 @@ public static class StudioUiaCapture {
         fileVersion = $FileVersion; sessionId = $target.SessionId; helperSessionId = (Get-Process -Id $PID).SessionId
         culture = [Globalization.CultureInfo]::CurrentUICulture.Name
         powershellVersion = $PSVersionTable.PSVersion.ToString()
+        systemDpi = [StudioUiaCapture]::GetDpiForSystem()
+        threadDpiContextAccepted = $dpiContext -ne [IntPtr]::Zero
+        limits = @{ maxDepth = $MaxDepth; maxNodesPerWindow = $MaxNodes; budgetMs = $BudgetMs }
         windowsTruncated = $windowsTruncated
         screenBounds = @([Windows.Forms.Screen]::AllScreens | ForEach-Object {
             @{ width = $_.Bounds.Width; height = $_.Bounds.Height; primary = $_.Primary }

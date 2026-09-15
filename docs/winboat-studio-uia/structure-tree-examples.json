@@ -1,0 +1,1123 @@
+{
+  "schemaVersion": 1,
+  "provider": "winappCli 0.6.0",
+  "scope": "Original Structure toolbar/canvas subtrees and ancestors; unrelated siblings and values omitted. WinForms viewPort exposes no widget children in these captures.",
+  "examples": [
+    {
+      "version": "10.24.26.0",
+      "source": "structure10.json",
+      "sourceSha256": "02a8e56bb1e6736e3bb6408bc367819319982623ba1e0b69cf618efd5ca3c2e0",
+      "elements": [
+        {
+          "type": "Window",
+          "name": "UIA16_10",
+          "className": "Window",
+          "isEnabled": true,
+          "isOffscreen": false,
+          "x": -8,
+          "y": -8,
+          "width": 1296,
+          "height": 816,
+          "selector": "win-uia1610-f721",
+          "isInvokable": false,
+          "children": [
+            {
+              "type": "Pane",
+              "className": "AutomationIdBorder",
+              "isEnabled": true,
+              "isOffscreen": false,
+              "x": -1,
+              "y": 39,
+              "width": 1282,
+              "height": 762,
+              "selector": "pn-35d2",
+              "isInvokable": false,
+              "children": [
+                {
+                  "type": "Unknown(50025)",
+                  "className": "DockControl",
+                  "isEnabled": true,
+                  "isOffscreen": false,
+                  "x": -1,
+                  "y": 39,
+                  "width": 1282,
+                  "height": 734,
+                  "selector": "elm-5bd3",
+                  "isInvokable": false,
+                  "children": [
+                    {
+                      "type": "Group",
+                      "automationId": "DockSite",
+                      "className": "DockSite",
+                      "isEnabled": true,
+                      "isOffscreen": false,
+                      "x": -1,
+                      "y": 39,
+                      "width": 1282,
+                      "height": 734,
+                      "selector": "DockSite",
+                      "isInvokable": false,
+                      "children": [
+                        {
+                          "type": "Group",
+                          "automationId": "DockSite.PART_DockHost",
+                          "className": "DockHost",
+                          "isEnabled": true,
+                          "isOffscreen": false,
+                          "x": -1,
+                          "y": 39,
+                          "width": 1282,
+                          "height": 734,
+                          "selector": "DockSite.PART_DockHost",
+                          "isInvokable": false,
+                          "children": [
+                            {
+                              "type": "Group",
+                              "className": "SplitContainer",
+                              "isEnabled": true,
+                              "isOffscreen": false,
+                              "x": 0,
+                              "y": 40,
+                              "width": 1280,
+                              "height": 732,
+                              "selector": "grp-13c1",
+                              "isInvokable": false,
+                              "children": [
+                                {
+                                  "type": "Group",
+                                  "className": "SplitContainer",
+                                  "isEnabled": true,
+                                  "isOffscreen": false,
+                                  "x": 284,
+                                  "y": 40,
+                                  "width": 712,
+                                  "height": 732,
+                                  "selector": "grp-8bb0",
+                                  "isInvokable": false,
+                                  "children": [
+                                    {
+                                      "type": "Pane",
+                                      "className": "Workspace",
+                                      "isEnabled": true,
+                                      "isOffscreen": false,
+                                      "x": 284,
+                                      "y": 40,
+                                      "width": 712,
+                                      "height": 530,
+                                      "selector": "pn-cb47",
+                                      "isInvokable": false,
+                                      "children": [
+                                        {
+                                          "type": "Tab",
+                                          "automationId": "DockSite.PART_DockHost__SplitContainer[1]__SplitContainer[0]__Workspace__TabbedMdiContainer",
+                                          "className": "TabbedMdiContainer",
+                                          "isEnabled": true,
+                                          "isOffscreen": false,
+                                          "x": 284,
+                                          "y": 40,
+                                          "width": 712,
+                                          "height": 530,
+                                          "selector": "DockSite.PART_DockHost__SplitContainer[1]__SplitContainer[0]__Workspace__TabbedMdiContainer",
+                                          "isInvokable": false,
+                                          "children": [
+                                            {
+                                              "type": "TabItem",
+                                              "name": "Home_Web [MyFirstModule]",
+                                              "className": "DockingWindowContainerTabItem",
+                                              "isEnabled": true,
+                                              "isOffscreen": false,
+                                              "x": 284,
+                                              "y": 40,
+                                              "width": 220,
+                                              "height": 28,
+                                              "selector": "tab-homewebmyfirstm-2c26",
+                                              "isInvokable": false,
+                                              "children": [
+                                                {
+                                                  "type": "Pane",
+                                                  "name": "Mendix.Modeler.Core.View.Editors.TabbedEditorViewModel",
+                                                  "className": "DocumentWindow",
+                                                  "isEnabled": true,
+                                                  "isOffscreen": false,
+                                                  "x": 284,
+                                                  "y": 68,
+                                                  "width": 712,
+                                                  "height": 502,
+                                                  "selector": "pn-mendixmodelerco-97c9",
+                                                  "isInvokable": true,
+                                                  "children": [
+                                                    {
+                                                      "type": "Pane",
+                                                      "className": "AutomationIdBorder",
+                                                      "isEnabled": true,
+                                                      "isOffscreen": false,
+                                                      "x": 284,
+                                                      "y": 68,
+                                                      "width": 712,
+                                                      "height": 502,
+                                                      "selector": "pn-6377",
+                                                      "isInvokable": false,
+                                                      "children": [
+                                                        {
+                                                          "type": "Pane",
+                                                          "className": "AutomationIdBorder",
+                                                          "isEnabled": true,
+                                                          "isOffscreen": false,
+                                                          "x": 284,
+                                                          "y": 68,
+                                                          "width": 712,
+                                                          "height": 475,
+                                                          "selector": "pn-7256",
+                                                          "isInvokable": false,
+                                                          "children": [
+                                                            {
+                                                              "type": "Pane",
+                                                              "className": "AutomationIdBorder",
+                                                              "isEnabled": true,
+                                                              "isOffscreen": false,
+                                                              "x": 284,
+                                                              "y": 68,
+                                                              "width": 712,
+                                                              "height": 28,
+                                                              "selector": "pn-a8ff",
+                                                              "isInvokable": false,
+                                                              "children": [
+                                                                {
+                                                                  "type": "Pane",
+                                                                  "className": "AutomationIdBorder",
+                                                                  "isEnabled": true,
+                                                                  "isOffscreen": false,
+                                                                  "x": 642,
+                                                                  "y": 68,
+                                                                  "width": 354,
+                                                                  "height": 28,
+                                                                  "selector": "pn-bfa7",
+                                                                  "isInvokable": false,
+                                                                  "children": [
+                                                                    {
+                                                                      "type": "Pane",
+                                                                      "className": "AutomationIdBorder",
+                                                                      "isEnabled": true,
+                                                                      "isOffscreen": false,
+                                                                      "x": 642,
+                                                                      "y": 68,
+                                                                      "width": 354,
+                                                                      "height": 28,
+                                                                      "selector": "pn-961f",
+                                                                      "isInvokable": false,
+                                                                      "children": [
+                                                                        {
+                                                                          "type": "Pane",
+                                                                          "className": "AutomationIdBorder",
+                                                                          "isEnabled": true,
+                                                                          "isOffscreen": false,
+                                                                          "x": 798,
+                                                                          "y": 72,
+                                                                          "width": 213,
+                                                                          "height": 20,
+                                                                          "selector": "pn-424d",
+                                                                          "isInvokable": false,
+                                                                          "children": [
+                                                                            {
+                                                                              "type": "Pane",
+                                                                              "className": "AutomationIdBorder",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 802,
+                                                                              "y": 72,
+                                                                              "width": 205,
+                                                                              "height": 20,
+                                                                              "selector": "pn-388a",
+                                                                              "isInvokable": false,
+                                                                              "children": [
+                                                                                {
+                                                                                  "type": "Button",
+                                                                                  "name": "Structure mode",
+                                                                                  "className": "Button",
+                                                                                  "isEnabled": true,
+                                                                                  "isOffscreen": false,
+                                                                                  "x": 802,
+                                                                                  "y": 72,
+                                                                                  "width": 102,
+                                                                                  "height": 20,
+                                                                                  "selector": "btn-structuremode-b9a1",
+                                                                                  "isInvokable": true,
+                                                                                  "children": [
+                                                                                    {
+                                                                                      "type": "Text",
+                                                                                      "name": "Structure mode",
+                                                                                      "className": "Text",
+                                                                                      "isEnabled": true,
+                                                                                      "isOffscreen": false,
+                                                                                      "x": 811,
+                                                                                      "y": 74,
+                                                                                      "width": 85,
+                                                                                      "height": 16,
+                                                                                      "selector": "lbl-structuremode-7fd0",
+                                                                                      "isInvokable": false,
+                                                                                      "children": [
+                                                                                        {
+                                                                                          "type": "Text",
+                                                                                          "name": "Structure mode",
+                                                                                          "className": "TextBlock",
+                                                                                          "isEnabled": true,
+                                                                                          "isOffscreen": false,
+                                                                                          "x": 811,
+                                                                                          "y": 74,
+                                                                                          "width": 85,
+                                                                                          "height": 16,
+                                                                                          "selector": "lbl-structuremode-5830",
+                                                                                          "isInvokable": false
+                                                                                        }
+                                                                                      ]
+                                                                                    }
+                                                                                  ]
+                                                                                },
+                                                                                {
+                                                                                  "type": "Button",
+                                                                                  "name": "Design mode",
+                                                                                  "className": "Button",
+                                                                                  "isEnabled": true,
+                                                                                  "isOffscreen": false,
+                                                                                  "x": 905,
+                                                                                  "y": 72,
+                                                                                  "width": 102,
+                                                                                  "height": 20,
+                                                                                  "selector": "btn-designmode-2c7e",
+                                                                                  "isInvokable": true,
+                                                                                  "children": [
+                                                                                    {
+                                                                                      "type": "Text",
+                                                                                      "name": "Design mode",
+                                                                                      "className": "Text",
+                                                                                      "isEnabled": true,
+                                                                                      "isOffscreen": false,
+                                                                                      "x": 919,
+                                                                                      "y": 74,
+                                                                                      "width": 73,
+                                                                                      "height": 16,
+                                                                                      "selector": "lbl-designmode-5421",
+                                                                                      "isInvokable": false,
+                                                                                      "children": [
+                                                                                        {
+                                                                                          "type": "Text",
+                                                                                          "name": "Design mode",
+                                                                                          "className": "TextBlock",
+                                                                                          "isEnabled": true,
+                                                                                          "isOffscreen": false,
+                                                                                          "x": 919,
+                                                                                          "y": 74,
+                                                                                          "width": 73,
+                                                                                          "height": 16,
+                                                                                          "selector": "lbl-designmode-2051",
+                                                                                          "isInvokable": false
+                                                                                        }
+                                                                                      ]
+                                                                                    }
+                                                                                  ]
+                                                                                }
+                                                                              ]
+                                                                            }
+                                                                          ]
+                                                                        }
+                                                                      ]
+                                                                    }
+                                                                  ]
+                                                                }
+                                                              ]
+                                                            },
+                                                            {
+                                                              "type": "Pane",
+                                                              "className": "WindowsFormsHost",
+                                                              "isEnabled": true,
+                                                              "isOffscreen": false,
+                                                              "x": 284,
+                                                              "y": 96,
+                                                              "width": 712,
+                                                              "height": 447,
+                                                              "selector": "pn-f7a3",
+                                                              "isInvokable": false,
+                                                              "children": [
+                                                                {
+                                                                  "type": "Pane",
+                                                                  "automationId": "FormEditorControl",
+                                                                  "className": "WindowsForms10.Window.8.app.0.3b95145_r3_ad1",
+                                                                  "isEnabled": true,
+                                                                  "isOffscreen": false,
+                                                                  "x": 284,
+                                                                  "y": 96,
+                                                                  "width": 712,
+                                                                  "height": 447,
+                                                                  "selector": "FormEditorControl",
+                                                                  "isInvokable": false,
+                                                                  "children": [
+                                                                    {
+                                                                      "type": "Pane",
+                                                                      "automationId": "autoCanvas",
+                                                                      "className": "WindowsForms10.Window.8.app.0.3b95145_r3_ad1",
+                                                                      "isEnabled": true,
+                                                                      "isOffscreen": false,
+                                                                      "x": 284,
+                                                                      "y": 96,
+                                                                      "width": 712,
+                                                                      "height": 447,
+                                                                      "selector": "autoCanvas",
+                                                                      "isInvokable": false,
+                                                                      "children": [
+                                                                        {
+                                                                          "type": "Pane",
+                                                                          "automationId": "viewPort",
+                                                                          "className": "WindowsForms10.Window.8.app.0.3b95145_r3_ad1",
+                                                                          "isEnabled": true,
+                                                                          "isOffscreen": false,
+                                                                          "x": 284,
+                                                                          "y": 96,
+                                                                          "width": 695,
+                                                                          "height": 430,
+                                                                          "selector": "viewPort",
+                                                                          "isInvokable": false
+                                                                        },
+                                                                        {
+                                                                          "type": "ScrollBar",
+                                                                          "automationId": "hScrollBar",
+                                                                          "className": "WindowsForms10.ScrollBar.app.0.3b95145_r3_ad1",
+                                                                          "isEnabled": true,
+                                                                          "isOffscreen": false,
+                                                                          "x": 284,
+                                                                          "y": 526,
+                                                                          "width": 695,
+                                                                          "height": 17,
+                                                                          "selector": "hScrollBar",
+                                                                          "isInvokable": false,
+                                                                          "children": [
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "왼쪽 스크롤 화살표",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 284,
+                                                                              "y": 526,
+                                                                              "width": 17,
+                                                                              "height": 17,
+                                                                              "selector": "btn-bcf8",
+                                                                              "isInvokable": true
+                                                                            },
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "페이지 왼쪽으로",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 301,
+                                                                              "y": 526,
+                                                                              "width": 171,
+                                                                              "height": 17,
+                                                                              "selector": "btn-bcf9",
+                                                                              "isInvokable": true
+                                                                            },
+                                                                            {
+                                                                              "type": "Thumb",
+                                                                              "name": "위치",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 472,
+                                                                              "y": 526,
+                                                                              "width": 383,
+                                                                              "height": 17,
+                                                                              "selector": "thm-bcfa",
+                                                                              "isInvokable": false
+                                                                            },
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "페이지 오른쪽으로",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 855,
+                                                                              "y": 526,
+                                                                              "width": 107,
+                                                                              "height": 17,
+                                                                              "selector": "btn-bcfb",
+                                                                              "isInvokable": true
+                                                                            },
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "오른쪽 스크롤 화살표",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 962,
+                                                                              "y": 526,
+                                                                              "width": 17,
+                                                                              "height": 17,
+                                                                              "selector": "btn-bcfc",
+                                                                              "isInvokable": true
+                                                                            }
+                                                                          ]
+                                                                        },
+                                                                        {
+                                                                          "type": "ScrollBar",
+                                                                          "automationId": "vScrollBar",
+                                                                          "className": "WindowsForms10.ScrollBar.app.0.3b95145_r3_ad1",
+                                                                          "isEnabled": true,
+                                                                          "isOffscreen": false,
+                                                                          "x": 979,
+                                                                          "y": 96,
+                                                                          "width": 17,
+                                                                          "height": 447,
+                                                                          "selector": "vScrollBar",
+                                                                          "isInvokable": false,
+                                                                          "children": [
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "위쪽 스크롤 화살표",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 979,
+                                                                              "y": 96,
+                                                                              "width": 17,
+                                                                              "height": 17,
+                                                                              "selector": "btn-bd36",
+                                                                              "isInvokable": true
+                                                                            },
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "페이지 위로",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 979,
+                                                                              "y": 113,
+                                                                              "width": 17,
+                                                                              "height": 56,
+                                                                              "selector": "btn-bd37",
+                                                                              "isInvokable": true
+                                                                            },
+                                                                            {
+                                                                              "type": "Thumb",
+                                                                              "name": "위치",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 979,
+                                                                              "y": 169,
+                                                                              "width": 17,
+                                                                              "height": 236,
+                                                                              "selector": "thm-bd38",
+                                                                              "isInvokable": false
+                                                                            },
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "페이지 아래로",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 979,
+                                                                              "y": 405,
+                                                                              "width": 17,
+                                                                              "height": 121,
+                                                                              "selector": "btn-bd39",
+                                                                              "isInvokable": true
+                                                                            },
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "아래쪽 스크롤 화살표",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 979,
+                                                                              "y": 526,
+                                                                              "width": 17,
+                                                                              "height": 17,
+                                                                              "selector": "btn-bd3a",
+                                                                              "isInvokable": true
+                                                                            }
+                                                                          ]
+                                                                        }
+                                                                      ]
+                                                                    }
+                                                                  ]
+                                                                }
+                                                              ]
+                                                            }
+                                                          ]
+                                                        }
+                                                      ]
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "version": "11.12.4.0",
+      "source": "campaign-winboat-20260916-11-02/structure.json",
+      "sourceSha256": "d74933d5a8a7ab45bfc02d5db3fcc9138a56716a78140565553fe643465911dc",
+      "elements": [
+        {
+          "type": "Window",
+          "name": "UIA16_10",
+          "className": "Window",
+          "isEnabled": true,
+          "isOffscreen": false,
+          "x": -8,
+          "y": -8,
+          "width": 1296,
+          "height": 816,
+          "selector": "win-uia1610-f783",
+          "isInvokable": false,
+          "children": [
+            {
+              "type": "Pane",
+              "className": "AutomationIdBorder",
+              "isEnabled": true,
+              "isOffscreen": false,
+              "x": -1,
+              "y": 39,
+              "width": 1282,
+              "height": 762,
+              "selector": "pn-5d2f",
+              "isInvokable": false,
+              "children": [
+                {
+                  "type": "Unknown(50025)",
+                  "className": "DockControl",
+                  "isEnabled": true,
+                  "isOffscreen": false,
+                  "x": -1,
+                  "y": 39,
+                  "width": 1282,
+                  "height": 734,
+                  "selector": "elm-cfbd",
+                  "isInvokable": false,
+                  "children": [
+                    {
+                      "type": "Group",
+                      "automationId": "DockSite",
+                      "className": "DockSite",
+                      "isEnabled": true,
+                      "isOffscreen": false,
+                      "x": -1,
+                      "y": 39,
+                      "width": 1282,
+                      "height": 734,
+                      "selector": "DockSite",
+                      "isInvokable": false,
+                      "children": [
+                        {
+                          "type": "Group",
+                          "automationId": "DockSite.PART_DockHost",
+                          "className": "DockHost",
+                          "isEnabled": true,
+                          "isOffscreen": false,
+                          "x": -1,
+                          "y": 39,
+                          "width": 1282,
+                          "height": 734,
+                          "selector": "DockSite.PART_DockHost",
+                          "isInvokable": false,
+                          "children": [
+                            {
+                              "type": "Group",
+                              "className": "SplitContainer",
+                              "isEnabled": true,
+                              "isOffscreen": false,
+                              "x": 0,
+                              "y": 40,
+                              "width": 1280,
+                              "height": 732,
+                              "selector": "grp-3a52",
+                              "isInvokable": false,
+                              "children": [
+                                {
+                                  "type": "Group",
+                                  "className": "SplitContainer",
+                                  "isEnabled": true,
+                                  "isOffscreen": false,
+                                  "x": 284,
+                                  "y": 40,
+                                  "width": 712,
+                                  "height": 732,
+                                  "selector": "grp-00dd",
+                                  "isInvokable": false,
+                                  "children": [
+                                    {
+                                      "type": "Pane",
+                                      "className": "Workspace",
+                                      "isEnabled": true,
+                                      "isOffscreen": false,
+                                      "x": 284,
+                                      "y": 40,
+                                      "width": 712,
+                                      "height": 530,
+                                      "selector": "pn-393a",
+                                      "isInvokable": false,
+                                      "children": [
+                                        {
+                                          "type": "Tab",
+                                          "automationId": "DockSite.PART_DockHost__SplitContainer[1]__SplitContainer[0]__Workspace__TabbedMdiContainer",
+                                          "className": "TabbedMdiContainer",
+                                          "isEnabled": true,
+                                          "isOffscreen": false,
+                                          "x": 284,
+                                          "y": 40,
+                                          "width": 712,
+                                          "height": 530,
+                                          "selector": "DockSite.PART_DockHost__SplitContainer[1]__SplitContainer[0]__Workspace__TabbedMdiContainer",
+                                          "isInvokable": false,
+                                          "children": [
+                                            {
+                                              "type": "TabItem",
+                                              "name": "Home_Web [MyFirstModule]",
+                                              "className": "DockingWindowContainerTabItem",
+                                              "isEnabled": true,
+                                              "isOffscreen": false,
+                                              "x": 284,
+                                              "y": 40,
+                                              "width": 220,
+                                              "height": 28,
+                                              "selector": "tab-homewebmyfirstm-99ff",
+                                              "isInvokable": false,
+                                              "children": [
+                                                {
+                                                  "type": "Pane",
+                                                  "name": "Mendix.Modeler.Core.View.Editors.TabbedEditorViewModel",
+                                                  "className": "DocumentWindow",
+                                                  "isEnabled": true,
+                                                  "isOffscreen": false,
+                                                  "x": 284,
+                                                  "y": 68,
+                                                  "width": 712,
+                                                  "height": 502,
+                                                  "selector": "pn-mendixmodelerco-c729",
+                                                  "isInvokable": true,
+                                                  "children": [
+                                                    {
+                                                      "type": "Pane",
+                                                      "className": "AutomationIdBorder",
+                                                      "isEnabled": true,
+                                                      "isOffscreen": false,
+                                                      "x": 284,
+                                                      "y": 68,
+                                                      "width": 712,
+                                                      "height": 502,
+                                                      "selector": "pn-68d4",
+                                                      "isInvokable": false,
+                                                      "children": [
+                                                        {
+                                                          "type": "Pane",
+                                                          "className": "AutomationIdBorder",
+                                                          "isEnabled": true,
+                                                          "isOffscreen": false,
+                                                          "x": 284,
+                                                          "y": 68,
+                                                          "width": 712,
+                                                          "height": 502,
+                                                          "selector": "pn-60ea",
+                                                          "isInvokable": false,
+                                                          "children": [
+                                                            {
+                                                              "type": "Pane",
+                                                              "className": "AutomationIdBorder",
+                                                              "isEnabled": true,
+                                                              "isOffscreen": false,
+                                                              "x": 284,
+                                                              "y": 68,
+                                                              "width": 712,
+                                                              "height": 28,
+                                                              "selector": "pn-0f05",
+                                                              "isInvokable": false,
+                                                              "children": [
+                                                                {
+                                                                  "type": "Pane",
+                                                                  "className": "AutomationIdBorder",
+                                                                  "isEnabled": true,
+                                                                  "isOffscreen": false,
+                                                                  "x": 642,
+                                                                  "y": 68,
+                                                                  "width": 354,
+                                                                  "height": 28,
+                                                                  "selector": "pn-bc78",
+                                                                  "isInvokable": false,
+                                                                  "children": [
+                                                                    {
+                                                                      "type": "Pane",
+                                                                      "className": "AutomationIdBorder",
+                                                                      "isEnabled": true,
+                                                                      "isOffscreen": false,
+                                                                      "x": 642,
+                                                                      "y": 68,
+                                                                      "width": 354,
+                                                                      "height": 28,
+                                                                      "selector": "pn-c9d0",
+                                                                      "isInvokable": false,
+                                                                      "children": [
+                                                                        {
+                                                                          "type": "Pane",
+                                                                          "className": "AutomationIdBorder",
+                                                                          "isEnabled": true,
+                                                                          "isOffscreen": false,
+                                                                          "x": 798,
+                                                                          "y": 72,
+                                                                          "width": 213,
+                                                                          "height": 20,
+                                                                          "selector": "pn-1309",
+                                                                          "isInvokable": false,
+                                                                          "children": [
+                                                                            {
+                                                                              "type": "Pane",
+                                                                              "className": "AutomationIdBorder",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 802,
+                                                                              "y": 72,
+                                                                              "width": 205,
+                                                                              "height": 20,
+                                                                              "selector": "pn-30d2",
+                                                                              "isInvokable": false,
+                                                                              "children": [
+                                                                                {
+                                                                                  "type": "Button",
+                                                                                  "name": "Structure mode",
+                                                                                  "className": "Button",
+                                                                                  "isEnabled": true,
+                                                                                  "isOffscreen": false,
+                                                                                  "x": 802,
+                                                                                  "y": 72,
+                                                                                  "width": 102,
+                                                                                  "height": 20,
+                                                                                  "selector": "btn-structuremode-f792",
+                                                                                  "isInvokable": true,
+                                                                                  "children": [
+                                                                                    {
+                                                                                      "type": "Text",
+                                                                                      "name": "Structure mode",
+                                                                                      "className": "Text",
+                                                                                      "isEnabled": true,
+                                                                                      "isOffscreen": false,
+                                                                                      "x": 811,
+                                                                                      "y": 74,
+                                                                                      "width": 85,
+                                                                                      "height": 16,
+                                                                                      "selector": "lbl-structuremode-f3b5",
+                                                                                      "isInvokable": false,
+                                                                                      "children": [
+                                                                                        {
+                                                                                          "type": "Text",
+                                                                                          "name": "Structure mode",
+                                                                                          "className": "TextBlock",
+                                                                                          "isEnabled": true,
+                                                                                          "isOffscreen": false,
+                                                                                          "x": 811,
+                                                                                          "y": 74,
+                                                                                          "width": 85,
+                                                                                          "height": 16,
+                                                                                          "selector": "lbl-structuremode-dd1e",
+                                                                                          "isInvokable": false
+                                                                                        }
+                                                                                      ]
+                                                                                    }
+                                                                                  ]
+                                                                                },
+                                                                                {
+                                                                                  "type": "Button",
+                                                                                  "name": "Design mode",
+                                                                                  "className": "Button",
+                                                                                  "isEnabled": true,
+                                                                                  "isOffscreen": false,
+                                                                                  "x": 905,
+                                                                                  "y": 72,
+                                                                                  "width": 102,
+                                                                                  "height": 20,
+                                                                                  "selector": "btn-designmode-4437",
+                                                                                  "isInvokable": true,
+                                                                                  "children": [
+                                                                                    {
+                                                                                      "type": "Text",
+                                                                                      "name": "Design mode",
+                                                                                      "className": "Text",
+                                                                                      "isEnabled": true,
+                                                                                      "isOffscreen": false,
+                                                                                      "x": 919,
+                                                                                      "y": 74,
+                                                                                      "width": 73,
+                                                                                      "height": 16,
+                                                                                      "selector": "lbl-designmode-b779",
+                                                                                      "isInvokable": false,
+                                                                                      "children": [
+                                                                                        {
+                                                                                          "type": "Text",
+                                                                                          "name": "Design mode",
+                                                                                          "className": "TextBlock",
+                                                                                          "isEnabled": true,
+                                                                                          "isOffscreen": false,
+                                                                                          "x": 919,
+                                                                                          "y": 74,
+                                                                                          "width": 73,
+                                                                                          "height": 16,
+                                                                                          "selector": "lbl-designmode-ce17",
+                                                                                          "isInvokable": false
+                                                                                        }
+                                                                                      ]
+                                                                                    }
+                                                                                  ]
+                                                                                }
+                                                                              ]
+                                                                            }
+                                                                          ]
+                                                                        }
+                                                                      ]
+                                                                    }
+                                                                  ]
+                                                                }
+                                                              ]
+                                                            },
+                                                            {
+                                                              "type": "Pane",
+                                                              "className": "WindowsFormsHost",
+                                                              "isEnabled": true,
+                                                              "isOffscreen": false,
+                                                              "x": 284,
+                                                              "y": 96,
+                                                              "width": 712,
+                                                              "height": 447,
+                                                              "selector": "pn-f501",
+                                                              "isInvokable": false,
+                                                              "children": [
+                                                                {
+                                                                  "type": "Pane",
+                                                                  "automationId": "FormEditorControl",
+                                                                  "className": "WindowsForms10.Window.8.app.0.3b95145_r3_ad1",
+                                                                  "isEnabled": true,
+                                                                  "isOffscreen": false,
+                                                                  "x": 284,
+                                                                  "y": 96,
+                                                                  "width": 712,
+                                                                  "height": 447,
+                                                                  "selector": "FormEditorControl",
+                                                                  "isInvokable": false,
+                                                                  "children": [
+                                                                    {
+                                                                      "type": "Pane",
+                                                                      "automationId": "autoCanvas",
+                                                                      "className": "WindowsForms10.Window.8.app.0.3b95145_r3_ad1",
+                                                                      "isEnabled": true,
+                                                                      "isOffscreen": false,
+                                                                      "x": 284,
+                                                                      "y": 96,
+                                                                      "width": 712,
+                                                                      "height": 447,
+                                                                      "selector": "autoCanvas",
+                                                                      "isInvokable": false,
+                                                                      "children": [
+                                                                        {
+                                                                          "type": "Pane",
+                                                                          "automationId": "viewPort",
+                                                                          "className": "WindowsForms10.Window.8.app.0.3b95145_r3_ad1",
+                                                                          "isEnabled": true,
+                                                                          "isOffscreen": false,
+                                                                          "x": 284,
+                                                                          "y": 96,
+                                                                          "width": 695,
+                                                                          "height": 430,
+                                                                          "selector": "viewPort",
+                                                                          "isInvokable": false
+                                                                        },
+                                                                        {
+                                                                          "type": "ScrollBar",
+                                                                          "automationId": "hScrollBar",
+                                                                          "className": "WindowsForms10.ScrollBar.app.0.3b95145_r3_ad1",
+                                                                          "isEnabled": true,
+                                                                          "isOffscreen": false,
+                                                                          "x": 284,
+                                                                          "y": 526,
+                                                                          "width": 695,
+                                                                          "height": 17,
+                                                                          "selector": "hScrollBar",
+                                                                          "isInvokable": false,
+                                                                          "children": [
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "왼쪽 스크롤 화살표",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 284,
+                                                                              "y": 526,
+                                                                              "width": 17,
+                                                                              "height": 17,
+                                                                              "selector": "btn-59ea",
+                                                                              "isInvokable": true
+                                                                            },
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "페이지 왼쪽으로",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 301,
+                                                                              "y": 526,
+                                                                              "width": 142,
+                                                                              "height": 17,
+                                                                              "selector": "btn-59eb",
+                                                                              "isInvokable": true
+                                                                            },
+                                                                            {
+                                                                              "type": "Thumb",
+                                                                              "name": "위치",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 443,
+                                                                              "y": 526,
+                                                                              "width": 383,
+                                                                              "height": 17,
+                                                                              "selector": "thm-59ec",
+                                                                              "isInvokable": false
+                                                                            },
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "페이지 오른쪽으로",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 826,
+                                                                              "y": 526,
+                                                                              "width": 136,
+                                                                              "height": 17,
+                                                                              "selector": "btn-59ed",
+                                                                              "isInvokable": true
+                                                                            },
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "오른쪽 스크롤 화살표",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 962,
+                                                                              "y": 526,
+                                                                              "width": 17,
+                                                                              "height": 17,
+                                                                              "selector": "btn-59ee",
+                                                                              "isInvokable": true
+                                                                            }
+                                                                          ]
+                                                                        },
+                                                                        {
+                                                                          "type": "ScrollBar",
+                                                                          "automationId": "vScrollBar",
+                                                                          "className": "WindowsForms10.ScrollBar.app.0.3b95145_r3_ad1",
+                                                                          "isEnabled": true,
+                                                                          "isOffscreen": false,
+                                                                          "x": 979,
+                                                                          "y": 96,
+                                                                          "width": 17,
+                                                                          "height": 447,
+                                                                          "selector": "vScrollBar",
+                                                                          "isInvokable": false,
+                                                                          "children": [
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "위쪽 스크롤 화살표",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 979,
+                                                                              "y": 96,
+                                                                              "width": 17,
+                                                                              "height": 17,
+                                                                              "selector": "btn-b6ea",
+                                                                              "isInvokable": true
+                                                                            },
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "페이지 위로",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 979,
+                                                                              "y": 113,
+                                                                              "width": 17,
+                                                                              "height": 129,
+                                                                              "selector": "btn-b6eb",
+                                                                              "isInvokable": true
+                                                                            },
+                                                                            {
+                                                                              "type": "Thumb",
+                                                                              "name": "위치",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 979,
+                                                                              "y": 242,
+                                                                              "width": 17,
+                                                                              "height": 236,
+                                                                              "selector": "thm-b6ec",
+                                                                              "isInvokable": false
+                                                                            },
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "페이지 아래로",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 979,
+                                                                              "y": 478,
+                                                                              "width": 17,
+                                                                              "height": 48,
+                                                                              "selector": "btn-b6ed",
+                                                                              "isInvokable": true
+                                                                            },
+                                                                            {
+                                                                              "type": "Button",
+                                                                              "name": "아래쪽 스크롤 화살표",
+                                                                              "isEnabled": true,
+                                                                              "isOffscreen": false,
+                                                                              "x": 979,
+                                                                              "y": 526,
+                                                                              "width": 17,
+                                                                              "height": 17,
+                                                                              "selector": "btn-b6ee",
+                                                                              "isInvokable": true
+                                                                            }
+                                                                          ]
+                                                                        }
+                                                                      ]
+                                                                    }
+                                                                  ]
+                                                                }
+                                                              ]
+                                                            }
+                                                          ]
+                                                        }
+                                                      ]
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

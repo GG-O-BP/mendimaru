@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory = $true)][ValidatePattern('^[0-9]{15,20}$')][string]$StartTimeUtcTicks,
     [Parameter(Mandatory = $true)][ValidatePattern('^(10|11)\.[0-9]+\.[0-9]+\.[0-9]+$')][string]$FileVersion,
     [Parameter(Mandatory = $true)][string]$OutputDirectory,
-    [ValidateRange(5, 60)][int]$TimeoutSeconds = 20
+    [ValidateRange(5, 60)][int]$TimeoutSeconds = 45
 )
 
 # Offline PoC tool, intentionally separate from the product's UI capabilities.
@@ -44,6 +44,17 @@ $script = '& ' + (Literal $worker) + ' -StudioProcessId ' + $StudioProcessId +
     ' -OutputDirectory ' + (Literal $directory.FullName)
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
 $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+function Stop-Worker([Diagnostics.Process]$process) {
+    if (-not $process.HasExited) {
+        try { $process.Kill() }
+        catch {
+            # The worker may finish between HasExited and Kill.
+            if (-not $process.HasExited) { throw }
+        }
+    }
+    $null = $process.WaitForExit(5000)
+}
+
 $child = $null
 $result = @{ schemaVersion = 1; status = 'fail'; reason = 'worker-start-failed' }
 try {
@@ -51,9 +62,8 @@ try {
     # bound that call, so a separate MTA process owns every UIA/GDI operation.
     $child = Start-Process -FilePath $powershell -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-Mta', '-EncodedCommand', $encoded) -WindowStyle Hidden -PassThru
     if (-not $child.WaitForExit($TimeoutSeconds * 1000)) {
-        $child.Kill()
-        $null = $child.WaitForExit(5000)
         $result.reason = 'provider-timeout'
+        Stop-Worker $child
     } elseif ($child.ExitCode -eq 0 -and (Test-Path -LiteralPath (Join-Path $directory.FullName 'snapshot.json'))) {
         $snapshot = Get-Content -LiteralPath (Join-Path $directory.FullName 'snapshot.json') -Raw | ConvertFrom-Json
         if ($snapshot.windowsTruncated -or @($snapshot.windows | Where-Object { $_.truncated }).Count -gt 0) {
@@ -64,10 +74,21 @@ try {
         }
     } else {
         $result.reason = 'worker-failed'
+        $failurePath = Join-Path $directory.FullName 'worker-failure.json'
+        if (Test-Path -LiteralPath $failurePath) {
+            $failure = [IO.File]::ReadAllText($failurePath) | ConvertFrom-Json
+            $allowed = @('initialization-failed', 'stale-or-wrong-process', 'no-interactive-desktop',
+                'no-visible-window', 'provider-failed', 'desktop-changed-during-capture')
+            if ($failure.reason -in $allowed) { $result.reason = [string]$failure.reason }
+        }
     }
 } finally {
     if ($null -ne $child) {
-        if (-not $child.HasExited) { $child.Kill() }
+        try { Stop-Worker $child }
+        catch { $result.status = 'fail'; $result.reason = 'worker-cleanup-failed' }
+        $result.workerProcessId = $child.Id
+        $result.workerExited = $child.HasExited
+        if (-not $result.workerExited) { $result.status = 'fail'; $result.reason = 'worker-cleanup-failed' }
         $child.Dispose()
     }
     $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $directory.FullName 'supervisor.json') -Encoding UTF8
