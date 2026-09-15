@@ -159,3 +159,19 @@ record layout changes, add a PR item for each step below:
 Fixture builders must not bypass or weaken schema validation, file-type checks,
 permissions, bounded reads, hashes, or process identity checks. They also must
 not include real host paths, credentials, command lines, or remote output.
+
+## VM use across processes (#150)
+
+The ordinary Rust suite includes real subprocess reader/writer, different-cache/
+Compose-copy identity, writer competition, timeout/cancel/SIGKILL, simulated PID
+reuse, stale-generation, forbidden upgrade, and file-trust tests. Real Chromium fixtures for linked Runtime and plain URL targets in another cache
+hold navigation open while Runtime start/stop/recreate must return a
+structured busy precondition and preserve Compose, container inspection, and the
+keeper; after release, one cleanup succeeds. These fixtures do not mutate a real VM.
+
+No Runtime/session record fields or contract schemas change. Existing 3.0.0 legacy
+invalidation and 4.0.0 creation/discovery, authenticated post-success recovery,
+Compose rollback, maintenance locks, and keeper socket regressions remain in the
+ordinary suite. The new 16-byte lock-generation hint never determines process
+liveness, and empty/stale contents cannot evict a live owner. See the
+[identity, trust, and acquisition policy](winboat-vm-use.md).

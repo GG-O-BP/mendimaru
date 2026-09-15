@@ -326,3 +326,12 @@ the compiled executable and runs that exact smoke suite through both a real
 Portable supervisor URL and a WinBoat loopback adapter URL. It also verifies
 exit/stream semantics and Runtime readiness rejection, re-queries artifacts,
 checks integrity, and scans trace members again.
+
+## Shared WinBoat use
+
+WinBoat Runtime targets automatically hold shared VM use for the complete browser
+command. For a plain URL in the configured VM, add `--winboat-use`; separate
+config/cache directories still coordinate through the same management identity.
+Lifecycle changes return a bounded, retryable busy precondition while tests hold
+use. See [VM use policy and boundaries](winboat-vm-use.md) for modes, timeout and
+cancellation, generations, and the advisory trust boundary.

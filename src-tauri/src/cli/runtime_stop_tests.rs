@@ -63,6 +63,8 @@ impl Fixture {
         let stopping = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stopped = stopping.clone();
         let unready = path.join("http-unready");
+        let browser_hold = path.join("browser-held");
+        let browser_release = path.join("browser-release");
         let health = thread::spawn(move || {
             while !stopped.load(std::sync::atomic::Ordering::Relaxed) {
                 let (mut stream, _) = listener.accept().unwrap();
@@ -71,6 +73,14 @@ impl Fixture {
                     .unwrap();
                 let mut request = [0; 2048];
                 let _ = stream.read(&mut request);
+                if request.starts_with(b"GET /hold HTTP/") {
+                    fs::write(&browser_hold, b"held").unwrap();
+                    while !browser_release.exists()
+                        && !stopped.load(std::sync::atomic::Ordering::Relaxed)
+                    {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                }
                 let response = if unready.exists() && request.starts_with(b"GET / HTTP/") {
                     b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                         .as_slice()
@@ -81,13 +91,15 @@ impl Fixture {
                 let _ = stream.write_all(response);
             }
         });
-        let original = "services:\n  windows:\n    image: ghcr.io/dockur/windows:e2e-fixture\n    container_name: WinBoat\n    volumes:\n      - fixture-storage:/storage\n    ports:\n      - 127.0.0.1:47280:7148/tcp\nvolumes:\n  fixture-storage: {}\n".to_string();
+        let vm_name = crate::contracts::secure_identifier("vm").unwrap();
+        let original = "services:\n  windows:\n    image: ghcr.io/dockur/windows:e2e-fixture\n    labels:\n      io.winboat.managed: 'true'\n    container_name: WinBoat\n    volumes:\n      - fixture-storage:/storage\n    ports:\n      - 127.0.0.1:47280:7148/tcp\nvolumes:\n  fixture-storage: {}\n".replace("container_name: WinBoat", &format!("container_name: {vm_name}"));
         let managed = original.replace(
             "    ports:\n",
             "    ports:\n      - 127.0.0.1:8080:8080/tcp\n",
         );
         fs::write(path.join("compose.yml"), &managed).unwrap();
         let mut config = super::tests::app_config(path);
+        config.container_name = vm_name;
         config.compose_file = path.join("compose.yml").to_string_lossy().into_owned();
         config.api_url = format!("http://{health_address}");
         config.startup_timeout_seconds = 15;
@@ -405,6 +417,26 @@ fn isolated_runtime_stop_process() {
         tauri::async_runtime::block_on(serve_session_keeper(listener, guard, &session_id));
         assert!(crate::winboat::registered_client_sessions().is_empty());
         fs::write(root.join("keeper-finished"), b"finished").unwrap();
+    } else if mode == "runtime-start" {
+        let execution = execute(
+            &[
+                "runtime",
+                "start",
+                "--mode",
+                "studio-run-locally",
+                "--json",
+                "--timeout-seconds",
+                "15",
+            ]
+            .map(OsString::from),
+        )
+        .unwrap();
+        fs::write(root.join("runtime-start.json"), execution.stderr).unwrap();
+    } else if mode == "vm-recreate" {
+        let config =
+            crate::application::load_config(&AppPaths::discover_for_cli().unwrap()).unwrap();
+        let result = tauri::async_runtime::block_on(crate::winboat::recreate_container(&config));
+        assert_eq!(result.unwrap_err(), crate::winboat::vm_use::BUSY);
     } else if mode == "runtime-reads" {
         for action in ["status", "wait", "url", "logs", "list"] {
             let mut args = vec!["runtime", action, "--json", "--timeout-seconds", "15"];
@@ -415,6 +447,47 @@ fn isolated_runtime_stop_process() {
                 execute(&args.into_iter().map(OsString::from).collect::<Vec<_>>()).unwrap();
             assert_eq!(execution.exit_code, EXIT_OK, "{}", execution.stderr);
         }
+    } else if mode == "browser-url" {
+        // Join from another config/cache/Compose copy with no Runtime record.
+        let mut config =
+            crate::application::load_config(&AppPaths::discover_for_cli().unwrap()).unwrap();
+        let isolated = root.join("isolated");
+        fs::create_dir_all(&isolated).unwrap();
+        fs::copy(&config.compose_file, isolated.join("compose.yml")).unwrap();
+        config.compose_file = isolated.join("compose.yml").to_string_lossy().into_owned();
+        fs::write(
+            isolated.join("config.json"),
+            serde_json::to_vec(&config).unwrap(),
+        )
+        .unwrap();
+        std::env::set_var("MENDIMARU_CONFIG_DIR", &isolated);
+        std::env::set_var("MENDIMARU_CACHE_DIR", isolated.join("cache"));
+        let suite = root.join("smoke.browser.json");
+        let execution = execute(
+            &[
+                "browser",
+                "test",
+                "--base-url",
+                &config.api_url,
+                "--winboat-use",
+                "--suite-path",
+                suite.to_str().unwrap(),
+                "--json",
+                "--timeout-seconds",
+                "15",
+            ]
+            .map(OsString::from),
+        )
+        .unwrap();
+        fs::write(
+            root.join("browser-url.json"),
+            if execution.exit_code == EXIT_OK {
+                execution.stdout
+            } else {
+                execution.stderr
+            },
+        )
+        .unwrap();
     } else if mode == "browser" || mode == "browser-local" {
         if mode == "browser-local" {
             let config =
@@ -770,4 +843,59 @@ fn runtime_stop_refuses_untrusted_lock_files_without_touching_compose() {
             .to_string()
             .contains(fixture.root.path().to_str().unwrap()));
     }
+}
+
+#[test]
+fn live_browser_use_prevents_stop_start_and_recreate_until_test_finishes() {
+    assert_browser_protects_vm("browser");
+}
+
+#[test]
+fn plain_url_browser_in_another_cache_protects_the_same_vm() {
+    assert_browser_protects_vm("browser-url");
+}
+
+fn assert_browser_protects_vm(browser_mode: &str) {
+    let fixture = Fixture::new();
+    fixture.prepare_browser();
+    let suite = fixture.path("smoke.browser.json");
+    fs::write(
+        &suite,
+        fs::read_to_string(&suite)
+            .unwrap()
+            .replace("\"path\":\"/\"", "\"path\":\"/hold\""),
+    )
+    .unwrap();
+    let mut keeper = fixture.spawn("keeper-observe");
+    until(|| fixture.path("keeper-ready").exists());
+    let compose = fs::read(fixture.path("compose.yml")).unwrap();
+    let inspection = fs::read(fixture.path("inspect.json")).unwrap();
+    let mut browser = fixture.spawn(browser_mode);
+    until(|| fixture.path("browser-held").exists());
+    // Request actual CLI lifecycle operations while Chromium is inside the test.
+    let mut stop = fixture.spawn("stop");
+    let mut start = fixture.spawn("runtime-start");
+    let mut recreate = fixture.spawn("vm-recreate");
+    stop.finish();
+    start.finish();
+    recreate.finish();
+    for mode in ["stop", "runtime-start"] {
+        let result = fixture.result(mode);
+        assert_eq!(result["error"]["code"], "precondition_failed", "{result}");
+        assert_eq!(result["error"]["message"], crate::winboat::vm_use::BUSY);
+        assert_eq!(result["error"]["retryable"], true);
+        assert!(!result
+            .to_string()
+            .contains(fixture.root.path().to_str().unwrap()));
+    }
+    assert_eq!(fixture.calls(), 0);
+    assert_eq!(fs::read(fixture.path("compose.yml")).unwrap(), compose);
+    assert_eq!(fs::read(fixture.path("inspect.json")).unwrap(), inspection);
+    assert!(keeper.0.try_wait().unwrap().is_none());
+    fs::write(fixture.path("browser-release"), b"").unwrap();
+    browser.finish();
+    assert_eq!(fixture.result(browser_mode)["data"]["outcome"], "passed");
+    fixture.confirm_studio_exit();
+    keeper.finish();
+    fixture.assert_stopped(1);
 }

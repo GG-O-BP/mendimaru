@@ -342,6 +342,17 @@ pub(crate) async fn available(config: &AppConfig) -> bool {
 }
 
 pub(crate) async fn preview(config: &AppConfig) -> Result<Preview, String> {
+    let lease = crate::winboat::vm_use::acquire(
+        config,
+        crate::winboat::vm_use::Mode::Exclusive,
+        crate::contracts::CapabilityId::StudioStart,
+    )
+    .await
+    .map_err(|error| error.message)?;
+    lease.run(preview_with_lease(config)).await
+}
+
+async fn preview_with_lease(config: &AppConfig) -> Result<Preview, String> {
     let _lease = super::maintenance::acquire(config, true)?;
     let plan = plan(config).await?;
     let preview = plan.preview.clone();
@@ -490,6 +501,21 @@ pub(crate) async fn recover(
     id: &str,
     confirmed: bool,
 ) -> Result<Outcome, String> {
+    let lease = super::vm_use::acquire(
+        config,
+        super::vm_use::Mode::Exclusive,
+        crate::contracts::CapabilityId::StudioStart,
+    )
+    .await
+    .map_err(|error| error.message)?;
+    lease.run(recover_with_lease(config, id, confirmed)).await
+}
+
+async fn recover_with_lease(
+    config: &AppConfig,
+    id: &str,
+    confirmed: bool,
+) -> Result<Outcome, String> {
     if !confirmed {
         return Err(crate::tr!("error-nvram-confirmation-required"));
     }
@@ -536,6 +562,21 @@ pub(crate) async fn recover(
 }
 
 pub(crate) async fn restore(
+    config: &AppConfig,
+    id: &str,
+    confirmed: bool,
+) -> Result<Outcome, String> {
+    let lease = super::vm_use::acquire(
+        config,
+        super::vm_use::Mode::Exclusive,
+        crate::contracts::CapabilityId::StudioStart,
+    )
+    .await
+    .map_err(|error| error.message)?;
+    lease.run(restore_with_lease(config, id, confirmed)).await
+}
+
+async fn restore_with_lease(
     config: &AppConfig,
     id: &str,
     confirmed: bool,

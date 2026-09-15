@@ -563,6 +563,19 @@ pub(crate) async fn start(
     config: &AppConfig,
     request: &RuntimeStartRequest,
 ) -> BackendResult<RuntimeStatus> {
+    let lease = crate::winboat::vm_use::acquire(
+        config,
+        crate::winboat::vm_use::Mode::Exclusive,
+        crate::contracts::CapabilityId::RuntimeStart,
+    )
+    .await?;
+    lease.run(start_with_lease(config, request)).await
+}
+
+async fn start_with_lease(
+    config: &AppConfig,
+    request: &RuntimeStartRequest,
+) -> BackendResult<RuntimeStatus> {
     let _maintenance = super::maintenance::shared(config)
         .map_err(|_| super::startup::failure(BackendErrorCode::PreconditionFailed))?;
     validate_start_request(request)?;
@@ -651,6 +664,26 @@ pub(crate) async fn start(
 }
 
 pub(super) async fn prepare_studio_session(
+    config: &AppConfig,
+    project_mpr_path: Option<&str>,
+    readiness_timeout_seconds: u64,
+) -> BackendResult<String> {
+    let lease = crate::winboat::vm_use::acquire(
+        config,
+        crate::winboat::vm_use::Mode::Exclusive,
+        crate::contracts::CapabilityId::RuntimeStart,
+    )
+    .await?;
+    lease
+        .run(prepare_studio_session_with_lease(
+            config,
+            project_mpr_path,
+            readiness_timeout_seconds,
+        ))
+        .await
+}
+
+async fn prepare_studio_session_with_lease(
     config: &AppConfig,
     project_mpr_path: Option<&str>,
     readiness_timeout_seconds: u64,
@@ -1000,6 +1033,16 @@ async fn create_session(
 }
 
 pub(crate) async fn status(config: &AppConfig, session_id: &str) -> BackendResult<RuntimeStatus> {
+    let lease = crate::winboat::vm_use::acquire(
+        config,
+        crate::winboat::vm_use::Mode::Shared,
+        crate::contracts::CapabilityId::RuntimeStatus,
+    )
+    .await?;
+    lease.run(status_with_lease(config, session_id)).await
+}
+
+async fn status_with_lease(config: &AppConfig, session_id: &str) -> BackendResult<RuntimeStatus> {
     let (directory, mut record) = load_session(session_id, CapabilityId::RuntimeStatus)?;
     if record.state != RuntimeState::Stopped {
         refresh(config, &directory, &mut record).await?;
@@ -1008,6 +1051,16 @@ pub(crate) async fn status(config: &AppConfig, session_id: &str) -> BackendResul
 }
 
 pub(crate) async fn wait(config: &AppConfig, session_id: &str) -> BackendResult<RuntimeStatus> {
+    let lease = crate::winboat::vm_use::acquire(
+        config,
+        crate::winboat::vm_use::Mode::Shared,
+        crate::contracts::CapabilityId::RuntimeWait,
+    )
+    .await?;
+    lease.run(wait_with_lease(config, session_id)).await
+}
+
+async fn wait_with_lease(config: &AppConfig, session_id: &str) -> BackendResult<RuntimeStatus> {
     let (directory, mut record) = load_session(session_id, CapabilityId::RuntimeWait)?;
     if record.state == RuntimeState::Stopped {
         return Ok(status_from_record(&record));
@@ -1073,6 +1126,16 @@ pub(crate) async fn url(config: &AppConfig, session_id: &str) -> BackendResult<S
 }
 
 pub(crate) async fn stop(config: &AppConfig, session_id: &str) -> BackendResult<()> {
+    let lease = crate::winboat::vm_use::acquire(
+        config,
+        crate::winboat::vm_use::Mode::Exclusive,
+        crate::contracts::CapabilityId::RuntimeStop,
+    )
+    .await?;
+    lease.run(stop_with_lease(config, session_id)).await
+}
+
+async fn stop_with_lease(config: &AppConfig, session_id: &str) -> BackendResult<()> {
     let _maintenance = super::maintenance::shared(config)
         .map_err(|_| super::startup::failure(BackendErrorCode::PreconditionFailed))?;
     let (_, record) = load_session(session_id, CapabilityId::RuntimeStop)?;
