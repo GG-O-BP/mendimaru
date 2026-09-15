@@ -2265,8 +2265,10 @@ fn success_execution(
         }
     }
     stdout.push_str(&json_line(&envelope));
-    let exit_code = if command == "browser.test"
-        && output.data.get("outcome").and_then(Value::as_str) == Some("failed")
+    let exit_code = if (command == "browser.doctor"
+        && output.data.get("ready").and_then(Value::as_bool) == Some(false))
+        || (command == "browser.test"
+            && output.data.get("outcome").and_then(Value::as_str) == Some("failed"))
     {
         EXIT_OPERATION_FAILED
     } else {

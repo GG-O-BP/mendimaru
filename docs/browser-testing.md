@@ -29,7 +29,54 @@ mendimaru browser doctor --json
 
 `doctor` reports the Node.js, required minimum Node.js, Playwright, and Chromium
 versions and separately reports whether Node.js is supported and Chromium is
-installed and launchable. Only the explicit
+installed and launchable. The CLI checks the runner and Node.js before invoking
+JavaScript, so a missing or broken runner still produces a complete report.
+`checks` always contains `runner`, `node`, `node_version`, `js_dependencies`, and
+`chromium`, in that order. Each check has a `passed`, `failed`, or `skipped`
+status, a safe message, and an action. Failed checks include a stable cause code:
+
+| Cause code                | Action                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------- |
+| `runner_missing`          | Reinstall the browser resources or correct the runner override.               |
+| `runner_unreadable`       | Restore read permission on the browser resources.                             |
+| `unsafe_override`         | Unset the affected override or use an absolute, direct regular file.          |
+| `node_missing`            | Install Node.js and check PATH or the Node override.                          |
+| `node_spawn_denied`       | Check executable permissions and filesystem execution restrictions.           |
+| `node_spawn_failed`       | Install a Node.js executable compatible with the host.                        |
+| `node_unsupported`        | Upgrade Node.js to 22.22.2 or later.                                          |
+| `node_probe_failed`       | Check that the configured executable returns a valid Node.js version.         |
+| `probe_timeout`           | Check Node.js/Chromium startup and rerun doctor.                              |
+| `js_dependencies_missing` | Reinstall the locked browser dependencies; use `npm ci` in a source checkout. |
+| `runner_failed`           | Inspect the private diagnostic and reinstall matching resources/dependencies. |
+| `runner_output_invalid`   | Reinstall matching resources and remove stale runner overrides.               |
+| `chromium_unavailable`    | Install the pinned Chromium build and check its system dependencies.          |
+
+Runner and Node override failures are reported independently. Later checks that
+cannot run are marked `skipped`; unobserved Node.js/Playwright versions are
+`"unavailable"`. Both a healthy and an unhealthy inspection return one success
+envelope (`ok: true`) with structured `data` on stdout and no stderr. The CLI
+exits **0 when ready and 1 when not ready**; `ok` means the inspection completed,
+while `data.ready` indicates toolchain readiness. Unsupported platforms and
+invalid CLI arguments retain the general CLI error behavior. The internal
+JavaScript runner's doctor response retains its existing shape; the host adds
+the prerequisite checks and diagnostic metadata.
+
+An unhealthy inspection retains at most one private report at
+`<Mendimaru cache>/browser-tests/doctor/latest.json` (directory mode 0700, file
+mode 0600 on Unix, at most 16 KiB). `diagnostic.reference` is the opaque
+`browser-doctor-latest` identifier; `diagnostic.stored` reports whether saving
+succeeded. An unavailable or unsafe cache does not suppress the checks. A later
+failure atomically replaces this report. A healthy inspection leaves the latest
+failure available for troubleshooting.
+
+Node.js version probing is limited to 2 seconds and runner inspection to 20
+seconds, with bounded process-tree cleanup afterward. Each probe captures at
+most 64 KiB per output stream while draining excess output. Diagnostics retain
+only allowlisted error kinds (such as `ERR_MODULE_NOT_FOUND` or `SyntaxError`),
+known dependency names and truncation flags. Raw stderr, arbitrary module names,
+stack traces, source excerpts, local paths and tokens are discarded, including
+when JavaScript fails before it can emit JSON. Version fields are validated
+before publication. No doctor check downloads resources. Only the explicit
 `install chromium` command may download it. CI should install browser system
 dependencies and Chromium before running the suite:
 
