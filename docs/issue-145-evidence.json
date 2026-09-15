@@ -1,0 +1,174 @@
+{
+  "issue": 145,
+  "dateUtc": "2026-09-15",
+  "baseCommit": "b29b2a0",
+  "studioProVersion": "11.12.3",
+  "bundlerReproduction": {
+    "platform": "win32",
+    "nodeVersion": "v24.10.0",
+    "rspackVersion": "1.7.11",
+    "results": [
+      {
+        "name": "local-absolute",
+        "builds": [
+          {
+            "cssBytes": 47,
+            "cssSha256": "19530972504b080f60ec11acfd67aeb71a4932aecf3d51eb6ad70b4f7051ebee",
+            "externalCss": 0,
+            "warnings": 0
+          },
+          {
+            "cssBytes": 104,
+            "cssSha256": "baa7db7f3e2fe4930d7d6fcb26f939a904a442b5616f1e0c54285bb4e039b586",
+            "externalCss": 0,
+            "warnings": 0
+          }
+        ]
+      },
+      {
+        "name": "unc-forward",
+        "builds": [
+          {
+            "cssBytes": 0,
+            "cssSha256": null,
+            "externalCss": 1,
+            "warnings": 0
+          },
+          {
+            "cssBytes": 0,
+            "cssSha256": null,
+            "externalCss": 1,
+            "warnings": 0
+          }
+        ]
+      },
+      {
+        "name": "unc-native",
+        "builds": [
+          {
+            "cssBytes": 47,
+            "cssSha256": "19530972504b080f60ec11acfd67aeb71a4932aecf3d51eb6ad70b4f7051ebee",
+            "externalCss": 0,
+            "warnings": 0
+          },
+          {
+            "cssBytes": 104,
+            "cssSha256": "baa7db7f3e2fe4930d7d6fcb26f939a904a442b5616f1e0c54285bb4e039b586",
+            "externalCss": 0,
+            "warnings": 0
+          }
+        ]
+      },
+      {
+        "name": "unc-relative",
+        "builds": [
+          {
+            "cssBytes": 47,
+            "cssSha256": "19530972504b080f60ec11acfd67aeb71a4932aecf3d51eb6ad70b4f7051ebee",
+            "externalCss": 0,
+            "warnings": 0
+          },
+          {
+            "cssBytes": 104,
+            "cssSha256": "baa7db7f3e2fe4930d7d6fcb26f939a904a442b5616f1e0c54285bb4e039b586",
+            "externalCss": 0,
+            "warnings": 0
+          }
+        ]
+      },
+      {
+        "name": "no-css",
+        "builds": [
+          {
+            "cssBytes": 0,
+            "cssSha256": null,
+            "externalCss": 0,
+            "warnings": 0
+          },
+          {
+            "cssBytes": 0,
+            "cssSha256": null,
+            "externalCss": 0,
+            "warnings": 0
+          }
+        ]
+      }
+    ]
+  },
+  "browserReproduction": {
+    "browserVersion": "151.0.7922.34",
+    "cases": [
+      {
+        "name": "local-absolute",
+        "style": {
+          "color": "rgb(17, 34, 51)",
+          "background": "rgb(51, 34, 17)",
+          "text": "Loaded"
+        },
+        "networkFailures": 0,
+        "consoleErrors": 0,
+        "pageErrors": 0
+      },
+      {
+        "name": "unc-forward",
+        "style": {
+          "color": "rgb(0, 0, 0)",
+          "background": "rgba(0, 0, 0, 0)",
+          "text": "Loading"
+        },
+        "networkFailures": 3,
+        "consoleErrors": 2,
+        "pageErrors": 0
+      },
+      {
+        "name": "unc-native",
+        "style": {
+          "color": "rgb(17, 34, 51)",
+          "background": "rgb(51, 34, 17)",
+          "text": "Loaded"
+        },
+        "networkFailures": 0,
+        "consoleErrors": 0,
+        "pageErrors": 0
+      },
+      {
+        "name": "unc-relative",
+        "style": {
+          "color": "rgb(17, 34, 51)",
+          "background": "rgb(51, 34, 17)",
+          "text": "Loaded"
+        },
+        "networkFailures": 0,
+        "consoleErrors": 0,
+        "pageErrors": 0
+      },
+      {
+        "name": "no-css",
+        "style": {
+          "color": "rgb(0, 0, 0)",
+          "background": "rgba(0, 0, 0, 0)",
+          "text": "Loaded"
+        },
+        "networkFailures": 2,
+        "consoleErrors": 1,
+        "pageErrors": 0
+      }
+    ]
+  },
+  "mpkCssExtraction": [
+    {
+      "widget": "LanguageSelector",
+      "mpkSha256": "85238f7851be1bd703e672d08448246cb7f13c9e6766adad872e6e8f4bda1e07",
+      "cssBytes": 1514,
+      "cssSha256": "557ae7c3994b4bc980416e2787cb99124bf10e92dfdea882bca0d47c8ed5cae1",
+      "deploymentBytesMatch": true
+    },
+    {
+      "widget": "MendixIronCalc",
+      "mpkSha256": "d963b43ead1a1c14ca425ec0ff19de1be3342b7a0f82311e723ede04dbc7f9a1",
+      "cssBytes": 231718,
+      "cssSha256": "5d7e380c2893726c3dc3acc18a462f97752e90aed8691d245e6818d432ff01bd",
+      "deploymentBytesMatch": true
+    }
+  ]
+}

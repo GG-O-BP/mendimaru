@@ -252,6 +252,92 @@ try {
     ),
   );
   assert(networkReport.entries.some(({ status }) => status === 503));
+  assert(
+    networkReport.entries.every(({ diagnostic }) => diagnostic === undefined),
+  );
+
+  for (const [kind, policy, diagnosed, failed] of [
+    ["missing", { failOnConsoleError: false }, true, true],
+    ["nested", {}, true, true],
+    ["missing-assertion", {}, true, true],
+    ["missing-console", { failOnNetworkFailure: false }, true, true],
+    [
+      "missing-allowed",
+      { failOnConsoleError: false, failOnNetworkFailure: false },
+      true,
+      false,
+    ],
+    ["present", {}, false, false],
+    ["unavailable", {}, false, true],
+    ["unrelated", {}, false, true],
+    ["foreign", {}, false, true],
+    ["fetch", {}, false, true],
+  ]) {
+    const cssRun = await runSuite({
+      baseUrl,
+      mode: "studio-run-locally",
+      name: `widget-css-${kind}`,
+      policy,
+      suite: {
+        schemaVersion: "1.0.0",
+        name: "Widget CSS diagnostics",
+        tests: [
+          {
+            name: kind,
+            steps: [
+              {
+                action: "goto",
+                path: `/widget-css-fixture?kind=${kind}`,
+                waitUntil: "load",
+              },
+              {
+                action: "expectText",
+                locator: { by: "role", role: "heading", name: "Loaded" },
+                value:
+                  kind === "missing-assertion" ? "Missing heading" : "Loaded",
+              },
+            ],
+          },
+        ],
+      },
+    });
+    assert.equal(cssRun.result.outcome, failed ? "failed" : "passed", kind);
+    const report = JSON.parse(
+      await fs.readFile(
+        path.join(cssRun.directory, "network-failures.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(
+      report.entries.some(
+        ({ diagnostic }) => diagnostic?.code === "mendix_widget_css_missing",
+      ),
+      diagnosed,
+      kind,
+    );
+    assert.equal(
+      (cssRun.result.tests[0].failure ?? "").includes("Check MPK CSS"),
+      diagnosed && failed,
+      kind,
+    );
+    if (diagnosed) {
+      assert(
+        report.entries.some(
+          ({ status, reason }) =>
+            status === 404 && reason === "http-error-status",
+        ),
+      );
+      assert.equal(JSON.stringify(report).includes("private-stamp"), false);
+      if (failed) {
+        const html = await fs.readFile(
+          path.join(cssRun.directory, "report.html"),
+          "utf8",
+        );
+        assert(html.includes("widget-css-diagnostics.md"));
+      }
+    }
+    await verifyNoSecret(cssRun.directory);
+  }
 
   await runCompressibleTraceRejection(baseUrl);
   const recovery = await runSuite({
@@ -276,7 +362,7 @@ try {
   assert.match(html, /Outcome: passed/);
 
   process.stdout.write(
-    "browser E2E: 13 scenarios passed (Portable, WinBoat metadata, env/storage auth, assertion/page/navigation/origin failures, console/network policy, missing Chromium, video/HAR, bounded malicious trace, recovery, secret scan)\n",
+    "browser E2E: 23 scenarios passed (Portable, WinBoat metadata, env/storage auth, assertion/page/navigation/origin failures, console/network policy, widget CSS diagnostics, missing Chromium, video/HAR, bounded malicious trace, recovery, secret scan)\n",
   );
 } finally {
   server.kill("SIGTERM");
@@ -411,9 +497,15 @@ async function runSuite({
       runtimeVersion: "11.12.2",
     },
     policy,
-    suite: JSON.parse(
-      await fs.readFile(path.join(repository, "tests/browser", suite), "utf8"),
-    ),
+    suite:
+      typeof suite === "string"
+        ? JSON.parse(
+            await fs.readFile(
+              path.join(repository, "tests/browser", suite),
+              "utf8",
+            ),
+          )
+        : suite,
   };
   const result = await invokeRunner("run", request);
   assert.equal(result.sessionId, sessionId);
