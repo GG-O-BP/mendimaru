@@ -64,6 +64,7 @@ impl Fixture {
         let stopped = stopping.clone();
         let unready = path.join("http-unready");
         let browser_hold = path.join("browser-held");
+        let frontend_hold = path.join("frontend-hold");
         let browser_release = path.join("browser-release");
         let health = thread::spawn(move || {
             while !stopped.load(std::sync::atomic::Ordering::Relaxed) {
@@ -73,7 +74,10 @@ impl Fixture {
                     .unwrap();
                 let mut request = [0; 2048];
                 let _ = stream.read(&mut request);
-                if request.starts_with(b"GET /hold HTTP/") {
+                if request.starts_with(b"GET /hold HTTP/")
+                    || (frontend_hold.exists()
+                        && String::from_utf8_lossy(&request).contains("HeadlessChrome"))
+                {
                     fs::write(&browser_hold, b"held").unwrap();
                     while !browser_release.exists()
                         && !stopped.load(std::sync::atomic::Ordering::Relaxed)
@@ -447,7 +451,25 @@ fn isolated_runtime_stop_process() {
                 execute(&args.into_iter().map(OsString::from).collect::<Vec<_>>()).unwrap();
             assert_eq!(execution.exit_code, EXIT_OK, "{}", execution.stderr);
         }
-    } else if mode == "browser-url" {
+    } else if mode == "frontend-health" {
+        let execution = execute(
+            &[
+                "browser",
+                "frontend-health",
+                "--runtime-session-id",
+                RUNTIME_ID,
+                "--observation-ms",
+                "100",
+                "--json",
+                "--timeout-seconds",
+                "15",
+            ]
+            .map(OsString::from),
+        )
+        .unwrap();
+        assert!(execution.stderr.is_empty(), "{}", execution.stderr);
+        fs::write(root.join("frontend-health.json"), execution.stdout).unwrap();
+    } else if mode == "browser-url" || mode == "frontend-url" {
         // Join from another config/cache/Compose copy with no Runtime record.
         let mut config =
             crate::application::load_config(&AppPaths::discover_for_cli().unwrap()).unwrap();
@@ -463,24 +485,26 @@ fn isolated_runtime_stop_process() {
         std::env::set_var("MENDIMARU_CONFIG_DIR", &isolated);
         std::env::set_var("MENDIMARU_CACHE_DIR", isolated.join("cache"));
         let suite = root.join("smoke.browser.json");
-        let execution = execute(
-            &[
-                "browser",
-                "test",
-                "--base-url",
-                &config.api_url,
-                "--winboat-use",
-                "--suite-path",
-                suite.to_str().unwrap(),
-                "--json",
-                "--timeout-seconds",
-                "15",
-            ]
-            .map(OsString::from),
-        )
-        .unwrap();
+        let frontend = mode == "frontend-url";
+        let url = format!("{}{}", config.api_url, if frontend { "/hold" } else { "" });
+        let mut args = vec![
+            "browser",
+            if frontend { "frontend-health" } else { "test" },
+            "--base-url",
+            &url,
+            "--winboat-use",
+            "--json",
+            "--timeout-seconds",
+            "15",
+        ];
+        if frontend {
+            args.extend(["--observation-ms", "100"]);
+        } else {
+            args.extend(["--suite-path", suite.to_str().unwrap()]);
+        }
+        let execution = execute(&args.into_iter().map(OsString::from).collect::<Vec<_>>()).unwrap();
         fs::write(
-            root.join("browser-url.json"),
+            root.join(format!("{mode}.json")),
             if execution.exit_code == EXIT_OK {
                 execution.stdout
             } else {
@@ -562,6 +586,12 @@ fn browser_runtime_uses_the_live_keeper_without_replacing_its_client() {
     for _ in 0..2 {
         fixture.spawn("browser").finish();
         fixture.spawn("runtime-reads").finish();
+        fixture.spawn("frontend-health").finish();
+        let health = fixture.result("frontend-health");
+        assert_eq!(health["data"]["frontendState"], "healthy", "{health}");
+        assert_eq!(health["data"]["httpReady"], true);
+        assert_eq!(health["data"]["studioState"], "running");
+        assert_eq!(health["data"]["assetBypass"], false);
         let result = fixture.result("browser");
         assert_eq!(result["data"]["outcome"], "passed", "{result}");
         assert_eq!(result["data"]["passed"], 1);
@@ -855,8 +885,17 @@ fn plain_url_browser_in_another_cache_protects_the_same_vm() {
     assert_browser_protects_vm("browser-url");
 }
 
+#[test]
+fn frontend_health_protects_linked_runtime_and_explicit_vm_url() {
+    assert_browser_protects_vm("frontend-health");
+    assert_browser_protects_vm("frontend-url");
+}
+
 fn assert_browser_protects_vm(browser_mode: &str) {
     let fixture = Fixture::new();
+    if browser_mode == "frontend-health" {
+        fs::write(fixture.path("frontend-hold"), b"").unwrap();
+    }
     fixture.prepare_browser();
     let suite = fixture.path("smoke.browser.json");
     fs::write(
@@ -894,7 +933,14 @@ fn assert_browser_protects_vm(browser_mode: &str) {
     assert!(keeper.0.try_wait().unwrap().is_none());
     fs::write(fixture.path("browser-release"), b"").unwrap();
     browser.finish();
-    assert_eq!(fixture.result(browser_mode)["data"]["outcome"], "passed");
+    if browser_mode.starts_with("frontend-") {
+        assert_eq!(
+            fixture.result(browser_mode)["data"]["frontendState"],
+            "healthy"
+        );
+    } else {
+        assert_eq!(fixture.result(browser_mode)["data"]["outcome"], "passed");
+    }
     fixture.confirm_studio_exit();
     keeper.finish();
     fixture.assert_stopped(1);

@@ -1495,6 +1495,16 @@ impl WinboatRuntimeFixture {
     fn new() -> Self {
         let temporary = tempfile::tempdir().expect("WinBoat Runtime fixture");
         let root = temporary.path();
+        // Independent fake VMs must not share the host-wide management lease.
+        let mut management_id = [0_u8; 16];
+        getrandom::fill(&mut management_id).unwrap();
+        let container_name = format!(
+            "vm_{}",
+            management_id
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
         let config_directory = root.join("config");
         let workspace = root.join("workspace");
         let fake_bin = root.join("bin");
@@ -1524,14 +1534,14 @@ impl WinboatRuntimeFixture {
         .expect("fixture launch settings");
         let compose_path = root.join("docker-compose.yml");
         let original_compose = format!(
-            "services:\n  windows:\n    image: ghcr.io/dockur/windows:e2e-fixture\n    container_name: MendimaruE2EWinBoat\n    volumes:\n      - winboat-storage:/storage\n      - {}:/shared\n    ports:\n      - 127.0.0.1:47280:7148\n      - 127.0.0.1:47300:3389\nvolumes:\n  winboat-storage: {{}}\n",
+            "services:\n  windows:\n    image: ghcr.io/dockur/windows:e2e-fixture\n    container_name: {container_name}\n    volumes:\n      - winboat-storage:/storage\n      - {}:/shared\n    ports:\n      - 127.0.0.1:47280:7148\n      - 127.0.0.1:47300:3389\nvolumes:\n  winboat-storage: {{}}\n",
             workspace.to_string_lossy()
         );
         fs::write(&compose_path, &original_compose).expect("Compose fixture");
 
         let mut config = fixture_config(&workspace);
         config.compose_file = compose_path.to_string_lossy().into_owned();
-        config.container_name = "MendimaruE2EWinBoat".into();
+        config.container_name = container_name;
         config.api_url = format!("http://127.0.0.1:{guest_api_port}");
         config.startup_timeout_seconds = 3;
         fs::write(
@@ -1787,6 +1797,30 @@ fn real_browser_tests_mirror_host_lan_assets_for_studio_runtime() {
     assert_eq!(browser["data"]["outcome"], "passed");
     assert_eq!(browser["data"]["passed"], 1);
     assert_eq!(browser["data"]["failed"], 0);
+    let asset_before = fs::read(web.join("widget.js")).unwrap();
+    let health_output = fixture.run(&[
+        "browser",
+        "frontend-health",
+        "--runtime-session-id",
+        runtime_session_id,
+        "--navigation-timeout-ms",
+        "1000",
+        "--observation-ms",
+        "200",
+        "--json",
+    ]);
+    assert_eq!(health_output.status.code(), Some(1));
+    assert!(health_output.stderr.is_empty());
+    let health: Value = serde_json::from_slice(&health_output.stdout).unwrap();
+    assert_complete_envelope(&health, "browser.frontend-health");
+    assert_eq!(health["data"]["frontendState"], "unhealthy");
+    assert_eq!(health["data"]["httpReady"], true);
+    assert_eq!(health["data"]["assetBypass"], false);
+    assert_eq!(
+        health["data"]["diagnostics"][0]["code"],
+        "shared_unc_asset_unreachable"
+    );
+    assert_eq!(fs::read(web.join("widget.js")).unwrap(), asset_before);
 }
 
 #[cfg(unix)]
@@ -2372,4 +2406,25 @@ fn asset_watcher_requires_opt_in_survives_regeneration_and_stops_cleanly() {
     let diagnostic = serde_json::from_slice::<Value>(&refused.stdout).unwrap();
     assert_eq!(diagnostic["state"], "failed");
     assert!(!String::from_utf8_lossy(&refused.stdout).contains(root.path().to_str().unwrap()));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn frontend_health_cli_observes_real_browser_failures_without_asset_bypass() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let output = Command::new("node")
+        .arg("--test")
+        .arg(repository.join("scripts/browser-frontend-health.node-test.mjs"))
+        .env(
+            "MENDIMARU_FRONTEND_TEST_BINARY",
+            env!("CARGO_BIN_EXE_mendimaru"),
+        )
+        .output()
+        .expect("run frontend health CLI matrix");
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

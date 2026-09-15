@@ -77,6 +77,7 @@ pub fn run() {
             save_config,
             test_settings_connection,
             get_capabilities,
+            diagnose_frontend_health,
             get_environment_status,
             get_environment_diagnostic_report,
             export_environment_diagnostic_report,

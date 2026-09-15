@@ -36,6 +36,7 @@
         "runtime.stop",
         "runtime.logs",
         "browser",
+        "browser.frontend-health",
         "browser.doctor",
         "browser.install",
         "browser.test",

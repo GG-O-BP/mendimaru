@@ -1,3 +1,4 @@
+mod browser;
 mod configuration;
 mod environment;
 mod localization;
@@ -7,6 +8,7 @@ mod studio;
 use crate::models::{AppConfig, CommandError, CommandErrorCode};
 use tauri::AppHandle;
 
+pub(crate) use browser::diagnose_frontend_health;
 pub(crate) use configuration::{
     detect_settings, get_config, preview_settings_save, redetect_config, save_config,
     test_settings_connection,

@@ -1,3 +1,4 @@
+import { FrontendHealthPanel } from "./FrontendHealthPanel";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -108,6 +109,8 @@ export function OperationsPage({
         title={t("operations-title")}
         description={t("operations-description")}
       />
+
+      <FrontendHealthPanel t={t} />
 
       <section className="section-card" aria-labelledby="operations-heading">
         <SectionHeader

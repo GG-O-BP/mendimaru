@@ -195,6 +195,17 @@ try {
     (_report, elapsed) => assert.ok(elapsed < 6_000),
   );
 
+  // Keep installed local resources present while removing npm dependencies.
+  // This fixture must diagnose the missing package, not a missing helper file.
+  for (const resource of [
+    "browser-artifact-safety.mjs",
+    "browser-frontend-health.mjs",
+  ]) {
+    await file(
+      resource,
+      await fs.readFile(path.join(repository, "scripts", resource)),
+    );
+  }
   const isolatedRunner = await file(
     "isolated-runner.mjs",
     await fs.readFile(runner),

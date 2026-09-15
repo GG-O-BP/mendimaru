@@ -17,6 +17,7 @@ import {
   StreamingPatternScanner,
   unzipArchiveBounded,
 } from "./browser-artifact-safety.mjs";
+import { diagnoseFrontend } from "./browser-frontend-health.mjs";
 
 const SCHEMA_VERSION = "4.0.0";
 const RUNNER_VERSION = "1.0.0";
@@ -64,6 +65,12 @@ try {
   } else if (command === "install") {
     await installChromium();
     result = await doctor();
+  } else if (command === "frontend-health") {
+    requireSupportedNode();
+    result = await diagnoseFrontend(
+      chromium,
+      JSON.parse(process.env.MENDIMARU_FRONTEND_REQUEST_JSON),
+    );
   } else if (command === "run") {
     result = await run(await readRequest());
   } else {

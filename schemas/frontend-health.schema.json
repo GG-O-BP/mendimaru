@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/frontend-health.schema.json",
+  "title": "Opt-in frontend browser observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "startedAt",
+    "finishedAt",
+    "frontendState",
+    "navigationComplete",
+    "documentStatus",
+    "observationMilliseconds",
+    "assetBypass",
+    "counts",
+    "truncated",
+    "diagnostics",
+    "studioState",
+    "httpReady",
+    "runtimeSessionId"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "4.0.0"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finishedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "frontendState": {
+      "enum": ["healthy", "unhealthy", "inconclusive"]
+    },
+    "navigationComplete": {
+      "type": "boolean"
+    },
+    "documentStatus": {
+      "type": ["integer", "null"],
+      "minimum": 100,
+      "maximum": 599
+    },
+    "observationMilliseconds": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 10000
+    },
+    "assetBypass": {
+      "const": false
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pageErrors",
+        "consoleErrors",
+        "failedRequests",
+        "httpErrors",
+        "errorDialogs"
+      ],
+      "properties": {
+        "pageErrors": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "consoleErrors": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "failedRequests": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "httpErrors": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "errorDialogs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "diagnostics": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "action", "occurrences"],
+        "properties": {
+          "code": {
+            "enum": [
+              "shared_unc_asset_unreachable",
+              "dns_failure",
+              "connection_failure",
+              "tls_failure",
+              "request_failure",
+              "http_failure",
+              "mendix_widget_css_missing",
+              "esm_failure",
+              "page_error",
+              "console_error",
+              "mendix_error_dialog",
+              "browser_dialog",
+              "navigation_timeout",
+              "observation_incomplete"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "occurrences": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "endpoint": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["scheme", "hostKind", "port", "pathKind"],
+            "properties": {
+              "scheme": {
+                "enum": ["http", "https", "other"]
+              },
+              "hostKind": {
+                "enum": [
+                  "shared-unc",
+                  "same-origin",
+                  "loopback",
+                  "external",
+                  "unknown"
+                ]
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "pathKind": {
+                "enum": [
+                  "shared-deployment",
+                  "stylesheet",
+                  "script",
+                  "document",
+                  "other"
+                ]
+              }
+            }
+          },
+          "failure": {
+            "enum": [
+              "dns_failure",
+              "connection_failure",
+              "tls_failure",
+              "request_failure",
+              "http_failure"
+            ]
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 599
+          }
+        }
+      }
+    },
+    "studioState": {
+      "enum": [null, "starting", "running", "stopped", "unknown"]
+    },
+    "httpReady": {
+      "type": ["boolean", "null"]
+    },
+    "runtimeSessionId": {
+      "type": ["string", "null"],
+      "pattern": "^runtime_[0-9a-f]{32}$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "frontendState": {
+            "const": "healthy"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "navigationComplete": {
+            "const": true
+          },
+          "truncated": {
+            "const": false
+          },
+          "diagnostics": {
+            "type": "array",
+            "maxItems": 0
+          },
+          "documentStatus": {
+            "type": "integer",
+            "minimum": 200,
+            "maximum": 399
+          }
+        }
+      }
+    }
+  ]
+}
