@@ -1787,6 +1787,30 @@ fn real_browser_tests_mirror_host_lan_assets_for_studio_runtime() {
     assert_eq!(browser["data"]["outcome"], "passed");
     assert_eq!(browser["data"]["passed"], 1);
     assert_eq!(browser["data"]["failed"], 0);
+    let asset_before = fs::read(web.join("widget.js")).unwrap();
+    let health_output = fixture.run(&[
+        "browser",
+        "frontend-health",
+        "--runtime-session-id",
+        runtime_session_id,
+        "--navigation-timeout-ms",
+        "1000",
+        "--observation-ms",
+        "200",
+        "--json",
+    ]);
+    assert_eq!(health_output.status.code(), Some(1));
+    assert!(health_output.stderr.is_empty());
+    let health: Value = serde_json::from_slice(&health_output.stdout).unwrap();
+    assert_complete_envelope(&health, "browser.frontend-health");
+    assert_eq!(health["data"]["frontendState"], "unhealthy");
+    assert_eq!(health["data"]["httpReady"], true);
+    assert_eq!(health["data"]["assetBypass"], false);
+    assert_eq!(
+        health["data"]["diagnostics"][0]["code"],
+        "shared_unc_asset_unreachable"
+    );
+    assert_eq!(fs::read(web.join("widget.js")).unwrap(), asset_before);
 }
 
 #[cfg(unix)]
@@ -2372,4 +2396,25 @@ fn asset_watcher_requires_opt_in_survives_regeneration_and_stops_cleanly() {
     let diagnostic = serde_json::from_slice::<Value>(&refused.stdout).unwrap();
     assert_eq!(diagnostic["state"], "failed");
     assert!(!String::from_utf8_lossy(&refused.stdout).contains(root.path().to_str().unwrap()));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn frontend_health_cli_observes_real_browser_failures_without_asset_bypass() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+    let output = Command::new("node")
+        .arg("--test")
+        .arg(repository.join("scripts/browser-frontend-health.node-test.mjs"))
+        .env(
+            "MENDIMARU_FRONTEND_TEST_BINARY",
+            env!("CARGO_BIN_EXE_mendimaru"),
+        )
+        .output()
+        .expect("run frontend health CLI matrix");
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

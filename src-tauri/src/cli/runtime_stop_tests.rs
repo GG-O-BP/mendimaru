@@ -415,6 +415,24 @@ fn isolated_runtime_stop_process() {
                 execute(&args.into_iter().map(OsString::from).collect::<Vec<_>>()).unwrap();
             assert_eq!(execution.exit_code, EXIT_OK, "{}", execution.stderr);
         }
+    } else if mode == "frontend-health" {
+        let execution = execute(
+            &[
+                "browser",
+                "frontend-health",
+                "--runtime-session-id",
+                RUNTIME_ID,
+                "--observation-ms",
+                "100",
+                "--json",
+                "--timeout-seconds",
+                "15",
+            ]
+            .map(OsString::from),
+        )
+        .unwrap();
+        assert!(execution.stderr.is_empty(), "{}", execution.stderr);
+        fs::write(root.join("frontend-health.json"), execution.stdout).unwrap();
     } else if mode == "browser" || mode == "browser-local" {
         if mode == "browser-local" {
             let config =
@@ -489,6 +507,12 @@ fn browser_runtime_uses_the_live_keeper_without_replacing_its_client() {
     for _ in 0..2 {
         fixture.spawn("browser").finish();
         fixture.spawn("runtime-reads").finish();
+        fixture.spawn("frontend-health").finish();
+        let health = fixture.result("frontend-health");
+        assert_eq!(health["data"]["frontendState"], "healthy", "{health}");
+        assert_eq!(health["data"]["httpReady"], true);
+        assert_eq!(health["data"]["studioState"], "running");
+        assert_eq!(health["data"]["assetBypass"], false);
         let result = fixture.result("browser");
         assert_eq!(result["data"]["outcome"], "passed", "{result}");
         assert_eq!(result["data"]["passed"], 1);

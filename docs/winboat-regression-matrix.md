@@ -159,3 +159,12 @@ record layout changes, add a PR item for each step below:
 Fixture builders must not bypass or weaken schema validation, file-type checks,
 permissions, bounded reads, hashes, or process identity checks. They also must
 not include real host paths, credentials, command lines, or remote output.
+
+## Frontend diagnosis without asset bypass (#144)
+
+The keeper observation fixture also executes `browser frontend-health`, checks
+Studio/HTTP/frontend fields separately and requires `assetBypass: false`.
+The client, Studio identity, Compose bytes and port inspection remain unchanged,
+with zero RDP launches or Compose recreations. The CLI/Chromium frontend matrix
+uses ordinary network resolution, including a failing shared UNC import; it
+does not use the existing browser-test mirror as frontend-health evidence.

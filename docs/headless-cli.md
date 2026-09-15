@@ -29,6 +29,7 @@ mendimaru runtime url --session-id RUNTIME_SESSION_ID
 mendimaru runtime stop --session-id RUNTIME_SESSION_ID
 mendimaru runtime forget --session-id RUNTIME_SESSION_ID
 mendimaru runtime logs --session-id RUNTIME_SESSION_ID [--cursor CURSOR]
+mendimaru browser frontend-health (--base-url URL | --runtime-session-id RUNTIME_SESSION_ID)
 mendimaru browser doctor
 mendimaru browser install chromium
 mendimaru browser test (--base-url URL | --runtime-session-id RUNTIME_SESSION_ID) --suite-path SUITE_JSON
@@ -274,3 +275,8 @@ generated widget imports relative across rebuilds. It emits a dedicated NDJSON
 status stream until Ctrl+C/SIGTERM, outside the normal command timeout/envelope.
 See [WinBoat assets](winboat-assets.md) for its opt-in, exact write scope,
 lifecycle, limits, and ordinary-browser validation.
+
+`browser frontend-health` provides a separate opt-in observation without asset
+bypass; HTTP readiness retains its lightweight contract. See the
+[frontend diagnosis contract](browser-testing.md#opt-in-frontend-health-144)
+for state meanings, limits and exit codes.

@@ -91,6 +91,11 @@ enum CliCommand {
         session_id: String,
         cursor: Option<String>,
     },
+    BrowserFrontendHealth {
+        target: String,
+        navigation_ms: u64,
+        observation_ms: u64,
+    },
     BrowserDoctor,
     BrowserInstallChromium,
     BrowserTest {
@@ -136,6 +141,7 @@ impl CliCommand {
             Self::RuntimeStop { .. } => "runtime.stop",
             Self::RuntimeForget { .. } => "runtime.forget",
             Self::RuntimeLogs { .. } => "runtime.logs",
+            Self::BrowserFrontendHealth { .. } => "browser.frontend-health",
             Self::BrowserDoctor => "browser.doctor",
             Self::BrowserInstallChromium => "browser.install",
             Self::BrowserTest { .. } => "browser.test",
@@ -535,7 +541,12 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
         (Some("browser"), None) => Some(
             "Usage: mendimaru browser COMMAND\n\
              \n\
-             Commands: doctor, install chromium, test, artifacts",
+             Commands: doctor, install chromium, frontend-health, test, artifacts",
+        ),
+        (Some("browser"), Some("frontend-health")) => Some(
+            "Usage: mendimaru browser frontend-health (--base-url URL | --runtime-session-id ID)\n\
+             Options: --navigation-timeout-ms (100–30000, default 15000), --observation-ms (100–10000, default 3000).\n\
+             Observes the frontend without asset bypass or Studio connections; HTTP readiness stays separate.",
         ),
         (Some("browser"), Some("doctor")) => Some(
             "Usage: mendimaru browser doctor\n\
@@ -664,6 +675,7 @@ Commands:
   runtime stop --session-id ID    Stop a Runtime session
   runtime forget --session-id ID  Forget a stopped or incompatible record
   runtime logs --session-id ID    Read bounded Runtime diagnostic logs
+  browser frontend-health [...]   Observe frontend health without asset bypass
   browser doctor                  Check the browser test toolchain
   browser install chromium        Install the pinned Chromium test browser
   browser test [...]              Run a browser test suite
@@ -700,7 +712,8 @@ async fn run_command(
     let browser_capability = match command {
         CliCommand::BrowserDoctor
         | CliCommand::BrowserInstallChromium
-        | CliCommand::BrowserTest { .. } => Some(CapabilityId::BrowserTest),
+        | CliCommand::BrowserTest { .. }
+        | CliCommand::BrowserFrontendHealth { .. } => Some(CapabilityId::BrowserTest),
         CliCommand::BrowserArtifacts { .. } => Some(CapabilityId::BrowserArtifacts),
         _ => None,
     };
@@ -725,6 +738,22 @@ async fn run_command(
         }
     }
     match command {
+        CliCommand::BrowserFrontendHealth {
+            target,
+            navigation_ms,
+            observation_ms,
+        } if !target.starts_with("runtime_") => {
+            return CommandOutput::data(
+                crate::application::browser_frontend_health(
+                    None,
+                    capability_snapshot.manifest.backend,
+                    target,
+                    *navigation_ms,
+                    *observation_ms,
+                )
+                .await?,
+            );
+        }
         CliCommand::BrowserDoctor => {
             return CommandOutput::data(
                 crate::application::browser_doctor(capability_snapshot.manifest.backend).await?,
@@ -769,6 +798,20 @@ async fn run_command(
     let config = crate::application::load_config(&paths)?;
     match command {
         CliCommand::Capabilities => unreachable!("handled without configuration"),
+        CliCommand::BrowserFrontendHealth {
+            target,
+            navigation_ms,
+            observation_ms,
+        } => CommandOutput::data(
+            crate::application::browser_frontend_health(
+                Some(&config),
+                capability_snapshot.manifest.backend,
+                target,
+                *navigation_ms,
+                *observation_ms,
+            )
+            .await?,
+        ),
         CliCommand::BrowserDoctor | CliCommand::BrowserInstallChromium => {
             unreachable!("handled without configuration")
         }
@@ -1972,6 +2015,53 @@ fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
 
 fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> {
     match values.first().map(String::as_str) {
+        Some("frontend-health") => {
+            let (options, _) = parse_options(
+                &values[1..],
+                &[
+                    "--base-url",
+                    "--runtime-session-id",
+                    "--navigation-timeout-ms",
+                    "--observation-ms",
+                ],
+                &[],
+            )?;
+            let base_url = options.get("--base-url");
+            let session = options.get("--runtime-session-id");
+            if base_url.is_some() == session.is_some() {
+                return Err(BackendError::invalid_request(
+                    "exactly one of --base-url or --runtime-session-id is required",
+                ));
+            }
+            if session.is_some_and(|id| {
+                !id.starts_with("runtime_")
+                    || id.len() != 40
+                    || !id[8..]
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            }) {
+                return Err(BackendError::invalid_request("invalid Runtime session ID"));
+            }
+            if base_url.is_some_and(|url| url.starts_with("runtime_")) {
+                return Err(BackendError::invalid_request("expected an HTTP(S) URL"));
+            }
+            let navigation_ms = options
+                .get("--navigation-timeout-ms")
+                .map(|value| parse_browser_timeout(value))
+                .transpose()?
+                .unwrap_or(15000);
+            let observation_ms = options
+                .get("--observation-ms")
+                .map(|value| parse_browser_timeout(value))
+                .transpose()?
+                .unwrap_or(3000);
+            crate::browser::frontend::validate_options(navigation_ms, observation_ms)?;
+            Ok(CliCommand::BrowserFrontendHealth {
+                target: base_url.or(session).unwrap().clone(),
+                navigation_ms,
+                observation_ms,
+            })
+        }
         Some("doctor") if values.len() == 1 => Ok(CliCommand::BrowserDoctor),
         Some("install")
             if values.get(1).map(String::as_str) == Some("chromium") && values.len() == 2 =>
@@ -2047,7 +2137,7 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
             })
         }
         _ => Err(BackendError::invalid_request(
-            "expected browser doctor, install chromium, test, or artifacts",
+            "expected browser doctor, install chromium, frontend-health, test, or artifacts",
         )),
     }
 }
@@ -2351,8 +2441,10 @@ fn success_execution(
         }
     }
     stdout.push_str(&json_line(&envelope));
-    let exit_code = if (command == "browser.doctor"
-        && output.data.get("ready").and_then(Value::as_bool) == Some(false))
+    let exit_code = if (command == "browser.frontend-health"
+        && output.data.get("frontendState").and_then(Value::as_str) != Some("healthy"))
+        || (command == "browser.doctor"
+            && output.data.get("ready").and_then(Value::as_bool) == Some(false))
         || (command == "browser.test"
             && output.data.get("outcome").and_then(Value::as_str) == Some("failed"))
     {
@@ -3072,6 +3164,12 @@ mod tests {
             args(&["operation", "list"]),
             args(&["operation", "status", "--operation-id", "install-11.12.2-a"]),
             args(&["operation", "retry", "--operation-id", "install-11.12.2-a"]),
+            args(&[
+                "browser",
+                "frontend-health",
+                "--base-url",
+                "http://localhost:8080",
+            ]),
             args(&["browser", "doctor"]),
             args(&["browser", "install", "chromium"]),
             args(&[

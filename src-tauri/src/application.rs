@@ -370,6 +370,60 @@ pub(crate) async fn browser_install_chromium(
         .map_err(CommandError::from)
 }
 
+/// Explicit frontend observation never enters the browser-test asset mirror or
+/// Studio metadata discovery path. Runtime status reads are owner-only.
+pub(crate) async fn browser_frontend_health(
+    config: Option<&AppConfig>,
+    backend: BackendId,
+    target: &str,
+    navigation_ms: u64,
+    observation_ms: u64,
+) -> ApplicationResult<crate::browser::frontend::FrontendHealth> {
+    let manifest = crate::platform::capability_manifest(Some(backend))?;
+    if !manifest.supports(CapabilityId::BrowserTest) {
+        return Err(BackendError::unsupported(backend, CapabilityId::BrowserTest).into());
+    }
+    crate::browser::frontend::validate_options(navigation_ms, observation_ms)?;
+    let status = if target.starts_with("runtime_") {
+        Some(
+            runtime_status(
+                config
+                    .ok_or_else(|| invalid_request("Runtime diagnosis requires configuration"))?,
+                target,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    let url = if let Some(status) = &status {
+        if !status.http_ready {
+            return Err(precondition_error(
+                CapabilityId::BrowserTest,
+                "Runtime HTTP is not ready; frontend health has not been checked.",
+                true,
+            ));
+        }
+        status
+            .url
+            .clone()
+            .ok_or_else(|| invalid_request("Runtime has no HTTP URL"))?
+    } else {
+        normalize_browser_url(target)?
+    };
+    if url.len() > 4096 {
+        return Err(invalid_request("the browser URL is too long"));
+    }
+    let mut report =
+        crate::browser::frontend::diagnose(backend, &url, navigation_ms, observation_ms).await?;
+    if let Some(status) = status {
+        report.http_ready = Some(status.http_ready);
+        report.studio_state = status.studio_state;
+        report.runtime_session_id = Some(status.session_id);
+    }
+    Ok(report)
+}
+
 pub(crate) async fn browser_test_url(
     backend: BackendId,
     base_url: &str,

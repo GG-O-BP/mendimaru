@@ -1,3 +1,4 @@
+import { diagnoseFrontend } from "./browser-frontend-health.mjs";
 import { spawn } from "node:child_process";
 import { Buffer } from "node:buffer";
 import { createHash, randomBytes } from "node:crypto";
@@ -64,6 +65,12 @@ try {
   } else if (command === "install") {
     await installChromium();
     result = await doctor();
+  } else if (command === "frontend-health") {
+    requireSupportedNode();
+    result = await diagnoseFrontend(
+      chromium,
+      JSON.parse(process.env.MENDIMARU_FRONTEND_REQUEST_JSON),
+    );
   } else if (command === "run") {
     result = await run(await readRequest());
   } else {

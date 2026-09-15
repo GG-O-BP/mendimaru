@@ -218,3 +218,29 @@
     grid-column: 2;
   }
 }
+
+.frontend-health form {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.frontend-health .simple-field {
+  flex: 1;
+  min-width: 220px;
+}
+.frontend-health dl {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 2fr;
+  gap: 8px;
+}
+.frontend-health dd {
+  margin: 0;
+}
+.frontend-health li {
+  margin-block: 12px;
+}
+.frontend-health code {
+  display: block;
+  overflow-wrap: anywhere;
+}
