@@ -271,6 +271,7 @@ function Name-Editor($e) {
 function Act($r) {
     Supported-Version
     $e=Resolve $r.elementId;$h=Input-Guard $e ($r.action -in @('focus','keyboard-input'));$pattern=$null
+    $dispatchElement=Public-Element $e
     switch -CaseSensitive ($r.action) {
         'focus' {
             $e.SetFocus();if(-not $e.Current.HasKeyboardFocus){throw 'ui-effect-unverified'}
@@ -308,6 +309,7 @@ function Act($r) {
         default {throw 'ui-invalid-request'}
     }
     $null=Target
+    if($r.action -eq 'invoke'){return $dispatchElement}
     return Public-Element $e
 }
 function Capture($r) {
@@ -371,9 +373,11 @@ while($null -ne ($line=[Console]::ReadLine())) {
         $result=@{ok=$true;data=$data}
     } catch {
         $reason=$_.Exception.Message
-        if($_.Exception -is [Windows.Automation.ElementNotAvailableException] -or $_.Exception.InnerException -is [Windows.Automation.ElementNotAvailableException]){$reason='ui-stale-element'}
+        $baseException=$_.Exception.GetBaseException()
+        if($baseException -is [Windows.Automation.ElementNotAvailableException]){$reason='ui-stale-element'}
+        elseif($baseException -is [InvalidOperationException] -or $baseException -is [NotSupportedException]){$reason='ui-unsupported-element'}
         if($reason -cnotmatch '^ui-[a-z-]+$'){$reason='ui-provider-failed'}
-        $result=@{ok=$false;reason=$reason}
+        $result=@{ok=$false;reason=$reason;diagnostic=@{exceptionType=$baseException.GetType().FullName;hresult=$baseException.HResult}}
     }
     $serialized=ConvertTo-Json -InputObject $result -Depth 16 -Compress
     if($serialized.Length -gt 12582912){$serialized='{"ok":false,"reason":"ui-tree-truncated"}'}

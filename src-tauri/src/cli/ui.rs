@@ -11,6 +11,7 @@ pub(super) fn parse_ui(values: &[String]) -> Result<CliCommand, BackendError> {
         Some("wait") => Operation::Wait,
         Some("screenshot") => Operation::Screenshot,
         Some("release") => Operation::Release,
+        Some("reconnect") => Operation::Reconnect,
         _ => {
             return Err(BackendError::invalid_request(
                 "expected a supported UI command",
@@ -165,7 +166,11 @@ pub(super) async fn serve_ui(
                 )
                 .await?;
                 lease
-                    .run(crate::ui_automation::owned_request(&r, Some(&cancellation)))
+                    .run(crate::ui_automation::owned_request(
+                        &config,
+                        &r,
+                        Some(&cancellation),
+                    ))
                     .await
             };
             tokio::pin!(execute);

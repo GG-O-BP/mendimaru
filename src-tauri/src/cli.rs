@@ -432,7 +432,7 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
     let subcommand = values.get(1).copied();
     match (values.first().copied(), subcommand) {
         (Some("ui"), _) => Some(
-            "Usage: mendimaru ui capabilities|tree|find|action|wait|screenshot|release --session-id ID [--timeout-ms 15000]\n\
+            "Usage: mendimaru ui capabilities|tree|find|action|wait|screenshot|release|reconnect --session-id ID [--timeout-ms 15000]\n\
              find/wait: --role ROLE --name NAME --automation-id ID [--scope-id ELEMENT]\n\
              wait: alternatively --condition project-ready|building|running|modal\n\
              action: --element-id ELEMENT --action invoke|click|focus|set-value|keyboard-input\n\

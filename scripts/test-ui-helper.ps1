@@ -17,6 +17,9 @@ $env:MENDIMARU_OPERATION_KEY = [Convert]::ToBase64String($key)
 . (Join-Path $source 'operation_security.ps1')
 $worker = [IO.File]::ReadAllBytes((Join-Path $source 'ui_worker.ps1'))
 $supervisor = [IO.File]::ReadAllText((Join-Path $source 'ui_supervisor.ps1')).Replace('__UI_WORKER_BASE64__',[Convert]::ToBase64String($worker))
+# Test-only capture of initialization stderr: this worker receives no secrets.
+# Production drains and discards stderr instead of exposing guest exceptions.
+$supervisor=$supervisor.Replace('$script:UiWorker.BeginErrorReadLine()', '$script:TestWorkerStderr=$script:UiWorker.StandardError.ReadToEndAsync()')
 . ([ScriptBlock]::Create($supervisor))
 $process = Get-Process -Id $PID
 $session = 'studio-' + $PID + '-' + $process.StartTime.ToUniversalTime().Ticks
@@ -42,6 +45,10 @@ function Receive-Response {
 try {
     Send-Request
     $first=Receive-Response
+    if($first.reason -ceq 'ui-helper-exited' -and $script:TestWorkerStderr.IsCompleted){
+        $diagnostic=$script:TestWorkerStderr.GetAwaiter().GetResult()
+        Write-Output ('Worker initialization diagnostic: '+$diagnostic.Substring(0,[Math]::Min(8192,$diagnostic.Length)))
+    }
     Assert (-not $first.ok -and $first.reason -ceq 'ui-wrong-session') ('worker must reject a non-Studio target: '+$first.reason)
     $workerId=$script:UiWorker.Id
     $workerBytes=[IO.File]::ReadAllBytes((Join-Path $script:UiDirectory 'worker.ps1'))

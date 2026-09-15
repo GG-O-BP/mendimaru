@@ -58,7 +58,8 @@
         "ui.action",
         "ui.wait",
         "ui.screenshot",
-        "ui.release"
+        "ui.release",
+        "ui.reconnect"
       ]
     },
     "ok": {

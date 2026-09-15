@@ -24,11 +24,12 @@ pub enum Operation {
     Wait,
     Screenshot,
     Release,
+    Reconnect,
 }
 impl Operation {
     pub fn capability(self) -> CapabilityId {
         match self {
-            Self::Capabilities | Self::Release => CapabilityId::UiCapabilities,
+            Self::Capabilities | Self::Release | Self::Reconnect => CapabilityId::UiCapabilities,
             Self::Tree => CapabilityId::UiTree,
             Self::Find => CapabilityId::UiFind,
             Self::Action => CapabilityId::UiAction,
@@ -39,6 +40,7 @@ impl Operation {
     pub fn name(self) -> &'static str {
         match self {
             Self::Release => "ui.release",
+            Self::Reconnect => "ui.reconnect",
             _ => self.capability().as_str(),
         }
     }
@@ -294,14 +296,42 @@ pub(crate) async fn linux_request(
             request.operation.capability(),
         )
         .await?;
-        lease.run(bridge::request(request, None)).await
+        lease.run(owned_request(config, request, None)).await
     } else {
         crate::cli::request_keeper_ui(&paths, request).await
     }
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) use bridge::request as owned_request;
+pub(crate) async fn owned_request(
+    config: &crate::models::AppConfig,
+    request: &Request,
+    cancellation: Option<&crate::process::CancellationToken>,
+) -> Result<Value, BackendError> {
+    if request.operation != Operation::Reconnect {
+        return bridge::request(request, cancellation).await;
+    }
+    if cancellation.is_some_and(|c| c.is_cancelled()) {
+        return Err(error(request.operation, "ui-cancelled"));
+    }
+    let current = crate::winboat::registered_client_sessions()
+        .into_iter()
+        .find(|s| s.session_id == request.session_id);
+    if current.is_some_and(|s| s.connection == crate::contracts::StudioConnectionState::Connected) {
+        return Ok(serde_json::json!({"sessionId":request.session_id,"reconnected":false}));
+    }
+    // Reconnect is explicit. Drop only this keeper's dead RDP client; the
+    // existing backend revalidates exact PID/start identity and project access.
+    crate::winboat::disconnect_client(&request.session_id);
+    tokio::time::timeout(
+        std::time::Duration::from_millis(request.timeout_ms),
+        crate::platform::reconnect_studio_session(config, &request.session_id),
+    )
+    .await
+    .map_err(|_| error(request.operation, "ui-helper-timeout"))?
+    .map_err(|_| error(request.operation, "ui-session-unavailable"))?;
+    Ok(serde_json::json!({"sessionId":request.session_id,"reconnected":true}))
+}
 
 #[cfg(test)]
 mod tests {

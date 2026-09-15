@@ -174,10 +174,21 @@ fn decode(
     if value["ok"] == true {
         return Ok(Some(value["data"].clone()));
     }
-    Err(error(
-        op,
-        value["reason"].as_str().unwrap_or("ui-provider-failed"),
-    ))
+    let mut failure = error(op, value["reason"].as_str().unwrap_or("ui-provider-failed"));
+    // Only a CLR type and numeric HRESULT are diagnostic; exception messages
+    // and stack/source text can contain values and are never returned.
+    if let (Some(kind), Some(code)) = (
+        value["diagnostic"]["exceptionType"].as_str(),
+        value["diagnostic"]["hresult"].as_i64(),
+    ) {
+        if kind.len() <= 100
+            && kind.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.')
+            && i32::try_from(code).is_ok()
+        {
+            failure.diagnostic_ref = Some(format!("uia:{kind}:{code}"));
+        }
+    }
+    Err(failure)
 }
 
 fn persist_screenshot(session_id: &str, response: Value) -> Result<Value, BackendError> {
