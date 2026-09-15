@@ -2274,3 +2274,102 @@ fn assert_complete_envelope(document: &Value, command: &str) {
         None | Some(Value::Object(_))
     ));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn asset_watcher_requires_opt_in_survives_regeneration_and_stops_cleanly() {
+    let root = tempfile::tempdir().unwrap();
+    let workspace = root.path().join("workspace");
+    let project = workspace.join("Orders");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("Orders.mpr"), b"original model").unwrap();
+    fs::write(
+        project.join("project-settings.user.json"),
+        r#"{"settingsParts":[{"type":"Mendix.Core, Version=11.12.3.0"}]}"#,
+    )
+    .unwrap();
+    let config = serde_json::to_vec(&fixture_config(&workspace)).unwrap();
+    fs::write(root.path().join("config.json"), &config).unwrap();
+    let listed = stdout_json(&run(root.path(), &["project", "list"]));
+    let id = listed["data"][0]["projectId"].as_str().unwrap();
+    let rejected = run(root.path(), &["assets", "watch", "--project-id", id]);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&rejected.stdout).unwrap()["generatedAssetsRewriteEnabled"],
+        false
+    );
+    assert!(!project.join("deployment").exists());
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mendimaru"));
+    command
+        .args([
+            "assets",
+            "watch",
+            "--project-id",
+            id,
+            "--rewrite-generated-assets",
+        ])
+        .env("MENDIMARU_CONFIG_DIR", root.path())
+        .env("MENDIMARU_CACHE_DIR", root.path().join("cache"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = FixtureProcess(command.spawn().unwrap());
+    let stdout = child.0.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            tx.send(line.unwrap()).unwrap();
+        }
+    });
+    let next = || {
+        let line = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(!line.contains(root.path().to_str().unwrap()));
+        serde_json::from_str::<Value>(&line).unwrap()
+    };
+    assert_eq!(next()["state"], "watching");
+    let source = "import '//host.lan/Data/Orders/deployment/web/widgets/widget.mjs';\nimport '//host.lan/Data/Orders/deployment/web/widgets/widget.css';\n";
+    let file = project.join("deployment/web/layouts/App.js");
+    for _ in 0..2 {
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, source).unwrap();
+        let report = next();
+        assert_eq!(report["state"], "normalized");
+        assert_eq!(report["counts"]["rewrittenImports"], 2);
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "import '../widgets/widget.mjs';\nimport '../widgets/widget.css';\n"
+        );
+        fs::remove_dir_all(project.join("deployment")).unwrap();
+    }
+    assert_eq!(unsafe { libc::kill(child.0.id() as i32, libc::SIGTERM) }, 0);
+    assert_eq!(next()["state"], "stopped");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while child.0.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "watcher failed to stop");
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(child.0.wait().unwrap().success());
+    reader.join().unwrap();
+    assert_eq!(
+        fs::read(project.join("Orders.mpr")).unwrap(),
+        b"original model"
+    );
+    assert_eq!(fs::read(root.path().join("config.json")).unwrap(), config);
+    // A later unsupported tree must stop visibly, with no source/path leak.
+    fs::create_dir_all(project.join("deployment/web")).unwrap();
+    std::os::unix::fs::symlink(root.path(), project.join("deployment/web/layouts")).unwrap();
+    let refused = run(
+        root.path(),
+        &[
+            "assets",
+            "watch",
+            "--project-id",
+            id,
+            "--rewrite-generated-assets",
+        ],
+    );
+    assert_eq!(refused.status.code(), Some(1));
+    let diagnostic = serde_json::from_slice::<Value>(&refused.stdout).unwrap();
+    assert_eq!(diagnostic["state"], "failed");
+    assert!(!String::from_utf8_lossy(&refused.stdout).contains(root.path().to_str().unwrap()));
+}

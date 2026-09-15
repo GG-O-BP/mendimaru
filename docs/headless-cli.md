@@ -266,3 +266,11 @@ Passwords, tokens, installer URLs, project paths, Windows command lines, and
 diagnostic observations are excluded from CLI DTOs, operation records, and
 checked-in fixtures. Backend diagnostic text is reduced to stable error codes
 and allowlisted messages before serialization.
+
+## Foreground generated-asset repair (Linux)
+
+`mendimaru assets watch --project-id ID --rewrite-generated-assets` keeps Studio's
+generated widget imports relative across rebuilds. It emits a dedicated NDJSON
+status stream until Ctrl+C/SIGTERM, outside the normal command timeout/envelope.
+See [WinBoat assets](winboat-assets.md) for its opt-in, exact write scope,
+lifecycle, limits, and ordinary-browser validation.

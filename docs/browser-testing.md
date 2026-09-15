@@ -147,7 +147,7 @@ browser metadata query replacing an existing RDP connection and triggering
 keeper teardown without concurrent external work. This corrects the earlier
 attribution in #63/#141: external interference is not required to reproduce
 that defect. Ordinary Chrome's `host.lan` asset-resolution failure is a separate
-problem handled by the asset mirror below.
+problem covered by the [opt-in generated-import repair](winboat-assets.md).
 
 The fixture regression suite and the optional existing-session live gate are
 described in the [WinBoat regression matrix](winboat-regression-matrix.md#safe-browser-and-runtime-observation-148).
@@ -204,27 +204,27 @@ compare paths rather than platform-specific host setup.
 
 ### WinBoat UNC widget assets
 
-Mendix Studio Pro 11.12.3 can emit protocol-relative imports such as
-`//host.lan/Data/<project>/deployment/web/widgets/...` when a project resides
-on the WinBoat SMB share. Linux does not resolve `host.lan`, and a normal user
-process must not modify `/etc/hosts` or bind privileged port 80.
+For **ordinary Chrome and `browser test --base-url`**, use the explicit
+[generated-import watcher](winboat-assets.md). It fixes selected-project widget
+imports before Studio's Rspack bundling and continues across regenerations.
+It requires `--rewrite-generated-assets`, preserves model/widget originals, and
+needs no hosts/privileged-port setup or browser interception.
 
-When a browser suite targets a Linux WinBoat Runtime session, Mendimaru starts
-an ephemeral loopback-only asset mirror and installs a Chromium route for
-`http(s)://host.lan/Data/**`. Requests are fulfilled only from
-`<shared-directory>/<project>/deployment/web/**`. Query-bearing paths,
+The older `browser test --runtime-session-id` path still starts an ephemeral
+loopback-only asset mirror and installs a Chromium route for
+`http(s)://host.lan/Data/**`. This is an automation-only compatibility path; it
+must not be used as evidence that ordinary Chrome works. Requests are restricted
+to `<shared-directory>/<project>/deployment/web/**`. Query-bearing paths,
 non-GET/HEAD requests, traversal, symlinks, directories, and files over 64 MiB
 are rejected. The mirror is destroyed with the browser run and never exposes a
 LAN listener, project paths, or model files.
 
-This serves eligible UNC assets within the automated browser context. It does
-not repair missing aggregate CSS or CSS imported as JavaScript by the generated
+The mirror does not repair missing aggregate CSS or CSS imported as JavaScript by the generated
 client; see [widget CSS diagnostics and the upstream reproduction](widget-css-diagnostics.md).
-A system-wide `curl http://host.lan/...` installation remains a deployment
-decision: an administrator can separately provide loopback name resolution and
-a socket-activated port-80 proxy with the same path restrictions. Mendimaru
-does not silently change host name resolution or acquire privileged socket
-capabilities.
+For #63 acceptance, exercise the normalizer with an ordinary browser or
+direct-URL browser suite, without that route. The normalizer requires no
+system-wide `curl http://host.lan/...` installation because Rspack bundles the
+normalized imports into assets served by the normal Runtime URL.
 
 Test credentials are never CLI arguments or suite literals. A suite may read
 only environment variables named `MENDIMARU_TEST_<NAME>`:
