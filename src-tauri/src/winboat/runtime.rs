@@ -1032,6 +1032,26 @@ async fn create_session(
     Ok((directory, record))
 }
 
+/// Read immutable record identity without refreshing readiness or changing the record.
+pub(crate) fn observation(session_id: &str) -> Option<(String, Option<String>)> {
+    let (_, record) = load_session(session_id, CapabilityId::BrowserTest).ok()?;
+    if record.state == RuntimeState::Stopped {
+        return None;
+    }
+    let identity = format!(
+        "{:x}",
+        Sha256::digest(format!(
+            "{}|{}|{}|{}|{:?}",
+            record.session_id,
+            record.started_at,
+            record.host_port,
+            record.guest_port,
+            record.studio_session_id
+        ))
+    );
+    Some((identity, record.studio_session_id))
+}
+
 pub(crate) async fn status(config: &AppConfig, session_id: &str) -> BackendResult<RuntimeStatus> {
     let lease = crate::winboat::vm_use::acquire(
         config,

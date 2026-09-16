@@ -298,3 +298,10 @@ a selected keeper-owned Linux WinBoat Studio session. The complete syntax,
 stdin-only Name writes, semantic waits, private captures, and recovery behavior
 are documented in [Studio UI automation](winboat-ui-automation.md). Native
 Windows UI is deferred and returns `unsupported_capability`.
+
+## Browser environment change evidence (#154)
+
+WinBoat browser runs now record bounded environment observations and interrupt on
+changes. See [environment generations](browser-environment-observation.md) for
+`--build-marker`, JSON comparability, preparation boundaries, observation limits,
+and the separate external-change fixture and disposable-VM gates.

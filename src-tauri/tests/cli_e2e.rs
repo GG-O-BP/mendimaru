@@ -1602,7 +1602,10 @@ if [ "$command" = "port" ]; then
 fi
 if [ "$command" = "inspect" ]; then
   if [ "${2:-}" = "--format" ]; then
-    printf 'USERNAME=fixture\nPASSWORD=fixture\n'
+    case "$3" in
+      *'.Id'*) python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))[0]; print(json.dumps(dict(id=d["Id"],running=d["State"]["Running"],ports=d["NetworkSettings"]["Ports"])))' "$state/inspect.json" ;;
+      *) printf 'USERNAME=fixture\nPASSWORD=fixture\n' ;;
+    esac
   else
     cat "$state/inspect.json"
   fi
@@ -1708,7 +1711,8 @@ fn write_fake_docker_inspection(
     storage_source: &str,
 ) {
     let mut inspection = serde_json::json!([{
-        "State": { "Status": "running" },
+        "Id": "a".repeat(64),
+        "State": { "Status": "running", "Running": true },
         "Mounts": [
             { "Source": storage_source, "Destination": "/storage" },
             { "Source": "/fixture/workspace", "Destination": "/shared" }

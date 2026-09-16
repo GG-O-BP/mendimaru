@@ -457,6 +457,7 @@ async fn browser_frontend_health_with_lease(
 pub(crate) async fn browser_test_url(
     backend: BackendId,
     vm_config: Option<&AppConfig>,
+    build_marker: Option<&str>,
     base_url: &str,
     suite_path: &str,
     policy: BrowserTestPolicy,
@@ -470,25 +471,34 @@ pub(crate) async fn browser_test_url(
         .await?;
         return lease
             .run(browser_test_url_with_lease(
-                backend, base_url, suite_path, policy,
+                backend,
+                Some(config),
+                build_marker,
+                base_url,
+                suite_path,
+                policy,
             ))
             .await;
     }
-    browser_test_url_with_lease(backend, base_url, suite_path, policy).await
+    browser_test_url_with_lease(backend, None, build_marker, base_url, suite_path, policy).await
 }
 
 async fn browser_test_url_with_lease(
     backend: BackendId,
+    vm_config: Option<&AppConfig>,
+    build_marker: Option<&str>,
     base_url: &str,
     suite_path: &str,
     policy: BrowserTestPolicy,
 ) -> ApplicationResult<BrowserTestSummary> {
     let manifest =
         crate::platform::capability_manifest(Some(backend)).map_err(CommandError::from)?;
+    let observer = crate::browser::environment::start(vm_config, None, build_marker).await?;
     let request = BrowserTestRequest {
         session_id: crate::contracts::secure_identifier("session")?,
         base_url: normalize_browser_url(base_url)?,
         asset_mirror_url: None,
+        environment_observer_url: observer.as_ref().map(|o| o.url().to_owned()),
         suite_path: suite_path.to_string(),
         runtime_context: BrowserRuntimeContext {
             host_platform: manifest.host_platform,
@@ -509,6 +519,7 @@ async fn browser_test_url_with_lease(
 pub(crate) async fn browser_test_runtime(
     config: &AppConfig,
     runtime_session_id: &str,
+    build_marker: Option<&str>,
     suite_path: &str,
     policy: BrowserTestPolicy,
 ) -> ApplicationResult<BrowserTestSummary> {
@@ -524,21 +535,27 @@ pub(crate) async fn browser_test_runtime(
             .run(browser_test_runtime_with_lease(
                 config,
                 runtime_session_id,
+                build_marker,
                 suite_path,
                 policy,
             ))
             .await;
     }
-    browser_test_runtime_with_lease(config, runtime_session_id, suite_path, policy).await
+    browser_test_runtime_with_lease(config, runtime_session_id, build_marker, suite_path, policy)
+        .await
 }
 
 async fn browser_test_runtime_with_lease(
     config: &AppConfig,
     runtime_session_id: &str,
+    build_marker: Option<&str>,
     suite_path: &str,
     policy: BrowserTestPolicy,
 ) -> ApplicationResult<BrowserTestSummary> {
     let manifest = crate::platform::capability_manifest(None).map_err(CommandError::from)?;
+    let observer =
+        crate::browser::environment::start(Some(config), Some(runtime_session_id), build_marker)
+            .await?;
     let status = runtime_status(config, runtime_session_id).await?;
     if !status.http_ready {
         return Err(precondition_error(
@@ -578,6 +595,7 @@ async fn browser_test_runtime_with_lease(
         session_id: crate::contracts::secure_identifier("session")?,
         base_url,
         asset_mirror_url,
+        environment_observer_url: observer.as_ref().map(|o| o.url().to_owned()),
         suite_path: suite_path.to_string(),
         runtime_context: BrowserRuntimeContext {
             host_platform: manifest.host_platform,

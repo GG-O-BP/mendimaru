@@ -421,3 +421,10 @@ config/cache directories still coordinate through the same management identity.
 Lifecycle changes return a bounded, retryable busy precondition while tests hold
 use. See [VM use policy and boundaries](winboat-vm-use.md) for modes, timeout and
 cancellation, generations, and the advisory trust boundary.
+
+## Browser environment change evidence (#154)
+
+WinBoat browser runs now record bounded environment observations and interrupt on
+changes. See [environment generations](browser-environment-observation.md) for
+`--build-marker`, JSON comparability, preparation boundaries, observation limits,
+and the separate external-change fixture and disposable-VM gates.

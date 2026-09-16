@@ -5,8 +5,9 @@ metadata lookup, browser startup, suite execution, and artifact collection. A
 lifecycle operation must obtain exclusive use before changing Compose, recreating
 the container, or recovering UEFI. This is the foundation from #150; session
 participation/cleanup ownership (#151), UI arbitration (#152), multi-project
-ownership (#153), external change detection (#154), and the parallel suite runner
-(#155) remain separate work.
+ownership (#153), and the parallel suite runner
+(#155) remain separate work. [Environment change observation](browser-environment-observation.md)
+now supplies retrospective evidence for #154.
 
 ## Using it
 
@@ -60,7 +61,8 @@ work starts, including failed or cancelled attempts. Nested owner calls reuse th
 same token. This separates a stable management identity from lifecycle generations;
 it is not proof that a container was successfully recreated. The actual Docker
 container ID is a separate observed incarnation. Tokens are diagnostic hints,
-never ownership records, and cannot detect external Docker changes (#154).
+never ownership records, and cannot themselves detect external Docker changes; the browser observer samples
+actual container, Compose and port evidence separately.
 
 There are no persisted PID-owner records or stale-owner deletion heuristics.
 Each scoped owner verifies its PID and `/proc/self/stat` start time before reuse.

@@ -1,0 +1,124 @@
+{
+  "issue": 154,
+  "dateUtc": "2026-09-15",
+  "productionCommit": "a4289001b3e66e13a8f2c37e7b251a31547a9aa4",
+  "snapshot": {
+    "id": "mendimaru-154-20260916-verified-cold-copy",
+    "verifiedFiles": 8,
+    "verifiedDataBytes": 45558112295,
+    "sourceArchiveAndWorkingCopyCompared": true,
+    "restoredGuestBootVerified": true
+  },
+  "vmGate": {
+    "pageProvider": "host HTTP fixture",
+    "containerRuntime": "real Docker WinBoat Windows guest",
+    "studioAndRuntimeCoverage": false,
+    "rawEvidenceSha256": "a60ecab456b3b7c4e4ac4aab481b1b174943581b5cc6b03771e3b973ceba4722",
+    "runs": [
+      {
+        "scenario": "read-only",
+        "sessionId": "session_a243bc4923db8a7dffecf7255d06e79c",
+        "preparationId": "preparation_c1aa3fc1b2ff71ac69087dab5dc58432",
+        "outcome": "passed",
+        "observations": 6,
+        "comparable": false,
+        "missing": ["runtime", "studio"],
+        "events": [],
+        "containerBefore": "607821fcd1ee2b0a877cd53355e6cc3c4bc2c02ff3aafe8690782d4cff872cbb",
+        "containerAfterController": "607821fcd1ee2b0a877cd53355e6cc3c4bc2c02ff3aafe8690782d4cff872cbb",
+        "actor": "unknown"
+      },
+      {
+        "scenario": "compose",
+        "sessionId": "session_65cf07b4ce8f507bd2981b0984cebb1f",
+        "preparationId": "preparation_8168e077d403c709433af90a30bf89a3",
+        "outcome": "failed",
+        "observations": 6,
+        "comparable": false,
+        "missing": ["runtime", "studio"],
+        "events": [
+          {
+            "component": "compose",
+            "classification": "environment-changed",
+            "observedAt": "2026-09-15T21:47:57.436461512Z"
+          }
+        ],
+        "containerBefore": "607821fcd1ee2b0a877cd53355e6cc3c4bc2c02ff3aafe8690782d4cff872cbb",
+        "containerAfterController": "607821fcd1ee2b0a877cd53355e6cc3c4bc2c02ff3aafe8690782d4cff872cbb",
+        "actor": "unknown"
+      },
+      {
+        "scenario": "recreate",
+        "sessionId": "session_f7a2d4267677ed38ac0db60b97ff2e29",
+        "preparationId": "preparation_aa8ec9efccff93097de6fb56f4865d90",
+        "outcome": "failed",
+        "observations": 20,
+        "comparable": false,
+        "missing": ["runtime", "studio"],
+        "events": [
+          {
+            "component": "container",
+            "classification": "environment-changed",
+            "observedAt": "2026-09-15T21:48:16.719567130Z"
+          },
+          {
+            "component": "published-ports",
+            "classification": "environment-changed",
+            "observedAt": "2026-09-15T21:48:16.719567130Z"
+          }
+        ],
+        "containerBefore": "607821fcd1ee2b0a877cd53355e6cc3c4bc2c02ff3aafe8690782d4cff872cbb",
+        "containerAfterController": "e49fa4faf360c3bdd835dacaf93e0fcb6ef980a1643686a26dcde5cfcaf94f3e",
+        "actor": "unknown"
+      },
+      {
+        "scenario": "ports",
+        "sessionId": "session_b7b9061932e360807fb78232113e024b",
+        "preparationId": "preparation_bb05f3cef5805dd42312c7c527b24d0f",
+        "outcome": "failed",
+        "observations": 27,
+        "comparable": false,
+        "missing": ["runtime", "studio"],
+        "events": [
+          {
+            "component": "compose",
+            "classification": "environment-changed",
+            "observedAt": "2026-09-15T21:48:23.273906073Z"
+          },
+          {
+            "component": "container",
+            "classification": "environment-changed",
+            "observedAt": "2026-09-15T21:48:44.184474914Z"
+          },
+          {
+            "component": "published-ports",
+            "classification": "environment-changed",
+            "observedAt": "2026-09-15T21:48:44.184474914Z"
+          }
+        ],
+        "containerBefore": "e49fa4faf360c3bdd835dacaf93e0fcb6ef980a1643686a26dcde5cfcaf94f3e",
+        "containerAfterController": "d3fd236eb7de3e4ef9d1212377a201bf5b8d3f337eb9468195300cc9acb6c2a3",
+        "actor": "unknown"
+      },
+      {
+        "scenario": "build",
+        "sessionId": "session_b55863bbe27f8ba8e5efabf23838c30c",
+        "preparationId": "preparation_2cfb1c8c3272392f2973988e1bad3f7b",
+        "outcome": "failed",
+        "observations": 6,
+        "comparable": false,
+        "missing": ["runtime", "studio"],
+        "events": [
+          {
+            "component": "build",
+            "classification": "build-changed",
+            "observedAt": "2026-09-15T21:48:50.617814118Z"
+          }
+        ],
+        "containerBefore": "d3fd236eb7de3e4ef9d1212377a201bf5b8d3f337eb9468195300cc9acb6c2a3",
+        "containerAfterController": "d3fd236eb7de3e4ef9d1212377a201bf5b8d3f337eb9468195300cc9acb6c2a3",
+        "actor": "unknown"
+      }
+    ]
+  }
+}
