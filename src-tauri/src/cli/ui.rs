@@ -263,6 +263,31 @@ pub(crate) async fn request_keeper_ui(
 mod tests {
     use super::*;
     #[test]
+    fn only_known_uia_diagnostics_survive_cli_sanitization() {
+        for (reference, accepted) in [
+            (
+                "uia:System.Runtime.InteropServices.COMException:-2146233088",
+                true,
+            ),
+            (
+                "uia:System.Windows.Automation.ElementNotAvailableException:-2146233079",
+                true,
+            ),
+            ("uia:private.secret:42", false),
+            ("uia:System.TimeoutException:2147483648", false),
+            ("uia:System.TimeoutException:+1", false),
+            ("uia:System.TimeoutException:1:path", false),
+            ("uia:System.TimeoutException:1\n", false),
+        ] {
+            let mut error = crate::ui_automation::error(Operation::Tree, "ui-provider-failed");
+            error.diagnostic_ref = Some(reference.into());
+            assert_eq!(
+                sanitize_backend_error(error).diagnostic_ref.as_deref(),
+                accepted.then_some(reference)
+            );
+        }
+    }
+    #[test]
     fn parser_keeps_values_off_argv_and_rejects_arbitrary_commands() {
         let base = [
             "action",

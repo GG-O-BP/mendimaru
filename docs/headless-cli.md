@@ -293,7 +293,7 @@ for state meanings, limits and exit codes.
 
 ## Studio UI automation
 
-Contract v5 adds `ui capabilities/tree/find/action/wait/screenshot/release` for
+Contract v5 adds `ui capabilities/tree/find/action/wait/screenshot/release/reconnect` for
 a selected keeper-owned Linux WinBoat Studio session. The complete syntax,
 stdin-only Name writes, semantic waits, private captures, and recovery behavior
 are documented in [Studio UI automation](winboat-ui-automation.md). Native

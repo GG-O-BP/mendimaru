@@ -9,6 +9,16 @@ $script:UiIdentity = $null
 $script:UiSequence = [long]0
 $script:UiVerified = $false
 
+function Start-MendimaruUiProcess($Process) {
+    # .NET Framework constructs StandardInput with Console.InputEncoding and
+    # AutoFlush during Start(), which can emit a BOM before our UTF-8 bytes.
+    # Scope a BOM-less encoding to construction, then restore the host setting.
+    $previousEncoding=[Console]::InputEncoding
+    try {
+        [Console]::InputEncoding=New-Object Text.UTF8Encoding($false)
+        $null=$Process.Start()
+    } finally { [Console]::InputEncoding=$previousEncoding }
+}
 function Send-MendimaruUiLine($Process,[string]$Line) {
     # Process.StandardInput uses the parent's console code page on .NET
     # Framework. Write UTF-8 bytes directly to match the worker's input stream.
@@ -91,7 +101,7 @@ public sealed class MendimaruUiJob : IDisposable {
     $start.StandardOutputEncoding=New-Object Text.UTF8Encoding($false)
     $script:UiWorker=New-Object Diagnostics.Process
     $script:UiWorker.StartInfo=$start
-    $null=$script:UiWorker.Start()
+    Start-MendimaruUiProcess $script:UiWorker
     $script:UiJob=New-Object MendimaruUiJob($script:UiWorker.Handle)
     # Drain initialization diagnostics privately; never forward guest exceptions.
     $script:UiWorker.BeginErrorReadLine()
@@ -100,7 +110,10 @@ public sealed class MendimaruUiJob : IDisposable {
 function Write-MendimaruUiResult($Response) {
     $resultPath=$controlPath+'.ui.report'
     $payload=[ordered]@{id=$script:UiPending.id;ok=[bool]$Response.ok}
-    if($Response.ok){$payload.data=$Response.data}else{$payload.reason=$Response.reason}
+    if($Response.ok){$payload.data=$Response.data}else{
+        $payload.reason=$Response.reason
+        if($null -ne $Response.diagnostic){$payload.diagnostic=$Response.diagnostic}
+    }
     Write-MendimaruReport $payload
     $script:UiPending=$null;$script:UiTask=$null
 }

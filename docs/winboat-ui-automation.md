@@ -41,13 +41,13 @@ match. Duplicate provider entries are deduplicated by complete UIA runtime ID.
 Multiple distinct matches fail wait with `ui-ambiguous-element`. A truncated
 scan cannot prove absence or uniqueness and fails find/wait explicitly.
 
-| Action           | Preconditions and result                                                                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `invoke`         | Requires the element's InvokePattern. A completed call confirms semantic dispatch; wait separately for the app effect.                     |
-| `click`          | Uses SelectionItemPattern and verifies selection. Coordinate/canvas clicking is unsupported.                                               |
-| `focus`          | Requires a visible enabled element in the foreground owned window; verifies keyboard focus.                                                |
-| `set-value`      | Only the Properties Name editor, writable ValuePattern, and a Mendix identifier of at most 100 ASCII characters. Verifies editor readback. |
-| `keyboard-input` | Only `Tab`, `F5`, `Ctrl+G`, `Ctrl+S`, on a native WPF/WinForms/Win32 focus target. F5 additionally requires observed project readiness.    |
+| Action           | Preconditions and result                                                                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoke`         | Requires the element's InvokePattern. A completed call confirms semantic dispatch; wait separately for the app effect.                                              |
+| `click`          | Uses SelectionItemPattern or TogglePattern and verifies the resulting state. Coordinate/canvas clicking is unsupported.                                             |
+| `focus`          | Requires a visible enabled element in the foreground owned window; verifies keyboard focus.                                                                         |
+| `set-value`      | Only the Properties Name editor, writable ValuePattern, and a Mendix identifier of at most 100 ASCII characters. Verifies editor readback.                          |
+| `keyboard-input` | Only `Tab`, `F5`, `Ctrl+G`, `Ctrl+S`, `Enter`, `Right`, `Escape`, on a native WPF/WinForms/Win32 focus target. F5 additionally requires observed project readiness. |
 
 ```sh
 mendimaru ui action --session-id SESSION --element-id ELEMENT --action focus --json
@@ -109,8 +109,8 @@ The existing `studio status` command remains the process/session inventory.
   exit. The bootstrap directory exposes no other host files.
 - Each request verifies PID, start ticks, executable path, exact file version,
   same nonzero interactive session, active RDP state, and Default input desktop.
-  Lock/disconnect fails closed. The selected RemoteApp must also have host window
-  focus; a denied foreground transition returns `ui-foreground-lost`. Reconnect must revalidate identity; a new worker
+  Lock/disconnect fails closed. Focus and keyboard input require the selected RemoteApp to have foreground
+  focus; a denied foreground transition returns `ui-foreground-lost`. Explicit `ui reconnect --session-id SESSION` revalidates identity and supports the command timeout and cancellation; a new worker
   generation invalidates old elements. Studio handoff after binding never
   silently retargets input to another PID.
 - The worker is a killable MTA child in a Windows job with kill-on-parent-close
@@ -147,6 +147,10 @@ Errors use existing backend codes and exact path-free messages:
   `ui-ambiguous-element`, `ui-tree-truncated`, `ui-modal-blocked`,
   `ui-foreground-lost`, `ui-effect-unverified`, `ui-capture-failed`,
   `ui-request-expired`, `ui-bridge-untrusted`, `ui-provider-failed`.
+
+Known CLR exception types and signed HRESULTs are returned as bounded
+`uia:TYPE:CODE` diagnostic references. Exception messages, source, stack traces
+and arbitrary type names never pass the public error boundary.
 
 Unsupported native adapters retain the same backend error envelope and never
 request WinBoat credentials, RDP, or shared files.

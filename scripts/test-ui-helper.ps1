@@ -43,6 +43,34 @@ function Receive-Response {
     return $payload
 }
 try {
+    # Exercise the production pipe writer with a Windows PowerShell child.
+    # ASCII JSON succeeds even with the old code-page-dependent StreamWriter;
+    # Korean and supplementary characters must survive byte-for-byte too.
+    $echoPath=Join-Path $lab 'echo.ps1'
+    [IO.File]::WriteAllText($echoPath, '[Console]::InputEncoding=New-Object Text.UTF8Encoding($false);[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false);[Console]::WriteLine([Console]::ReadLine())')
+    $echoStart=New-Object Diagnostics.ProcessStartInfo
+    $echoStart.FileName=Join-Path $PSHOME 'powershell.exe'
+    $echoStart.Arguments='-NoLogo -NoProfile -NonInteractive -File "'+$echoPath+'"'
+    $echoStart.UseShellExecute=$false;$echoStart.CreateNoWindow=$true
+    $echoStart.RedirectStandardInput=$true;$echoStart.RedirectStandardOutput=$true
+    $echoStart.StandardOutputEncoding=New-Object Text.UTF8Encoding($false)
+    $echoProcess=New-Object Diagnostics.Process
+    $echoProcess.StartInfo=$echoStart
+    $testEncoding=[Console]::InputEncoding
+    try {
+        [Console]::InputEncoding=[Text.Encoding]::UTF8
+        Start-MendimaruUiProcess $echoProcess
+        $unicode=([string][char]0xd30c)+[char]0xc77c+[char]::ConvertFromUtf32(0x1f642)
+        $line=ConvertTo-Json -InputObject @{name=$unicode} -Compress
+        Send-MendimaruUiLine $echoProcess $line
+        $read=$echoProcess.StandardOutput.ReadLineAsync()
+        Assert ($read.Wait(15000)) 'UTF-8 pipe response timeout'
+        Assert ($read.Result -ceq $line) 'UTF-8 request pipe corrupted Unicode'
+    } finally {
+        [Console]::InputEncoding=$testEncoding
+        if(-not $echoProcess.HasExited){$echoProcess.Kill()}
+        $null=$echoProcess.WaitForExit(2000);$echoProcess.Dispose()
+    }
     Send-Request
     $first=Receive-Response
     if($first.reason -ceq 'ui-helper-exited' -and $script:TestWorkerStderr.IsCompleted){

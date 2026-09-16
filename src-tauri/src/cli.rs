@@ -2775,9 +2775,22 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
         }
         _ => safe_error_message_for_backend(error.code, error.backend),
     };
-    let diagnostic_ref = error
-        .diagnostic_ref
-        .filter(|value| is_safe_artifact_reference(value));
+    let diagnostic_ref = error.diagnostic_ref.filter(|value| {
+        is_safe_artifact_reference(value)
+            || (error.backend == Some(BackendId::LinuxWinboat)
+                && matches!(
+                    error.capability,
+                    Some(
+                        CapabilityId::UiCapabilities
+                            | CapabilityId::UiTree
+                            | CapabilityId::UiFind
+                            | CapabilityId::UiAction
+                            | CapabilityId::UiWait
+                            | CapabilityId::UiScreenshot
+                    )
+                )
+                && crate::ui_automation::safe_diagnostic(value))
+    });
     BackendError {
         schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
         code: error.code,

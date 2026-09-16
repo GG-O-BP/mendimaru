@@ -181,11 +181,9 @@ fn decode(
         value["diagnostic"]["exceptionType"].as_str(),
         value["diagnostic"]["hresult"].as_i64(),
     ) {
-        if kind.len() <= 100
-            && kind.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.')
-            && i32::try_from(code).is_ok()
-        {
-            failure.diagnostic_ref = Some(format!("uia:{kind}:{code}"));
+        let reference = format!("uia:{kind}:{code}");
+        if super::safe_diagnostic(&reference) {
+            failure.diagnostic_ref = Some(reference);
         }
     }
     Err(failure)

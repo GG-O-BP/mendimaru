@@ -252,6 +252,23 @@ pub(crate) fn safe_reason(reason: &str) -> Option<&'static str> {
     .find(|v| *v == reason)
 }
 
+/// Only fixed CLR type names and a signed HRESULT may cross the CLI boundary.
+/// Provider exception messages, arbitrary type names and paths remain private.
+pub(crate) fn safe_diagnostic(value: &str) -> bool {
+    let Some((kind, code)) = value.strip_prefix("uia:").and_then(|v| v.split_once(':')) else {
+        return false;
+    };
+    matches!(
+        kind,
+        "System.Windows.Automation.ElementNotAvailableException"
+            | "System.Runtime.InteropServices.COMException"
+            | "System.InvalidOperationException"
+            | "System.NotSupportedException"
+            | "System.UnauthorizedAccessException"
+            | "System.TimeoutException"
+    ) && code.parse::<i32>().is_ok_and(|n| n.to_string() == code)
+}
+
 #[cfg(any(target_os = "linux", test))]
 pub(crate) fn error(operation: Operation, reason: &str) -> BackendError {
     let reason = safe_reason(reason).unwrap_or("ui-provider-failed");
@@ -323,20 +340,82 @@ pub(crate) async fn owned_request(
     // Reconnect is explicit. Drop only this keeper's dead RDP client; the
     // existing backend revalidates exact PID/start identity and project access.
     crate::winboat::disconnect_client(&request.session_id);
-    tokio::time::timeout(
-        std::time::Duration::from_millis(request.timeout_ms),
+    bounded_reconnect(
+        request.timeout_ms,
+        cancellation,
         crate::platform::reconnect_studio_session(config, &request.session_id),
     )
-    .await
-    .map_err(|_| error(request.operation, "ui-helper-timeout"))?
-    .map_err(|_| error(request.operation, "ui-session-unavailable"))?;
+    .await?;
     Ok(serde_json::json!({"sessionId":request.session_id,"reconnected":true}))
+}
+
+#[cfg(any(target_os = "linux", test))]
+async fn bounded_reconnect<E>(
+    timeout_ms: u64,
+    cancellation: Option<&crate::process::CancellationToken>,
+    reconnect: impl std::future::Future<Output = Result<(), E>>,
+) -> Result<(), BackendError> {
+    let cancelled = async {
+        match cancellation {
+            Some(token) => token.cancelled().await,
+            None => std::future::pending().await,
+        }
+    };
+    // Dropping the reconnect future reaps its owned RemoteApp child and removes
+    // its temporary mailboxes through their existing RAII guards. No Studio
+    // close request is sent and protected-project records remain intact.
+    tokio::select! {
+        biased;
+        _ = cancelled => Err(error(Operation::Reconnect, "ui-cancelled")),
+        result = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), reconnect) => {
+            result.map_err(|_| error(Operation::Reconnect, "ui-helper-timeout"))?
+                .map_err(|_| error(Operation::Reconnect, "ui-session-unavailable"))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     const SESSION: &str = "studio-4242-639250850131064367";
+
+    #[tokio::test]
+    async fn reconnect_cancellation_and_timeout_drop_pending_owned_work() {
+        for cancel in [true, false] {
+            let (sender, mut receiver) = tokio::sync::oneshot::channel::<()>();
+            let token = crate::process::CancellationToken::default();
+            let work = async move {
+                let _owned = sender;
+                std::future::pending::<Result<(), ()>>().await
+            };
+            if cancel {
+                token.cancel();
+            }
+            let result = bounded_reconnect(1, Some(&token), work).await.unwrap_err();
+            assert_eq!(
+                result.message,
+                if cancel {
+                    "ui-cancelled"
+                } else {
+                    "ui-helper-timeout"
+                }
+            );
+            assert_eq!(
+                receiver.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+            );
+        }
+        assert!(bounded_reconnect(100, None, async { Ok::<_, ()>(()) })
+            .await
+            .is_ok());
+        assert_eq!(
+            bounded_reconnect(100, None, async { Err(()) })
+                .await
+                .unwrap_err()
+                .message,
+            "ui-session-unavailable"
+        );
+    }
     #[test]
     fn bounded_requests_reject_ambiguous_or_executable_payloads() {
         for operation in [
