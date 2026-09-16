@@ -46,7 +46,7 @@ scan cannot prove absence or uniqueness and fails find/wait explicitly.
 | `invoke`         | Requires the element's InvokePattern. A completed call confirms semantic dispatch; wait separately for the app effect.                                              |
 | `click`          | Uses SelectionItemPattern or TogglePattern and verifies the resulting state. Coordinate/canvas clicking is unsupported.                                             |
 | `focus`          | Requires a visible enabled element in the foreground owned window; verifies keyboard focus.                                                                         |
-| `set-value`      | Only the Properties Name editor, writable ValuePattern, and a Mendix identifier of at most 100 ASCII characters. Verifies editor readback.                          |
+| `set-value`      | Properties Name or the unique writable editor in the native Go To modal; accepts a Mendix identifier of at most 100 ASCII characters. Verifies editor readback.     |
 | `keyboard-input` | Only `Tab`, `F5`, `Ctrl+G`, `Ctrl+S`, `Enter`, `Right`, `Escape`, on a native WPF/WinForms/Win32 focus target. F5 additionally requires observed project readiness. |
 
 ```sh
@@ -62,7 +62,7 @@ Values enter through stdin, never `--value` or an arbitrary PowerShell expressio
 Password elements are excluded from lookup/input and their names/values are
 redacted in trees. Editor readback does not mean the model has been saved: commit
 focus changes and save explicitly, then verify the intended application result.
-A delivered shortcut or selected preview outline alone is not success evidence.
+The Go To search permits document names such as `Home_Web`; it does not accept arbitrary text or paths. Multiple writable editors, an unrelated dialog, and stale value handles are rejected. A delivered shortcut or selected preview outline alone is not success evidence.
 
 Semantic waits are `project-ready`, `building`, `deploying`, `starting-runtime`,
 `running`, and `modal`. The tree

@@ -171,6 +171,10 @@ jobs:
         shell: powershell
         run: ./scripts/test-ui-modal.ps1
 
+      - name: Test bounded native Go To navigation
+        shell: powershell
+        run: ./scripts/test-ui-navigation.ps1
+
   security:
     name: Dependency security audit
     runs-on: ubuntu-latest

@@ -55,6 +55,31 @@ $script:ElementSequence = [long]0
 $script:MainHandle = [IntPtr]::Zero
 $script:Deadline = [DateTime]::UtcNow
 $walker = [Windows.Automation.TreeWalker]::RawViewWalker
+# Fetch each node's observation in one UIA request. Never reuse this cache for
+# action validation: Resolve/Input-Guard always read current provider state.
+function New-ObservationCache {
+    $cache=New-Object Windows.Automation.CacheRequest
+    $cache.TreeScope=[Windows.Automation.TreeScope]::Element
+    foreach($property in @('RuntimeId','Name','ControlType','IsPassword','AutomationId','FrameworkId','IsEnabled','IsOffscreen','HasKeyboardFocus','BoundingRectangle','IsValuePatternAvailable','IsWindowPatternAvailable')){
+        $cache.Add([Windows.Automation.AutomationElement]::($property+'Property'))
+    }
+    $cache.Add([Windows.Automation.ValuePattern]::ValueProperty)
+    $cache.Add([Windows.Automation.ValuePattern]::IsReadOnlyProperty)
+    $cache.Add([Windows.Automation.WindowPattern]::IsModalProperty)
+    return $cache
+}
+$script:ObservationCache=New-ObservationCache
+function Observation($e) {
+    $c=$e.Cached;$value=$null;$readOnly=$null;$modal=$false
+    if(-not $c.IsPassword -and [bool]$e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::IsValuePatternAvailableProperty)){
+        $value=$e.GetCachedPropertyValue([Windows.Automation.ValuePattern]::ValueProperty)
+        $readOnly=$e.GetCachedPropertyValue([Windows.Automation.ValuePattern]::IsReadOnlyProperty)
+    }
+    if([bool]$e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::IsWindowPatternAvailableProperty)){
+        $modal=[bool]$e.GetCachedPropertyValue([Windows.Automation.WindowPattern]::IsModalProperty)
+    }
+    return @{c=$c;rid=($e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::RuntimeIdProperty) -join '.');value=$value;readOnly=$readOnly;modal=$modal}
+}
 
 function Check-Deadline {
     if ([DateTime]::UtcNow -ge $script:Deadline) { throw 'ui-helper-timeout' }
@@ -100,13 +125,15 @@ function Window-For($element) {
     }
     throw 'ui-stale-element'
 }
-function Register($element) {
+function Register($element,$observation=$null) {
     $c = $element.Current
-    $rid = $element.GetRuntimeId() -join '.'
+    $rid = $null
+    if($null -ne $observation){$c=$observation.c;$rid=$observation.rid}else{$rid=$element.GetRuntimeId() -join '.'}
     $script:ElementSequence++
     $id = $script:Generation + ':' + $script:ElementSequence
     $observedValue=$null;$pattern=$null
-    if(-not $c.IsPassword -and $element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)){$observedValue=$pattern.Current.Value}
+    if($null -ne $observation){$observedValue=$observation.value}
+    elseif(-not $c.IsPassword -and $element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)){$observedValue=$pattern.Current.Value}
     if ($script:Elements.Count -ge 4096 -and -not $script:Elements.ContainsKey($id)) { throw 'ui-tree-truncated' }
     $script:Elements[$id] = @{element=$element; rid=$rid; name=$c.Name; role=$c.ControlType.ProgrammaticName; password=$c.IsPassword; value=$observedValue}
     return $id
@@ -129,8 +156,8 @@ function Public-Element($e) {
     return @{elementId=(Register $e); role=$c.ControlType.ProgrammaticName.Replace('ControlType.',''); name=$(if($c.IsPassword){'[password-redacted]'}else{Short $c.Name})}
 }
 function Short([string]$s) { return $s.Substring(0,[Math]::Min(256,$s.Length)) }
-function Matches($e,$selector) {
-    $c=$e.Current
+function Matches($e,$selector,$observation=$null) {
+    $c=$(if($null -ne $observation){$observation.c}else{$e.Current})
     if ($c.IsPassword) { return $false }
     if ($selector.role -and $c.ControlType.ProgrammaticName -cne ('ControlType.'+$selector.role)) { return $false }
     if ($null -ne $selector.name -and $c.Name -cne $selector.name) { return $false }
@@ -142,22 +169,22 @@ function Scan($scope=$null) {
     # is resolved before scanning, so no stale handle can cross generations.
     $script:Generation=[Guid]::NewGuid().ToString('N');$script:Elements=@{}
     $queue=New-Object Collections.Generic.Queue[object]
-    if ($null -ne $scope) { $queue.Enqueue(@{e=$scope;depth=0;parent=$null}) }
-    else { foreach($h in @(Windows)){ $queue.Enqueue(@{e=[Windows.Automation.AutomationElement]::FromHandle($h);depth=0;parent=$null}) } }
+    if ($null -ne $scope) { $queue.Enqueue(@{e=$scope.GetUpdatedCache($script:ObservationCache);depth=0;parent=$null}) }
+    else { foreach($h in @(Windows)){ $queue.Enqueue(@{e=[Windows.Automation.AutomationElement]::FromHandle($h).GetUpdatedCache($script:ObservationCache);depth=0;parent=$null}) } }
     $nodes=New-Object Collections.Generic.List[object]; $seen=@{}; $truncated=$false
     while($queue.Count -gt 0) {
         Check-Deadline
         if($nodes.Count -ge 3000){$truncated=$true;break}
-        $item=$queue.Dequeue(); $e=$item.e; $rid=$e.GetRuntimeId() -join '.'
+        $item=$queue.Dequeue(); $e=$item.e; $observed=Observation $e;$rid=$observed.rid
         if($seen.ContainsKey($rid)){continue};$seen[$rid]=$true
-        $id=Register $e
-        $nodes.Add(@{e=$e;id=$id;parent=$item.parent;depth=$item.depth})
-        $child=$walker.GetFirstChild($e)
+        $id=Register $e $observed
+        $nodes.Add(@{e=$e;id=$id;parent=$item.parent;depth=$item.depth;observed=$observed})
+        $child=$walker.GetFirstChild($e,$script:ObservationCache)
         if($item.depth -ge 48){if($null -ne $child){$truncated=$true};continue}
         while($null -ne $child){
             Check-Deadline
             if($nodes.Count+$queue.Count -ge 3000){$truncated=$true;break}
-            $queue.Enqueue(@{e=$child;depth=$item.depth+1;parent=$id});$child=$walker.GetNextSibling($child)
+            $queue.Enqueue(@{e=$child;depth=$item.depth+1;parent=$id});$child=$walker.GetNextSibling($child,$script:ObservationCache)
         }
     }
     return @{nodes=$nodes;truncated=$truncated}
@@ -167,7 +194,7 @@ function Find-Elements($selector,$scope=$null) {
     $scan=Scan $scope
     if($scan.truncated){throw 'ui-tree-truncated'}
     $found=New-Object Collections.Generic.List[object]
-    foreach($node in $scan.nodes){if(Matches $node.e $selector){$found.Add($node.e)}}
+    foreach($node in $scan.nodes){if(Matches $node.e $selector $node.observed){$found.Add($node.e)}}
     return $found.ToArray()
 }
 function Modal($e) {
@@ -179,9 +206,9 @@ function State($scan) {
     $statusTexts=New-Object Collections.Generic.List[string];$projectReady=$false;$projectOpen=$false;$busy=$null;$running=$false
     $parents=@{};foreach($node in $scan.nodes){$parents[$node.id]=$node}
     foreach($node in $scan.nodes){
-        $c=$node.e.Current
+        $c=$node.observed.c
         if($node.depth -eq 0){
-            $modal=Modal $node.e;$kind='unknown';$name=$c.Name
+            $modal=$node.observed.modal;$kind='unknown';$name=$c.Name
             if($name -match '(?i)^(sign.?in|log.?in|로그인)$|^(Mendix Studio Pro|멘딕스 스튜디오 프로).*?(sign.?in|log.?in|로그인)'){$kind='login'}
             elseif($modal -and $name -match '(?i)convert|upgrade|변환'){$kind='conversion'}
             elseif($modal -and $name -match '(?i)update|업데이트'){$kind='update'}
@@ -202,7 +229,7 @@ function State($scan) {
                 $ancestor=$node
                 for($i=0;$i -lt 48 -and $ancestor.parent;$i++){
                     $ancestor=$parents[$ancestor.parent];if($null -eq $ancestor){break}
-                    if($ancestor.e.Current.ControlType -eq [Windows.Automation.ControlType]::TabItem -and $ancestor.e.Current.Name -in @('Console','콘솔')){$running=$true;break}
+                    if($ancestor.observed.c.ControlType -eq [Windows.Automation.ControlType]::TabItem -and $ancestor.observed.c.Name -in @('Console','콘솔')){$running=$true;break}
                 }
             }
         }
@@ -216,12 +243,12 @@ function Tree {
     $p=Target;$scan=Scan;$nodes=New-Object Collections.Generic.List[object]
     foreach($node in $scan.nodes){
         Check-Deadline
-        $e=$node.e;$c=$e.Current;$bounds=$c.BoundingRectangle
+        $e=$node.e;$c=$node.observed.c;$bounds=$c.BoundingRectangle
         $publicBounds=@(0,0,0,0);if(-not $bounds.IsEmpty){$publicBounds=@($bounds.X,$bounds.Y,$bounds.Width,$bounds.Height)}
         $patterns=@($e.GetSupportedPatterns()|ForEach-Object{$_.ProgrammaticName.Replace('PatternIdentifiers.Pattern','')})
         $value=$null;$readOnly=$null
         if(-not $c.IsPassword -and $patterns -contains 'Value'){
-            $v=$e.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current;$value=Short $v.Value;$readOnly=$v.IsReadOnly
+            $value=Short $node.observed.value;$readOnly=$node.observed.readOnly
         }
         $nodes.Add(@{elementId=$node.id;parentId=$node.parent;depth=$node.depth;role=$c.ControlType.ProgrammaticName.Replace('ControlType.','');name=$(if($c.IsPassword){'[password-redacted]'}else{Short $c.Name});automationId=$(if($c.IsPassword){''}else{Short $c.AutomationId});framework=$c.FrameworkId;enabled=$c.IsEnabled;offscreen=$c.IsOffscreen;password=$c.IsPassword;focused=$c.HasKeyboardFocus;value=$value;readOnly=$readOnly;patterns=$patterns;bounds=$publicBounds})
     }
@@ -231,7 +258,7 @@ function Tree {
         $windows.Add(@{elementId=(Register $root);handle=$h.ToInt64().ToString();name=(Short $root.Current.Name);modal=(Modal $root);minimized=[MendimaruUiNative]::IsIconic($h);foreground=([MendimaruUiNative]::GetForegroundWindow() -eq $h);dpi=[MendimaruUiNative]::GetDpiForWindow($h)})
     }
     $state=State $scan;$script:Revision++
-    return @{sessionId=$script:Identity.sessionId;revision=$script:Revision;root=@{schemaVersion='5.0.0';hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';adapter=$script:Identity.fileVersion;generation=$script:Generation;processId=$p.Id;startedTicks=$script:Identity.startedTicks;interactiveSessionId=$p.SessionId;helperProcessId=$PID;helperSessionId=(Get-Process -Id $PID).SessionId;foregroundWindow=[MendimaruUiNative]::GetForegroundWindow().ToInt64().ToString();state=$state.state;statusTexts=$state.statusTexts;dialogs=$state.dialogs;windows=$windows.ToArray();nodes=$nodes.ToArray();truncated=$scan.truncated;limits=@{nodes=3000;depth=48;windows=16};fallbacks=@{coordinates=$false;keyboard=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');setValue='Properties Name only'}}}
+    return @{sessionId=$script:Identity.sessionId;revision=$script:Revision;root=@{schemaVersion='5.0.0';hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';adapter=$script:Identity.fileVersion;generation=$script:Generation;processId=$p.Id;startedTicks=$script:Identity.startedTicks;interactiveSessionId=$p.SessionId;helperProcessId=$PID;helperSessionId=(Get-Process -Id $PID).SessionId;foregroundWindow=[MendimaruUiNative]::GetForegroundWindow().ToInt64().ToString();state=$state.state;statusTexts=$state.statusTexts;dialogs=$state.dialogs;windows=$windows.ToArray();nodes=$nodes.ToArray();truncated=$scan.truncated;limits=@{nodes=3000;depth=48;windows=16};fallbacks=@{coordinates=$false;keyboard=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');setValue='Properties Name or unique Go To search editor'}}}
 }
 function Input-Guard($e,[bool]$needsForeground) {
     $null=Target;Supported-Version
@@ -272,6 +299,32 @@ function Name-Editor($e) {
     }
     return $panel -and $property
 }
+function GoTo-Editor($e) {
+    if($e.Current.FrameworkId -cne 'WPF' -or $e.Current.ControlType -ne [Windows.Automation.ControlType]::Edit){return $false}
+    $h=Window-For $e
+    $dialog=[Windows.Automation.AutomationElement]::FromHandle($h)
+    if($dialog.Current.Name -cnotin @('Go To','이동') -or -not (Modal $dialog)){return $false}
+    # Search only the selected Studio's known native modal, with a bounded
+    # traversal. More than one writable editor is ambiguous and fails closed.
+    $queue=New-Object Collections.Generic.Queue[object];$queue.Enqueue($dialog)
+    $count=0;$found=$null
+    while($queue.Count -gt 0){
+        Check-Deadline
+        if(++$count -gt 512){return $false}
+        $node=$queue.Dequeue();$c=$node.Current;$pattern=$null
+        if($c.ControlType -eq [Windows.Automation.ControlType]::Edit -and $c.IsEnabled -and -not $c.IsOffscreen -and -not $c.IsPassword -and
+            $node.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern) -and -not $pattern.Current.IsReadOnly){
+            if($null -ne $found){return $false};$found=$node
+        }
+        $child=$walker.GetFirstChild($node)
+        while($null -ne $child){
+            Check-Deadline
+            if($count+$queue.Count -ge 512){return $false}
+            $queue.Enqueue($child);$child=$walker.GetNextSibling($child)
+        }
+    }
+    return $null -ne $found -and ($found.GetRuntimeId() -join '.') -ceq ($e.GetRuntimeId() -join '.')
+}
 function Act($r) {
     Supported-Version
     $e=Resolve $r.elementId;$h=Input-Guard $e ($r.action -in @('focus','keyboard-input'));$pattern=$null
@@ -287,7 +340,7 @@ function Act($r) {
             # caller must wait for the intended application state separately.
         }
         'set-value' {
-            if(-not (Name-Editor $e) -or $r.value -cnotmatch '^[A-Za-z_][A-Za-z0-9_]{0,99}$'){throw 'ui-unsupported-element'}
+            if($r.value -cnotmatch '^[A-Za-z_][A-Za-z0-9_]{0,99}$' -or (-not (Name-Editor $e) -and -not (GoTo-Editor $e))){throw 'ui-unsupported-element'}
             if(-not $e.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern) -or $pattern.Current.IsReadOnly){throw 'ui-unsupported-element'}
             $pattern.SetValue([string]$r.value)
             if($pattern.Current.Value -cne $r.value){throw 'ui-effect-unverified'}
@@ -346,7 +399,7 @@ function Execute($r) {
     $null=Target
     Supported-Version
     switch -CaseSensitive ($r.operation) {
-        'capabilities' {return @{sessionId=$r.sessionId;actions=@('invoke','click','focus','set-value','keyboard-input');adapter=$script:Identity.fileVersion;hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';coordinates=$false;setValue='Properties Name only';keys=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');conditions=@('project-ready','building','deploying','starting-runtime','running','modal')}}
+        'capabilities' {return @{sessionId=$r.sessionId;actions=@('invoke','click','focus','set-value','keyboard-input');adapter=$script:Identity.fileVersion;hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';coordinates=$false;setValue='Properties Name or unique Go To search editor';keys=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');conditions=@('project-ready','building','deploying','starting-runtime','running','modal')}}
         'tree' {return Tree}
         'find' {return ,@(Find-Elements $r.selector | ForEach-Object { foreach($e in $_){Public-Element $e} })}
         'action' {return Act $r}
