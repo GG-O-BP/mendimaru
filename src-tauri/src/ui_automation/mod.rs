@@ -337,9 +337,10 @@ pub(crate) async fn owned_request(
     if current.is_some_and(|s| s.connection == crate::contracts::StudioConnectionState::Connected) {
         return Ok(serde_json::json!({"sessionId":request.session_id,"reconnected":false}));
     }
-    // Reconnect is explicit. Drop only this keeper's dead RDP client; the
-    // existing backend revalidates exact PID/start identity and project access.
-    crate::winboat::disconnect_client(&request.session_id);
+    // Retain the disconnected owner's authenticated monitor and project lease
+    // until a replacement is verified. A failed/cancelled reconnect is not
+    // evidence of Studio exit and must leave status/stop usable for this owner.
+    // register_client retires the previous monitor only after successful bind.
     bounded_reconnect(
         request.timeout_ms,
         cancellation,

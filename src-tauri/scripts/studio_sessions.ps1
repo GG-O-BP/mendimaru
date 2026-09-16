@@ -8,7 +8,9 @@ $installRoot = '__INSTALL_ROOT__'
 $knownStudiosJson = [Text.Encoding]::UTF8.GetString(
     [Convert]::FromBase64String('__KNOWN_STUDIOS_BASE64__')
 )
-$knownStudios = @($knownStudiosJson | ConvertFrom-Json)
+# Windows PowerShell 5.1 emits a JSON array as one pipeline object. Wrapping
+# that output in @() nests the array and makes each path comparison fail.
+$knownStudios = $knownStudiosJson | ConvertFrom-Json
 
 __SECURITY_PREAMBLE__
 __UI_PREAMBLE__

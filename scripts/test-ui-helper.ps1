@@ -43,6 +43,18 @@ function Receive-Response {
     return $payload
 }
 try {
+    & {
+        # Exercise the production inventory header with multiple installations.
+        # A nested Object[] used to make .path.Equals throw and silently hide
+        # every running Studio session from query/reconnect under PowerShell 5.1.
+        $known=@(@{version='11.12.4';path='C:\Mendix\11.12.4\modeler\studiopro.exe'},@{version='10.24.26';path='C:\Mendix\10.24.26\modeler\studiopro.exe'})
+        $json=ConvertTo-Json -InputObject $known -Compress
+        $template=[IO.File]::ReadAllText((Join-Path $source 'studio_sessions.ps1'))
+        $header=$template.Substring(0,$template.IndexOf('__SECURITY_PREAMBLE__')).Replace('__TARGET_PROCESS_ID__','0').Replace('__TARGET_STARTED_TICKS__','0').Replace('__KNOWN_STUDIOS_BASE64__',[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json)))
+        . ([ScriptBlock]::Create($header))
+        $match=@($knownStudios|Where-Object{$_.path.Equals('c:\mendix\11.12.4\modeler\StudioPro.exe',[StringComparison]::OrdinalIgnoreCase)})
+        Assert ($knownStudios.Count -eq 2 -and $match.Count -eq 1 -and $match[0].version -ceq '11.12.4') 'installed Studio inventory did not preserve separate paths'
+    }
     # Exercise the production pipe writer with a Windows PowerShell child.
     # ASCII JSON succeeds even with the old code-page-dependent StreamWriter;
     # Korean and supplementary characters must survive byte-for-byte too.
