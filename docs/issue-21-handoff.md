@@ -1,250 +1,212 @@
-# Issue #21 reboot handoff — 2026-09-16
+# Issue #21 reboot checkpoint — 2026-09-16, second handoff
 
-## Request and current status
+## Resume here
 
-The user requested issue #21 implementation, a starting issue comment, a new
-branch/worktree, a PR, and a verified merge into main. The authorized scope is
-**Linux + WinBoat only**; native Windows UI transport and acceptance are deferred.
-The user then requested saving/pushing this checkpoint before reboot and resuming
-in a new session. Work is **incomplete**. Do not merge, close #21, or describe the
-Linux acceptance matrix as passed yet.
+The latest user instruction is to **save and push before a PC reboot**, then
+continue in a new session. This checkpoint pauses implementation; it is not a
+completed acceptance report. The earlier authorization remains: finish **Linux +
+WinBoat**, create the PR and merge verified work into main. Native Windows
+transport/Studio acceptance is deferred. Keep issue #21 and `needs-multi-os` open
+for that remainder; do not use a closing keyword in the PR.
 
-- Repository: `GG-O-BP/mendimaru`.
+- Repository: `GG-O-BP/mendimaru`; issue: <https://github.com/GG-O-BP/mendimaru/issues/21>.
 - Worktree: `/home/ggobp/Workspaces/mendix/mendimaru-issue-21`.
 - Branch: `feat/21-winboat-uia`.
-- Original checkout: `/home/ggobp/Workspaces/mendix/mendimaru` (preserve it).
-- [Draft PR #167](https://github.com/GG-O-BP/mendimaru/pull/167).
-- [Starting issue comment](https://github.com/GG-O-BP/mendimaru/issues/21#issuecomment-5688224321).
-- Initial base: `0ec892c` (#165, issue #16 spike).
-- Implementation commits before the reboot checkpoint: `08ed37f`, `ac6f566`.
-- Latest fetched main: `dea7c05` (#166, browser environment-change reporting).
-  GitHub reports the PR as **DIRTY**. Resolve those conflicts before expecting new
-  pull-request CI checks. Do not overwrite #166's changes when aligning schemas.
+- Draft PR #167: <https://github.com/GG-O-BP/mendimaru/pull/167>.
+- Original checkout `/home/ggobp/Workspaces/mendix/mendimaru` must be preserved.
+- Latest implementation before this checkpoint: `580427f`; main `dea7c05` was
+  already merged in `ede9cc7`. PR was MERGEABLE, still draft, at checkpoint.
+- No applicable AGENTS.md or skill was found; no subagents were used. This is
+  **mendimaru**, not pantosDemoAgGrid.
 
-The user confirmed other work had used/recreated the VM, then granted this task
-exclusive VM use. After reboot, freshly check its ownership and environment; do
-not assume old ports, PIDs, RDP sessions, or the old exclusive-use window survive.
-No applicable AGENTS.md was found during this work. No subagents were used. This
-is **mendimaru**, not pantosDemoAgGrid; the latter's product contract is unrelated.
+Read the current #21 body **and comments**, plus #16, #17, #6 and #24 before
+resuming. Also read [provider documentation](winboat-ui-automation.md),
+[the #16 spike](winboat-studio-uia-spike.md), [backend contract](backend-contract.md)
+and [CLI contract](headless-cli.md). Issue #21 requires exact-session Ready → F5,
+observed build/deploy/runtime phases, modal diagnostics and an actual Linux
+Chrome app assertion **without request interception**. Those combined acceptance
+gates are still incomplete. Hosted Windows CI is not native Studio acceptance.
 
-## Read before continuing
+## Reboot shutdown and private archive
 
-Read current issue #21 body **and comments**, plus #16, #17, #6 and #24. Their
-bodies/comments were read before implementation. Also read:
+Public `studio stop` successfully closed the current Studio 11 session. Its
+Runtime automatically reached `stopped`; the original WinBoat Compose file was
+restored **byte for byte**, and the keeper and RDP client exited. The owned assets
+watcher, Xvfb `:121` and xfwm4 were stopped. WinBoat shutdown verification is
+recorded in the archive's `shutdown.json`. The four other issue VMs had already
+been stopped. Unrelated `kangs-paste-issue2-20260916` runtime/Postgres containers
+were preserved.
 
-- [UI provider documentation](winboat-ui-automation.md).
-- [Issue #16 spike](winboat-studio-uia-spike.md): Limited Go, bounded helper only;
-  no generic canvas automation or assumed full frozen-flow completion.
-- [Backend contract](backend-contract.md) and [CLI contract](headless-cli.md).
+Durable private archive (mode 0700, deliberately outside git):
 
-Issue #21's additional acceptance comment requires exact-session project Ready,
-Run Locally/F5, distinct build/deploy/runtime observations, modal diagnostics,
-and an actual Linux Chrome app assertion **without request interception**.
-Those positive end-to-end gates have **not passed** at this checkpoint.
-Native Windows deferral must remain explicit in the eventual PR/issue outcome;
-retain `needs-multi-os` tracking and do not auto-close #21 with a closing keyword.
+`/home/ggobp/.local/state/mendimaru/issue-21/20260916T040952Z-reboot`
 
-## Implementation map
+It contains the entire private lab as `lab/`, temporary helper scripts/logs as
+`tmp-files/`, selected fixture model backups, test results and a SHA-256 manifest.
+The older `20260916-handoff` archive remains unchanged. **Do not upload these
+archives wholesale:** configs, Compose backups, screenshots and helper material
+can contain credentials or user data. This document contains no credentials.
 
-- `src-tauri/src/ui_automation/mod.rs`: bounded typed requests, validation,
-  operation/error mapping, Linux dispatch and explicit reconnect work in progress.
-- `src-tauri/src/ui_automation/bridge.rs`: signed request/report/cancellation
-  mailboxes over the registered Studio channel, freshness checks, bounded private
-  screenshot artifacts and Linux file-safety checks.
-- `src-tauri/src/cli/ui.rs`: CLI parsing, values through stdin, same-UID private
-  keeper IPC, serialization and cancellation acknowledgement under a VM lease.
-- `src-tauri/scripts/ui_supervisor.ps1`: persistent MTA child, private NTFS source,
-  job-owned cleanup and 512 MiB child limit, signed deadline/cancel supervision.
-- `src-tauri/scripts/ui_worker.ps1`: exact PID/start/path/version/session guards,
-  UIA tree/find/wait, semantic actions, conservative state/dialog classification,
-  PrintWindow capture. Adapters currently declare **10.24.26.0 and 11.12.4.0**.
-- Launch/reconnect scripts embed the supervisor and hash-pinned worker. Existing
-  session keeper and `UiAutomationBackend` contracts are reused.
-- `winboat/security.rs` and `remote_app.rs`: operation keys moved out of guest
-  process arguments into a private, one-use RDP redirected bootstrap file. The
-  guest argument pins its SHA-256. File removal precedes execution; directory
-  lifetime belongs to the retained RDP child. This affects existing operations
-  too, so retain their regression tests.
-- Contract version is **5.0.0**: the closed CLI enum/result contract changed.
-  Unchanged v4 Runtime/build/browser records remain readable. Active schemas,
-  runners and fixtures were updated; historical evidence was not rewritten.
-- `scripts/test-ui-helper.ps1`: production worker/supervisor failure/lifecycle
-  test using a non-Studio target. It is **not native Studio acceptance**.
-- CI now has a separate, short Windows helper-contract job, with test-only
-  initialization stderr capture to diagnose a hosted-runner failure.
+The old lab location was `/tmp/mendimaru21-resume`; private helpers hard-code it.
+If it is gone after reboot, restore `lab/` there with mode 0700, then copy only
+needed helpers from `tmp-files/` into `/tmp`. Do not treat restored session/cache
+records as live. Freshly verify ownership, processes, VM disk, ports, certificate,
+config, fixtures and exact Studio versions. Never reuse old PIDs, UI element IDs,
+RDP handles or the old exclusive VM-use assumption. Do not replay historical
+retirement/diagnostic commands.
 
-## Verified results and practical limits
+## Saved implementation and unverified candidate
 
-### Linux regression results
+Contract version is 5.0.0. Unchanged v4 Runtime/build/browser records remain
+readable. The public CLI uses the existing exact-session keeper and persistent
+MTA worker, signed bounded mailboxes, deadline/cancel handling, 512 MiB child job,
+one-use hash-pinned redirected bootstrap and private screenshot artifacts.
+Adapters are pinned to Studio file versions **10.24.26.0 and 11.12.4.0**.
+Unsupported actions fail explicitly; no arbitrary script/process or coordinate
+input interface was added.
 
-Before the final unverified Unicode/navigation edits:
+Recent commits:
 
-- Full Rust all-target tests passed. Library result: **378 passed, 18 ignored**;
-  binary/integration test executables also passed.
-- Clippy all-targets with `-D warnings` passed.
-- Backend JSON contract validation passed (v5, 21 capability IDs).
-- Frontend: 111 tests / 23 files passed; production build and frontend lint passed.
-- Prettier and Rust formatting passed.
+- `e075b46`, `25421f4`, `e64f8c9`: UTF-8 pipe/BOM handling, navigation keys,
+  safe error diagnostics and authenticated old-monitor retirement.
+- `f96b0c9`: nested modal input ownership and Korean login handling.
+- `dff9fe7`: preserve ownership on failed reconnect; fix PowerShell 5.1 parsing
+  of multiple installed Studio records.
+- `13bff5e`: cache per-node UIA observations; bounded unique native Go To search
+  editor accepts the existing restricted identifier value. Native WPF tests
+  cover unique/ambiguous/unrelated editors and stale handles.
+- `580427f`: preserve disabled native owner roots but omit their blocking child
+  trees, explicitly reporting truncation and `omittedDisabledWindows`. Global
+  lookup/waits reject partial observations except a positive enabled-modal wait;
+  scoped lookup in an enabled modal works. Native fixture tests passed.
 
-At the reboot checkpoint, PowerShell syntax parsing and `cargo check
---all-targets` passed again. This is **not** a replacement for rerunning the full
-relevant tests after the last edits and conflict resolution.
+**This checkpoint also saves a candidate in `ui_worker.ps1` and
+`test-ui-navigation.ps1` that is NOT yet live-verified:**
 
-### Actual WinBoat observations
+1. Cache pattern-availability properties, avoiding per-node current
+   `GetSupportedPatterns()` calls. Native fixture compares cached/live patterns.
+2. Ask the validated native element to focus before foreground activation, while
+   retaining exact owned foreground verification. Native fixture checks focus.
+3. Exclude omitted disabled window roots from modal classification. Studio's
+   Notification Stack can advertise UIA enabled while Win32 says disabled.
 
-A dedicated Xvfb `:121`, xfwm4, isolated config/cache and real FreeRDP client were
-used. No UI command opened a new RDP connection. Actual Studio 11.12.4 was started
-through the public CLI with a disposable project ID.
+Both edited PowerShell files parse successfully; the eight Rust UI tests passed
+at this checkpoint. Those checks do not execute Windows UIA or prove the new
+candidate's behavior. The last live keeper and debug executable used **580427f**,
+not these candidate edits. Rebuild and start a fresh keeper before testing them.
+Do not describe this commit as a measured performance improvement yet.
 
-- Production helper initialization, warm reuse, wrong-process rejection,
-  crash/restart, release, signed cancellation, expired request, authentication
-  rejection and UTF-8 script BOM passed in the real guest contract test.
-- Studio and UI helper both ran in interactive **Session 2**, not Session 0.
-- Tree and PrintWindow screenshot worked. The login capture was visually checked.
-- Korean login-later button was invoked through its observed UIA ID.
-- Login window classification was fixed: this window is **not** reported modal
-  by WindowPattern, but its title must still produce a `login` dialog diagnostic.
-- `ui wait --condition project-ready` succeeded on the loaded app.
-- Exact `MyFirstModule` lookup succeeded; `click` selected its SelectionItem.
-- `InvokePattern` on that App Explorer DataItem failed. Do not claim it opens a
-  document. Its child expander has **TogglePattern**, not InvokePattern.
-- Tree scans during project transition sometimes returned `ui-provider-failed`;
-  a later stable observation passed. Transient-error handling still needs review.
-- Foreground requests sometimes failed safely with `ui-foreground-lost` while
-  the notification window/RemoteApp focus changed. Later trees showed the main
-  Studio foreground. UIA invoke/select/value operations no longer unnecessarily
-  require keyboard foreground; focus/keyboard still do.
-- The new private redirected bootstrap successfully started a second real
-  Studio session, and its one-use file was consumed.
+## Validation already obtained
 
-Old session IDs, **evidence only; both were explicitly stopped**:
+Before the latest candidate: Linux Rust 385 library tests, 8 contracts, 18 CLI
+E2E and the lifecycle test passed; clippy passed. Frontend 111 tests in 23 files,
+lint, production build, formatting and backend schema checks passed. Relevant
+logs are archived (`m21-reconnect-all-tests.log`, `m21-reconnect-clippy.log`,
+`m21-cache-ui-tests.log`, `m21-reboot-ui-tests.log`).
 
-- `studio-8328-639251067080306226` (first implementation).
-- `studio-9008-639251075408124531` (private-bootstrap implementation).
+All CI jobs for **580427f** passed in run **35052853682**, including Windows
+helper contracts, both host test suites, actual Windows Tauri dev E2E, installed
+Windows bundles, security and AUR. Performance run **35052853526** was still
+running: Windows WebView passed; Linux WebView and installed Windows bundle
+measurements were pending. Check the newest checkpoint CI as well. Earlier
+performance failures/superseded runs remain historical evidence, not waived gates.
 
-Both public `studio stop` commands returned success. The task's Xvfb and test RDP
-clients were stopped. Do not reuse these PIDs or session IDs after reboot.
+Actual WinBoat tests passed authentication/expiry/wrong-target checks, helper
+warm reuse/crash/restart/cancellation/release, BOM/Unicode and plural inventory,
+nested modal ownership, and the bounded Go To/partial-owner native WPF fixtures.
+These helper contracts supplement, but do not replace, actual Studio acceptance.
 
-### CI failure still requiring investigation
+### Actual Studio 11: model edit and saved proof
 
-For `08ed37f`, the hosted Windows job passed Rust tests and both clippy modes,
-then failed the new helper test with `ui-helper-exited` during initialization.
-The same helper test passed in WinBoat. Do not classify this as native Studio
-acceptance failure or waive it merely because native transport is deferred.
+The last session was `studio-5536-639251271135764846` (now stopped). Studio/helper
+were both in interactive Session 2. Fresh launch took 145.258 seconds. Public
+login-later, native tree and Ready worked. An intentional owned-RDP disconnect
+caused `ui-session-unavailable`; public reconnect restored the same process/start
+identity in 24.195 seconds.
 
-- CI run: `35030081701`, Windows job: `104586276147`.
-- Raw job logs may require `gh api .../actions/jobs/ID/logs
---allow-escape-sequences`; strip terminal escapes before presenting logs.
-- `ac6f566` adds a dedicated short helper job and test-only bounded stderr capture.
-  At checkpoint, no new run existed because the PR conflicts with main.
-- Old `08ed37f` CI and Release performance runs may finish after this checkpoint;
-  inspect their results, but they do not validate the latest commit.
+The successful **public CLI only** edit sequence was:
 
-## Latest saved changes that are not yet live-verified
+1. File menu Ctrl+G → native Go To editor `Home_Web` → scoped Go To button Invoke.
+2. Page opened in **Structure mode**, not Design mode. An earlier wait for the
+   Design document timed out because of that incorrect harness expectation.
+3. View → Properties, then View → Page Explorer. Semantic SelectionItem click on
+   the observed Getting started widget selected it without coordinates.
+4. Its editable Name property changed from `uia16Probe` to `uia21Probe11` through
+   ValuePattern, followed by Tab and File/Ctrl+S.
+5. A later independent `mxcli DESCRIBE PAGE` and the `.mxunit` contents confirmed
+   the saved value. The first immediate read saw the old value because save was
+   asynchronous; preserve that failure instead of claiming instantaneous save.
+6. Public PrintWindow screenshot was reviewed and showed the selected widget
+   and new Name. Page Name `Home_Web` itself was read-only and correctly rejected.
 
-1. **Unicode pipe encoding:** Windows PowerShell 5.1 needed a BOM when the worker
-   source was written to disk; that fix is live-verified. A second issue was
-   found: ASCII `MyFirstModule` lookup works but a Korean File-menu lookup
-   returned no matches. The parent `Process.StandardInput` code page is suspect.
-   The latest supervisor sends explicit UTF-8 bytes through `BaseStream`.
-   Add a real Unicode pipe regression test and verify exact Korean lookup/value
-   input. Do not count the earlier BOM test as verifying this new fix.
-2. **Semantic navigation:** latest `click` also supports TogglePattern with state
-   readback. Keyboard whitelist adds Enter, Right and Escape, alongside Tab,
-   F5, Ctrl+G and Ctrl+S. These need live tests and documentation reconciliation.
-   No coordinate input or arbitrary script/process action was added.
-3. **Explicit `ui reconnect`:** keeper-side reconnect is present but not tested.
-   It reuses the backend's exact-session reconnect and project-access rules.
-   Review cancellation during reconnect, old helper/monitor cleanup, retained
-   protected-project constraints, and bounded timeout behavior. A live keeper
-   running older code cannot serve this new operation: start a fresh verified
-   keeper for the recovery test.
-4. **Error diagnostics:** worker emits only CLR type/HRESULT, never exception
-   source/message text. Bridge constructs a `uia:TYPE:CODE` diagnostic reference,
-   but CLI sanitization currently accepts artifact references only, so it likely
-   drops this value. Finish a safe diagnostic representation and regression test.
-5. Invoke dispatch returns a pre-action element snapshot to avoid reporting a
-   false failure solely because a successful invoke removed the element. Verify
-   this behavior; invocation dispatch still does not prove application success.
-6. Build/deploy/starting-runtime states use supported shallow WPF text and retain
-   observed text. Running requires the enabled Stop button under the Console
-   tab. These phase distinctions have not been observed through a complete F5 run.
+Evidence: `lab/fixture11-page-saved-confirmed.txt`, `fixture11-page-before.txt`,
+`cached11-name-save-capture.json`, and `cache/ui-artifact-AXtXHC/window.png`.
+Changed model unit: `mprcontents/7b/22/7b22940f-b2dd-43e1-9a0b-25011a7e1b33.mxunit`.
 
-## Disposable projects and private evidence
+After switching back to App Explorer, public Ready wait passed and F5 dispatched
+in 13.822 seconds. Trees observed the native Run Project progress dialog and
+status texts including error checking, clearing deployment directory and writing
+files. These were still classified as generic `modal`, not distinct build/deploy
+states. **`cached11-run-phase-20.json` and `reboot-tree.json` finally reported
+`running` with no dialogs.** The fresh reboot tree had 899 nodes and took 44.256
+seconds. Runtime HTTP readiness and an actual Chrome assertion were **not tested**
+before shutdown. A running UI observation alone does not prove app acceptance.
 
-Persisted **local private archive**, excluded from git:
+### Actual Studio 10: retained failure
 
-`/home/ggobp/.local/state/mendimaru/issue-21/20260916-handoff`
+Old session `studio-8436-639251251242346007` is stopped. Native trees, Ready,
+menus, selection, screenshots and disconnect/reconnect passed. Public F5 reached
+the actual build, but bundled Node/Rollup aborted with exit 134 at
+`rollup-runner.mjs:65:13`; no working app was established. Full tree requests during
+build/error modal timed out before the 580427f owner-omission fix. The underlying
+bundler failure remains unresolved; see `build10-error-diagnostic.json`.
+A positive Studio 10 Name edit/save is still missing.
 
-It contains CLI JSONs, screenshots, Linux test logs, guest helper-test results,
-private harness scripts, and the isolated config/cache. **Do not upload it wholesale**:
-Runtime recovery copies may contain original Compose credentials. Old `env.json`
-points into `/tmp`; recreate display/authentication and refresh config paths.
+## Fixtures, tools and continuation
 
-Shared disposable fixtures:
+Disposable fixtures are preserved on disk, not committed into this product repo:
 
-- `/home/ggobp/Workspaces/mendix/mendix-workspaces/UIA21_11_20260916`
-- `/home/ggobp/Workspaces/mendix/mendix-workspaces/UIA21_10_20260916`
-- Helper-test-only files: `.mendimaru-ui21-helper-tests` under the same share.
+- 11: `/home/ggobp/Workspaces/mendix/mendix-workspaces/UIA21_11_20260916/UIA16_10.mpr`,
+  ID `project_49d11fcfc0a8f5c46825d6550f6bede4b6d4ea613218acd73f31384986773ff5`.
+- 10: same parent, `UIA21_10_20260916/UIA16_10.mpr`,
+  ID `project_bdaf39a3764a4bb6b00dbe7fa0a61df64b81473573cff64dbb5e9bf02d7f7186`.
 
-Both projects are copies; the issue #16 originals were preserved. Their MPR
-basename is `UIA16_10.mpr` (retain it with the v2 mprcontents structure). Metadata
-was checked read-only in `_MetaData`:
+Original #16 fixtures were preserved. Fixture 11 assets were hydrated, 39 widget
+units and 19 design properties repaired with official exact 11.12.4 tooling,
+and zero consistency errors verified before the UI edit. Fixture 10 had zero UI
+consistency errors after hydration. Preserve the new saved Name and backups.
 
-- v10: `10.24.26.123458` (installed file version `10.24.26.0`).
-- v11: `11.12.4` (installed file version `11.12.4.0`).
+Private helper `m21lib.py` wraps the public CLI, saving JSONs in the lab. Full
+trees/F5 need explicit `--timeout-ms 60000`; put `--timeout-seconds` after command
+arguments. Its old `start11.json`/`start10.json` are evidence only after shutdown.
+The shared debug target path is
+`/home/ggobp/Workspaces/mendix/mendimaru/src-tauri/target/debug/mendimaru`.
+Build from the issue worktree with that checkout's `src-tauri/target` as
+`CARGO_TARGET_DIR` and `CARGO_BUILD_JOBS=2`.
 
-Opaque project IDs in the original shared-root configuration:
+Private guest test runners open another RDP connection and can disturb active
+Studio UI tests. Run deliberately, serially. Historical `m21-guest-cache-diagnostic.py`
+and `m21-guest-clean-error-short.py` target OLD PID 8436 and must not be replayed.
+Never disable RDP TLS verification; discover current ports and use verified trust.
+`chrome-assert.mjs` is prepared but **unrun**: real headed Google Chrome, sandbox
+on, no interception, Home heading and `.mx-name-uia21Probe11`, no request/HTTP/
+console/page errors. Revalidate URL/runtime/environment before using it.
 
-- v11: `project_49d11fcfc0a8f5c46825d6550f6bede4b6d4ea613218acd73f31384986773ff5`
-- v10: `project_bdaf39a3764a4bb6b00dbe7fa0a61df64b81473573cff64dbb5e9bf02d7f7186`
+Next work, after fresh environment verification:
 
-The initial minimal copies lacked template assets; the v11 UI showed **835 model
-errors**. Before pause, only the disposable v11 project's javasource,
-javascriptsource, theme, themesource and widgets were hydrated from the archived
-`source11` template. This has **not been verified to repair that fixture**. Verify
-model consistency and dependencies before attributing F5 failures to the provider.
-No actual Name-editor value change or complete runtime/browser assertion passed.
-
-Installed paths last observed (re-discover after reboot):
-
-- `C:\Program Files\Mendix\11.12.4\modeler\studiopro.exe`
-- `C:\Program Files\Mendix\10.24.26.123458\modeler\studiopro.exe`
-
-VM is `WinBoat`; Compose is `/home/ggobp/.winboat/docker-compose.yml`. Runtime
-forwarding setup/cleanup legitimately recreates the container and changes its
-API/RDP ports. Read current Docker port mappings rather than using archived
-4728x/4730x values. Preserve storage, guest preferences and other users' files.
-
-Existing test helpers in the private archive are starting points, not commands
-to replay automatically. `/tmp/m21-cli.py` used the shared cargo target executable
-and isolated environment; `/tmp/m21-step.py` saved one JSON response and timing.
-The private guest helper runner hash-verified copies before invoking the test,
-kept credentials out of host argv, and used test-only diagnostic instrumentation.
-Review it before reuse. Never print container credentials or encoded auth payloads.
-
-## Suggested continuation order
-
-1. Check worktree/main status, read this handoff and current issue contracts.
-   Resolve latest-main conflicts carefully; keep #166 environment-change behavior.
-2. Finish/review Unicode, navigation, reconnect and diagnostic changes. Add the
-   targeted regression tests; reconcile help/docs/schemas with the final surface.
-3. Run formatting, full relevant Rust tests, clippy, contract validation and
-   frontend checks affected by conflict resolution. Diagnose the short Windows
-   helper CI initialization error with its new test-only diagnostics.
-4. Freshly verify VM identity, ports, RDP ownership and exact Studio installations.
-   Recreate a private display/config/cache. A known trusted RDP certificate pin
-   existed in the user's FreeRDP cache; verify identity instead of disabling TLS.
-5. Verify disposable fixture consistency, then actual CLI UI tests on both
-   declared adapters: semantic lookup/wait/click/value/capture, modal handling,
-   stale/ambiguous/unsupported cases, multiple-process isolation, cancellation,
-   helper crash, RDP disconnect/reconnect and Studio exit/ownership cleanup.
-6. Complete exact-session Ready → F5/Run Locally → observed phases → real Linux
-   browser assertion without interception. Capture diagnostic tree/screenshots
-   for failures and report actual browser identity. Locally found Chromium
-   caches are not automatically evidence of Google Chrome acceptance.
-7. Write concise reproducible verification evidence, update the PR description
-   around the final implementation, finish required CI, mark ready and merge.
-   Update #21 with Linux completion and explicit native Windows deferral. Preserve
-   unfinished multi-OS tracking. The user already authorized PR/merge; do not ask
-   permission again because this checkpoint paused work.
+1. Rebuild and validate this checkpoint's cached-pattern/focus/modal candidates
+   against real guest fixture tests and Studio. Recheck CI/performance outcomes.
+2. Fix conservative build/deploy/runtime phase classification using actual current
+   progress context. In the Run Project dialog (`프로젝트 실행`), progress labels
+   are depth 5 and current status text depth 8, with a duplicate child at depth 9.
+   Do not infer current phase from static future/completed step labels. Keep
+   unknown/blocking-modal behavior when evidence is insufficient.
+3. Repeat Ready → F5 → HTTP-ready → real Linux Chrome assertion with the saved
+   Name, no interception, and explicit phase/modal evidence. Investigate the
+   Studio 10 bundler failure and obtain its positive edit/save proof.
+4. Complete selected-process isolation using multiple actual Studios and final
+   lifecycle cleanup evidence; helper wrong-target tests alone are insufficient.
+5. Finish relevant tests, full current CI/performance gates and reproducible
+   evidence/docs. Then mark PR ready and merge main as already authorized.
+   Keep #21/native Windows remainder open. Do not request the same authorization
+   again merely because this reboot checkpoint paused work.

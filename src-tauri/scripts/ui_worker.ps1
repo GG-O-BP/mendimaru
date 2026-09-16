@@ -60,9 +60,14 @@ $walker = [Windows.Automation.TreeWalker]::RawViewWalker
 function New-ObservationCache {
     $cache=New-Object Windows.Automation.CacheRequest
     $cache.TreeScope=[Windows.Automation.TreeScope]::Element
-    foreach($property in @('RuntimeId','Name','ControlType','IsPassword','AutomationId','FrameworkId','IsEnabled','IsOffscreen','HasKeyboardFocus','BoundingRectangle','IsValuePatternAvailable','IsWindowPatternAvailable')){
+    foreach($property in @('RuntimeId','Name','ControlType','IsPassword','AutomationId','FrameworkId','IsEnabled','IsOffscreen','HasKeyboardFocus','BoundingRectangle')){
         $cache.Add([Windows.Automation.AutomationElement]::($property+'Property'))
     }
+    $script:PatternProperties=@([Windows.Automation.AutomationElement].GetFields([Reflection.BindingFlags]'Public,Static,FlattenHierarchy') | Where-Object{$_.Name -match '^Is(.+)PatternAvailableProperty$'} | ForEach-Object{
+        $name=$_.Name -replace '^Is','' -replace 'PatternAvailableProperty$',''
+        @{name=$name;property=$_.GetValue($null)}
+    })
+    foreach($pattern in $script:PatternProperties){$cache.Add($pattern.property)}
     $cache.Add([Windows.Automation.ValuePattern]::ValueProperty)
     $cache.Add([Windows.Automation.ValuePattern]::IsReadOnlyProperty)
     $cache.Add([Windows.Automation.WindowPattern]::IsModalProperty)
@@ -78,7 +83,8 @@ function Observation($e) {
     if([bool]$e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::IsWindowPatternAvailableProperty)){
         $modal=[bool]$e.GetCachedPropertyValue([Windows.Automation.WindowPattern]::IsModalProperty)
     }
-    return @{c=$c;rid=($e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::RuntimeIdProperty) -join '.');value=$value;readOnly=$readOnly;modal=$modal}
+    $patterns=@($script:PatternProperties | Where-Object{[bool]$e.GetCachedPropertyValue($_.property)} | ForEach-Object{$_.name})
+    return @{c=$c;patterns=$patterns;rid=($e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::RuntimeIdProperty) -join '.');value=$value;readOnly=$readOnly;modal=$modal}
 }
 
 function Check-Deadline {
@@ -179,7 +185,7 @@ function Scan($scope=$null) {
         $item=$queue.Dequeue(); $e=$item.e; $observed=Observation $e;$rid=$observed.rid
         if($seen.ContainsKey($rid)){continue};$seen[$rid]=$true
         $id=Register $e $observed
-        $nodes.Add(@{e=$e;id=$id;parent=$item.parent;depth=$item.depth;observed=$observed})
+        $nodes.Add(@{e=$e;id=$id;parent=$item.parent;depth=$item.depth;observed=$observed;omittedChildren=[bool]$item.omitChildren})
         # Disabled owners can block UIA while a native modal/build dialog is
         # active. Preserve their roots and explicitly mark the tree partial.
         # Callers can scope a fresh lookup to the enabled dialog's root.
@@ -217,7 +223,7 @@ function State($scan) {
             if($name -match '(?i)^(sign.?in|log.?in|로그인)$|^(Mendix Studio Pro|멘딕스 스튜디오 프로).*?(sign.?in|log.?in|로그인)'){$kind='login'}
             elseif($modal -and $name -match '(?i)convert|upgrade|변환'){$kind='conversion'}
             elseif($modal -and $name -match '(?i)update|업데이트'){$kind='update'}
-            if($c.IsEnabled -and ($modal -or $kind -eq 'login')){$dialogs.Add(@{elementId=$node.id;kind=$kind;name=(Short $name);modal=$modal})}
+            if(-not $node.omittedChildren -and $c.IsEnabled -and ($modal -or $kind -eq 'login')){$dialogs.Add(@{elementId=$node.id;kind=$kind;name=(Short $name);modal=$modal})}
         }
         if($c.IsEnabled -and -not $c.IsOffscreen){
             if($c.FrameworkId -ceq 'WPF' -and $c.ControlType -eq [Windows.Automation.ControlType]::DataItem -and $c.Name -match "^(App|앱) '"){$projectOpen=$true}
@@ -250,7 +256,7 @@ function Tree {
         Check-Deadline
         $e=$node.e;$c=$node.observed.c;$bounds=$c.BoundingRectangle
         $publicBounds=@(0,0,0,0);if(-not $bounds.IsEmpty){$publicBounds=@($bounds.X,$bounds.Y,$bounds.Width,$bounds.Height)}
-        $patterns=@($e.GetSupportedPatterns()|ForEach-Object{$_.ProgrammaticName.Replace('PatternIdentifiers.Pattern','')})
+        $patterns=@($node.observed.patterns)
         $value=$null;$readOnly=$null
         if(-not $c.IsPassword -and $patterns -contains 'Value'){
             $value=Short $node.observed.value;$readOnly=$node.observed.readOnly
@@ -279,6 +285,10 @@ function Input-Guard($e,[bool]$needsForeground) {
         if($other -ne $h -and [MendimaruUiNative]::IsWindowEnabled($other) -and (Modal $w)){throw 'ui-modal-blocked'}
     }
     if(-not $needsForeground){return $h}
+    # A freshly opened RemoteApp may not have a foreground HWND yet. Ask the
+    # validated native element's provider to focus it before activation; input
+    # still requires the exact owned window to become foreground below.
+    $e.SetFocus()
     $null=[MendimaruUiNative]::SetForegroundWindow($h)
     $focusDeadline=[DateTime]::UtcNow.AddMilliseconds(750)
     while([MendimaruUiNative]::GetForegroundWindow() -ne $h){

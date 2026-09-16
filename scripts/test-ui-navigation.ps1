@@ -61,6 +61,8 @@ try {
             if($scan.truncated){throw 'native dialog tree truncated'}
             $snapshot=@($scan.nodes|Where-Object{$_.observed.c.AutomationId -ceq 'SearchEditor'})
             if($snapshot.Count -ne 1 -or $snapshot[0].observed.value -cne 'Original'){throw 'cached editor observation missing'}
+            $livePatterns=@($edit.GetSupportedPatterns()|ForEach-Object{$_.ProgrammaticName.Replace('PatternIdentifiers.Pattern','')})
+            if(@(Compare-Object @($snapshot[0].observed.patterns) $livePatterns).Count){throw 'cached pattern inventory differs from current native provider'}
             $full=Scan
             if(-not $full.truncated -or $full.omittedDisabledWindows.Count -ne 1){throw 'disabled modal owner must be explicitly omitted'}
             if((State $full).state -cne 'modal'){throw 'enabled modal observation lost'}
@@ -68,6 +70,8 @@ try {
             $request=@{elementId=$id;action='set-value';value='Home_Web'}
             if($mode -eq 'unique'){
                 if(-not (GoTo-Editor $edit)){throw 'known unique Go To editor rejected'}
+                $null=Act @{elementId=$id;action='focus'}
+                if(-not $edit.Current.HasKeyboardFocus -or [MendimaruUiNative]::GetForegroundWindow() -ne [IntPtr]$handles.dialog){throw 'native editor focus not verified'}
                 $null=Act $request
                 $value=$edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
                 if($value -cne 'Home_Web'){throw 'Go To value readback failed'}
