@@ -888,6 +888,7 @@ fn register_client(
             project_access,
         },
     ) {
+        close_ui_monitor(session_id, &previous.control);
         let _ = previous.process.kill();
         let _ = previous.process.wait();
     }
@@ -903,9 +904,36 @@ fn forget_registered_project_session(session_id: &str, client: &RegisteredClient
 pub(crate) fn disconnect_client(session_id: &str) {
     if let Ok(mut clients) = clients() {
         if let Some(mut client) = clients.remove(session_id) {
+            close_ui_monitor(session_id, &client.control);
             let _ = client.process.kill();
             let _ = client.process.wait();
         }
+    }
+}
+
+fn close_ui_monitor(session_id: &str, control: &RegisteredControl) {
+    // The guest monitor survives RDP loss so it can still observe Studio exit.
+    // When this owner discards it, explicitly retire only that authenticated
+    // channel. Reconnect receives a new key/path and a fresh helper generation.
+    let payload = serde_json::json!({"sessionId": session_id, "close": true});
+    let Ok(payload) = serde_json::to_vec(&payload) else {
+        return;
+    };
+    let Ok(envelope) = authenticated_envelope(&control.security, control.next_sequence, &payload)
+    else {
+        return;
+    };
+    let mut path = control.control_path.as_os_str().to_owned();
+    path.push(".ui.close");
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    if let Ok(mut file) = options.open(Path::new(&path)) {
+        let _ = file.write_all(&envelope).and_then(|()| file.sync_all());
     }
 }
 
@@ -1251,6 +1279,19 @@ mod tests {
             write_stop_control("studio-4242-638908128000000000", identity, &mut control,).is_err(),
             "an existing control request must never be overwritten"
         );
+        super::close_ui_monitor("studio-4242-638908128000000000", &control);
+        let close_path = directory.path().join("session.control.json.ui.close");
+        let close = std::fs::read(&close_path).unwrap();
+        let authenticated = authenticate_report(&close, &control.security).unwrap();
+        assert_eq!(authenticated.sequence, 2);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&authenticated.payload).unwrap(),
+            serde_json::json!({"sessionId": "studio-4242-638908128000000000", "close": true})
+        );
+        super::close_ui_monitor("studio-other", &control);
+        assert_eq!(std::fs::read(&close_path).unwrap(), close);
+        // Retiring the monitor must leave the distinct Studio stop request intact.
+        assert_eq!(std::fs::read(&control_path).unwrap(), content);
     }
 
     #[test]

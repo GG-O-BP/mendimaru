@@ -221,6 +221,7 @@ try {
             while ($true) {
                 Start-Sleep -Milliseconds 50
                 Service-MendimaruUi
+                if($script:UiClosed){exit 0} # A replacement owns the new channel.
                 $ended = $false
                 try {
                     $process.Refresh()

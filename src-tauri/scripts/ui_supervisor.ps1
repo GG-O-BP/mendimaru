@@ -8,6 +8,7 @@ $script:UiDirectory = $null
 $script:UiIdentity = $null
 $script:UiSequence = [long]0
 $script:UiVerified = $false
+$script:UiClosed = $false
 
 function Start-MendimaruUiProcess($Process) {
     # .NET Framework constructs StandardInput with Console.InputEncoding and
@@ -119,6 +120,19 @@ function Write-MendimaruUiResult($Response) {
 }
 function Service-MendimaruUi {
     if($null -eq $script:UiIdentity){return}
+    $closePath=$controlPath+'.ui.close'
+    if(Test-Path -LiteralPath $closePath){
+        try {
+            $authClose=Read-MendimaruAuthenticatedPayload -Path $closePath
+            $close=$authClose.Json|ConvertFrom-Json
+            if($authClose.Sequence -gt $script:UiSequence -and $close.close -eq $true -and $close.sessionId -ceq $script:UiIdentity.sessionId){
+                Remove-Item -LiteralPath $closePath -Force
+                Close-MendimaruUi
+                $script:UiClosed=$true
+                return
+            }
+        }catch{}
+    }
     if($script:UiVerified -and $null -ne $script:UiWorker -and -not [MendimaruUiJob]::Active([int]$script:UiIdentity.interactiveSessionId)){
         Stop-MendimaruUi
         if($null -ne $script:UiPending){Write-MendimaruUiResult @{ok=$false;reason='ui-no-interactive-desktop'};return}

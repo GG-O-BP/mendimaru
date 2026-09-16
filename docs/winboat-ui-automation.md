@@ -111,7 +111,8 @@ The existing `studio status` command remains the process/session inventory.
   same nonzero interactive session, active RDP state, and Default input desktop.
   Lock/disconnect fails closed. Focus and keyboard input require the selected RemoteApp to have foreground
   focus; a denied foreground transition returns `ui-foreground-lost`. Explicit `ui reconnect --session-id SESSION` revalidates identity and supports the command timeout and cancellation; a new worker
-  generation invalidates old elements. Studio handoff after binding never
+  generation invalidates old elements. Replacing a disconnected channel sends a
+  signed retirement request to its previous monitor, preserving Studio. Studio handoff after binding never
   silently retargets input to another PID.
 - The worker is a killable MTA child in a Windows job with kill-on-parent-close
   and a 512 MiB process-memory ceiling. A hung UIA call cannot hang the parent

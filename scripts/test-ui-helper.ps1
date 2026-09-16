@@ -116,6 +116,21 @@ try {
     Service-MendimaruUi
     Assert ($null -eq $script:UiWorker -and $script:UiSequence -eq $sequence -and -not (Test-Path ($controlPath+'.ui.report'))) 'unauthenticated request was accepted'
     Remove-Item -LiteralPath ($controlPath+'.ui.request') -Force
+    # A discarded owner retires its old monitor without closing Studio. The
+    # same authenticated channel rejects a different session and bad signatures.
+    $closePath=$controlPath+'.ui.close'
+    [IO.File]::WriteAllText($closePath,'{"schemaVersion":1,"mac":"invalid"}')
+    Service-MendimaruUi
+    Assert (-not $script:UiClosed) 'unauthenticated monitor close was accepted'
+    Remove-Item -LiteralPath $closePath -Force
+    $resultPath=$closePath
+    Write-MendimaruReport @{sessionId='studio-other';close=$true}
+    Service-MendimaruUi
+    Assert (-not $script:UiClosed) 'another session retired this monitor'
+    Remove-Item -LiteralPath $closePath -Force
+    Write-MendimaruReport @{sessionId=$session;close=$true}
+    Service-MendimaruUi
+    Assert ($script:UiClosed -and $null -eq $script:UiWorker -and -not (Test-Path $closePath)) 'owned monitor did not retire'
     Write-Output 'UI helper: persistent worker, wrong target, crash/restart, release, cancellation, expired request, UTF-8 and authentication passed.'
 } finally {
     Stop-MendimaruUi

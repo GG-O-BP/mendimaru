@@ -332,6 +332,7 @@ try {
             continue
         }
         Service-MendimaruUi
+        if($script:UiClosed){exit 0} # Release the monitor, preserving Studio.
         if (Test-Path -LiteralPath $controlPath) {
             try {
                 $sequence = Read-MendimaruStudioStopRequest `
