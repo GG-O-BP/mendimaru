@@ -167,6 +167,9 @@ jobs:
       - name: Test the production WinBoat helper under Windows PowerShell 5.1
         shell: powershell
         run: ./scripts/test-ui-helper.ps1
+      - name: Test nested modal input guards
+        shell: powershell
+        run: ./scripts/test-ui-modal.ps1
 
   security:
     name: Dependency security audit

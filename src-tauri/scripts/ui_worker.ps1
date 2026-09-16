@@ -182,7 +182,7 @@ function State($scan) {
         $c=$node.e.Current
         if($node.depth -eq 0){
             $modal=Modal $node.e;$kind='unknown';$name=$c.Name
-            if($name -match '(?i)^(Mendix Studio Pro|멘딕스 스튜디오 프로).*?(sign.?in|log.?in|로그인)'){$kind='login'}
+            if($name -match '(?i)^(sign.?in|log.?in|로그인)$|^(Mendix Studio Pro|멘딕스 스튜디오 프로).*?(sign.?in|log.?in|로그인)'){$kind='login'}
             elseif($modal -and $name -match '(?i)convert|upgrade|변환'){$kind='conversion'}
             elseif($modal -and $name -match '(?i)update|업데이트'){$kind='update'}
             if($modal -or $kind -eq 'login'){$dialogs.Add(@{elementId=$node.id;kind=$kind;name=(Short $name);modal=$modal})}
@@ -240,7 +240,11 @@ function Input-Guard($e,[bool]$needsForeground) {
     if([MendimaruUiNative]::IsIconic($h) -or -not [MendimaruUiNative]::IsWindowEnabled($h)){throw 'ui-modal-blocked'}
     foreach($other in @(Windows)){
         $w=[Windows.Automation.AutomationElement]::FromHandle($other)
-        if($other -ne $h -and (Modal $w)){throw 'ui-modal-blocked'}
+        # A nested dialog disables its modal owner. That owner must not block
+        # input to the active child (WPF may also report disabled tool windows
+        # as modal). Disabled targets are rejected above; enabled sibling
+        # modals still prevent input from crossing the active dialog boundary.
+        if($other -ne $h -and [MendimaruUiNative]::IsWindowEnabled($other) -and (Modal $w)){throw 'ui-modal-blocked'}
     }
     if(-not $needsForeground){return $h}
     $null=[MendimaruUiNative]::SetForegroundWindow($h)
