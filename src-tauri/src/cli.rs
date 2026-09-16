@@ -435,9 +435,9 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
         (Some("ui"), _) => Some(
             "Usage: mendimaru ui capabilities|tree|find|action|wait|screenshot|release|reconnect --session-id ID [--timeout-ms 15000]\n\
              find/wait: --role ROLE --name NAME --automation-id ID [--scope-id ELEMENT]\n\
-             wait: alternatively --condition project-ready|building|running|modal\n\
+             wait: alternatively --condition project-ready|building|deploying|starting-runtime|running|modal\n\
              action: --element-id ELEMENT --action invoke|click|focus|set-value|keyboard-input\n\
-             set-value: --value-stdin; keyboard-input: --key Tab|F5|Ctrl+G|Ctrl+S\n\
+             set-value: --value-stdin; keyboard-input: --key Tab|F5|Ctrl+G|Ctrl+S|Enter|Right|Escape\n\
              screenshot: [--window-id ELEMENT] [--region x,y,width,height]\n\
              Linux+WinBoat requires a session started by this version of the CLI. Windows native is deferred.",
         ),
