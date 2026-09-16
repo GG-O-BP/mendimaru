@@ -170,8 +170,9 @@ function Scan($scope=$null) {
     $script:Generation=[Guid]::NewGuid().ToString('N');$script:Elements=@{}
     $queue=New-Object Collections.Generic.Queue[object]
     if ($null -ne $scope) { $queue.Enqueue(@{e=$scope.GetUpdatedCache($script:ObservationCache);depth=0;parent=$null}) }
-    else { foreach($h in @(Windows)){ $queue.Enqueue(@{e=[Windows.Automation.AutomationElement]::FromHandle($h).GetUpdatedCache($script:ObservationCache);depth=0;parent=$null}) } }
+    else { foreach($h in @(Windows)){ $queue.Enqueue(@{e=[Windows.Automation.AutomationElement]::FromHandle($h).GetUpdatedCache($script:ObservationCache);depth=0;parent=$null;omitChildren=(-not [MendimaruUiNative]::IsWindowEnabled($h))}) } }
     $nodes=New-Object Collections.Generic.List[object]; $seen=@{}; $truncated=$false
+    $omitted=New-Object Collections.Generic.List[object]
     while($queue.Count -gt 0) {
         Check-Deadline
         if($nodes.Count -ge 3000){$truncated=$true;break}
@@ -179,6 +180,10 @@ function Scan($scope=$null) {
         if($seen.ContainsKey($rid)){continue};$seen[$rid]=$true
         $id=Register $e $observed
         $nodes.Add(@{e=$e;id=$id;parent=$item.parent;depth=$item.depth;observed=$observed})
+        # Disabled owners can block UIA while a native modal/build dialog is
+        # active. Preserve their roots and explicitly mark the tree partial.
+        # Callers can scope a fresh lookup to the enabled dialog's root.
+        if($item.omitChildren){$truncated=$true;$omitted.Add(@{elementId=$id;reason='disabled-window'});continue}
         $child=$walker.GetFirstChild($e,$script:ObservationCache)
         if($item.depth -ge 48){if($null -ne $child){$truncated=$true};continue}
         while($null -ne $child){
@@ -187,7 +192,7 @@ function Scan($scope=$null) {
             $queue.Enqueue(@{e=$child;depth=$item.depth+1;parent=$id});$child=$walker.GetNextSibling($child,$script:ObservationCache)
         }
     }
-    return @{nodes=$nodes;truncated=$truncated}
+    return @{nodes=$nodes;truncated=$truncated;omittedDisabledWindows=$omitted.ToArray()}
 }
 function Find-Elements($selector,$scope=$null) {
     if($null -eq $scope -and $selector.scopeId){$scope=Resolve $selector.scopeId}
@@ -212,7 +217,7 @@ function State($scan) {
             if($name -match '(?i)^(sign.?in|log.?in|로그인)$|^(Mendix Studio Pro|멘딕스 스튜디오 프로).*?(sign.?in|log.?in|로그인)'){$kind='login'}
             elseif($modal -and $name -match '(?i)convert|upgrade|변환'){$kind='conversion'}
             elseif($modal -and $name -match '(?i)update|업데이트'){$kind='update'}
-            if($modal -or $kind -eq 'login'){$dialogs.Add(@{elementId=$node.id;kind=$kind;name=(Short $name);modal=$modal})}
+            if($c.IsEnabled -and ($modal -or $kind -eq 'login')){$dialogs.Add(@{elementId=$node.id;kind=$kind;name=(Short $name);modal=$modal})}
         }
         if($c.IsEnabled -and -not $c.IsOffscreen){
             if($c.FrameworkId -ceq 'WPF' -and $c.ControlType -eq [Windows.Automation.ControlType]::DataItem -and $c.Name -match "^(App|앱) '"){$projectOpen=$true}
@@ -258,7 +263,7 @@ function Tree {
         $windows.Add(@{elementId=(Register $root);handle=$h.ToInt64().ToString();name=(Short $root.Current.Name);modal=(Modal $root);minimized=[MendimaruUiNative]::IsIconic($h);foreground=([MendimaruUiNative]::GetForegroundWindow() -eq $h);dpi=[MendimaruUiNative]::GetDpiForWindow($h)})
     }
     $state=State $scan;$script:Revision++
-    return @{sessionId=$script:Identity.sessionId;revision=$script:Revision;root=@{schemaVersion='5.0.0';hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';adapter=$script:Identity.fileVersion;generation=$script:Generation;processId=$p.Id;startedTicks=$script:Identity.startedTicks;interactiveSessionId=$p.SessionId;helperProcessId=$PID;helperSessionId=(Get-Process -Id $PID).SessionId;foregroundWindow=[MendimaruUiNative]::GetForegroundWindow().ToInt64().ToString();state=$state.state;statusTexts=$state.statusTexts;dialogs=$state.dialogs;windows=$windows.ToArray();nodes=$nodes.ToArray();truncated=$scan.truncated;limits=@{nodes=3000;depth=48;windows=16};fallbacks=@{coordinates=$false;keyboard=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');setValue='Properties Name or unique Go To search editor'}}}
+    return @{sessionId=$script:Identity.sessionId;revision=$script:Revision;root=@{schemaVersion='5.0.0';hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';adapter=$script:Identity.fileVersion;generation=$script:Generation;processId=$p.Id;startedTicks=$script:Identity.startedTicks;interactiveSessionId=$p.SessionId;helperProcessId=$PID;helperSessionId=(Get-Process -Id $PID).SessionId;foregroundWindow=[MendimaruUiNative]::GetForegroundWindow().ToInt64().ToString();state=$state.state;statusTexts=$state.statusTexts;dialogs=$state.dialogs;windows=$windows.ToArray();nodes=$nodes.ToArray();truncated=$scan.truncated;omittedDisabledWindows=$scan.omittedDisabledWindows;limits=@{nodes=3000;depth=48;windows=16};fallbacks=@{coordinates=$false;keyboard=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');setValue='Properties Name or unique Go To search editor'}}}
 }
 function Input-Guard($e,[bool]$needsForeground) {
     $null=Target;Supported-Version
@@ -414,8 +419,12 @@ function Execute($r) {
                     if($found.Count -eq 1 -and $found[0].Current.IsEnabled -and -not $found[0].Current.IsOffscreen){return Public-Element $found[0]}
                 } else {
                     $scan=Scan
+                    $state=State $scan
+                    # An observed enabled modal proves presence even when its
+                    # disabled owner's children were deliberately omitted.
+                    if($state.state -ceq 'modal' -and $r.condition -ceq 'modal'){return Public-Element (Root)}
                     if($scan.truncated){throw 'ui-tree-truncated'}
-                    if((State $scan).state -ceq $r.condition){return Public-Element (Root)}
+                    if($state.state -ceq $r.condition){return Public-Element (Root)}
                 }
                 Start-Sleep -Milliseconds 100
             }

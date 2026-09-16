@@ -39,7 +39,12 @@ observation; previous IDs fail closed. Scopes are resolved before a new lookup.
 Find returns all unique matches; wait requires exactly one enabled, visible
 match. Duplicate provider entries are deduplicated by complete UIA runtime ID.
 Multiple distinct matches fail wait with `ui-ambiguous-element`. A truncated
-scan cannot prove absence or uniqueness and fails find/wait explicitly.
+scan cannot prove absence or uniqueness and fails find/wait explicitly. During
+a native modal, disabled owner windows retain their root nodes but omit their
+children: `truncated=true` and `omittedDisabledWindows` identify this boundary.
+Use the observed enabled dialog root as `--scope-id` for its element lookup.
+An enabled modal itself is positive evidence for `wait --condition modal`;
+it does not require inspecting the disabled owner.
 
 | Action           | Preconditions and result                                                                                                                                            |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

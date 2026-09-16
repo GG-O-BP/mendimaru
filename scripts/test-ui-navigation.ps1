@@ -61,7 +61,10 @@ try {
             if($scan.truncated){throw 'native dialog tree truncated'}
             $snapshot=@($scan.nodes|Where-Object{$_.observed.c.AutomationId -ceq 'SearchEditor'})
             if($snapshot.Count -ne 1 -or $snapshot[0].observed.value -cne 'Original'){throw 'cached editor observation missing'}
-            $id=$snapshot[0].id
+            $full=Scan
+            if(-not $full.truncated -or $full.omittedDisabledWindows.Count -ne 1){throw 'disabled modal owner must be explicitly omitted'}
+            if((State $full).state -cne 'modal'){throw 'enabled modal observation lost'}
+            $id=Register $edit
             $request=@{elementId=$id;action='set-value';value='Home_Web'}
             if($mode -eq 'unique'){
                 if(-not (GoTo-Editor $edit)){throw 'known unique Go To editor rejected'}
