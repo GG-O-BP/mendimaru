@@ -16,10 +16,10 @@ $syntheticControl={
     param([string]$Framework,[Windows.Automation.ControlType]$Role,[string]$Name,[bool]$Enabled,[bool]$Offscreen)
     @{c=[pscustomobject]@{FrameworkId=$Framework;ControlType=$Role;Name=$Name;IsEnabled=$Enabled;IsOffscreen=$Offscreen};patterns=@();rid=[Guid]::NewGuid().ToString('N');value=$null;readOnly=$null;modal=$false}
 }
-$ready=$syntheticControl.Invoke('WPF',[Windows.Automation.ControlType]::Text,'Ready',$true,$false)
-$document=$syntheticControl.Invoke('Chrome',[Windows.Automation.ControlType]::Document','MyFirstModule.Home_Web',$true,$false)
+$ready=$syntheticControl.Invoke('WPF',([Windows.Automation.ControlType]::Text),'Ready',$true,$false)
+$document=$syntheticControl.Invoke('Chrome',([Windows.Automation.ControlType]::Document),'MyFirstModule.Home_Web',$true,$false)
 $document.value='https://studio.example/page-editor/index.html'
-$runButton=$syntheticControl.Invoke('WPF',[Windows.Automation.ControlType]::Button,'Run Locally',$true,$false)
+$runButton=$syntheticControl.Invoke('WPF',([Windows.Automation.ControlType]::Button),'Run Locally',$true,$false)
 $chromeReadiness=@{nodes=@(
     @{id='ready';parent=$null;depth=1;observed=$ready;omittedChildren=$false},
     @{id='document';parent=$null;depth=2;observed=$document;omittedChildren=$false},
