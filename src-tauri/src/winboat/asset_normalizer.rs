@@ -43,6 +43,8 @@ pub(crate) struct Scan {
 pub(crate) struct Normalizer {
     project: Dir,
     imports: Regex,
+    requires: Regex,
+    action_unc: String,
     observed: HashMap<PathBuf, Revision>,
     completed: HashMap<PathBuf, Revision>,
 }
@@ -119,15 +121,24 @@ impl Normalizer {
             "//host.lan/Data/{}/deployment/web/widgets/",
             names.join("/")
         );
-        // Generated, single-line static imports only. Do not change arbitrary
-        // strings, comments, widget sources, JS actions, or another project.
+        let action_prefix = format!("//host.lan/Data/{}/javascriptsource/", names.join("/"));
+        let action_unc =
+            format!(r"\\host.lan\Data\{}\javascriptsource\", names.join(r"\")).replace('\\', r"\\");
+        // Generated, single-line references only. Do not change arbitrary
+        // strings, comments, widget sources, another project, or user sources.
         let imports = Regex::new(&format!(
             r#"(?m)^(?P<before>[ \t]*import[ \t]+(?:[A-Za-z0-9_*$,{{}} \t]+[ \t]+from[ \t]+)?)(?P<quote>["'])(?P<url>{})(?P<asset>[^"'\r\n]+)(?P<end>["'];[ \t]*\r?$)"#,
             regex::escape(&prefix),
         )).map_err(|_| invalid("the generated import matcher could not be prepared"))?;
+        let requires = Regex::new(&format!(
+            r#"(?m)^(?P<before>[ \t]*(?:"action"[ \t]*:[ \t]*)?\(\)[ \t]*=>[ \t]*require\()(?P<quote>["'])(?P<url>{})(?P<asset>[^"'\r\n]+)(?P<end>["']\)\.[A-Za-z_$][A-Za-z0-9_$]*,?[ \t]*\r?$)"#,
+            regex::escape(&action_prefix),
+        )).map_err(|_| invalid("the generated JavaScript action matcher could not be prepared"))?;
         Ok(Self {
             project: directory,
             imports,
+            requires,
+            action_unc,
             observed: HashMap::new(),
             completed: HashMap::new(),
         })
@@ -166,9 +177,9 @@ impl Normalizer {
             }
             Err(error) => return Err(error),
         };
-        // These two generated directories contain static widget imports. Keep
-        // nanoflow JS-action paths and all original project directories intact.
-        for name in ["layouts", "pages"] {
+        // These generated directories contain static widget imports and
+        // generated nanoflow action references. Keep original sources intact.
+        for name in ["layouts", "pages", "nanoflows"] {
             match web.open_dir_nofollow(name) {
                 Ok(directory) => self.scan_directory(
                     &directory,
@@ -281,6 +292,12 @@ impl Normalizer {
     }
 
     fn normalize(&self, text: &str, depth: usize) -> io::Result<(String, usize)> {
+        let (text, import_count) = self.normalize_widget_imports(text, depth)?;
+        let (text, require_count) = self.normalize_nanoflow_requires(&text)?;
+        Ok((text, import_count + require_count))
+    }
+
+    fn normalize_widget_imports(&self, text: &str, depth: usize) -> io::Result<(String, usize)> {
         let mut result = String::with_capacity(text.len());
         let mut offset = 0;
         let mut count = 0;
@@ -311,6 +328,43 @@ impl Normalizer {
             result.push_str(&"../".repeat(depth));
             result.push_str("widgets/");
             result.push_str(asset);
+            result.push_str(&capture["end"]);
+            offset = matched.end();
+            count += 1;
+        }
+        result.push_str(&text[offset..]);
+        Ok((result, count))
+    }
+
+    fn normalize_nanoflow_requires(&self, text: &str) -> io::Result<(String, usize)> {
+        let mut result = String::with_capacity(text.len());
+        let mut offset = 0;
+        let mut count = 0;
+        let mut lexer = ImportContext::default();
+        for capture in self.requires.captures_iter(text) {
+            let matched = capture.get(0).expect("complete action require match");
+            if !lexer.is_code_at(text.as_bytes(), matched.start()) {
+                continue;
+            }
+            let asset = &capture["asset"];
+            if capture["quote"] != capture["end"][..1]
+                || asset.contains(['\\', '%', '?', '#', '\0'])
+                || asset.is_empty()
+                || asset.ends_with(".js")
+                || asset
+                    .split('/')
+                    .any(|part| part.is_empty() || matches!(part, "." | ".."))
+            {
+                return Err(invalid(
+                    "the generated JavaScript action path is unsupported",
+                ));
+            }
+            result.push_str(&text[offset..matched.start()]);
+            result.push_str(&capture["before"]);
+            result.push_str(&capture["quote"]);
+            result.push_str(&self.action_unc);
+            result.push_str(&asset.replace('/', r"\\"));
+            result.push_str(".js");
             result.push_str(&capture["end"]);
             offset = matched.end();
             count += 1;
@@ -438,6 +492,11 @@ mod tests {
 
     const ORIGINAL: &str = "import * as Widget from \"//host.lan/Data/Project/deployment/web/widgets/com/widget.mjs\";\r\nimport \"//host.lan/Data/Project/deployment/web/widgets/com/widget.css\";\r\n";
     const NORMALIZED: &str = "import * as Widget from \"../widgets/com/widget.mjs\";\r\nimport \"../widgets/com/widget.css\";\r\n";
+    const ACTION_ORIGINAL: &str = "      \"action\": () => require(\"//host.lan/Data/Project/javascriptsource/atlas_core/actions/ReloadWithState\").ReloadWithState,\r\n";
+    const ACTION_NORMALIZED: &str = concat!(
+        r#"      "action": () => require("\\\\host.lan\\Data\\Project\\javascriptsource\\atlas_core\\actions\\ReloadWithState.js").ReloadWithState,"#,
+        "\r\n"
+    );
 
     #[test]
     fn normalizes_only_selected_widget_static_imports_at_the_correct_depth() {
@@ -477,6 +536,31 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_only_generated_nanoflow_javascript_action_requires() {
+        let (_root, normalizer) = fixture();
+        assert_eq!(
+            normalizer.normalize(ACTION_ORIGINAL, 1).unwrap(),
+            (ACTION_NORMALIZED.to_string(), 1)
+        );
+        let block = format!("/*\n{ACTION_ORIGINAL}*/\nconst text = `\n{ACTION_ORIGINAL}`;\n");
+        assert_eq!(normalizer.normalize(&block, 1).unwrap(), (block, 0));
+        let untouched = [
+            "// \"action\": () => require(\"//host.lan/Data/Project/javascriptsource/a/b\").Action,",
+            "\"action\": () => require(\"//host.lan/Data/Other/javascriptsource/a/b\").Action,",
+            "\"value\": () => require(\"https://example.test/source\").Action,",
+            "\"action\": () => require(\"../../javascriptsource/a/b.js\").Action,",
+        ]
+        .join("\n");
+        assert_eq!(normalizer.normalize(&untouched, 1).unwrap(), (untouched, 0));
+        for suffix in ["../secret", "a/../../secret", "a%2fsecret", "a?x=1", "a\\b"] {
+            let source = format!(
+                "\"action\": () => require(\"//host.lan/Data/Project/javascriptsource/{suffix}\").Action,"
+            );
+            assert!(normalizer.normalize(&source, 1).is_err());
+        }
+    }
+
+    #[test]
     fn watches_fresh_build_regeneration_and_whole_deployment_replacement() {
         let (root, mut normalizer) = fixture();
         assert_eq!(normalizer.scan().unwrap().rewritten_files, 0);
@@ -484,13 +568,18 @@ mod tests {
         let layout = project.join("deployment/web/layouts/App.js");
         fs::create_dir_all(layout.parent().unwrap()).unwrap();
         fs::write(&layout, ORIGINAL).unwrap();
+        let nanoflow = project.join("deployment/web/nanoflows/Atlas_Core.Action.js");
+        fs::create_dir_all(nanoflow.parent().unwrap()).unwrap();
+        fs::write(&nanoflow, ACTION_ORIGINAL).unwrap();
         fs::create_dir_all(project.join("deployment/web/dist")).unwrap();
         fs::write(project.join("deployment/web/dist/page.js"), ORIGINAL).unwrap();
         fs::write(project.join("model.mpr"), ORIGINAL).unwrap();
-        assert_eq!(normalizer.scan().unwrap().pending_files, 1);
+        assert_eq!(normalizer.scan().unwrap().pending_files, 2);
         assert_eq!(fs::read_to_string(&layout).unwrap(), ORIGINAL);
-        assert_eq!(normalizer.scan().unwrap().rewritten_imports, 2);
+        assert_eq!(fs::read_to_string(&nanoflow).unwrap(), ACTION_ORIGINAL);
+        assert_eq!(normalizer.scan().unwrap().rewritten_imports, 3);
         assert_eq!(fs::read_to_string(&layout).unwrap(), NORMALIZED);
+        assert_eq!(fs::read_to_string(&nanoflow).unwrap(), ACTION_NORMALIZED);
         assert_eq!(normalizer.scan().unwrap().rewritten_files, 0);
         assert_eq!(
             fs::read_to_string(project.join("model.mpr")).unwrap(),
@@ -503,14 +592,17 @@ mod tests {
         // A real watcher can replace a file, and Clean Deployment can replace
         // the entire tree. Both must be rediscovered using the project anchor.
         fs::write(&layout, ORIGINAL).unwrap();
+        fs::write(&nanoflow, ACTION_ORIGINAL).unwrap();
         normalizer.scan().unwrap();
-        assert_eq!(normalizer.scan().unwrap().rewritten_files, 1);
+        assert_eq!(normalizer.scan().unwrap().rewritten_files, 2);
         fs::remove_dir_all(project.join("deployment")).unwrap();
         normalizer.scan().unwrap();
         fs::create_dir_all(layout.parent().unwrap()).unwrap();
+        fs::create_dir_all(nanoflow.parent().unwrap()).unwrap();
         fs::write(&layout, ORIGINAL).unwrap();
+        fs::write(&nanoflow, ACTION_ORIGINAL).unwrap();
         normalizer.scan().unwrap();
-        assert_eq!(normalizer.scan().unwrap().rewritten_files, 1);
+        assert_eq!(normalizer.scan().unwrap().rewritten_files, 2);
     }
 
     #[test]

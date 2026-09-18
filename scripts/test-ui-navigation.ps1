@@ -12,6 +12,22 @@ foreach($definition in $ast.FindAll({param($node) $node -is [Management.Automati
 }
 $walker=[Windows.Automation.TreeWalker]::RawViewWalker
 $script:ObservationCache=New-ObservationCache
+$syntheticControl={
+    param([string]$Framework,[Windows.Automation.ControlType]$Role,[string]$Name,[bool]$Enabled,[bool]$Offscreen)
+    @{c=[pscustomobject]@{FrameworkId=$Framework;ControlType=$Role;Name=$Name;IsEnabled=$Enabled;IsOffscreen=$Offscreen};patterns=@();rid=[Guid]::NewGuid().ToString('N');value=$null;readOnly=$null;modal=$false}
+}
+$ready=$syntheticControl.Invoke('WPF',[Windows.Automation.ControlType]::Text,'Ready',$true,$false)
+$document=$syntheticControl.Invoke('Chrome',[Windows.Automation.ControlType]::Document','MyFirstModule.Home_Web',$true,$false)
+$document.value='https://studio.example/page-editor/index.html'
+$runButton=$syntheticControl.Invoke('WPF',[Windows.Automation.ControlType]::Button,'Run Locally',$true,$false)
+$chromeReadiness=@{nodes=@(
+    @{id='ready';parent=$null;depth=1;observed=$ready;omittedChildren=$false},
+    @{id='document';parent=$null;depth=2;observed=$document;omittedChildren=$false},
+    @{id='run';parent=$null;depth=1;observed=$runButton;omittedChildren=$false}
+);truncated=$false;omittedDisabledWindows=@()}
+if((State $chromeReadiness).state -cne 'project-ready'){throw 'Chrome page-editor document did not prove project openness'}
+$document.value='https://studio.example/unknown/index.html'
+if((State $chromeReadiness).state -ceq 'project-ready'){throw 'unrelated Chrome document falsely proved project openness'}
 $lab=Join-Path $env:TEMP ('mendimaru-navigation-test-'+[Guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory -Path $lab
 $fixture=Join-Path $lab 'fixture.ps1'
@@ -22,12 +38,20 @@ Add-Type -AssemblyName PresentationFramework
 $main=New-Object Windows.Window
 $main.Title='Mendimaru navigation test owner';$main.Width=400;$main.Height=300
 $dialog=New-Object Windows.Window
-$dialog.Title=$(if($Mode -eq 'unrelated'){'Other dialog'}else{'Go To'})
+$dialog.Title=$(if($Mode -eq 'unrelated'){'Other dialog'}elseif($Mode -like 'phase-*'){'Run Project'}else{'Go To'})
 $dialog.Width=300;$dialog.Height=200
 $panel=New-Object Windows.Controls.StackPanel
 $edit=New-Object Windows.Controls.TextBox
 $edit.Text='Original';$edit.Name='SearchEditor';$panel.Children.Add($edit)|Out-Null
 if($Mode -eq 'ambiguous'){$panel.Children.Add((New-Object Windows.Controls.TextBox))|Out-Null}
+if($Mode -like 'phase-*'){
+    $status=New-Object Windows.Controls.TextBlock
+    $statusText=@{'phase-building'='Compiling Java files...';'phase-deploying'='Clearing deployment directory...';'phase-starting-runtime'='Starting runtime...'}[$Mode]
+    $status.Text=$statusText
+    $panel.Children.Add($status)|Out-Null
+    $future=New-Object Windows.Controls.TextBlock
+    $future.Text='Clean deployment directory';$panel.Children.Add($future)|Out-Null
+}
 $dialog.Content=$panel
 $timer=New-Object Windows.Threading.DispatcherTimer
 $timer.Interval=[TimeSpan]::FromMilliseconds(50)
@@ -39,7 +63,7 @@ $dialog.Add_ContentRendered({$timer.Start()})
 $main.Show();$dialog.Owner=$main;$null=$dialog.ShowDialog()
 '@)
 try {
-    foreach($mode in @('unique','ambiguous','unrelated')){
+    foreach($mode in @('phase-building','phase-deploying','phase-starting-runtime','unique','ambiguous','unrelated')){
         $state=Join-Path $lab ($mode+'.json');$process=$null
         try {
             $process=Start-Process (Join-Path $PSHOME 'powershell.exe') -ArgumentList @('-NoProfile','-STA','-File',('"'+$fixture+'"'),('"'+$state+'"'),$mode) -PassThru
@@ -54,6 +78,20 @@ try {
             $script:Generation=[Guid]::NewGuid().ToString('N');$script:Elements=@{};$script:ElementSequence=0
             $handles=[IO.File]::ReadAllText($state)|ConvertFrom-Json
             $dialog=[Windows.Automation.AutomationElement]::FromHandle([IntPtr]$handles.dialog)
+            if($mode -like 'phase-*'){
+                $scan=Scan $dialog
+                $state=State $scan
+                $expected=$mode.Substring(6)
+                $expectedText=@{'building'='Compiling Java files...';'deploying'='Clearing deployment directory...';'starting-runtime'='Starting runtime...'}[$expected]
+                if($state.state -cne $expected -or @($state.statusTexts) -cnotcontains $expectedText){
+                    throw ('current Run Project status was not classified: '+$state.state)
+                }
+                if(@($state.dialogs).Count -ne 1 -or $state.dialogs[0].kind -cne 'progress'){
+                    throw 'Run Project progress dialog was not reported diagnostically'
+                }
+                Write-Output ('UI navigation: current Run Project '+$expected+' phase passed.')
+                continue
+            }
             $condition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'SearchEditor')
             $edit=$dialog.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)
             if($null -eq $edit){throw 'search editor missing'}

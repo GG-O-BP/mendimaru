@@ -212,10 +212,20 @@ function Modal($e) {
     $pattern=$null
     return $e.TryGetCurrentPattern([Windows.Automation.WindowPattern]::Pattern,[ref]$pattern) -and $pattern.Current.IsModal
 }
+function Progress-Phase([string]$name) {
+    if($name -cmatch '^(Checking for errors|Writing files|Compiling theme files|Compiling Java files|오류 확인 중|파일을 쓰는 중|테마 파일 컴파일 중|Java 컴파일 중)\.\.\.$'){return 'building'}
+    if($name -cmatch '^(Clearing deployment directory|배치 디렉터리 정리 중)\.\.\.$'){return 'deploying'}
+    if($name -cmatch '^(Starting runtime|Starting the runtime|런타임 시작)\.\.\.$'){return 'starting-runtime'}
+    return $null
+}
 function State($scan) {
     $state='unknown';$dialogs=New-Object Collections.Generic.List[object]
-    $statusTexts=New-Object Collections.Generic.List[string];$projectReady=$false;$projectOpen=$false;$busy=$null;$running=$false
+    $statusTexts=New-Object Collections.Generic.List[string];$projectReady=$false;$projectOpen=$false;$busy=$null;$running=$false;$runtimeStarting=$false
     $parents=@{};foreach($node in $scan.nodes){$parents[$node.id]=$node}
+    $runDialogRoots=@{}
+    foreach($node in $scan.nodes){
+        if($node.depth -eq 0 -and $node.observed.modal -and $node.observed.c.Name -cin @('Run Project','프로젝트 실행')){$runDialogRoots[$node.id]=$true}
+    }
     foreach($node in $scan.nodes){
         $c=$node.observed.c
         if($node.depth -eq 0){
@@ -223,17 +233,25 @@ function State($scan) {
             if($name -match '(?i)^(sign.?in|log.?in|로그인)$|^(Mendix Studio Pro|멘딕스 스튜디오 프로).*?(sign.?in|log.?in|로그인)'){$kind='login'}
             elseif($modal -and $name -match '(?i)convert|upgrade|변환'){$kind='conversion'}
             elseif($modal -and $name -match '(?i)update|업데이트'){$kind='update'}
+            elseif($runDialogRoots.ContainsKey($node.id)){$kind='progress'}
             if(-not $node.omittedChildren -and $c.IsEnabled -and ($modal -or $kind -eq 'login')){$dialogs.Add(@{elementId=$node.id;kind=$kind;name=(Short $name);modal=$modal})}
         }
         if($c.IsEnabled -and -not $c.IsOffscreen){
             if($c.FrameworkId -ceq 'WPF' -and $c.ControlType -eq [Windows.Automation.ControlType]::DataItem -and $c.Name -match "^(App|앱) '"){$projectOpen=$true}
+            if($c.FrameworkId -cin @('WPF','Chrome') -and $c.ControlType -eq [Windows.Automation.ControlType]::Document -and $c.Name -cmatch '^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$' -and [string]$node.observed.value -cmatch 'page-editor/index.html'){$projectOpen=$true}
+            $inRunDialog=$false;$ancestor=$node
+            for($i=0;$i -lt 48 -and $ancestor;$i++){
+                if($runDialogRoots.ContainsKey($ancestor.id)){$inRunDialog=$true;break}
+                if(-not $ancestor.parent){break}
+                $ancestor=$parents[$ancestor.parent]
+            }
+            if($inRunDialog -and $c.ControlType -eq [Windows.Automation.ControlType]::Text){
+                $phase=Progress-Phase $c.Name
+                if($phase){$busy=$phase;if(-not $statusTexts.Contains($c.Name)){$statusTexts.Add((Short $c.Name))}}
+            }
             if($c.FrameworkId -ceq 'WPF' -and $node.depth -le 8 -and $c.ControlType -eq [Windows.Automation.ControlType]::Text){
                 if($c.Name -in @('Ready','준비')){$projectReady=$true}
-                $phase=$null
-                if($c.Name -match '^(Building|Compiling|빌드 중|컴파일 중)'){$phase='building'}
-                elseif($c.Name -match '^(Deploying|배포 중)'){$phase='deploying'}
-                elseif($c.Name -match '^(Starting runtime|Starting the runtime|런타임 시작)'){$phase='starting-runtime'}
-                if($phase){$busy=$phase;if(-not $statusTexts.Contains($c.Name)){$statusTexts.Add((Short $c.Name))}}
+                if($c.Name -in @('The app is starting.','앱이 시작되고 있습니다.')){$runtimeStarting=$true}
             }
             if($c.ControlType -eq [Windows.Automation.ControlType]::Button -and $c.Name -in @('Run Locally','Run locally','로컬에서 실행')){$projectReady=$true}
             if($c.ControlType -eq [Windows.Automation.ControlType]::Button -and $c.Name -in @('Stop','중지')){
@@ -245,8 +263,11 @@ function State($scan) {
             }
         }
     }
-    if($projectReady -and $projectOpen){$state='project-ready'};if($running){$state='running'};if($busy){$state=$busy}
-    if($dialogs.Count -gt 0){$state='modal'}
+    if($projectReady -and $projectOpen){$state='project-ready'}
+    if($busy){$state=$busy}
+    elseif($runtimeStarting){$state='starting-runtime'}
+    if($running){$state='running'}
+    if($dialogs.Count -gt 0 -and $state -in @('unknown','project-ready')){$state='modal'}
     if($scan.truncated -and $state -eq 'project-ready'){$state='unknown'}
     return @{state=$state;dialogs=$dialogs.ToArray();statusTexts=$statusTexts.ToArray()}
 }
@@ -304,10 +325,16 @@ function Name-Editor($e) {
     for($i=0;$i -lt 16 -and $null -ne $row;$i++){
         if($row.Current.Name -in @('Properties','속성','특성') -and $row.Current.ControlType -eq [Windows.Automation.ControlType]::TabItem){$panel=$true;break}
         if($i -lt 4){
-            $child=$walker.GetFirstChild($row);$n=0
-            while($null -ne $child -and $n++ -lt 32){
-                if($child.Current.Name -in @('Name','이름') -and $child.Current.ControlType -eq [Windows.Automation.ControlType]::Text){$property=$true}
-                $child=$walker.GetNextSibling($child)
+            $queue=New-Object Collections.Generic.Queue[object];$queue.Enqueue(@{e=$row;depth=0});$n=0
+            while($queue.Count -gt 0 -and $n++ -lt 32){
+                $item=$queue.Dequeue();$child=$item.e
+                if($child.Current.Name -in @('Name','이름') -and $child.Current.ControlType -eq [Windows.Automation.ControlType]::Text){$property=$true;break}
+                if($item.depth -ge 2){continue}
+                $next=$walker.GetFirstChild($child)
+                while($null -ne $next){
+                    if($n+$queue.Count -ge 32){break}
+                    $queue.Enqueue(@{e=$next;depth=$item.depth+1});$next=$walker.GetNextSibling($next)
+                }
             }
         }
         $row=$walker.GetParent($row)
@@ -433,7 +460,15 @@ function Execute($r) {
                     # An observed enabled modal proves presence even when its
                     # disabled owner's children were deliberately omitted.
                     if($state.state -ceq 'modal' -and $r.condition -ceq 'modal'){return Public-Element (Root)}
-                    if($scan.truncated){throw 'ui-tree-truncated'}
+                    # A current Run Project status is likewise positive evidence;
+                    # disabled owners cannot make that observation complete, but
+                    # they cannot invalidate the observed active status either.
+                    if($state.state -ceq $r.condition -and $state.state -cin @('building','deploying','starting-runtime','running')){return Public-Element (Root)}
+                    # A partial snapshot cannot satisfy a semantic wait, but it
+                    # also cannot disprove the next observation. Poll until the
+                    # request deadline instead of turning transient startup
+                    # truncation into an immediate wait failure.
+                    if($scan.truncated){Start-Sleep -Milliseconds 100;continue}
                     if($state.state -ceq $r.condition){return Public-Element (Root)}
                 }
                 Start-Sleep -Milliseconds 100

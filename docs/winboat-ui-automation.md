@@ -39,12 +39,15 @@ observation; previous IDs fail closed. Scopes are resolved before a new lookup.
 Find returns all unique matches; wait requires exactly one enabled, visible
 match. Duplicate provider entries are deduplicated by complete UIA runtime ID.
 Multiple distinct matches fail wait with `ui-ambiguous-element`. A truncated
-scan cannot prove absence or uniqueness and fails find/wait explicitly. During
+scan cannot prove absence or uniqueness and fails find explicitly. Semantic
+waits keep polling until their deadline; a deadline expires without positive
+evidence rather than treating truncation as the requested state. During
 a native modal, disabled owner windows retain their root nodes but omit their
 children: `truncated=true` and `omittedDisabledWindows` identify this boundary.
 Use the observed enabled dialog root as `--scope-id` for its element lookup.
 An enabled modal itself is positive evidence for `wait --condition modal`;
-it does not require inspecting the disabled owner.
+it does not require inspecting the disabled owner. A current Run Project status
+is likewise positive evidence for its semantic phase despite those omitted owners.
 
 | Action           | Preconditions and result                                                                                                                                            |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -73,11 +76,17 @@ Semantic waits are `project-ready`, `building`, `deploying`, `starting-runtime`,
 `running`, and `modal`. The tree
 reports `unknown` when no supported observation proves a state. Readiness uses
 native shallow WPF status/Run controls and the loaded app explorer root; runtime state uses the enabled Console
-Stop control. Busy phases retain their observed status text; a phase not observed
-is never inferred as completed. These are Studio UI observations, **not HTTP or browser health**.
+Stop control. Build/deploy classification reads only the current status text
+inside the observed native Run Project dialog (for example error checking,
+deployment-directory cleanup, file writing, or theme/Java compilation). Static
+future/completed step labels are retained as tree evidence but never determine
+the current phase. Runtime start uses the current application-starting
+notification before the Console Stop control proves `running`. Busy phases
+retain their observed status text; a phase not observed is never inferred as
+completed. These are Studio UI observations, **not HTTP or browser health**.
 Use Runtime/browser verification for those boundaries. Dialogs retain their IDs,
-names, and conservative login/conversion/update/unknown classification. The
-provider never dismisses a dialog automatically or sends input through a modal.
+names, and conservative login/conversion/update/progress/unknown classification.
+The provider never dismisses a dialog automatically or sends input through a modal.
 
 ## Capture and diagnostics
 

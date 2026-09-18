@@ -281,8 +281,9 @@ See [WinBoat VM use](winboat-vm-use.md) for identity, generations, and limitatio
 ## Foreground generated-asset repair (Linux)
 
 `mendimaru assets watch --project-id ID --rewrite-generated-assets` keeps Studio's
-generated widget imports relative across rebuilds. It emits a dedicated NDJSON
-status stream until Ctrl+C/SIGTERM, outside the normal command timeout/envelope.
+generated widget imports and nanoflow action requires bundler-resolvable across
+rebuilds. It emits a dedicated NDJSON status stream until Ctrl+C/SIGTERM,
+outside the normal command timeout/envelope.
 See [WinBoat assets](winboat-assets.md) for its opt-in, exact write scope,
 lifecycle, limits, and ordinary-browser validation.
 

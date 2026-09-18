@@ -4,10 +4,12 @@ use std::ffi::OsString;
 
 const HELP: &str = "Usage: mendimaru assets watch --project-id ID --rewrite-generated-assets\n\
 Linux WinBoat only. Run alongside Studio Pro before F5. Rewrites only generated\n\
-deployment/web/{layouts,pages} widget imports to relative paths and keeps watching\n\
+deployment/web/{layouts,pages} widget imports and nanoflow JavaScript-action\n\
+requires to bundler-resolvable paths and keeps watching\n\
 after rebuilds. Rspack must finish rebuilding before reloading the browser.\n\
 Emits NDJSON status until Ctrl+C; an error stops the watcher with exit 1.\n\
-Does not edit model/widget sources, configure hosts/ports, or start/stop Studio.\n\
+Does not edit model, widget, or original JavaScript-action sources; configure\n\
+hosts/ports; or start/stop Studio.\n\
 Use project list to find the project ID. See docs/winboat-assets.md.";
 
 pub(super) fn dispatch(arguments: &[OsString]) -> i32 {
@@ -74,7 +76,7 @@ fn parse(arguments: &[OsString]) -> Result<String, &'static str> {
         index += 1;
     }
     if !opt_in {
-        return Err("--rewrite-generated-assets is required: this command changes generated layout/page imports");
+        return Err("--rewrite-generated-assets is required: this command changes generated layout, page, and nanoflow references");
     }
     let id = id.ok_or("--project-id is required")?;
     if !id.strip_prefix("project_").is_some_and(|suffix| {
@@ -126,7 +128,7 @@ async fn watch(project_id: &str) -> Result<(), String> {
         .map_err(|_| "asset watcher termination handling is unavailable")?;
     let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
         .map_err(|_| "asset watcher cancellation handling is unavailable")?;
-    report(true, "watching", "Generated layout/page widget imports will be rewritten. Wait for Studio's Rspack build to finish before loading the ordinary browser. Keep this process running across F5/rebuilds.", None);
+    report(true, "watching", "Generated layout/page widget imports and nanoflow action requires will be rewritten. Wait for Studio's Rspack build to finish before loading the ordinary browser. Keep this process running across F5/rebuilds.", None);
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(250));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Consume interval's immediate first tick: require a real quiet interval.
@@ -138,7 +140,7 @@ async fn watch(project_id: &str) -> Result<(), String> {
             _ = interval.tick() => {
                 let scan = normalizer.scan().map_err(safe_error)?;
                 if scan.rewritten_files > 0 {
-                    report(true, "normalized", "Generated imports normalized; wait for Rspack to finish bundling the widgets and CSS, then reload the browser.", Some(serde_json::to_value(scan).map_err(|_| "asset status serialization failed")?));
+                    report(true, "normalized", "Generated references normalized; wait for Rspack to finish bundling the widgets, CSS, and JavaScript actions, then reload the browser.", Some(serde_json::to_value(scan).map_err(|_| "asset status serialization failed")?));
                 }
             }
         }
