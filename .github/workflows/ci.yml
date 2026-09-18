@@ -158,6 +158,23 @@ jobs:
         if: runner.os == 'Windows'
         run: npm run test:e2e:windows:powershell
 
+  ui-helper-contract:
+    name: Windows helper contract (no Studio)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Test the production WinBoat helper under Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/test-ui-helper.ps1
+      - name: Test nested modal input guards
+        shell: powershell
+        run: ./scripts/test-ui-modal.ps1
+
+      - name: Test bounded native Go To navigation
+        shell: powershell
+        run: ./scripts/test-ui-navigation.ps1
+
   security:
     name: Dependency security audit
     runs-on: ubuntu-latest

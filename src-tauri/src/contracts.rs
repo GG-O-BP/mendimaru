@@ -5,7 +5,13 @@ use std::fmt;
 /// Contract versions follow semantic versioning. Changes accepted by the
 /// current closed schemas may increment the minor version; serialized fields,
 /// enum variants, capability IDs, or semantics require a major version.
-pub const CONTRACT_SCHEMA_VERSION: &str = "4.0.0";
+pub const CONTRACT_SCHEMA_VERSION: &str = "5.0.0";
+
+/// UI commands added in v5 do not change persisted v4 Runtime/build/browser
+/// records. Read both without rewriting old snapshots or artifact descriptors.
+pub(crate) fn compatible_record_schema(version: &str) -> bool {
+    matches!(version, "4.0.0" | "5.0.0")
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
@@ -1141,10 +1147,17 @@ mod tests {
                 schema["$schema"],
                 "https://json-schema.org/draft/2020-12/schema"
             );
-            assert_eq!(
-                schema["properties"]["schemaVersion"]["const"], CONTRACT_SCHEMA_VERSION,
-                "{name} schema version drifted"
-            );
+            if name == "artifact" {
+                assert_eq!(
+                    schema["properties"]["schemaVersion"]["enum"],
+                    serde_json::json!(["4.0.0", CONTRACT_SCHEMA_VERSION])
+                );
+            } else {
+                assert_eq!(
+                    schema["properties"]["schemaVersion"]["const"], CONTRACT_SCHEMA_VERSION,
+                    "{name} schema version drifted"
+                );
+            }
         }
         let browser: serde_json::Value =
             serde_json::from_str(include_str!("../../schemas/browser.schema.json"))

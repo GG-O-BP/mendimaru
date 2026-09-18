@@ -281,8 +281,9 @@ See [WinBoat VM use](winboat-vm-use.md) for identity, generations, and limitatio
 ## Foreground generated-asset repair (Linux)
 
 `mendimaru assets watch --project-id ID --rewrite-generated-assets` keeps Studio's
-generated widget imports relative across rebuilds. It emits a dedicated NDJSON
-status stream until Ctrl+C/SIGTERM, outside the normal command timeout/envelope.
+generated widget imports and nanoflow action requires bundler-resolvable across
+rebuilds. It emits a dedicated NDJSON status stream until Ctrl+C/SIGTERM,
+outside the normal command timeout/envelope.
 See [WinBoat assets](winboat-assets.md) for its opt-in, exact write scope,
 lifecycle, limits, and ordinary-browser validation.
 
@@ -290,6 +291,14 @@ lifecycle, limits, and ordinary-browser validation.
 bypass; HTTP readiness retains its lightweight contract. See the
 [frontend diagnosis contract](browser-testing.md#opt-in-frontend-health-144)
 for state meanings, limits and exit codes.
+
+## Studio UI automation
+
+Contract v5 adds `ui capabilities/tree/find/action/wait/screenshot/release/reconnect` for
+a selected keeper-owned Linux WinBoat Studio session. The complete syntax,
+stdin-only Name writes, semantic waits, private captures, and recovery behavior
+are documented in [Studio UI automation](winboat-ui-automation.md). Native
+Windows UI is deferred and returns `unsupported_capability`.
 
 ## Browser environment change evidence (#154)
 

@@ -77,7 +77,7 @@ impl CancellationToken {
         self.cancelled.load(Ordering::SeqCst)
     }
 
-    async fn cancelled(&self) {
+    pub(crate) async fn cancelled(&self) {
         loop {
             let notification = self.notification.notified();
             if self.is_cancelled() {

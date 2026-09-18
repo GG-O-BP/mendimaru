@@ -13,7 +13,7 @@ mod remote_app;
 #[cfg(target_os = "linux")]
 pub(crate) mod runtime;
 mod scripts;
-mod security;
+pub(crate) mod security;
 mod sessions;
 mod staging;
 pub(crate) mod startup;
@@ -33,6 +33,8 @@ pub use container::{
 };
 pub(crate) use operation::WindowsOperationFailure;
 pub(crate) use sessions::stop as stop_studio_session;
+#[cfg(target_os = "linux")]
+pub(crate) use sessions::ui_channel;
 pub(crate) use sessions::{
     cleanup_dead_session_lock, close_all_registered_clients, disconnect_client,
     registered_client_sessions, stop_registered_client,
@@ -469,7 +471,8 @@ mod tests {
             r"\\host.lan\Data\.mendimaru\commands\launch-11.12.2.ps1",
             &security,
         );
-        let encoded = encode_powershell_script(&launcher);
+        let bootstrap = super::security::redirected_bootstrap_launcher(launcher.as_bytes());
+        let encoded = encode_powershell_script(&bootstrap);
         let arguments = headless_powershell_arguments(&encoded);
 
         // TS_RAIL_ORDER_EXEC allows at most 16,000 bytes for Arguments.

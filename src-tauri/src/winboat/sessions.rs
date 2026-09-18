@@ -126,7 +126,10 @@ pub(crate) async fn reconnect(
             "error-project-session-reselection-required"
         )));
     }
-    if !registered_client_sessions().is_empty() {
+    if registered_client_sessions()
+        .iter()
+        .any(|session| session.session_id != session_id)
+    {
         return Err(failure(
             "another connected Studio Pro session must be closed before reconnecting",
         ));
@@ -888,6 +891,7 @@ fn register_client(
             project_access,
         },
     ) {
+        close_ui_monitor(session_id, &previous.control);
         let _ = previous.process.kill();
         let _ = previous.process.wait();
     }
@@ -903,9 +907,36 @@ fn forget_registered_project_session(session_id: &str, client: &RegisteredClient
 pub(crate) fn disconnect_client(session_id: &str) {
     if let Ok(mut clients) = clients() {
         if let Some(mut client) = clients.remove(session_id) {
+            close_ui_monitor(session_id, &client.control);
             let _ = client.process.kill();
             let _ = client.process.wait();
         }
+    }
+}
+
+fn close_ui_monitor(session_id: &str, control: &RegisteredControl) {
+    // The guest monitor survives RDP loss so it can still observe Studio exit.
+    // When this owner discards it, explicitly retire only that authenticated
+    // channel. Reconnect receives a new key/path and a fresh helper generation.
+    let payload = serde_json::json!({"sessionId": session_id, "close": true});
+    let Ok(payload) = serde_json::to_vec(&payload) else {
+        return;
+    };
+    let Ok(envelope) = authenticated_envelope(&control.security, control.next_sequence, &payload)
+    else {
+        return;
+    };
+    let mut path = control.control_path.as_os_str().to_owned();
+    path.push(".ui.close");
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    if let Ok(mut file) = options.open(Path::new(&path)) {
+        let _ = file.write_all(&envelope).and_then(|()| file.sync_all());
     }
 }
 
@@ -1011,6 +1042,22 @@ fn remove_regular_file(path: &Path) {
         }
         _ => {}
     }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn ui_channel(session_id: &str) -> Result<(PathBuf, OperationSecurity, u64), ()> {
+    let mut registry = clients().map_err(|_| ())?;
+    let client = registry.get_mut(session_id).ok_or(())?;
+    if client.process.try_wait().map_err(|_| ())?.is_some() {
+        return Err(());
+    }
+    let sequence = client.control.next_sequence;
+    client.control.next_sequence = sequence.checked_add(1).ok_or(())?;
+    Ok((
+        client.control.control_path.clone(),
+        client.control.security.clone(),
+        sequence,
+    ))
 }
 
 #[cfg(test)]
@@ -1235,6 +1282,19 @@ mod tests {
             write_stop_control("studio-4242-638908128000000000", identity, &mut control,).is_err(),
             "an existing control request must never be overwritten"
         );
+        super::close_ui_monitor("studio-4242-638908128000000000", &control);
+        let close_path = directory.path().join("session.control.json.ui.close");
+        let close = std::fs::read(&close_path).unwrap();
+        let authenticated = authenticate_report(&close, &control.security).unwrap();
+        assert_eq!(authenticated.sequence, 2);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&authenticated.payload).unwrap(),
+            serde_json::json!({"sessionId": "studio-4242-638908128000000000", "close": true})
+        );
+        super::close_ui_monitor("studio-other", &control);
+        assert_eq!(std::fs::read(&close_path).unwrap(), close);
+        // Retiring the monitor must leave the distinct Studio stop request intact.
+        assert_eq!(std::fs::read(&control_path).unwrap(), content);
     }
 
     #[test]
@@ -1310,6 +1370,102 @@ mod tests {
         .expect("restore authenticated exit report");
         assert!(!read_session_active(&mut control).expect("closed report is valid"));
         assert_eq!(control.previous_report.sequence, 3);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn failed_ui_reconnect_preserves_the_disconnected_owner_and_project_lease() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let config = config(workspace.path());
+        let mpr = outside.path().join("Fixture.mpr");
+        std::fs::write(&mpr, b"fixture").unwrap();
+        let selection = crate::projects::validate_project_selection(&config, &mpr).unwrap();
+        let lease = super::project_access::prepare(&config, &selection).unwrap();
+        let session_id = "studio-737373-638915148000000000";
+        super::project_access::remember_protected_session(&config, session_id, "11.12.4", &lease)
+            .unwrap();
+        let report_path = workspace.path().join("launch.json");
+        let control_path = workspace.path().join("launch.control.json");
+        let security = OperationSecurity::fixture();
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "state":"succeeded", "timestamp":"2026-08-23T03:00:00Z",
+            "sessions":[{
+                "sessionId":session_id, "version":"11.12.4", "processId":737373,
+                "startedAt":"2026-08-23T03:00:00Z", "hasWindow":true
+            }]
+        }))
+        .unwrap();
+        let envelope = authenticated_report_fixture(&security, 2, &payload);
+        std::fs::write(&report_path, &envelope).unwrap();
+        let previous_report = authenticate_report(envelope.as_bytes(), &security).unwrap();
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        super::register_client(
+            session_id,
+            super::RemoteAppProcess::from_test_child(child),
+            crate::contracts::StudioSessionStatus {
+                schema_version: crate::contracts::CONTRACT_SCHEMA_VERSION.into(),
+                session_id: session_id.into(),
+                version: "11.12.4".into(),
+                process_id: Some(737373),
+                project_name: Some("Fixture".into()),
+                started_at: Some(Utc.with_ymd_and_hms(2026, 8, 23, 3, 0, 0).unwrap()),
+                state: crate::contracts::StudioProcessState::Unknown,
+                connection: crate::contracts::StudioConnectionState::Disconnected,
+                reconnectable: false,
+                reconnect_unavailable: Some(
+                    crate::contracts::StudioReconnectUnavailable::ProjectReselectionRequired,
+                ),
+            },
+            RegisteredControl {
+                report_path: report_path.clone(),
+                control_path,
+                security,
+                previous_report,
+                next_sequence: 1,
+                cleanup_report: true,
+            },
+            Some(super::RegisteredProjectAccess {
+                config: config.clone(),
+                _lease: lease,
+            }),
+        )
+        .unwrap();
+        // A redirected project deliberately rejects reconnect before any guest
+        // access. The UI path must still retain its old authenticated observer.
+        let result = crate::ui_automation::owned_request(
+            &config,
+            &crate::ui_automation::Request::new(
+                session_id,
+                crate::ui_automation::Operation::Reconnect,
+            ),
+            None,
+        )
+        .await;
+        let clients = super::clients().unwrap();
+        let retained = clients
+            .get(session_id)
+            .is_some_and(|client| client.project_access.is_some());
+        drop(clients);
+        let report_retained = report_path.exists();
+        let retired = workspace
+            .path()
+            .join("launch.control.json.ui.close")
+            .exists();
+        super::disconnect_client(session_id);
+        assert!(result.is_err());
+        assert!(
+            retained && report_retained,
+            "failed reconnect discarded its owner"
+        );
+        assert!(
+            !retired,
+            "failed reconnect retired a still-needed guest monitor"
+        );
     }
 
     #[test]

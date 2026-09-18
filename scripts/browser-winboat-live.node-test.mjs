@@ -77,7 +77,7 @@ test(
           `${JSON.stringify({
             ok: true,
             session: {
-              schemaVersion: "4.0.0",
+              schemaVersion: "5.0.0",
               sessionId: studioId,
               processId: 4242,
               startedAt: "2025-08-15T00:00:00Z",

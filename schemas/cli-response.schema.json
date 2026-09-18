@@ -13,7 +13,9 @@
     "sessionId"
   ],
   "properties": {
-    "schemaVersion": { "const": "4.0.0" },
+    "schemaVersion": {
+      "const": "5.0.0"
+    },
     "command": {
       "enum": [
         "capabilities",
@@ -48,12 +50,27 @@
         "operation.list",
         "operation.status",
         "operation.retry",
-        "unknown"
+        "unknown",
+        "ui",
+        "ui.capabilities",
+        "ui.tree",
+        "ui.find",
+        "ui.action",
+        "ui.wait",
+        "ui.screenshot",
+        "ui.release",
+        "ui.reconnect"
       ]
     },
-    "ok": { "type": "boolean" },
-    "platform": { "enum": ["linux", "windows", "macos", "unsupported"] },
-    "backend": { "enum": ["linux-winboat", "windows-native", "mac-native"] },
+    "ok": {
+      "type": "boolean"
+    },
+    "platform": {
+      "enum": ["linux", "windows", "macos", "unsupported"]
+    },
+    "backend": {
+      "enum": ["linux-winboat", "windows-native", "mac-native"]
+    },
     "sessionId": {
       "type": "string",
       "pattern": "^session_(?:[0-9a-f]{32}|unavailable)$"
@@ -63,7 +80,9 @@
         {
           "$ref": "https://github.com/GG-O-BP/mendimaru/schemas/capabilities.schema.json#/$defs/capabilitySnapshot"
         },
-        { "type": "null" }
+        {
+          "type": "null"
+        }
       ]
     },
     "operationId": {
@@ -89,29 +108,52 @@
   },
   "oneOf": [
     {
-      "properties": { "ok": { "const": true }, "data": {} },
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "data": {}
+      },
       "required": ["data"],
       "not": {
-        "properties": { "error": {} },
+        "properties": {
+          "error": {}
+        },
         "required": ["error"]
       }
     },
     {
-      "properties": { "ok": { "const": false }, "error": {} },
+      "properties": {
+        "ok": {
+          "const": false
+        },
+        "error": {}
+      },
       "required": ["error"],
       "not": {
         "anyOf": [
-          { "properties": { "data": {} }, "required": ["data"] },
           {
-            "properties": { "operationId": {} },
+            "properties": {
+              "data": {}
+            },
+            "required": ["data"]
+          },
+          {
+            "properties": {
+              "operationId": {}
+            },
             "required": ["operationId"]
           },
           {
-            "properties": { "studioSessionId": {} },
+            "properties": {
+              "studioSessionId": {}
+            },
             "required": ["studioSessionId"]
           },
           {
-            "properties": { "runtimeSessionId": {} },
+            "properties": {
+              "runtimeSessionId": {}
+            },
             "required": ["runtimeSessionId"]
           }
         ]

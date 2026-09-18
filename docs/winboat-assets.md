@@ -1,12 +1,13 @@
-# Ordinary Linux browsers and UNC widget imports (#63)
+# Ordinary Linux browsers and UNC generated references (#63)
 
-Studio Pro 11.12.3 can generate imports pointing at
-`//host.lan/Data/<project>/deployment/web/widgets/...` for shared-workspace
-projects. Rspack treats these as external URLs. An ordinary Linux browser then
-requests `host.lan:80`, where neither DNS nor an HTTP asset server is configured.
-A CSS import can also remain an external JavaScript import instead of entering
-Rspack's CSS extraction pipeline. An automation-only asset mirror does not fix
-this ordinary-browser path.
+Studio Pro 11 can generate imports and generated nanoflow `require` calls
+pointing at `//host.lan/Data/<project>/deployment/web/widgets/...` or the
+selected project's `javascriptsource` tree. Rspack treats these as external
+URLs. An ordinary Linux browser then requests `host.lan:80`, where neither DNS
+nor an HTTP asset server is configured. A CSS import can also remain an external
+JavaScript import instead of entering Rspack's CSS extraction pipeline, and a
+nanoflow can fail to load its JavaScript action module. An automation-only asset
+mirror does not fix this ordinary-browser path.
 
 ## Opt-in repair
 
@@ -27,18 +28,22 @@ event is needed; wait for the normal Studio build completion. A first load durin
 that interval may still observe the previous failed bundle and need a reload.
 
 The command requires the explicit `--rewrite-generated-assets` opt-in. It changes
-**only generated `.js` files under `deployment/web/layouts` and
-`deployment/web/pages`**, replacing this selected project's static widget imports
-with file-relative imports. For example:
+**only generated `.js` files under `deployment/web/layouts`,
+`deployment/web/pages`, and `deployment/web/nanoflows`**, replacing this
+selected project's static widget imports and generated JavaScript-action
+requires with paths Rspack resolves as project files. For example:
 
 ```js
 import "../widgets/com/mendix/widget/web/languageselector/LanguageSelector.css";
+require("\\\\host.lan\\Data\\Project\\javascriptsource\\atlas_core\\actions\\ReloadWithState.js")
+  .ReloadWithState;
 ```
 
 Rspack then bundles the real widget modules and extracts the real CSS. Mendimaru
 does not patch `dist`, fabricate empty CSS, or disable browser errors. It does
-not edit the model, widget packages/sources, JavaScript actions, project settings,
-or `rspack.config.mjs`. No privileged port, hosts entry, proxy, or browser request
+not edit the model, widget packages/sources, original JavaScript-action sources,
+project settings, or `rspack.config.mjs`; only generated nanoflow references are
+rewritten. No privileged port, hosts entry, proxy, or browser request
 interception is needed. The existing fixed-port Runtime policy is unchanged.
 For this issue's normalization alternative, validate the resulting **Runtime
 URL and its bundled assets**, not the obsolete `http://host.lan/Data/...` URL.
@@ -56,7 +61,7 @@ The command emits NDJSON immediately and continues until Ctrl+C or SIGTERM. This
 long-running stream has its own `assets.watch` status shape (schema version,
 `ok`, `state`, `generatedAssetsRewriteEnabled`, safe `message`, and `counts`),
 not the short-lived CLI command envelope. `watching` confirms the opt-in;
-`normalized` reports rewritten file/import counts. `failed` exits 1 with an action;
+`normalized` reports rewritten file/reference counts. `failed` exits 1 with an action;
 invalid/missing options exit 2 and unsupported platforms exit 3. Normal shutdown
 emits `stopped` and exits 0. Generic `--json`, `--timeout-seconds`, and backend
 switches are not accepted; use `assets --help` for its complete options.
@@ -67,10 +72,12 @@ removed/regenerated deployment directories. Only changed files are read.
 Directory descriptors anchor traversal; symlinks and hardlinked/nonregular
 JavaScript files are rejected. Limits are eight nested directory levels, 10,000
 entries, 8 MiB per JavaScript file, and 64 MiB of candidate source bytes per scan.
-Unsafe paths in matched widget imports, invalid UTF-8, permission errors, and
-exceeded limits stop the command visibly. Only single-line static imports in the
-generated form (with a semicolon and `.js`, `.mjs`, or `.css` target) are supported;
-other forms and quoted/commented lookalikes are left intact. Correct the reported condition
+Unsafe paths in matched widget imports or JavaScript-action requires, invalid
+UTF-8, permission errors, and exceeded limits stop the command visibly. Only
+single-line static imports in the generated form (with a semicolon and `.js`,
+`.mjs`, or `.css` target) and generated `"action": () => require(...) ` calls are
+supported; other forms and quoted/commented lookalikes are left intact. Correct
+the reported condition
 and restart it before F5. File-system regeneration can briefly race a browser
 load; the command does not claim that its `normalized` event means Rspack has
 already finished rebuilding.

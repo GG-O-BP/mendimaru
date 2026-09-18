@@ -8,9 +8,12 @@ $installRoot = '__INSTALL_ROOT__'
 $knownStudiosJson = [Text.Encoding]::UTF8.GetString(
     [Convert]::FromBase64String('__KNOWN_STUDIOS_BASE64__')
 )
-$knownStudios = @($knownStudiosJson | ConvertFrom-Json)
+# Windows PowerShell 5.1 emits a JSON array as one pipeline object. Wrapping
+# that output in @() nests the array and makes each path comparison fail.
+$knownStudios = $knownStudiosJson | ConvertFrom-Json
 
 __SECURITY_PREAMBLE__
+__UI_PREAMBLE__
 
 if (-not ('Mendimaru.ProcessSecurity' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -215,9 +218,12 @@ try {
             $process = Get-Process -Id ([int]$session.processId) -ErrorAction Stop
             $process.Refresh()
             Write-SessionResult 'succeeded' 'Studio Pro session is ready to reconnect.' $null @($session)
+            Initialize-MendimaruUi $process $session.sessionId
             $lastControlSequence = [long]0
             while ($true) {
-                Start-Sleep -Milliseconds 500
+                Start-Sleep -Milliseconds 50
+                Service-MendimaruUi
+                if($script:UiClosed){exit 0} # A replacement owns the new channel.
                 $ended = $false
                 try {
                     $process.Refresh()
@@ -230,6 +236,7 @@ try {
                     continue
                 }
                 if ($ended) {
+                    Close-MendimaruUi
                     Write-SessionResult 'succeeded' 'Studio Pro session closed.' $null @()
                     exit 0
                 }

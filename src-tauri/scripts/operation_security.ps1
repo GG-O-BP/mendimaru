@@ -26,7 +26,7 @@ function Write-MendimaruReport {
     param([System.Collections.IDictionary]$Payload)
 
     $script:MendimaruReportSequence++
-    $payloadJson = $Payload | ConvertTo-Json -Compress -Depth 8
+    $payloadJson = $Payload | ConvertTo-Json -Compress -Depth 16
     $payloadBytes = [Text.Encoding]::UTF8.GetBytes($payloadJson)
     $payloadBase64 = [Convert]::ToBase64String($payloadBytes)
     $authenticatedText = "{0}`n{1}`n{2}`n{3}" -f @(

@@ -107,7 +107,7 @@ async function ownerStatus(cache, sessionId) {
   });
   assert.equal(response.ok, true, "keeper observation failed");
   const session = response.session;
-  assert.equal(session?.schemaVersion, "4.0.0");
+  assert.equal(session?.schemaVersion, "5.0.0");
   assert.equal(session.sessionId, sessionId);
   assert.equal(session.state, "running");
   assert.equal(session.connection, "connected");

@@ -1,5 +1,7 @@
 use super::project_access::ProjectAccessLease;
-use super::security::{secure_powershell_launcher, OperationSecurity};
+use super::security::{
+    redirected_bootstrap_launcher, secure_powershell_launcher, OperationSecurity,
+};
 use crate::models::AppConfig;
 use crate::process::{self, CommandPolicy};
 use crate::projects::linux_path_to_windows_share;
@@ -20,6 +22,7 @@ const MAX_DIAGNOSTIC_BYTES: usize = 64 * 1024;
 pub(super) struct RemoteAppProcess {
     child: Child,
     diagnostics: Mutex<File>,
+    _bootstrap: Option<tempfile::TempDir>,
 }
 
 impl RemoteAppProcess {
@@ -28,6 +31,7 @@ impl RemoteAppProcess {
         Self {
             child,
             diagnostics: Mutex::new(tempfile::tempfile().expect("fixture diagnostics")),
+            _bootstrap: None,
         }
     }
 
@@ -124,7 +128,22 @@ pub(super) fn spawn_powershell_file(
         &config.windows_shared_directory,
     )?;
     let launcher = secure_powershell_launcher(&windows_script_path, security);
-    let encoded = encode_powershell_script(&launcher);
+    let bootstrap = tempfile::Builder::new()
+        .prefix("mendimaru-auth-")
+        .tempdir()
+        .map_err(|_| "private RemoteApp bootstrap unavailable".to_string())?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options
+        .open(bootstrap.path().join("bootstrap.ps1"))
+        .and_then(|mut f| f.write_all(launcher.as_bytes()).and_then(|()| f.sync_all()))
+        .map_err(|_| "private RemoteApp bootstrap unavailable".to_string())?;
+    let encoded = encode_powershell_script(&redirected_bootstrap_launcher(launcher.as_bytes()));
     let arguments = headless_powershell_arguments(&encoded);
     if arguments.encode_utf16().count() * 2 >= 16_000 {
         return Err(crate::tr!("error-remoteapp-command-too-long"));
@@ -135,6 +154,7 @@ pub(super) fn spawn_powershell_file(
         Some(&arguments),
         label,
         project_access,
+        bootstrap,
     )
 }
 
@@ -165,6 +185,7 @@ fn spawn_remote_app(
     app_arguments: Option<&str>,
     label: &str,
     project_access: Option<&ProjectAccessLease>,
+    bootstrap: tempfile::TempDir,
 ) -> Result<RemoteAppProcess, String> {
     let (username, password) = container_credentials(config)?;
     let safe_label: String = label
@@ -202,6 +223,12 @@ fn spawn_remote_app(
     {
         arguments.push(argument);
     }
+    let bootstrap_path = bootstrap
+        .path()
+        .to_str()
+        .filter(|p| !p.chars().any(|c| c.is_control() || c == ',' || c == '"'))
+        .ok_or_else(|| "private RemoteApp bootstrap unavailable".to_string())?;
+    arguments.push(format!("/drive:MendimaruAuth,{bootstrap_path}"));
     arguments.push(remote_app);
 
     // FreeRDP 3 can parse one argument per line from stdin. This keeps the
@@ -237,6 +264,7 @@ fn spawn_remote_app(
     Ok(RemoteAppProcess {
         child,
         diagnostics: Mutex::new(diagnostics),
+        _bootstrap: Some(bootstrap),
     })
 }
 
@@ -373,6 +401,7 @@ mod tests {
             diagnostics: std::sync::Mutex::new(
                 tempfile::tempfile().expect("anonymous diagnostics"),
             ),
+            _bootstrap: None,
         };
 
         drop(remote_app);

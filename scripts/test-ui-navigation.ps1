@@ -1,0 +1,134 @@
+# Exercise production locators/actions against test-owned native WPF dialogs.
+# Only Studio process identity is substituted; UIA, ownership and modal checks
+# use real windows. This is not a substitute for live Studio acceptance.
+$ErrorActionPreference='Stop'
+$text=[IO.File]::ReadAllText((Join-Path (Split-Path $PSScriptRoot -Parent) 'src-tauri\scripts\ui_worker.ps1'))
+. ([ScriptBlock]::Create($text.Substring(0,$text.IndexOf('$null = [MendimaruUiNative]::SetThreadDpiAwarenessContext'))))
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'worker syntax errors'}
+foreach($definition in $ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst]},$true)){
+    . ([ScriptBlock]::Create($definition.Extent.Text))
+}
+$walker=[Windows.Automation.TreeWalker]::RawViewWalker
+$script:ObservationCache=New-ObservationCache
+$syntheticControl={
+    param([string]$Framework,[Windows.Automation.ControlType]$Role,[string]$Name,[bool]$Enabled,[bool]$Offscreen,[string]$Value=$null)
+    @{c=[pscustomobject]@{FrameworkId=$Framework;ControlType=$Role;Name=$Name;IsEnabled=$Enabled;IsOffscreen=$Offscreen};patterns=@();rid=[Guid]::NewGuid().ToString('N');value=$Value;readOnly=$null;modal=$false}
+}
+$ready=$syntheticControl.Invoke('WPF',([Windows.Automation.ControlType]::Text),'Ready',$true,$false)
+$document=$syntheticControl.Invoke('Chrome',([Windows.Automation.ControlType]::Document),'MyFirstModule.Home_Web',$true,$false,'https://studio.example/page-editor/index.html')
+$runButton=$syntheticControl.Invoke('WPF',([Windows.Automation.ControlType]::Button),'Run Locally',$true,$false)
+$chromeReadiness=@{nodes=@(
+    @{id='ready';parent=$null;depth=1;observed=$ready;omittedChildren=$false},
+    @{id='document';parent=$null;depth=2;observed=$document;omittedChildren=$false},
+    @{id='run';parent=$null;depth=1;observed=$runButton;omittedChildren=$false}
+);truncated=$false;omittedDisabledWindows=@()}
+if((State $chromeReadiness).state -cne 'project-ready'){throw 'Chrome page-editor document did not prove project openness'}
+$unrelatedDocument=$syntheticControl.Invoke('Chrome',([Windows.Automation.ControlType]::Document),'MyFirstModule.Home_Web',$true,$false,'https://studio.example/unknown/index.html')
+$unknownReadiness=@{nodes=@(
+    @{id='ready';parent=$null;depth=1;observed=$ready;omittedChildren=$false},
+    @{id='document';parent=$null;depth=2;observed=$unrelatedDocument;omittedChildren=$false},
+    @{id='run';parent=$null;depth=1;observed=$runButton;omittedChildren=$false}
+);truncated=$false;omittedDisabledWindows=@()}
+if((State $unknownReadiness).state -ceq 'project-ready'){throw 'unrelated Chrome document falsely proved project openness'}
+$lab=Join-Path $env:TEMP ('mendimaru-navigation-test-'+[Guid]::NewGuid().ToString('N'))
+$null=New-Item -ItemType Directory -Path $lab
+$fixture=Join-Path $lab 'fixture.ps1'
+[IO.File]::WriteAllText($fixture,@'
+param($StatePath,$Mode)
+$ErrorActionPreference='Stop'
+Add-Type -AssemblyName PresentationFramework
+$main=New-Object Windows.Window
+$main.Title='Mendimaru navigation test owner';$main.Width=400;$main.Height=300
+$dialog=New-Object Windows.Window
+$dialog.Title=$(if($Mode -eq 'unrelated'){'Other dialog'}elseif($Mode -like 'phase-*'){'Run Project'}else{'Go To'})
+$dialog.Width=300;$dialog.Height=200
+$panel=New-Object Windows.Controls.StackPanel
+$edit=New-Object Windows.Controls.TextBox
+$edit.Text='Original';$edit.Name='SearchEditor';$panel.Children.Add($edit)|Out-Null
+if($Mode -eq 'ambiguous'){$panel.Children.Add((New-Object Windows.Controls.TextBox))|Out-Null}
+if($Mode -like 'phase-*'){
+    $status=New-Object Windows.Controls.TextBlock
+    $statusText=@{'phase-building'='Compiling Java files...';'phase-deploying'='Clearing deployment directory...';'phase-starting-runtime'='Starting runtime...'}[$Mode]
+    $status.Text=$statusText
+    $panel.Children.Add($status)|Out-Null
+    $future=New-Object Windows.Controls.TextBlock
+    $future.Text='Clean deployment directory';$panel.Children.Add($future)|Out-Null
+}
+$dialog.Content=$panel
+$timer=New-Object Windows.Threading.DispatcherTimer
+$timer.Interval=[TimeSpan]::FromMilliseconds(50)
+$timer.Add_Tick({
+    $timer.Stop()
+    [IO.File]::WriteAllText($StatePath,(@{dialog=(New-Object Windows.Interop.WindowInteropHelper($dialog)).Handle.ToInt64()}|ConvertTo-Json -Compress))
+})
+$dialog.Add_ContentRendered({$timer.Start()})
+$main.Show();$dialog.Owner=$main;$null=$dialog.ShowDialog()
+'@)
+try {
+    foreach($mode in @('phase-building','phase-deploying','phase-starting-runtime','unique','ambiguous','unrelated')){
+        $state=Join-Path $lab ($mode+'.json');$process=$null
+        try {
+            $process=Start-Process (Join-Path $PSHOME 'powershell.exe') -ArgumentList @('-NoProfile','-STA','-File',('"'+$fixture+'"'),('"'+$state+'"'),$mode) -PassThru
+            $until=[DateTime]::UtcNow.AddSeconds(20)
+            while(-not (Test-Path $state)){
+                if($process.HasExited -or [DateTime]::UtcNow -ge $until){throw 'navigation fixture did not start'}
+                Start-Sleep -Milliseconds 50
+            }
+            $script:Deadline=[DateTime]::UtcNow.AddSeconds(30)
+            function Target { Check-Deadline;return $process }
+            $script:Identity=@{fileVersion='10.24.26.0'}
+            $script:Generation=[Guid]::NewGuid().ToString('N');$script:Elements=@{};$script:ElementSequence=0
+            $handles=[IO.File]::ReadAllText($state)|ConvertFrom-Json
+            $dialog=[Windows.Automation.AutomationElement]::FromHandle([IntPtr]$handles.dialog)
+            if($mode -like 'phase-*'){
+                $scan=Scan $dialog
+                $state=State $scan
+                $expected=$mode.Substring(6)
+                $expectedText=@{'building'='Compiling Java files...';'deploying'='Clearing deployment directory...';'starting-runtime'='Starting runtime...'}[$expected]
+                if($state.state -cne $expected -or @($state.statusTexts) -cnotcontains $expectedText){
+                    throw ('current Run Project status was not classified: '+$state.state)
+                }
+                if(@($state.dialogs).Count -ne 1 -or $state.dialogs[0].kind -cne 'progress'){
+                    throw 'Run Project progress dialog was not reported diagnostically'
+                }
+                Write-Output ('UI navigation: current Run Project '+$expected+' phase passed.')
+                continue
+            }
+            $condition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::AutomationIdProperty,'SearchEditor')
+            $edit=$dialog.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)
+            if($null -eq $edit){throw 'search editor missing'}
+            $scan=Scan $dialog
+            if($scan.truncated){throw 'native dialog tree truncated'}
+            $snapshot=@($scan.nodes|Where-Object{$_.observed.c.AutomationId -ceq 'SearchEditor'})
+            if($snapshot.Count -ne 1 -or $snapshot[0].observed.value -cne 'Original'){throw 'cached editor observation missing'}
+            $livePatterns=@($edit.GetSupportedPatterns()|ForEach-Object{$_.ProgrammaticName.Replace('PatternIdentifiers.Pattern','')})
+            if(@(Compare-Object @($snapshot[0].observed.patterns) $livePatterns).Count){throw 'cached pattern inventory differs from current native provider'}
+            $full=Scan
+            if(-not $full.truncated -or $full.omittedDisabledWindows.Count -ne 1){throw 'disabled modal owner must be explicitly omitted'}
+            if((State $full).state -cne 'modal'){throw 'enabled modal observation lost'}
+            $id=Register $edit
+            $request=@{elementId=$id;action='set-value';value='Home_Web'}
+            if($mode -eq 'unique'){
+                if(-not (GoTo-Editor $edit)){throw 'known unique Go To editor rejected'}
+                $null=Act @{elementId=$id;action='focus'}
+                if(-not $edit.Current.HasKeyboardFocus -or [MendimaruUiNative]::GetForegroundWindow() -ne [IntPtr]$handles.dialog){throw 'native editor focus not verified'}
+                $null=Act $request
+                $value=$edit.GetCurrentPattern([Windows.Automation.ValuePattern]::Pattern).Current.Value
+                if($value -cne 'Home_Web'){throw 'Go To value readback failed'}
+                $rejected=$false
+                try{$null=Act $request}catch{$rejected=$_.Exception.Message -ceq 'ui-stale-element'}
+                if(-not $rejected){throw 'old value handle remained valid'}
+                $request.elementId=Register $edit;$request.value='../../arbitrary'
+            }
+            $rejected=$false
+            try{$null=Act $request}catch{$rejected=$_.Exception.Message -ceq 'ui-unsupported-element'}
+            if(-not $rejected){throw ('unsafe navigation write accepted: '+$mode)}
+            Write-Output ('UI navigation: '+$mode+' passed.')
+        } finally {
+            if($process -and -not $process.HasExited){$process.Kill();$null=$process.WaitForExit(5000)}
+            if($process){$process.Dispose()}
+        }
+    }
+} finally {Remove-Item -LiteralPath $lab -Recurse -Force -ErrorAction SilentlyContinue}

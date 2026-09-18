@@ -636,7 +636,7 @@ async fn browser_studio_version(config: &AppConfig, session_id: &str) -> Applica
     let session = studio_session(config, session_id)
         .await
         .map_err(|_| unavailable())?;
-    if session.schema_version != crate::contracts::CONTRACT_SCHEMA_VERSION
+    if !crate::contracts::compatible_record_schema(&session.schema_version)
         || session.session_id != session_id
         || session.state == crate::contracts::StudioProcessState::Stopped
         || crate::platform::validate_version(&session.version).is_err()

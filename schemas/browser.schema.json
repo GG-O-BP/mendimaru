@@ -219,7 +219,7 @@
         "downloadPolicy"
       ],
       "properties": {
-        "schemaVersion": { "const": "4.0.0" },
+        "schemaVersion": { "const": "5.0.0" },
         "runnerVersion": { "const": "1.0.0" },
         "ready": { "type": "boolean" },
         "nodeVersion": {
@@ -496,7 +496,7 @@
       ],
       "properties": {
         "environment": { "$ref": "#/$defs/environment" },
-        "schemaVersion": { "const": "4.0.0" },
+        "schemaVersion": { "const": "5.0.0" },
         "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
         "outcome": { "$ref": "#/$defs/outcome" },
         "passed": { "type": "integer", "minimum": 0 },
@@ -546,7 +546,7 @@
       ],
       "properties": {
         "environment": { "$ref": "#/$defs/environment" },
-        "schemaVersion": { "const": "4.0.0" },
+        "schemaVersion": { "const": "5.0.0" },
         "sessionId": { "type": "string", "pattern": "^session_[0-9a-f]{32}$" },
         "createdAt": { "type": "string", "format": "date-time" },
         "hostPlatform": {

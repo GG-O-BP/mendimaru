@@ -510,7 +510,7 @@ fn cached_build(
 ) -> Result<BuildRecord, String> {
     ensure_direct_directory(directory)?;
     let record: BuildRecord = store::read_json(&directory.join("build.json"))?;
-    if record.schema_version != CONTRACT_SCHEMA_VERSION
+    if !crate::contracts::compatible_record_schema(&record.schema_version)
         || !record.success
         || record.project_key != project_key
         || record.build_key != build_key
@@ -535,10 +535,10 @@ fn cached_build(
     ensure_direct_directory(&directory.join("deployment-template"))?;
     let artifact: ArtifactRecord =
         store::read_json(&layout.artifact_record(&package.artifact_id)?)?;
-    if artifact.schema_version != CONTRACT_SCHEMA_VERSION
-        || artifact.descriptor.schema_version != CONTRACT_SCHEMA_VERSION
-        || record.consistency_artifact.schema_version != CONTRACT_SCHEMA_VERSION
-        || record.build_log_artifact.schema_version != CONTRACT_SCHEMA_VERSION
+    if !crate::contracts::compatible_record_schema(&artifact.schema_version)
+        || !crate::contracts::compatible_record_schema(&artifact.descriptor.schema_version)
+        || !crate::contracts::compatible_record_schema(&record.consistency_artifact.schema_version)
+        || !crate::contracts::compatible_record_schema(&record.build_log_artifact.schema_version)
         || artifact.role != ArtifactRole::Package
         || artifact.project_key != project_key
         || artifact.build_key != build_key

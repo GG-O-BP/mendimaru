@@ -14,7 +14,7 @@ vi.mock("../../api/tauri", () => ({
 }));
 const t = (key: string) => key;
 const report: FrontendHealth = {
-  schemaVersion: "4.0.0",
+  schemaVersion: "5.0.0",
   frontendState: "unhealthy",
   studioState: "running",
   httpReady: true,

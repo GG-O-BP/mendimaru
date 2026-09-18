@@ -4,7 +4,7 @@
   "title": "Mendimaru Runtime contracts",
   "type": "object",
   "properties": {
-    "schemaVersion": { "const": "4.0.0" }
+    "schemaVersion": { "const": "5.0.0" }
   },
   "oneOf": [
     { "$ref": "#/$defs/buildResult" },
@@ -59,7 +59,7 @@
         "httpReady"
       ],
       "properties": {
-        "schemaVersion": { "const": "4.0.0" },
+        "schemaVersion": { "const": "5.0.0" },
         "sessionId": {
           "type": "string",
           "pattern": "^runtime_[0-9a-f]{32}$"
@@ -203,7 +203,7 @@
       "additionalProperties": false,
       "required": ["schemaVersion", "sessions"],
       "properties": {
-        "schemaVersion": { "const": "4.0.0" },
+        "schemaVersion": { "const": "5.0.0" },
         "sessions": {
           "type": "array",
           "maxItems": 1024,
@@ -216,7 +216,7 @@
       "additionalProperties": false,
       "required": ["schemaVersion", "sessionId", "forgotten"],
       "properties": {
-        "schemaVersion": { "const": "4.0.0" },
+        "schemaVersion": { "const": "5.0.0" },
         "sessionId": {
           "type": "string",
           "pattern": "^runtime_[0-9a-f]{32}$"

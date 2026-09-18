@@ -22,7 +22,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": "4.0.0"
+      "const": "5.0.0"
     },
     "startedAt": {
       "type": "string",

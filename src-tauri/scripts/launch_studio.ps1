@@ -8,6 +8,7 @@ $projectReadyTimeoutSeconds = __PROJECT_READY_TIMEOUT_SECONDS__
 $process = $null
 
 __SECURITY_PREAMBLE__
+__UI_PREAMBLE__
 
 if (-not ('Mendimaru.ProcessSecurity' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -315,6 +316,7 @@ try {
     # it or expose the Windows RemoteApp selection window.
     $readyProcessId = [int]$readyProcess.Id
     $readyStartedTicks = [long]$readyProcess.StartTime.ToUniversalTime().Ticks
+    Initialize-MendimaruUi $readyProcess $sessionId
     $lastControlSequence = [long]0
     while ($true) {
         try {
@@ -329,6 +331,8 @@ try {
             Start-Sleep -Milliseconds 500
             continue
         }
+        Service-MendimaruUi
+        if($script:UiClosed){exit 0} # Release the monitor, preserving Studio.
         if (Test-Path -LiteralPath $controlPath) {
             try {
                 $sequence = Read-MendimaruStudioStopRequest `
@@ -351,8 +355,9 @@ try {
                 # host times out while this authenticated launch stays alive.
             }
         }
-        Start-Sleep -Milliseconds 500
+        Start-Sleep -Milliseconds 50
     }
+    Close-MendimaruUi
     Write-LaunchResult 'succeeded' 'Studio Pro session closed.' $null $executable $null @()
     exit 0
 } catch {
@@ -367,6 +372,7 @@ try {
             # The authenticated host-side abort path owns forced cleanup.
         }
     }
+    Close-MendimaruUi
     Write-LaunchResult 'failed' 'Studio Pro failed to start.' $exitCode $executable $_.Exception.Message @()
     exit 1
 }
