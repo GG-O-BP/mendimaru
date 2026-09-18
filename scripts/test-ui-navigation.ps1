@@ -13,12 +13,11 @@ foreach($definition in $ast.FindAll({param($node) $node -is [Management.Automati
 $walker=[Windows.Automation.TreeWalker]::RawViewWalker
 $script:ObservationCache=New-ObservationCache
 $syntheticControl={
-    param([string]$Framework,[Windows.Automation.ControlType]$Role,[string]$Name,[bool]$Enabled,[bool]$Offscreen)
-    @{c=[pscustomobject]@{FrameworkId=$Framework;ControlType=$Role;Name=$Name;IsEnabled=$Enabled;IsOffscreen=$Offscreen};patterns=@();rid=[Guid]::NewGuid().ToString('N');value=$null;readOnly=$null;modal=$false}
+    param([string]$Framework,[Windows.Automation.ControlType]$Role,[string]$Name,[bool]$Enabled,[bool]$Offscreen,[string]$Value=$null)
+    @{c=[pscustomobject]@{FrameworkId=$Framework;ControlType=$Role;Name=$Name;IsEnabled=$Enabled;IsOffscreen=$Offscreen};patterns=@();rid=[Guid]::NewGuid().ToString('N');value=$Value;readOnly=$null;modal=$false}
 }
 $ready=$syntheticControl.Invoke('WPF',([Windows.Automation.ControlType]::Text),'Ready',$true,$false)
-$document=$syntheticControl.Invoke('Chrome',([Windows.Automation.ControlType]::Document),'MyFirstModule.Home_Web',$true,$false)
-$document.value='https://studio.example/page-editor/index.html'
+$document=$syntheticControl.Invoke('Chrome',([Windows.Automation.ControlType]::Document),'MyFirstModule.Home_Web',$true,$false,'https://studio.example/page-editor/index.html')
 $runButton=$syntheticControl.Invoke('WPF',([Windows.Automation.ControlType]::Button),'Run Locally',$true,$false)
 $chromeReadiness=@{nodes=@(
     @{id='ready';parent=$null;depth=1;observed=$ready;omittedChildren=$false},
@@ -26,8 +25,13 @@ $chromeReadiness=@{nodes=@(
     @{id='run';parent=$null;depth=1;observed=$runButton;omittedChildren=$false}
 );truncated=$false;omittedDisabledWindows=@()}
 if((State $chromeReadiness).state -cne 'project-ready'){throw 'Chrome page-editor document did not prove project openness'}
-$document.value='https://studio.example/unknown/index.html'
-if((State $chromeReadiness).state -ceq 'project-ready'){throw 'unrelated Chrome document falsely proved project openness'}
+$unrelatedDocument=$syntheticControl.Invoke('Chrome',([Windows.Automation.ControlType]::Document),'MyFirstModule.Home_Web',$true,$false,'https://studio.example/unknown/index.html')
+$unknownReadiness=@{nodes=@(
+    @{id='ready';parent=$null;depth=1;observed=$ready;omittedChildren=$false},
+    @{id='document';parent=$null;depth=2;observed=$unrelatedDocument;omittedChildren=$false},
+    @{id='run';parent=$null;depth=1;observed=$runButton;omittedChildren=$false}
+);truncated=$false;omittedDisabledWindows=@()}
+if((State $unknownReadiness).state -ceq 'project-ready'){throw 'unrelated Chrome document falsely proved project openness'}
 $lab=Join-Path $env:TEMP ('mendimaru-navigation-test-'+[Guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory -Path $lab
 $fixture=Join-Path $lab 'fixture.ps1'
