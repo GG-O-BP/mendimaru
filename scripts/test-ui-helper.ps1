@@ -127,13 +127,13 @@ try {
     # The extra offset keeps the worker timeout itself inside its own cap.
     Send-Request 'capabilities' 15000 48000
     $graced=Receive-Response
-    Assert ($graced.ok) 'request within clock grace was rejected'
+    Assert ($graced.ok) ('request within clock grace was rejected: ' + ($graced | ConvertTo-Json -Compress -Depth 4))
     Send-Request 'release'
     $null=Receive-Response
     Assert ($null -eq $script:UiWorker) 'clock-grace request left a worker running'
     Send-Request 'capabilities' 15000 52000
     $far=Receive-Response
-    Assert ($far.reason -ceq 'ui-request-expired' -and $null -eq $script:UiWorker) 'far-future request was accepted'
+    Assert ($far.reason -ceq 'ui-request-expired' -and $null -eq $script:UiWorker) ('far-future request was accepted: ' + ($far | ConvertTo-Json -Compress -Depth 4))
 
     # Invalid authentication never reaches the worker or consumes a sequence.
     Remove-Item -LiteralPath ($controlPath+'.ui.report') -Force
