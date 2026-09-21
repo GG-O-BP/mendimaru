@@ -123,11 +123,13 @@ try {
 
     # A request stamped slightly beyond the acceptance cap stays acceptable:
     # the guest clock may trail the Linux host clock by a bounded grace
-    # (docs/winboat-clock-sync.md). Beyond the grace the request is rejected.
-    # The extra offset keeps the worker timeout itself inside its own cap.
+    # (docs/winboat-clock-sync.md). Acceptance is observable because this
+    # harness targets a non-Studio process: an accepted capabilities request
+    # reaches the worker and fails with ui-wrong-session instead of the
+    # window's ui-request-expired. Beyond the grace the request is rejected.
     Send-Request 'capabilities' 15000 48000
     $graced=Receive-Response
-    Assert ($graced.ok) ('request within clock grace was rejected: ' + ($graced | ConvertTo-Json -Compress -Depth 4))
+    Assert ($graced.reason -ceq 'ui-wrong-session') ('request within clock grace was rejected: ' + ($graced | ConvertTo-Json -Compress -Depth 4))
     Send-Request 'release'
     $null=Receive-Response
     Assert ($null -eq $script:UiWorker) 'clock-grace request left a worker running'
