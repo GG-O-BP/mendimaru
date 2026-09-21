@@ -128,7 +128,6 @@ jobs:
         with:
           node-version: 22.22.2
           cache: npm
-          cache-dependency-path: ${{ matrix.variant == 'baseline' && 'baseline-source/package-lock.json' || 'package-lock.json' }}
 
       - name: Set up Rust
         if: steps.relevance.outputs.relevant == 'true'
@@ -141,9 +140,13 @@ jobs:
           workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
           shared-key: release-performance-${{ matrix.platform }}-${{ matrix.variant }}
 
-      - name: Install dependencies
+      - name: Install candidate dependencies
         if: steps.relevance.outputs.relevant == 'true'
-        working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
+        run: npm ci
+
+      - name: Install baseline dependencies
+        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true'
+        working-directory: baseline-source
         run: npm ci
 
       - name: Cache pinned Tauri WebDriver bridge
@@ -370,7 +373,6 @@ jobs:
         with:
           node-version: 22.22.2
           cache: npm
-          cache-dependency-path: ${{ matrix.variant == 'baseline' && 'baseline-source/package-lock.json' || 'package-lock.json' }}
 
       - name: Set up Rust
         if: steps.relevance.outputs.relevant == 'true'
@@ -383,9 +385,13 @@ jobs:
           workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
           shared-key: release-performance-windows-bundles-${{ matrix.variant }}
 
-      - name: Install dependencies
+      - name: Install candidate dependencies
         if: steps.relevance.outputs.relevant == 'true'
-        working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
+        run: npm ci
+
+      - name: Install baseline dependencies
+        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true'
+        working-directory: baseline-source
         run: npm ci
 
       - name: Build MSI and NSIS
