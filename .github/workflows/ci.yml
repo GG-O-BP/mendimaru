@@ -15,7 +15,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Decide which gates must run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      aur: ${{ steps.filter.outputs.aur }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+      - name: Detect packaging-relevant changes
+        id: filter
+        shell: bash
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          aur=true
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            base="${PULL_REQUEST_BASE_SHA:-}"
+            if [[ -n "$base" ]] \
+              && git cat-file -e "$base^{commit}" 2>/dev/null \
+              && ! git diff --name-only "$base" HEAD -- \
+                'aur' 'scripts/aur' 'src' 'src-tauri' 'package.json' \
+                '.github/workflows/aur-package.yml' | grep -q .; then
+              aur=false
+            fi
+          fi
+          echo "aur=$aur" >> "$GITHUB_OUTPUT"
+          echo "AUR gate relevance: $aur"
+
   aur-package:
+    needs: changes
+    if: needs.changes.outputs.aur == 'true'
     uses: ./.github/workflows/aur-package.yml
 
   test:

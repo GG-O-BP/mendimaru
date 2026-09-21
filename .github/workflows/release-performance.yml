@@ -350,7 +350,7 @@ jobs:
           done
           test -x "$chrome_path"
           export MENDIMARU_CHROME_PATH="$chrome_path"
-          variants=(candidate)
+          variants=(${{ matrix.variant }})
           if [[ "${{ matrix.phase }}" == "latency" ]]; then variants=(baseline candidate); fi
           for variant in "${variants[@]}"; do
             application="$(find "binary/webview-binary-${{ matrix.platform }}-$variant" -maxdepth 1 -name '*.AppImage' -print -quit)"
