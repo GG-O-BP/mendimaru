@@ -29,6 +29,11 @@ scheduled runs, and manual dispatch always measure in full, and any pull
 request that does touch a measured path gets exactly the same full measurement
 as before.
 
+Baseline and candidate measurements run as parallel matrix jobs and a separate
+gate job compares the two reports, so the previous strictly sequential
+baseline-then-candidate schedule (including the two 300-second idle windows on
+pull requests) no longer doubles the wall time.
+
 ## Fixtures and measurements
 
 Every full release-WebView run excludes one warm-up launch and records seven
