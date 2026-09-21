@@ -286,6 +286,17 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Cache pinned Playwright Chromium
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-chromium-${{ runner.os }}-
+
+      - name: Install pinned Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
       - name: Build frontend
         run: npm run build
 
