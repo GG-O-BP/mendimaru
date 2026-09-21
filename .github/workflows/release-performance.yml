@@ -60,7 +60,31 @@ jobs:
           ref: ${{ steps.revisions.outputs.baseline }}
           path: baseline-source
 
+      - name: Decide whether measured artifacts can change
+        id: relevance
+        shell: bash
+        run: |
+          relevant=false
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            relevant=true
+          else
+            base="${{ steps.revisions.outputs.baseline }}"
+            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+              git fetch origin "$base" --depth=1
+            fi
+            if git diff --name-only "$base" HEAD -- \
+              'src-tauri' 'src' 'scripts' 'tests' 'performance' \
+              'package.json' 'package-lock.json' 'vite.config.ts' \
+              'tsconfig.json' 'tsconfig.node.json' 'index.html' \
+              '.github/workflows/release-performance.yml' | grep -q .; then
+              relevant=true
+            fi
+          fi
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
+          echo "Measured-artifact relevance: $relevant"
+
       - name: Backport test-only fixture hooks for the bootstrap baseline
+        if: steps.relevance.outputs.relevant == 'true'
         shell: bash
         run: |
           if ! grep -q MENDIMARU_E2E_MARKETPLACE_URL \
@@ -78,7 +102,7 @@ jobs:
           fi
 
       - name: Install Linux desktop dependencies
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
         shell: bash
         run: |
           sudo apt-get update
@@ -92,15 +116,18 @@ jobs:
             xvfb
 
       - name: Set up Node.js
+        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
           cache: npm
 
       - name: Set up Rust
+        if: steps.relevance.outputs.relevant == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache both Rust release builds
+        if: steps.relevance.outputs.relevant == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
@@ -109,44 +136,56 @@ jobs:
           shared-key: release-performance-${{ matrix.platform }}
 
       - name: Install candidate dependencies
+        if: steps.relevance.outputs.relevant == 'true'
         run: npm ci
 
       - name: Install baseline dependencies
+        if: steps.relevance.outputs.relevant == 'true'
         working-directory: baseline-source
         run: npm ci
 
+      - name: Cache pinned Tauri WebDriver bridge
+        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin/tauri-driver
+            ~/.cargo/.crates.json
+            ~/.cargo/.crates.toml
+          key: tauri-driver-2.0.6-x86_64-unknown-linux-gnu
+
       - name: Install pinned Tauri WebDriver bridge
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
         run: cargo install tauri-driver --version 2.0.6 --locked
 
       - name: Build candidate Linux AppImage
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
         run: >-
           npm run tauri -- build --bundles appimage --features e2e
           --config src-tauri/tauri.e2e.conf.json
 
       - name: Build baseline Linux AppImage
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
         working-directory: baseline-source
         run: >-
           npm run tauri -- build --bundles appimage --features e2e
           --config src-tauri/tauri.e2e.conf.json
 
       - name: Build candidate Windows release executable
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.relevance.outputs.relevant == 'true'
         run: >-
           npm run tauri -- build --no-bundle --features e2e
           --config src-tauri/tauri.e2e.conf.json
 
       - name: Build baseline Windows release executable
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.relevance.outputs.relevant == 'true'
         working-directory: baseline-source
         run: >-
           npm run tauri -- build --no-bundle --features e2e
           --config src-tauri/tauri.e2e.conf.json
 
       - name: Resolve Linux applications
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
         id: linux-applications
         shell: bash
         run: |
@@ -164,7 +203,7 @@ jobs:
           echo "baseline=${baseline[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Measure baseline and candidate Linux AppImages
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
         shell: bash
         env:
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
@@ -201,7 +240,7 @@ jobs:
             "${sampling_args[@]}"
 
       - name: Measure baseline and candidate Windows executables
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.relevance.outputs.relevant == 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory `
@@ -225,10 +264,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows candidate measurement failed.' }
 
       - name: Apply absolute and current-main regression budgets
+        if: steps.relevance.outputs.relevant == 'true'
         run: >-
           node scripts/perf/performance-gate.mjs
           artifacts/e2e/release-performance/${{ matrix.platform }}-candidate.json
           artifacts/e2e/release-performance/${{ matrix.platform }}-baseline.json
+
+      - name: Record skipped measurement
+        if: steps.relevance.outputs.relevant != 'true'
+        shell: bash
+        run: |
+          mkdir -p artifacts/e2e/release-performance
+          {
+            echo "release-performance: measurement skipped"
+            echo "no measured-artifact paths changed since ${{ steps.revisions.outputs.baseline }}"
+          } > artifacts/e2e/release-performance/skip-reason.txt
 
       - name: Upload release WebView reports and evidence
         if: always()
@@ -272,16 +322,42 @@ jobs:
           ref: ${{ steps.revisions.outputs.baseline }}
           path: baseline-source
 
+      - name: Decide whether measured artifacts can change
+        id: relevance
+        shell: bash
+        run: |
+          relevant=false
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            relevant=true
+          else
+            base="${{ steps.revisions.outputs.baseline }}"
+            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+              git fetch origin "$base" --depth=1
+            fi
+            if git diff --name-only "$base" HEAD -- \
+              'src-tauri' 'src' 'scripts' 'tests' 'performance' \
+              'package.json' 'package-lock.json' 'vite.config.ts' \
+              'tsconfig.json' 'tsconfig.node.json' 'index.html' \
+              '.github/workflows/release-performance.yml' | grep -q .; then
+              relevant=true
+            fi
+          fi
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
+          echo "Measured-artifact relevance: $relevant"
+
       - name: Set up Node.js
+        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
           cache: npm
 
       - name: Set up Rust
+        if: steps.relevance.outputs.relevant == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache both Windows bundle builds
+        if: steps.relevance.outputs.relevant == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
@@ -290,20 +366,25 @@ jobs:
           shared-key: release-performance-windows-bundles
 
       - name: Install candidate dependencies
+        if: steps.relevance.outputs.relevant == 'true'
         run: npm ci
 
       - name: Install baseline dependencies
+        if: steps.relevance.outputs.relevant == 'true'
         working-directory: baseline-source
         run: npm ci
 
       - name: Build candidate MSI and NSIS
+        if: steps.relevance.outputs.relevant == 'true'
         run: npm run tauri -- build --bundles msi,nsis
 
       - name: Build baseline MSI and NSIS
+        if: steps.relevance.outputs.relevant == 'true'
         working-directory: baseline-source
         run: npm run tauri -- build --bundles msi,nsis
 
       - name: Stage baseline installers under the guarded bundle root
+        if: steps.relevance.outputs.relevant == 'true'
         shell: pwsh
         run: |
           foreach ($kind in @('msi', 'nsis')) {
@@ -322,6 +403,7 @@ jobs:
           }
 
       - name: Measure baseline and candidate installed bundles
+        if: steps.relevance.outputs.relevant == 'true'
         shell: pwsh
         env:
           MENDIMARU_EPHEMERAL_WINDOWS_VM: mendimaru-github-hosted-ephemeral-vm
@@ -380,16 +462,28 @@ jobs:
           }
 
       - name: Gate MSI against current main
+        if: steps.relevance.outputs.relevant == 'true'
         run: >-
           node scripts/perf/performance-gate.mjs
           artifacts/e2e/release-performance/candidate-msi.json
           artifacts/e2e/release-performance/baseline-msi.json
 
       - name: Gate NSIS against current main
+        if: steps.relevance.outputs.relevant == 'true'
         run: >-
           node scripts/perf/performance-gate.mjs
           artifacts/e2e/release-performance/candidate-nsis.json
           artifacts/e2e/release-performance/baseline-nsis.json
+
+      - name: Record skipped measurement
+        if: steps.relevance.outputs.relevant != 'true'
+        shell: bash
+        run: |
+          mkdir -p artifacts/e2e/release-performance
+          {
+            echo "release-performance: installed-bundle measurement skipped"
+            echo "no measured-artifact paths changed since ${{ steps.revisions.outputs.baseline }}"
+          } > artifacts/e2e/release-performance/skip-reason.txt
 
       - name: Upload installed bundle reports and evidence
         if: always()

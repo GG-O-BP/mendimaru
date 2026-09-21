@@ -19,7 +19,7 @@ done
 pacman -S --needed --noconfirm "${build_dependencies[@]}"
 pacman -T "${build_dependencies[@]}"
 chown -R aurbuild:aurbuild /build
-runuser -u aurbuild -- env CARGO_BUILD_JOBS=2 makepkg --nodeps --noconfirm
+runuser -u aurbuild -- env CARGO_BUILD_JOBS=4 makepkg --nodeps --noconfirm
 packages=(/build/mendimaru-*.pkg.tar.zst)
 [[ ${#packages[@]} == 1 && -f "${packages[0]}" ]]
 mkdir /inventory

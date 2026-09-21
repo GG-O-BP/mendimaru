@@ -25,7 +25,7 @@ git rev-parse HEAD > "$output/commit.txt"
 for file in build-package.sh verify-package.mjs installed-package.mjs; do
   git show "HEAD:scripts/aur/$file" > "$scratch/$file"
 done
-docker run --rm --init --cpus=2 --memory=6g \
+docker run --rm --init --cpus=4 --memory=12g \
   -v "$scratch:/gate:ro" -v "$output:/output" \
   archlinux:base-devel bash /gate/build-package.sh
 

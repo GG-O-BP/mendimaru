@@ -16,6 +16,19 @@ feature. Normal release artifacts do not contain the embedded driver or the
 loopback Marketplace override. The separately installed MSI and NSIS checks use
 ordinary release bundles.
 
+## Measurement relevance on pull requests
+
+On pull requests the workflow first asks whether the commit can change the
+measured artifacts at all. If no path under `src-tauri`, `src`, `scripts`,
+`tests`, `performance`, the build configuration files, or the workflow itself
+changed since the pull request base, the measurement, builds, and gates are
+skipped for that push and the job records a `skip-reason.txt` artifact instead.
+This keeps the required check green without spending 20–30 minutes per runner
+re-measuring binaries that are bit-for-bit inputs of `main`. Pushes to `main`,
+scheduled runs, and manual dispatch always measure in full, and any pull
+request that does touch a measured path gets exactly the same full measurement
+as before.
+
 ## Fixtures and measurements
 
 Every full release-WebView run excludes one warm-up launch and records seven
