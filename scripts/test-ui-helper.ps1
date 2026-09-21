@@ -25,10 +25,10 @@ $process = Get-Process -Id $PID
 $session = 'studio-' + $PID + '-' + $process.StartTime.ToUniversalTime().Ticks
 Initialize-MendimaruUi $process $session
 function Assert([bool]$Condition,[string]$Message) { if(-not $Condition){throw $Message} }
-function Send-Request([string]$Operation='capabilities',[int]$Budget=15000) {
+function Send-Request([string]$Operation='capabilities',[int]$Budget=15000,[int]$ExpiresExtra=0) {
     Remove-Item -LiteralPath ($controlPath+'.ui.report') -Force -ErrorAction SilentlyContinue
     $script:TestId = 'ui_' + [Guid]::NewGuid().ToString('N')
-    $payload = [ordered]@{id=$script:TestId;expiresAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()+$Budget;request=@{sessionId=$session;operation=$Operation;timeoutMs=$Budget}}
+    $payload = [ordered]@{id=$script:TestId;expiresAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()+$Budget+$ExpiresExtra;request=@{sessionId=$session;operation=$Operation;timeoutMs=$Budget}}
     $resultPath = $controlPath+'.ui.request'
     Write-MendimaruReport $payload
     Service-MendimaruUi
@@ -124,13 +124,14 @@ try {
     # A request stamped slightly beyond the acceptance cap stays acceptable:
     # the guest clock may trail the Linux host clock by a bounded grace
     # (docs/winboat-clock-sync.md). Beyond the grace the request is rejected.
-    Send-Request 'capabilities' 63000
+    # The extra offset keeps the worker timeout itself inside its own cap.
+    Send-Request 'capabilities' 15000 48000
     $graced=Receive-Response
     Assert ($graced.ok) 'request within clock grace was rejected'
     Send-Request 'release'
     $null=Receive-Response
     Assert ($null -eq $script:UiWorker) 'clock-grace request left a worker running'
-    Send-Request 'capabilities' 67000
+    Send-Request 'capabilities' 15000 52000
     $far=Receive-Response
     Assert ($far.reason -ceq 'ui-request-expired' -and $null -eq $script:UiWorker) 'far-future request was accepted'
 
