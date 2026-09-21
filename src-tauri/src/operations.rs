@@ -15,7 +15,7 @@ use tauri::AppHandle;
 
 const HISTORY_FILE_NAME: &str = "operation-history.json";
 const HISTORY_SCHEMA_VERSION: &str = "1.0.0";
-const LEGACY_RECORD_SCHEMA_VERSIONS: &[&str] = &["1.0.0", "2.0.0", "3.0.0"];
+const LEGACY_RECORD_SCHEMA_VERSIONS: &[&str] = &["1.0.0", "2.0.0", "3.0.0", "4.0.0"];
 const MAX_HISTORY_BYTES: u64 = 512 * 1024;
 const MAX_RECORDS: usize = 250;
 const MAX_IDENTIFIER_BYTES: usize = 160;
@@ -1331,21 +1331,23 @@ mod tests {
         .expect("finish operation");
 
         let history = history_path(&config);
-        let mut legacy: serde_json::Value =
-            serde_json::from_slice(&fs::read(&history).expect("read history"))
-                .expect("parse history");
-        legacy["records"][0]["schemaVersion"] = serde_json::json!("3.0.0");
-        fs::write(
-            &history,
-            serde_json::to_vec_pretty(&legacy).expect("serialize legacy history"),
-        )
-        .expect("write legacy history");
+        for legacy_version in ["3.0.0", "4.0.0"] {
+            let mut legacy: serde_json::Value =
+                serde_json::from_slice(&fs::read(&history).expect("read history"))
+                    .expect("parse history");
+            legacy["records"][0]["schemaVersion"] = serde_json::json!(legacy_version);
+            fs::write(
+                &history,
+                serde_json::to_vec_pretty(&legacy).expect("serialize legacy history"),
+            )
+            .expect("write legacy history");
 
-        let records = list(&config).expect("load compatible legacy history");
-        assert_eq!(
-            records[0].schema_version,
-            crate::contracts::CONTRACT_SCHEMA_VERSION
-        );
+            let records = list(&config).expect("load compatible legacy history");
+            assert_eq!(
+                records[0].schema_version,
+                crate::contracts::CONTRACT_SCHEMA_VERSION
+            );
+        }
 
         begin(
             &config,
@@ -1366,6 +1368,49 @@ mod tests {
             .expect("records")
             .iter()
             .all(|record| record["schemaVersion"] == crate::contracts::CONTRACT_SCHEMA_VERSION));
+    }
+
+    #[test]
+    fn lists_a_stored_v4_launch_record_from_the_previous_contract() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let config = config(temporary.path());
+        let history = history_path(&config);
+        let stored = serde_json::json!({
+            "schemaVersion": "1.0.0",
+            "records": [
+                {
+                    "schemaVersion": "4.0.0",
+                    "id": "launch-10.24.9-49faea1b04f2fe456172698eea39443e",
+                    "kind": "launch",
+                    "targetVersion": "10.24.9",
+                    "protectedProject": true,
+                    "state": "succeeded",
+                    "stage": "completed",
+                    "percentage": 100.0,
+                    "estimated": false,
+                    "startedAt": "2026-09-11T06:33:16.946366574Z",
+                    "updatedAt": "2026-09-11T06:35:25.434222295Z",
+                    "finishedAt": "2026-09-11T06:35:25.434220409Z",
+                    "retryable": false,
+                    "logAvailable": true
+                }
+            ],
+            "legacyScanComplete": true
+        });
+        fs::write(
+            &history,
+            serde_json::to_vec_pretty(&stored).expect("serialize history"),
+        )
+        .expect("write history");
+
+        let records = list(&config).expect("list history with a v4 launch record");
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].id,
+            "launch-10.24.9-49faea1b04f2fe456172698eea39443e"
+        );
+        assert!(records[0].protected_project);
+        assert_eq!(records[0].state, OperationState::Succeeded);
     }
 
     #[test]

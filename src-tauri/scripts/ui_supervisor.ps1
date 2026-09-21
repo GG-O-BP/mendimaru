@@ -1,5 +1,9 @@
 # Included in the authenticated Studio launch/reconnect host. Worker source is
 # embedded in the hash-verified launch script; requests can never replace it.
+# Request deadlines are stamped from the Linux host clock; the guest clock may
+# legitimately differ by a few seconds (docs/winboat-clock-sync.md), so the
+# request window keeps a bounded grace on both comparisons.
+$script:UiRequestClockGraceMs = [long]5000
 $script:UiWorker = $null
 $script:UiJob = $null
 $script:UiTask = $null
@@ -152,7 +156,7 @@ function Service-MendimaruUi {
                 }catch{}
                 if($null -eq $script:UiPending){return}
             }
-            if([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge [long]$script:UiPending.expiresAt){
+            if([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -ge ([long]$script:UiPending.expiresAt + $script:UiRequestClockGraceMs)){
                 Stop-MendimaruUi;Write-MendimaruUiResult @{ok=$false;reason='ui-helper-timeout'};return
             }
             if($script:UiTask.IsCompleted){
@@ -182,7 +186,7 @@ function Service-MendimaruUi {
             }catch{}
         }
         $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-        if([long]$message.expiresAt -le $now -or [long]$message.expiresAt -gt $now+60000){Write-MendimaruUiResult @{ok=$false;reason='ui-request-expired'};return}
+        if([long]$message.expiresAt -le $now -or [long]$message.expiresAt -gt ($now+60000+$script:UiRequestClockGraceMs)){Write-MendimaruUiResult @{ok=$false;reason='ui-request-expired'};return}
         if($message.request.operation -ceq 'release'){
             Stop-MendimaruUi;Write-MendimaruUiResult @{ok=$true;data=@{sessionId=$script:UiIdentity.sessionId;released=$true}};return
         }
