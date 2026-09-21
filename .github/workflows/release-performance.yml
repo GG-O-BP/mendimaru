@@ -400,29 +400,19 @@ jobs:
         run: npm run tauri -- build --bundles msi,nsis
 
       - name: Stage installers under the guarded bundle root
-        if: steps.relevance.outputs.relevant == 'true'
+        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true'
         shell: pwsh
         run: |
-          $root = if ('${{ matrix.variant }}' -eq 'baseline') {
-            'baseline-source'
-          } else {
-            '.'
-          }
-          $guarded = if ('${{ matrix.variant }}' -eq 'baseline') {
-            'src-tauri/target/release/bundle/baseline'
-          } else {
-            'src-tauri/target/release/bundle'
-          }
           foreach ($kind in @('msi', 'nsis')) {
             $filter = if ($kind -eq 'msi') { '*.msi' } else { '*.exe' }
             $source = @(
-              Get-ChildItem "$root/src-tauri/target/release/bundle/$kind" `
+              Get-ChildItem "baseline-source/src-tauri/target/release/bundle/$kind" `
                 -Filter $filter -File -ErrorAction Stop
             )
             if ($source.Count -ne 1) {
-              throw "Expected exactly one $kind installer for $root."
+              throw "Expected exactly one baseline $kind installer."
             }
-            $destination = "$guarded/$kind"
+            $destination = "src-tauri/target/release/bundle/baseline/$kind"
             New-Item -ItemType Directory -Path $destination -Force | Out-Null
             Copy-Item -LiteralPath $source[0].FullName -Destination $destination
           }
