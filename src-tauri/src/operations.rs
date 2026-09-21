@@ -1409,7 +1409,7 @@ mod tests {
             records[0].id,
             "launch-10.24.9-49faea1b04f2fe456172698eea39443e"
         );
-        assert_eq!(records[0].protected_project, true);
+        assert!(records[0].protected_project);
         assert_eq!(records[0].state, OperationState::Succeeded);
     }
 
