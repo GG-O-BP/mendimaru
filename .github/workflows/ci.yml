@@ -15,7 +15,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Decide which gates must run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      aur: ${{ steps.filter.outputs.aur }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+      - name: Detect packaging-relevant changes
+        id: filter
+        shell: bash
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          aur=true
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            base="${PULL_REQUEST_BASE_SHA:-}"
+            if [[ -n "$base" ]] \
+              && git cat-file -e "$base^{commit}" 2>/dev/null \
+              && ! git diff --name-only "$base" HEAD -- \
+                'aur' 'scripts/aur' 'src' 'src-tauri' 'package.json' \
+                '.github/workflows/aur-package.yml' | grep -q .; then
+              aur=false
+            fi
+          fi
+          echo "aur=$aur" >> "$GITHUB_OUTPUT"
+          echo "AUR gate relevance: $aur"
+
   aur-package:
+    needs: changes
+    if: needs.changes.outputs.aur == 'true'
     uses: ./.github/workflows/aur-package.yml
 
   test:
@@ -24,7 +57,6 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest
           - windows-latest
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
@@ -32,8 +64,230 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v6
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check frontend formatting and lint
+        run: |
+          npm run format:check
+          npm run lint:frontend
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run frontend unit and mocked app-flow tests
+        run: npm run test:frontend
+
+      - name: Verify the animation lifecycle contract
+        run: npm run test:motion
+
+      - name: Test bounded browser artifact scanning
+        run: npm run test:browser:security
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --nocapture --test-threads=1
+
+      - name: Run Rust clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run Windows test-feature clippy
+        if: runner.os == 'Windows'
+        run: npm run lint:rust:all-features
+
+      - name: Test Windows bundle smoke helpers
+        if: runner.os == 'Windows'
+        run: npm run test:e2e:windows:powershell
+
+  test-ubuntu:
+    name: Test (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
       - name: Install Linux desktop dependencies
-        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            at-spi2-core \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            webkit2gtk-driver \
+            xvfb
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Cache pinned Playwright Chromium
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-chromium-${{ runner.os }}-
+
+      - name: Install pinned Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Check frontend formatting and lint
+        run: |
+          npm run format:check
+          npm run lint:frontend
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run frontend unit and mocked app-flow tests
+        run: npm run test:frontend
+
+      - name: Verify the animation lifecycle contract
+        run: npm run test:motion
+
+      - name: Test bounded browser artifact scanning
+        run: npm run test:browser:security
+
+      - name: Run strict Playwright browser E2E
+        run: |
+          npm run test:browser
+          npm run test:browser:winboat:helpers
+
+      - name: Run sandboxed Marketplace Chromium security gate
+        shell: bash
+        run: |
+          chrome_path="$(
+            command -v google-chrome-stable || command -v google-chrome
+          )"
+          test -x "$chrome_path"
+          MENDIMARU_CHROME_PATH="$chrome_path" \
+            cargo test --manifest-path src-tauri/Cargo.toml \
+              live_linux_marketplace_browser_security_gate -- \
+              --ignored --nocapture --test-threads=1
+
+      - name: Scrape the real Marketplace catalog with Linux Chromium
+        shell: bash
+        run: |
+          chrome_path="$(
+            command -v google-chrome-stable || command -v google-chrome
+          )"
+          test -x "$chrome_path"
+          MENDIMARU_CHROME_PATH="$chrome_path" \
+            cargo test --manifest-path src-tauri/Cargo.toml \
+              live_scrapes_the_first_catalog_page -- \
+              --ignored --nocapture --test-threads=1
+
+  linux-webkit-e2e:
+    name: Linux Tauri WebKit E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install Linux desktop dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            at-spi2-core \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            webkit2gtk-driver \
+            xvfb
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Cache pinned Tauri WebDriver bridge
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin/tauri-driver
+            ~/.cargo/.crates.json
+            ~/.cargo/.crates.toml
+          key: tauri-driver-2.0.6-x86_64-unknown-linux-gnu
+
+      - name: Install pinned Tauri WebDriver bridge
+        run: cargo install tauri-driver --version 2.0.6 --locked
+
+      - name: Run real Tauri WebKit E2E
+        env:
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+        run: xvfb-run --auto-servernum npm run test:e2e
+
+      - name: Verify Linux and Windows E2E coverage levels
+        run: npm run test:e2e:coverage
+
+      - name: Upload Tauri WebKit E2E failure evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-linux-e2e
+          path: |
+            artifacts/e2e/linux-tauri.json
+            artifacts/e2e/linux-tauri*.png
+            artifacts/e2e/e2e-coverage.json
+            /tmp/mendimaru-tauri-e2e-*
+          if-no-files-found: ignore
+
+  rust-ubuntu:
+    name: Rust tests and clippy (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install Linux desktop dependencies
         shell: bash
         run: |
           sudo apt-get update
@@ -65,98 +319,25 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Cache pinned Playwright Chromium
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-chromium-${{ runner.os }}-
+
       - name: Install pinned Playwright Chromium
-        if: runner.os == 'Linux'
         run: npx playwright install --with-deps chromium
-
-      - name: Install pinned Tauri WebDriver bridge
-        if: runner.os == 'Linux'
-        run: cargo install tauri-driver --version 2.0.6 --locked
-
-      - name: Check frontend formatting and lint
-        run: |
-          npm run format:check
-          npm run lint:frontend
 
       - name: Build frontend
         run: npm run build
-
-      - name: Run frontend unit and mocked app-flow tests
-        run: npm run test:frontend
-
-      - name: Verify the animation lifecycle contract
-        run: npm run test:motion
-
-      - name: Test bounded browser artifact scanning
-        run: npm run test:browser:security
-
-      - name: Run strict Playwright browser E2E
-        if: runner.os == 'Linux'
-        run: |
-          npm run test:browser
-          npm run test:browser:winboat:helpers
-
-      - name: Run sandboxed Marketplace Chromium security gate
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          chrome_path="$(
-            command -v google-chrome-stable || command -v google-chrome
-          )"
-          test -x "$chrome_path"
-          MENDIMARU_CHROME_PATH="$chrome_path" \
-            cargo test --manifest-path src-tauri/Cargo.toml \
-              live_linux_marketplace_browser_security_gate -- \
-              --ignored --nocapture --test-threads=1
-
-      - name: Scrape the real Marketplace catalog with Linux Chromium
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          chrome_path="$(
-            command -v google-chrome-stable || command -v google-chrome
-          )"
-          test -x "$chrome_path"
-          MENDIMARU_CHROME_PATH="$chrome_path" \
-            cargo test --manifest-path src-tauri/Cargo.toml \
-              live_scrapes_the_first_catalog_page -- \
-              --ignored --nocapture --test-threads=1
-
-      - name: Run real Tauri WebKit E2E
-        if: runner.os == 'Linux'
-        env:
-          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
-        run: xvfb-run --auto-servernum npm run test:e2e
-
-      - name: Verify Linux and Windows E2E coverage levels
-        if: runner.os == 'Linux'
-        run: npm run test:e2e:coverage
-
-      - name: Upload Tauri WebKit E2E failure evidence
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v7
-        with:
-          name: mendimaru-linux-e2e
-          path: |
-            artifacts/e2e/linux-tauri.json
-            artifacts/e2e/linux-tauri*.png
-            artifacts/e2e/e2e-coverage.json
-            /tmp/mendimaru-tauri-e2e-*
-          if-no-files-found: ignore
 
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets -- --nocapture --test-threads=1
 
       - name: Run Rust clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-
-      - name: Run Windows test-feature clippy
-        if: runner.os == 'Windows'
-        run: npm run lint:rust:all-features
-
-      - name: Test Windows bundle smoke helpers
-        if: runner.os == 'Windows'
-        run: npm run test:e2e:windows:powershell
 
   ui-helper-contract:
     name: Windows helper contract (no Studio)
@@ -188,7 +369,6 @@ jobs:
 
   windows-native-e2e:
     name: Actual Windows Tauri dev E2E
-    needs: test
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -227,9 +407,6 @@ jobs:
 
   windows-bundle:
     name: Build, install, launch, and uninstall Windows bundles
-    needs:
-      - security
-      - windows-native-e2e
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
