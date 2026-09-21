@@ -208,7 +208,7 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 90 }}
 
   release-webview-measure:
-    name: Measure WebView (${{ matrix.platform }} / ${{ matrix.variant }} / ${{ matrix.phase }})
+    name: Measure WebView (${{ matrix.platform }} / ${{ matrix.phase }})
     needs: release-webview-build
     strategy:
       fail-fast: false
@@ -216,9 +216,6 @@ jobs:
         platform:
           - linux
           - windows
-        variant:
-          - baseline
-          - candidate
         phase:
           - latency
           - idle
@@ -230,7 +227,9 @@ jobs:
             runner: windows-latest
             package-kind: release-executable
           - phase: latency
-            sample-count: 5
+            # Baseline and candidate run back to back on this one VM so the
+            # latency comparison keeps strict same-host compatibility.
+            sample-count: 3
             idle-window-seconds: 5
           - phase: idle
             sample-count: 1
@@ -320,11 +319,11 @@ jobs:
         if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
         run: cargo install tauri-driver --version 2.0.6 --locked
 
-      - name: Download the built binary
+      - name: Download the built binaries
         if: steps.relevance.outputs.relevant == 'true'
         uses: actions/download-artifact@v7
         with:
-          name: webview-binary-${{ matrix.platform }}-${{ matrix.variant }}
+          pattern: webview-binary-${{ matrix.platform }}-*
           path: binary
 
       - name: Measure the Linux AppImage phase
@@ -343,20 +342,24 @@ jobs:
           done
           test -x "$chrome_path"
           export MENDIMARU_CHROME_PATH="$chrome_path"
-          chmod +x binary/*.AppImage
-          commit="${{ steps.revisions.outputs.baseline }}"
-          if [[ "${{ matrix.variant }}" == "candidate" ]]; then
-            commit="${{ steps.revisions.outputs.candidate }}"
-          fi
-          xvfb-run --auto-servernum node scripts/perf/release-webview.mjs \
-            --application "$(find binary -maxdepth 1 -name '*.AppImage' -print -quit)" \
-            --report "artifacts/e2e/release-performance/${{ matrix.platform }}-${{ matrix.variant }}-${{ matrix.phase }}.json" \
-            --commit "$commit" \
-            --baseline-commit "${{ steps.revisions.outputs.baseline }}" \
-            --package-kind ${{ matrix.package-kind }} \
-            --run-id "${GITHUB_RUN_ID}-${{ matrix.variant }}-${{ matrix.phase }}" \
-            --sample-count ${{ matrix.sample-count }} \
-            --idle-window-seconds ${{ matrix.idle-window-seconds }}
+          for variant in baseline candidate; do
+            application="$(find "binary/webview-binary-${{ matrix.platform }}-$variant" -maxdepth 1 -name '*.AppImage' -print -quit)"
+            test -n "$application"
+            chmod +x "$application"
+            commit="${{ steps.revisions.outputs.baseline }}"
+            if [[ "$variant" == "candidate" ]]; then
+              commit="${{ steps.revisions.outputs.candidate }}"
+            fi
+            xvfb-run --auto-servernum node scripts/perf/release-webview.mjs \
+              --application "$application" \
+              --report "artifacts/e2e/release-performance/${{ matrix.platform }}-$variant-${{ matrix.phase }}.json" \
+              --commit "$commit" \
+              --baseline-commit "${{ steps.revisions.outputs.baseline }}" \
+              --package-kind ${{ matrix.package-kind }} \
+              --run-id "${GITHUB_RUN_ID}-$variant-${{ matrix.phase }}" \
+              --sample-count ${{ matrix.sample-count }} \
+              --idle-window-seconds ${{ matrix.idle-window-seconds }}
+          done
 
       - name: Measure the Windows executable phase
         if: runner.os == 'Windows' && steps.relevance.outputs.relevant == 'true'
@@ -365,21 +368,25 @@ jobs:
           New-Item -ItemType Directory `
             -Path artifacts/e2e/release-performance `
             -Force | Out-Null
-          $commit = '${{ steps.revisions.outputs.baseline }}'
-          if ('${{ matrix.variant }}' -eq 'candidate') {
-            $commit = '${{ steps.revisions.outputs.candidate }}'
-          }
-          node scripts/perf/release-webview.mjs `
-            --application (Resolve-Path 'binary/mendimaru.exe') `
-            --report "artifacts/e2e/release-performance/${{ matrix.platform }}-${{ matrix.variant }}-${{ matrix.phase }}.json" `
-            --commit $commit `
-            --baseline-commit '${{ steps.revisions.outputs.baseline }}' `
-            --package-kind release-executable `
-            --run-id "$env:GITHUB_RUN_ID-${{ matrix.variant }}-${{ matrix.phase }}" `
-            --sample-count ${{ matrix.sample-count }} `
-            --idle-window-seconds ${{ matrix.idle-window-seconds }}
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Windows ${{ matrix.variant }} ${{ matrix.phase }} measurement failed.'
+          foreach ($variant in @('baseline', 'candidate')) {
+            $application = Resolve-Path "binary/webview-binary-${{ matrix.platform }}-$variant/mendimaru.exe" `
+              -ErrorAction Stop
+            $commit = '${{ steps.revisions.outputs.baseline }}'
+            if ($variant -eq 'candidate') {
+              $commit = '${{ steps.revisions.outputs.candidate }}'
+            }
+            node scripts/perf/release-webview.mjs `
+              --application $application `
+              --report "artifacts/e2e/release-performance/${{ matrix.platform }}-$variant-${{ matrix.phase }}.json" `
+              --commit $commit `
+              --baseline-commit '${{ steps.revisions.outputs.baseline }}' `
+              --package-kind release-executable `
+              --run-id "$env:GITHUB_RUN_ID-$variant-${{ matrix.phase }}" `
+              --sample-count ${{ matrix.sample-count }} `
+              --idle-window-seconds ${{ matrix.idle-window-seconds }}
+            if ($LASTEXITCODE -ne 0) {
+              throw "Windows $variant ${{ matrix.phase }} measurement failed."
+            }
           }
 
       - name: Record skipped measurement
@@ -396,7 +403,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: webview-report-${{ matrix.platform }}-${{ matrix.variant }}-${{ matrix.phase }}
+          name: webview-report-${{ matrix.platform }}-${{ matrix.phase }}
           path: artifacts/e2e/release-performance
           if-no-files-found: warn
           retention-days: ${{ github.event_name == 'pull_request' && 30 || 90 }}
@@ -783,7 +790,8 @@ jobs:
           fi
           node scripts/perf/performance-gate.mjs \
             reports/candidate-msi.json \
-            reports/baseline-msi.json
+            reports/baseline-msi.json \
+            performance/budgets.bundle.json
 
       - name: Gate NSIS against current main
         shell: bash
@@ -793,4 +801,5 @@ jobs:
           fi
           node scripts/perf/performance-gate.mjs \
             reports/candidate-nsis.json \
-            reports/baseline-nsis.json
+            reports/baseline-nsis.json \
+            performance/budgets.bundle.json

@@ -268,8 +268,9 @@
         },
         "sampleCount": {
           "type": "integer",
-          "minimum": 5,
-          "maximum": 1000
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Split-phase runs may use a single filler sample for metric groups they do not measure; gates decide statistical adequacy through the budget policy."
         },
         "percentileMethod": {
           "const": "nearest-rank"
@@ -285,7 +286,8 @@
         },
         "idleWindowSeconds": {
           "type": "number",
-          "minimum": 300
+          "minimum": 5,
+          "description": "Idle resource metrics are only budgeted from reports using the full 300-second window; shorter windows are filler for split-phase latency runs."
         },
         "idleSampleSeconds": {
           "type": "number",

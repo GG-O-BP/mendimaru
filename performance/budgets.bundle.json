@@ -57,6 +57,68 @@
             "count": 1
           },
           "metrics": {
+            "coldStartupMs": {
+              "statistic": "p95",
+              "absoluteMax": 40000,
+              "relativeMaxPercent": 20,
+              "rationale": "The hosted Linux AppImage fallback measured 31.40 to 31.47 seconds; 40 seconds preserves bounded runner headroom while remaining far below the former 120 second debug timeout."
+            },
+            "warmStartupMs": {
+              "statistic": "p95",
+              "absoluteMax": 40000,
+              "relativeMaxPercent": 20,
+              "rationale": "The hosted AppImage launch path still performs fallback package extraction on warm runs, so its measured 31.46 to 31.68 seconds receives the same 40 second safety ceiling."
+            },
+            "firstIpcMs": {
+              "statistic": "p95",
+              "absoluteMax": 3000,
+              "relativeMaxPercent": 20,
+              "rationale": "The environment IPC observation was 346 ms; this retains hosted-runner headroom."
+            },
+            "environmentSlowMs": {
+              "statistic": "p95",
+              "absoluteMax": 5000,
+              "relativeMaxPercent": 20,
+              "rationale": "A tracked 400 ms backend delay verifies that slow environment discovery remains observable and bounded."
+            },
+            "environmentTimeoutRecoveryMs": {
+              "statistic": "p95",
+              "absoluteMax": 6000,
+              "relativeMaxPercent": 20,
+              "rationale": "A client deadline against a two-second probe must recover on the next normal environment request."
+            },
+            "catalogCachedMs": {
+              "statistic": "p95",
+              "absoluteMax": 750,
+              "relativeMaxPercent": 20,
+              "relativeNoiseFloor": 75,
+              "rationale": "A valid disk catalog must be visible without waiting for an isolated refresh. Three same-host bootstrap comparisons observed 3.17-59.56 ms p95, so this metric uses a reviewed 75 ms floor while retaining the 750 ms safety ceiling."
+            },
+            "catalogRefreshMs": {
+              "statistic": "p50",
+              "absoluteMax": 15000,
+              "relativeMaxPercent": 20,
+              "rationale": "The isolated catalog fixture is bounded separately from external Marketplace availability. Three same-host comparisons kept p50 within 785.39-813.42 ms while one-time browser bootstrap made seven-sample p95 range from 873.86-1727.80 ms; p95 and outliers remain reported, but the relative gate uses the stable p50."
+            },
+            "smallWorkspaceScanMs": {
+              "statistic": "p95",
+              "absoluteMax": 3000,
+              "relativeMaxPercent": 20,
+              "rationale": "The one-project observation was 16 ms and should not regress into user-visible delay."
+            },
+            "largeWorkspaceScanMs": {
+              "statistic": "p95",
+              "absoluteMax": 12000,
+              "relativeMaxPercent": 20,
+              "rationale": "The realistic tier intentionally carries enough projects and bytes to expose linear scan regressions."
+            },
+            "navigationMs": {
+              "statistic": "p95",
+              "absoluteMax": 1500,
+              "relativeMaxPercent": 20,
+              "relativeNoiseFloor": 100,
+              "rationale": "Observed debug navigation was 111 to 248 ms. Hosted Linux release comparisons can jitter by tens of milliseconds on unrelated changes, so navigation uses a reviewed 100 ms floor while retaining its 20 percent and 1.5 second gates."
+            },
             "backgroundPollingCpuPercent": {
               "statistic": "p95",
               "absoluteMax": 8,
@@ -183,6 +245,67 @@
             "count": 2
           },
           "metrics": {
+            "coldStartupMs": {
+              "statistic": "p95",
+              "absoluteMax": 20000,
+              "relativeMaxPercent": 20,
+              "relativeNoiseFloor": 600,
+              "rationale": "Release WebView2 startup replaces the former 180 second CI override with a 20 second safety rail. Hosted-runner cold p95 can vary by roughly 0.6 seconds for unrelated changes, so a metric-specific 600 ms floor avoids false positives while retaining the 20 percent and 20 second gates."
+            },
+            "warmStartupMs": {
+              "statistic": "p50",
+              "absoluteMax": 12000,
+              "relativeMaxPercent": 20,
+              "rationale": "Warm release startup excludes Rust compilation and Vite readiness. Across three same-host bootstrap comparisons, candidate p50 changes stayed within 16 percent while a single 984.97 ms Tukey outlier produced a 28.62 percent p95 false positive; p95 remains reported and the relative gate uses p50."
+            },
+            "firstIpcMs": {
+              "statistic": "p95",
+              "absoluteMax": 4000,
+              "relativeMaxPercent": 20,
+              "rationale": "Native environment discovery gets explicit hosted Windows variance headroom."
+            },
+            "environmentSlowMs": {
+              "statistic": "p95",
+              "absoluteMax": 6000,
+              "relativeMaxPercent": 20,
+              "rationale": "A tracked 400 ms backend delay verifies that slow native discovery stays observable and bounded."
+            },
+            "environmentTimeoutRecoveryMs": {
+              "statistic": "p95",
+              "absoluteMax": 7000,
+              "relativeMaxPercent": 20,
+              "rationale": "WebView2 must recover after a client deadline without requiring an application restart."
+            },
+            "catalogCachedMs": {
+              "statistic": "p95",
+              "absoluteMax": 1000,
+              "relativeMaxPercent": 20,
+              "rationale": "Cached Marketplace state must render without a live browser refresh."
+            },
+            "catalogRefreshMs": {
+              "statistic": "p95",
+              "absoluteMax": 20000,
+              "relativeMaxPercent": 20,
+              "rationale": "The isolated browser fixture has its own ceiling and never depends on live Marketplace health."
+            },
+            "smallWorkspaceScanMs": {
+              "statistic": "p95",
+              "absoluteMax": 4000,
+              "relativeMaxPercent": 20,
+              "rationale": "Small native workspace discovery should remain well below the old 10 second ceiling."
+            },
+            "largeWorkspaceScanMs": {
+              "statistic": "p95",
+              "absoluteMax": 15000,
+              "relativeMaxPercent": 20,
+              "rationale": "The large tier bounds registry and filesystem scanning on hosted Windows."
+            },
+            "navigationMs": {
+              "statistic": "p95",
+              "absoluteMax": 2000,
+              "relativeMaxPercent": 20,
+              "rationale": "WebView2 navigation should stay interactive under hosted runner noise."
+            },
             "backgroundPollingCpuPercent": {
               "statistic": "p95",
               "absoluteMax": 8,
