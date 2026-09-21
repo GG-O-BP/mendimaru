@@ -17,8 +17,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  release-webview-measure:
-    name: Measure WebView (${{ matrix.platform }} / ${{ matrix.variant }})
+  release-webview-build:
+    name: Build WebView binary (${{ matrix.platform }} / ${{ matrix.variant }})
     strategy:
       fail-fast: false
       matrix:
@@ -36,7 +36,7 @@ jobs:
             runner: windows-latest
             package-kind: release-executable
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - name: Check out candidate source
         uses: actions/checkout@v6
@@ -83,15 +83,23 @@ jobs:
           echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
           echo "Measured-artifact relevance: $relevant"
 
+      - name: Cache the built baseline binary
+        if: matrix.variant == 'baseline'
+        id: baseline-binary
+        uses: actions/cache@v6
+        with:
+          path: cached-baseline-binary
+          key: webview-binary-${{ matrix.platform }}-${{ steps.revisions.outputs.baseline }}
+
       - name: Check out current-main baseline
-        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true'
+        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ steps.revisions.outputs.baseline }}
           path: baseline-source
 
       - name: Backport test-only fixture hooks for the bootstrap baseline
-        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true'
+        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
         shell: bash
         run: |
           if ! grep -q MENDIMARU_E2E_MARKETPLACE_URL \
@@ -107,6 +115,171 @@ jobs:
             cp src-tauri/src/commands/environment.rs \
               baseline-source/src-tauri/src/commands/environment.rs
           fi
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            at-spi2-core \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            webkit2gtk-driver \
+            xvfb
+
+      - name: Set up Node.js
+        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+          cache-dependency-path: ${{ matrix.variant == 'baseline' && 'baseline-source/package-lock.json' || 'package-lock.json' }}
+
+      - name: Set up Rust
+        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache the Rust release build
+        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
+          shared-key: release-performance-${{ matrix.platform }}-${{ matrix.variant }}
+
+      - name: Install dependencies
+        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
+        run: npm ci
+
+      - name: Build the Linux AppImage
+        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
+        run: >-
+          npm run tauri -- build --bundles appimage --features e2e
+          --config src-tauri/tauri.e2e.conf.json
+
+      - name: Build the Windows release executable
+        if: runner.os == 'Windows' && steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
+        run: >-
+          npm run tauri -- build --no-bundle --features e2e
+          --config src-tauri/tauri.e2e.conf.json
+
+      - name: Stage the binary for caching and artifact upload
+        if: steps.relevance.outputs.relevant == 'true'
+        shell: bash
+        run: |
+          mkdir -p staged-binary
+          if [[ "${{ steps.baseline-binary.outputs.cache-hit }}" == "true" ]]; then
+            cp cached-baseline-binary/* staged-binary/
+            exit 0
+          fi
+          root="."
+          if [[ "${{ matrix.variant }}" == "baseline" ]]; then root="baseline-source"; fi
+          mkdir -p cached-baseline-binary
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            mapfile -t app < <(find "$root/src-tauri/target/release/bundle/appimage" -maxdepth 1 -type f -name '*.AppImage')
+            [[ ${#app[@]} -eq 1 ]]
+            cp "${app[0]}" staged-binary/
+            if [[ "${{ matrix.variant }}" == "baseline" ]]; then cp "${app[0]}" cached-baseline-binary/; fi
+          else
+            cp "$root/src-tauri/target/release/mendimaru.exe" staged-binary/
+            if [[ "${{ matrix.variant }}" == "baseline" ]]; then cp "$root/src-tauri/target/release/mendimaru.exe" cached-baseline-binary/; fi
+          fi
+
+      - name: Record skipped build
+        if: steps.relevance.outputs.relevant != 'true'
+        shell: bash
+        run: |
+          mkdir -p staged-binary
+          echo "release-performance build skipped: no measured-artifact paths changed" \
+            > staged-binary/skip-reason.txt
+
+      - name: Publish the binary artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: webview-binary-${{ matrix.platform }}-${{ matrix.variant }}
+          path: staged-binary
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 90 }}
+
+  release-webview-measure:
+    name: Measure WebView (${{ matrix.platform }} / ${{ matrix.variant }} / ${{ matrix.phase }})
+    needs: release-webview-build
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux
+          - windows
+        variant:
+          - baseline
+          - candidate
+        phase:
+          - latency
+          - idle
+        include:
+          - platform: linux
+            runner: ubuntu-latest
+            package-kind: appimage
+          - platform: windows
+            runner: windows-latest
+            package-kind: release-executable
+          - phase: latency
+            sample-count: 5
+            idle-window-seconds: 5
+          - phase: idle
+            sample-count: 1
+            idle-window-seconds: 300
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - name: Check out candidate source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Resolve measured revisions
+        id: revisions
+        shell: bash
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          candidate="$(git rev-parse HEAD)"
+          if [[ -n "$PULL_REQUEST_BASE_SHA" ]]; then
+            baseline="$PULL_REQUEST_BASE_SHA"
+          else
+            baseline="$(git rev-parse HEAD^)"
+          fi
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether measured artifacts can change
+        id: relevance
+        shell: bash
+        run: |
+          relevant=false
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            relevant=true
+          else
+            base="${{ steps.revisions.outputs.baseline }}"
+            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+              git fetch origin "$base" --depth=1
+            fi
+            if git diff --name-only "$base" HEAD -- \
+              'src-tauri' 'src' 'scripts' 'tests' 'performance' \
+              'package.json' 'package-lock.json' 'vite.config.ts' \
+              'tsconfig.json' 'tsconfig.node.json' 'index.html' \
+              '.github/workflows/release-performance.yml' | grep -q .; then
+              relevant=true
+            fi
+          fi
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
+          echo "Measured-artifact relevance: $relevant"
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
@@ -129,24 +302,8 @@ jobs:
           node-version: 22.22.2
           cache: npm
 
-      - name: Set up Rust
+      - name: Install dependencies
         if: steps.relevance.outputs.relevant == 'true'
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache the Rust release build
-        if: steps.relevance.outputs.relevant == 'true'
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
-          shared-key: release-performance-${{ matrix.platform }}-${{ matrix.variant }}
-
-      - name: Install candidate dependencies
-        if: steps.relevance.outputs.relevant == 'true'
-        run: npm ci
-
-      - name: Install baseline dependencies
-        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true'
-        working-directory: baseline-source
         run: npm ci
 
       - name: Cache pinned Tauri WebDriver bridge
@@ -163,31 +320,20 @@ jobs:
         if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
         run: cargo install tauri-driver --version 2.0.6 --locked
 
-      - name: Build Linux AppImage
-        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
-        working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
-        run: >-
-          npm run tauri -- build --bundles appimage --features e2e
-          --config src-tauri/tauri.e2e.conf.json
+      - name: Download the built binary
+        if: steps.relevance.outputs.relevant == 'true'
+        uses: actions/download-artifact@v7
+        with:
+          name: webview-binary-${{ matrix.platform }}-${{ matrix.variant }}
+          path: binary
 
-      - name: Build Windows release executable
-        if: runner.os == 'Windows' && steps.relevance.outputs.relevant == 'true'
-        working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
-        run: >-
-          npm run tauri -- build --no-bundle --features e2e
-          --config src-tauri/tauri.e2e.conf.json
-
-      - name: Measure the Linux AppImage
+      - name: Measure the Linux AppImage phase
         if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
         shell: bash
         env:
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
         run: |
           mkdir -p artifacts/e2e/release-performance
-          sampling_args=()
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            sampling_args+=(--sample-count 5 --idle-window-seconds 300)
-          fi
           chrome_path=""
           for command_name in google-chrome-stable google-chrome chromium chromium-browser; do
             if command -v "$command_name" >/dev/null 2>&1; then
@@ -197,53 +343,43 @@ jobs:
           done
           test -x "$chrome_path"
           export MENDIMARU_CHROME_PATH="$chrome_path"
-          if [[ "${{ matrix.variant }}" == "baseline" ]]; then
-            root="baseline-source"
-            commit="${{ steps.revisions.outputs.baseline }}"
-          else
-            root="."
+          chmod +x binary/*.AppImage
+          commit="${{ steps.revisions.outputs.baseline }}"
+          if [[ "${{ matrix.variant }}" == "candidate" ]]; then
             commit="${{ steps.revisions.outputs.candidate }}"
           fi
-          mapfile -t application < <(
-            find "$root/src-tauri/target/release/bundle/appimage" \
-              -maxdepth 1 -type f -name '*.AppImage'
-          )
-          [[ ${#application[@]} -eq 1 ]]
           xvfb-run --auto-servernum node scripts/perf/release-webview.mjs \
-            --application "${application[0]}" \
-            --report "artifacts/e2e/release-performance/${{ matrix.platform }}-${{ matrix.variant }}.json" \
+            --application "$(find binary -maxdepth 1 -name '*.AppImage' -print -quit)" \
+            --report "artifacts/e2e/release-performance/${{ matrix.platform }}-${{ matrix.variant }}-${{ matrix.phase }}.json" \
             --commit "$commit" \
             --baseline-commit "${{ steps.revisions.outputs.baseline }}" \
             --package-kind ${{ matrix.package-kind }} \
-            --run-id "${GITHUB_RUN_ID}-${{ matrix.variant }}" \
-            "${sampling_args[@]}"
+            --run-id "${GITHUB_RUN_ID}-${{ matrix.variant }}-${{ matrix.phase }}" \
+            --sample-count ${{ matrix.sample-count }} \
+            --idle-window-seconds ${{ matrix.idle-window-seconds }}
 
-      - name: Measure the Windows executable
+      - name: Measure the Windows executable phase
         if: runner.os == 'Windows' && steps.relevance.outputs.relevant == 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory `
             -Path artifacts/e2e/release-performance `
             -Force | Out-Null
-          $root = if ('${{ matrix.variant }}' -eq 'baseline') {
-            'baseline-source'
-          } else {
-            '.'
-          }
-          $application = Join-Path $root 'src-tauri/target/release/mendimaru.exe'
           $commit = '${{ steps.revisions.outputs.baseline }}'
           if ('${{ matrix.variant }}' -eq 'candidate') {
             $commit = '${{ steps.revisions.outputs.candidate }}'
           }
           node scripts/perf/release-webview.mjs `
-            --application $application `
-            --report "artifacts/e2e/release-performance/${{ matrix.platform }}-${{ matrix.variant }}.json" `
+            --application (Resolve-Path 'binary/mendimaru.exe') `
+            --report "artifacts/e2e/release-performance/${{ matrix.platform }}-${{ matrix.variant }}-${{ matrix.phase }}.json" `
             --commit $commit `
             --baseline-commit '${{ steps.revisions.outputs.baseline }}' `
-            --package-kind ${{ matrix.package-kind }} `
-            --run-id "$env:GITHUB_RUN_ID-${{ matrix.variant }}"
+            --package-kind release-executable `
+            --run-id "$env:GITHUB_RUN_ID-${{ matrix.variant }}-${{ matrix.phase }}" `
+            --sample-count ${{ matrix.sample-count }} `
+            --idle-window-seconds ${{ matrix.idle-window-seconds }}
           if ($LASTEXITCODE -ne 0) {
-            throw 'Windows ${{ matrix.variant }} measurement failed.'
+            throw 'Windows ${{ matrix.variant }} ${{ matrix.phase }} measurement failed.'
           }
 
       - name: Record skipped measurement
@@ -260,7 +396,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: webview-report-${{ matrix.platform }}-${{ matrix.variant }}
+          name: webview-report-${{ matrix.platform }}-${{ matrix.variant }}-${{ matrix.phase }}
           path: artifacts/e2e/release-performance
           if-no-files-found: warn
           retention-days: ${{ github.event_name == 'pull_request' && 30 || 90 }}
@@ -284,6 +420,10 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Download measurement reports
         uses: actions/download-artifact@v7
@@ -292,7 +432,7 @@ jobs:
           merge-multiple: true
           path: reports
 
-      - name: Apply absolute and current-main regression budgets
+      - name: Gate the latency phase against current main
         shell: bash
         run: |
           if [[ -f reports/skip-reason.txt ]]; then
@@ -301,11 +441,23 @@ jobs:
             exit 0
           fi
           node scripts/perf/performance-gate.mjs \
-            "reports/${{ matrix.platform }}-candidate.json" \
-            "reports/${{ matrix.platform }}-baseline.json"
+            "reports/${{ matrix.platform }}-candidate-latency.json" \
+            "reports/${{ matrix.platform }}-baseline-latency.json" \
+            performance/budgets.latency.json
 
-  installed-bundle-measure:
-    name: Measure installed bundles (${{ matrix.variant }})
+      - name: Gate the idle phase against current main
+        shell: bash
+        run: |
+          if [[ -f reports/skip-reason.txt ]]; then
+            exit 0
+          fi
+          node scripts/perf/performance-gate.mjs \
+            "reports/${{ matrix.platform }}-candidate-idle.json" \
+            "reports/${{ matrix.platform }}-baseline-idle.json" \
+            performance/budgets.idle.json
+
+  installed-bundle-build:
+    name: Build installers (${{ matrix.variant }})
     strategy:
       fail-fast: false
       matrix:
@@ -313,7 +465,7 @@ jobs:
           - baseline
           - candidate
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
     steps:
       - name: Check out candidate source
         uses: actions/checkout@v6
@@ -332,8 +484,6 @@ jobs:
           else
             baseline="$(git rev-parse HEAD^)"
           fi
-          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$baseline" =~ ^[0-9a-f]{40}$ ]]
           echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
           echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
 
@@ -360,12 +510,146 @@ jobs:
           echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
           echo "Measured-artifact relevance: $relevant"
 
+      - name: Cache the built baseline installers
+        if: matrix.variant == 'baseline'
+        id: baseline-installers
+        uses: actions/cache@v6
+        with:
+          path: staged-installers
+          key: bundle-installers-${{ steps.revisions.outputs.baseline }}
+
       - name: Check out current-main baseline
-        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true'
+        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ steps.revisions.outputs.baseline }}
           path: baseline-source
+
+      - name: Set up Node.js
+        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+          cache-dependency-path: ${{ matrix.variant == 'baseline' && 'baseline-source/package-lock.json' || 'package-lock.json' }}
+
+      - name: Set up Rust
+        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache the Rust bundle build
+        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
+          shared-key: release-performance-windows-bundles-${{ matrix.variant }}
+
+      - name: Install dependencies
+        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
+        working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
+        run: npm ci
+
+      - name: Build MSI and NSIS
+        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
+        working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
+        run: npm run tauri -- build --bundles msi,nsis
+
+      - name: Stage the built installers
+        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $root = if ('${{ matrix.variant }}' -eq 'baseline') {
+            'baseline-source'
+          } else {
+            '.'
+          }
+          New-Item -ItemType Directory -Path staged-installers -Force | Out-Null
+          foreach ($kind in @('msi', 'nsis')) {
+            $filter = if ($kind -eq 'msi') { '*.msi' } else { '*.exe' }
+            $source = @(
+              Get-ChildItem "$root/src-tauri/target/release/bundle/$kind" `
+                -Filter $filter -File -ErrorAction Stop
+            )
+            if ($source.Count -ne 1) {
+              throw "Expected exactly one $kind installer for $root."
+            }
+            Copy-Item -LiteralPath $source[0].FullName -Destination staged-installers
+          }
+
+      - name: Record skipped build
+        if: steps.relevance.outputs.relevant != 'true'
+        shell: bash
+        run: |
+          mkdir -p staged-installers
+          echo "release-performance build skipped: no measured-artifact paths changed" \
+            > staged-installers/skip-reason.txt
+
+      - name: Publish the installer artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bundle-installers-${{ matrix.variant }}
+          path: staged-installers
+          if-no-files-found: warn
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 90 }}
+
+  installed-bundle-measure:
+    name: Measure installed bundle (${{ matrix.variant }} / ${{ matrix.kind }})
+    needs: installed-bundle-build
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - baseline
+          - candidate
+        kind:
+          - msi
+          - nsis
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out candidate source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Resolve measured revisions
+        id: revisions
+        shell: bash
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          candidate="$(git rev-parse HEAD)"
+          if [[ -n "$PULL_REQUEST_BASE_SHA" ]]; then
+            baseline="$PULL_REQUEST_BASE_SHA"
+          else
+            baseline="$(git rev-parse HEAD^)"
+          fi
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether measured artifacts can change
+        id: relevance
+        shell: bash
+        run: |
+          relevant=false
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            relevant=true
+          else
+            base="${{ steps.revisions.outputs.baseline }}"
+            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+              git fetch origin "$base" --depth=1
+            fi
+            if git diff --name-only "$base" HEAD -- \
+              'src-tauri' 'src' 'scripts' 'tests' 'performance' \
+              'package.json' 'package-lock.json' 'vite.config.ts' \
+              'tsconfig.json' 'tsconfig.node.json' 'index.html' \
+              '.github/workflows/release-performance.yml' | grep -q .; then
+              relevant=true
+            fi
+          fi
+          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
+          echo "Measured-artifact relevance: $relevant"
 
       - name: Set up Node.js
         if: steps.relevance.outputs.relevant == 'true'
@@ -374,50 +658,31 @@ jobs:
           node-version: 22.22.2
           cache: npm
 
-      - name: Set up Rust
+      - name: Install dependencies
         if: steps.relevance.outputs.relevant == 'true'
-        uses: dtolnay/rust-toolchain@stable
+        run: npm ci
 
-      - name: Cache the Rust bundle build
+      - name: Download the built installers
         if: steps.relevance.outputs.relevant == 'true'
-        uses: Swatinem/rust-cache@v2
+        uses: actions/download-artifact@v7
         with:
-          workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
-          shared-key: release-performance-windows-bundles-${{ matrix.variant }}
+          name: bundle-installers-${{ matrix.variant }}
+          path: installers
 
-      - name: Install candidate dependencies
+      - name: Stage the installer under the guarded bundle root
         if: steps.relevance.outputs.relevant == 'true'
-        run: npm ci
-
-      - name: Install baseline dependencies
-        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true'
-        working-directory: baseline-source
-        run: npm ci
-
-      - name: Build MSI and NSIS
-        if: steps.relevance.outputs.relevant == 'true'
-        working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
-        run: npm run tauri -- build --bundles msi,nsis
-
-      - name: Stage installers under the guarded bundle root
-        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true'
         shell: pwsh
         run: |
-          foreach ($kind in @('msi', 'nsis')) {
-            $filter = if ($kind -eq 'msi') { '*.msi' } else { '*.exe' }
-            $source = @(
-              Get-ChildItem "baseline-source/src-tauri/target/release/bundle/$kind" `
-                -Filter $filter -File -ErrorAction Stop
-            )
-            if ($source.Count -ne 1) {
-              throw "Expected exactly one baseline $kind installer."
-            }
-            $destination = "src-tauri/target/release/bundle/baseline/$kind"
-            New-Item -ItemType Directory -Path $destination -Force | Out-Null
-            Copy-Item -LiteralPath $source[0].FullName -Destination $destination
+          $filter = if ('${{ matrix.kind }}' -eq 'msi') { '*.msi' } else { '*.exe' }
+          $source = @(Get-ChildItem 'installers' -Filter $filter -File -ErrorAction Stop)
+          if ($source.Count -ne 1) {
+            throw "Expected exactly one ${{ matrix.kind }} installer."
           }
+          $destination = "src-tauri/target/release/bundle/${{ matrix.variant }}/${{ matrix.kind }}"
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          Copy-Item -LiteralPath $source[0].FullName -Destination $destination
 
-      - name: Measure the installed bundles
+      - name: Measure the installed bundle
         if: steps.relevance.outputs.relevant == 'true'
         shell: pwsh
         env:
@@ -425,50 +690,43 @@ jobs:
         run: |
           $artifactRoot = 'artifacts/e2e/release-performance'
           New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+          $guarded = "src-tauri/target/release/bundle/${{ matrix.variant }}/${{ matrix.kind }}"
+          $filter = if ('${{ matrix.kind }}' -eq 'msi') { '*.msi' } else { '*.exe' }
+          $installers = @(
+            Get-ChildItem $guarded -Filter $filter -File -ErrorAction Stop
+          )
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one staged ${{ matrix.kind }} installer."
+          }
           $commit = '${{ steps.revisions.outputs.baseline }}'
           if ('${{ matrix.variant }}' -eq 'candidate') {
             $commit = '${{ steps.revisions.outputs.candidate }}'
           }
-          $guarded = if ('${{ matrix.variant }}' -eq 'baseline') {
-            'src-tauri/target/release/bundle/baseline'
-          } else {
-            'src-tauri/target/release/bundle'
+          ./scripts/e2e/windows-bundle-smoke.ps1 `
+            -InstallerKind ${{ matrix.kind }} `
+            -InstallerPath $installers[0].FullName `
+            -Performance
+          $raw = "artifacts/bundle-smoke/${{ matrix.kind }}.json"
+          $rawCopy = "$artifactRoot/${{ matrix.variant }}-${{ matrix.kind }}.raw.json"
+          $report = "$artifactRoot/${{ matrix.variant }}-${{ matrix.kind }}.json"
+          Copy-Item -LiteralPath $raw -Destination $rawCopy -Force
+          foreach ($suffix in @('install.log', 'uninstall.log')) {
+            $log = "artifacts/bundle-smoke/${{ matrix.kind }}-$suffix"
+            if (Test-Path -LiteralPath $log) {
+              Copy-Item `
+                -LiteralPath $log `
+                -Destination "$artifactRoot/${{ matrix.variant }}-${{ matrix.kind }}-$suffix" `
+                -Force
+            }
           }
-          foreach ($kind in @('msi', 'nsis')) {
-            $filter = if ($kind -eq 'msi') { '*.msi' } else { '*.exe' }
-            $installers = @(
-              Get-ChildItem "$guarded/$kind" `
-                -Filter $filter -File -ErrorAction Stop
-            )
-            if ($installers.Count -ne 1) {
-              throw "Expected exactly one staged $kind installer."
-            }
-            ./scripts/e2e/windows-bundle-smoke.ps1 `
-              -InstallerKind $kind `
-              -InstallerPath $installers[0].FullName `
-              -Performance
-            $raw = "artifacts/bundle-smoke/$kind.json"
-            $rawCopy = "$artifactRoot/${{ matrix.variant }}-$kind.raw.json"
-            $report = "$artifactRoot/${{ matrix.variant }}-$kind.json"
-            Copy-Item -LiteralPath $raw -Destination $rawCopy -Force
-            foreach ($suffix in @('install.log', 'uninstall.log')) {
-              $log = "artifacts/bundle-smoke/$kind-$suffix"
-              if (Test-Path -LiteralPath $log) {
-                Copy-Item `
-                  -LiteralPath $log `
-                  -Destination "$artifactRoot/${{ matrix.variant }}-$kind-$suffix" `
-                  -Force
-              }
-            }
-            node scripts/perf/bundle-report.mjs `
-              --raw $rawCopy `
-              --output $report `
-              --commit $commit `
-              --baseline-commit '${{ steps.revisions.outputs.baseline }}' `
-              --run-id "$env:GITHUB_RUN_ID-${{ matrix.variant }}-$kind"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to normalize ${{ matrix.variant }} $kind report."
-            }
+          node scripts/perf/bundle-report.mjs `
+            --raw $rawCopy `
+            --output $report `
+            --commit $commit `
+            --baseline-commit '${{ steps.revisions.outputs.baseline }}' `
+            --run-id "$env:GITHUB_RUN_ID-${{ matrix.variant }}-${{ matrix.kind }}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to normalize ${{ matrix.variant }} ${{ matrix.kind }} report."
           }
 
       - name: Record skipped measurement
@@ -481,11 +739,11 @@ jobs:
             echo "no measured-artifact paths changed since ${{ steps.revisions.outputs.baseline }}"
           } > artifacts/e2e/release-performance/skip-reason.txt
 
-      - name: Upload the measurement reports
+      - name: Upload the measurement report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: installed-bundle-report-${{ matrix.variant }}
+          name: installed-bundle-report-${{ matrix.variant }}-${{ matrix.kind }}
           path: artifacts/e2e/release-performance
           if-no-files-found: warn
           retention-days: ${{ github.event_name == 'pull_request' && 30 || 90 }}
@@ -503,6 +761,10 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Download measurement reports
         uses: actions/download-artifact@v7
