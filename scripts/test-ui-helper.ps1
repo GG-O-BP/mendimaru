@@ -121,6 +121,19 @@ try {
     $expired=Receive-Response
     Assert ($expired.reason -ceq 'ui-request-expired' -and $null -eq $script:UiWorker) 'expired request started work'
 
+    # A request stamped slightly beyond the acceptance cap stays acceptable:
+    # the guest clock may trail the Linux host clock by a bounded grace
+    # (docs/winboat-clock-sync.md). Beyond the grace the request is rejected.
+    Send-Request 'capabilities' 63000
+    $graced=Receive-Response
+    Assert ($graced.ok) 'request within clock grace was rejected'
+    Send-Request 'release'
+    $null=Receive-Response
+    Assert ($null -eq $script:UiWorker) 'clock-grace request left a worker running'
+    Send-Request 'capabilities' 67000
+    $far=Receive-Response
+    Assert ($far.reason -ceq 'ui-request-expired' -and $null -eq $script:UiWorker) 'far-future request was accepted'
+
     # Invalid authentication never reaches the worker or consumes a sequence.
     Remove-Item -LiteralPath ($controlPath+'.ui.report') -Force
     [IO.File]::WriteAllText(($controlPath+'.ui.request'),'{"schemaVersion":1,"mac":"invalid"}')
@@ -143,7 +156,7 @@ try {
     Write-MendimaruReport @{sessionId=$session;close=$true}
     Service-MendimaruUi
     Assert ($script:UiClosed -and $null -eq $script:UiWorker -and -not (Test-Path $closePath)) 'owned monitor did not retire'
-    Write-Output 'UI helper: persistent worker, wrong target, crash/restart, release, cancellation, expired request, UTF-8 and authentication passed.'
+    Write-Output 'UI helper: persistent worker, wrong target, crash/restart, release, cancellation, expired request, clock grace, UTF-8 and authentication passed.'
 } finally {
     Stop-MendimaruUi
     $script:MendimaruHmac.Dispose()

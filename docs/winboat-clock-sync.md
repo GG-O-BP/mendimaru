@@ -109,3 +109,29 @@ Start-Service W32Time
 Mendimaru never writes the guest clock itself and never rewrites Studio
 timestamps. Session timestamps remain guest-reported values; the Guest clock
 diagnostic explains how to interpret them.
+
+## Boot-time skew after container recreation
+
+Recreating the WinBoat container (for example when Mendimaru applies or rolls
+back runtime port forwarding) boots Windows fresh, and a guest that reads the
+QEMU real-time clock as local time comes up exactly one timezone off (−9 h on
+a KST guest). Setting the guest registry value below once makes every later
+boot read the RTC as UTC; observed boot skew then stays within about a second:
+
+```powershell
+New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\TimeZoneInformation' `
+  -Name 'RealTimeIsUniversal' -PropertyType DWord -Value 1 -Force
+```
+
+This is a guest operating-system change, not a Mendimaru feature; apply it on
+disposable lab VMs and keep the Guest clock diagnostic as the source of truth.
+
+## Request deadlines and bounded clock difference
+
+The Studio UI automation request window is stamped from the Linux host clock
+and validated by the guest supervisor. Because the guest clock may trail the
+host clock by a few seconds, the supervisor keeps a bounded grace (5 s,
+matching the Guest clock warning threshold) on the request acceptance window
+and the pending-wait deadline in `ui_supervisor.ps1`. The grace keeps short
+requests usable across the residual skew without weakening the replay bounds;
+warning-level skew should still be resynchronized as described above.

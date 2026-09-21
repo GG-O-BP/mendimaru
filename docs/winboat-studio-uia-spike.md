@@ -261,3 +261,41 @@ Validation completed:
   runtime schema and capability code are outside this change.
 
 Native Windows Studio validation remains the unresolved part of #16.
+
+## Studio 10 Rspack selection (2026-09-21)
+
+Follow-up lab work on the #21 Linux+WinBoat track completed the Studio 10
+web-client build that previously died in `rollup-runner.mjs` (exit 134).
+Findings below describe the disposable `UIA21_10_RSPACK2_20260921` fixture and
+Studio Pro `10.24.26.123458`; they extend the product conclusions above, not
+the fixture claims.
+
+- Decoding the `Settings$ProjectSettings` unit (`Forms$WebUIProjectSettingsPart`
+  BSON in `mprcontents/4e/70/4e70063d-*.mxunit`) shows Studio 11 adding
+  `EnableNewStringBehavior` and `EnableRspackBundler` over Studio 10. Selecting
+  Rspack on 10.24.26 required both a project-level `EnableRspackBundler: true`
+  setting and an `app-bundler` file (exact bytes `rspack`) at the project root;
+  either alone kept Rollup. Studio 11 needed only the setting. The `.mpr` unit
+  `ContentsHash` is not enforced for local projects, but edits belong on
+  disposable copies, never the preserved fixtures.
+- With both switches set, 10.24.26 selected Rspack but its
+  `modeler/tools/node/rspack-runner.mjs` failed on UNC projects with
+  `ERR_INVALID_FILE_URL_PATH`: it imports the config via
+  `"file://" + deploymentWebDirectory + ...`, producing `file:////host.lan/...`.
+  11.12.4 fixed this upstream with `pathToFileURL(nodePath.join(...))`. The lab
+  applied the same two-line fix to the guest's runner copy (original preserved
+  and hashed). This is a disposable-VM workaround, not product behavior — the
+  same standing caveat as the fixture-only `deployment/gradle.properties`
+  VFS note.
+- Full flow then passed on Linux+WinBoat: Go To `Home_Web`, project-ready, F5,
+  `Build started (Rspack)` (11 s), observed `running`, HTTP 200 on the forwarded
+  port, and a sandboxed headed Linux Chrome assertion of
+  `.mx-name-uia21Probe10` with no request interception, zero failed/HTTP/
+  console/page errors and no `host.lan` request. `assets watch
+--rewrite-generated-assets` normalized the generated widget imports (24
+  files, 64 imports) that otherwise referenced `http://host.lan/...` URLs.
+- Two product robustness fixes came out of the same session and live on the
+  branch: v4 operation-history records (`schemaVersion 4.0.0`) are readable
+  again, and the UI supervisor request window tolerates bounded host/guest
+  clock differences (`ui_supervisor.ps1`, see
+  [clock sync](winboat-clock-sync.md)).
