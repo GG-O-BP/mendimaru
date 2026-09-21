@@ -208,7 +208,7 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 7 || 90 }}
 
   release-webview-measure:
-    name: Measure WebView (${{ matrix.platform }} / ${{ matrix.phase }})
+    name: Measure WebView (${{ matrix.platform }} / ${{ matrix.variant }} / ${{ matrix.phase }})
     needs: release-webview-build
     strategy:
       fail-fast: false
@@ -216,9 +216,17 @@ jobs:
         platform:
           - linux
           - windows
+        variant:
+          - baseline
+          - candidate
         phase:
           - latency
           - idle
+        exclude:
+          # Latency compares both variants back to back on this one VM, so it
+          # runs only from the candidate leg; idle stays per variant.
+          - phase: latency
+            variant: baseline
         include:
           - platform: linux
             runner: ubuntu-latest
@@ -342,7 +350,9 @@ jobs:
           done
           test -x "$chrome_path"
           export MENDIMARU_CHROME_PATH="$chrome_path"
-          for variant in baseline candidate; do
+          variants=(candidate)
+          if [[ "${{ matrix.phase }}" == "latency" ]]; then variants=(baseline candidate); fi
+          for variant in "${variants[@]}"; do
             application="$(find "binary/webview-binary-${{ matrix.platform }}-$variant" -maxdepth 1 -name '*.AppImage' -print -quit)"
             test -n "$application"
             chmod +x "$application"
@@ -368,7 +378,9 @@ jobs:
           New-Item -ItemType Directory `
             -Path artifacts/e2e/release-performance `
             -Force | Out-Null
-          foreach ($variant in @('baseline', 'candidate')) {
+          $variants = @('${{ matrix.variant }}')
+          if ('${{ matrix.phase }}' -eq 'latency') { $variants = @('baseline', 'candidate') }
+          foreach ($variant in $variants) {
             $application = Resolve-Path "binary/webview-binary-${{ matrix.platform }}-$variant/mendimaru.exe" `
               -ErrorAction Stop
             $commit = '${{ steps.revisions.outputs.baseline }}'
@@ -403,7 +415,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: webview-report-${{ matrix.platform }}-${{ matrix.phase }}
+          name: webview-report-${{ matrix.platform }}-${{ matrix.variant }}-${{ matrix.phase }}
           path: artifacts/e2e/release-performance
           if-no-files-found: warn
           retention-days: ${{ github.event_name == 'pull_request' && 30 || 90 }}
