@@ -129,6 +129,15 @@ pub(crate) struct RuntimeComposeBaseline {
     pub(crate) removed_mappings: Vec<RuntimePortMapping>,
 }
 
+pub(crate) fn expected_runtime_port_mapping(guest_port: u16) -> RuntimePortMapping {
+    RuntimePortMapping {
+        host_ip: LOOPBACK_IPV4.to_string(),
+        host_port: Some(guest_port),
+        guest_port,
+        protocol: "tcp".to_string(),
+    }
+}
+
 pub(crate) fn prepare_runtime_compose_baseline(
     compose_path: &Path,
     guest_port: u16,
@@ -158,10 +167,14 @@ pub(crate) fn prepare_runtime_compose_baseline(
             removed_mappings: Vec::new(),
         });
     };
+    // An already exact Mendimaru mapping stays in place: adopting prepared
+    // forwarding must not rewrite the Compose file or force a VM recreation,
+    // which would destroy other active Runtimes on the same VM.
+    let expected = expected_runtime_port_mapping(guest_port);
     let removed_mappings = ports
         .iter()
         .filter_map(parse_port_mapping)
-        .filter(|mapping| mapping.guest_port == guest_port)
+        .filter(|mapping| mapping.guest_port == guest_port && *mapping != expected)
         .collect::<Vec<_>>();
     if removed_mappings.is_empty() {
         let bytes = previous.content.clone().unwrap_or_default();
@@ -173,7 +186,8 @@ pub(crate) fn prepare_runtime_compose_baseline(
         });
     }
     ports.retain(|entry| {
-        parse_port_mapping(entry).is_none_or(|mapping| mapping.guest_port != guest_port)
+        parse_port_mapping(entry)
+            .is_none_or(|mapping| !(mapping.guest_port == guest_port && mapping != expected))
     });
     write_compose(compose_path, &compose, &revision)?;
     let snapshot = match snapshot_file(compose_path) {
@@ -327,6 +341,148 @@ pub(crate) fn runtime_port_mapping(
     }
 }
 
+/// Every WinBoat service port mapping in file order.
+pub(crate) fn runtime_port_mappings(
+    compose_path: &Path,
+) -> Result<Vec<RuntimePortMapping>, String> {
+    let compose = read_compose(compose_path)?;
+    let service_name = winboat_service_name(&compose).map_err(String::from)?;
+    let ports = service_value_named(&compose, &service_name)
+        .and_then(|service| service.get("ports"))
+        .and_then(Value::as_sequence);
+    Ok(ports
+        .map(|ports| ports.iter().filter_map(parse_port_mapping).collect())
+        .unwrap_or_default())
+}
+
+/// Replace all forwarding for the given guest ports with the recorded
+/// pre-existing mappings (empty removes the port's forwarding). Everything
+/// else in the Compose file — including external edits and other Runtimes'
+/// mappings — is preserved. Returns whether the file changed.
+pub(crate) fn replace_runtime_port_mappings(
+    compose_path: &Path,
+    replacements: &[(u16, Vec<RuntimePortMapping>)],
+) -> Result<bool, String> {
+    for (guest_port, _) in replacements {
+        if !(1024..=u16::MAX).contains(guest_port) {
+            return Err(
+                "the Mendix Runtime guest port must be from 1024 through 65535".to_string(),
+            );
+        }
+    }
+    let snapshot = snapshot_file(compose_path)?;
+    let revision = snapshot.revision().ok_or_else(|| {
+        crate::tr!(
+            "error-compose-file-not-found",
+            path = compose_path.display()
+        )
+    })?;
+    let mut compose = parse_snapshot(&snapshot)?;
+    let (_, service) = winboat_runtime_service(&mut compose)?;
+    let mapping = service
+        .as_mapping_mut()
+        .ok_or_else(|| crate::tr!("error-compose-windows-service-invalid"))?;
+    let storage_before = mapping
+        .get(Value::String("volumes".to_string()))
+        .and_then(Value::as_sequence)
+        .map(|volumes| storage_mounts(volumes))
+        .unwrap_or_default();
+
+    let ports_key = Value::String("ports".to_string());
+    if !mapping.contains_key(&ports_key) {
+        mapping.insert(ports_key.clone(), Value::Sequence(Vec::new()));
+    }
+    let ports = mapping
+        .get_mut(&ports_key)
+        .and_then(Value::as_sequence_mut)
+        .ok_or_else(|| "the WinBoat Compose ports value is invalid".to_string())?;
+    let replaced_ports = replacements
+        .iter()
+        .map(|(guest_port, _)| *guest_port)
+        .collect::<Vec<_>>();
+    let before = ports
+        .iter()
+        .filter_map(parse_port_mapping)
+        .collect::<Vec<_>>();
+    ports.retain(|entry| {
+        parse_port_mapping(entry)
+            .is_none_or(|mapping| !replaced_ports.contains(&mapping.guest_port))
+    });
+    for (_, mappings) in replacements {
+        for restored in mappings {
+            ports.push(port_mapping_value(restored));
+        }
+    }
+    let after = ports
+        .iter()
+        .filter_map(parse_port_mapping)
+        .collect::<Vec<_>>();
+    if before == after {
+        return Ok(false);
+    }
+
+    let storage_after = mapping
+        .get(Value::String("volumes".to_string()))
+        .and_then(Value::as_sequence)
+        .map(|volumes| storage_mounts(volumes))
+        .unwrap_or_default();
+    if storage_after != storage_before {
+        return Err(
+            "the WinBoat /storage volume changed while restoring Runtime forwarding".to_string(),
+        );
+    }
+    write_compose(compose_path, &compose, &revision)?;
+    Ok(true)
+}
+
+fn port_mapping_value(mapping: &RuntimePortMapping) -> Value {
+    let protocol = if mapping.protocol.eq_ignore_ascii_case("tcp") {
+        String::new()
+    } else {
+        format!("/{}", mapping.protocol.to_ascii_lowercase())
+    };
+    if mapping.host_ip.is_empty() {
+        return match mapping.host_port {
+            Some(host_port) => {
+                Value::String(format!("{host_port}:{}{protocol}", mapping.guest_port))
+            }
+            None => Value::String(format!("{}{protocol}", mapping.guest_port)),
+        };
+    }
+    match mapping.host_port {
+        Some(host_port) => Value::String(format!(
+            "{}:{host_port}:{}{protocol}",
+            mapping.host_ip, mapping.guest_port
+        )),
+        None => Value::String(format!(
+            "{}::{}{protocol}",
+            mapping.host_ip, mapping.guest_port
+        )),
+    }
+}
+
+/// Mappings recorded for one guest port inside a session's saved original
+/// Compose bytes. Used as the legacy fallback when a record predates the
+/// port ownership registry.
+pub(crate) fn original_port_mappings(
+    bytes: &[u8],
+    guest_port: u16,
+) -> Option<Vec<RuntimePortMapping>> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let compose: Value = serde_yaml::from_str(text).ok()?;
+    let service_name = winboat_service_name(&compose).ok()?;
+    let ports = service_value_named(&compose, &service_name)?
+        .get("ports")?
+        .as_sequence()?;
+    Some(
+        ports
+            .iter()
+            .filter_map(parse_port_mapping)
+            .filter(|mapping| mapping.guest_port == guest_port)
+            .collect(),
+    )
+}
+
 pub(crate) fn ensure_runtime_port_mapping(
     compose_path: &Path,
     guest_port: u16,
@@ -360,12 +516,7 @@ pub(crate) fn ensure_runtime_port_mapping(
         .get_mut(&ports_key)
         .and_then(Value::as_sequence_mut)
         .ok_or_else(|| "the WinBoat Compose ports value is invalid".to_string())?;
-    let expected = RuntimePortMapping {
-        host_ip: LOOPBACK_IPV4.to_string(),
-        host_port: Some(guest_port),
-        guest_port,
-        protocol: "tcp".to_string(),
-    };
+    let expected = expected_runtime_port_mapping(guest_port);
     let current = ports
         .iter()
         .filter_map(parse_port_mapping)
@@ -1217,9 +1368,10 @@ fn service_value_named_mut<'a>(
 mod tests {
     use super::{
         apply_shared_mount, compose_file_is_valid, ensure_runtime_port_mapping,
-        host_port_for_guest, plan_shared_mount, prepare_runtime_compose_baseline, restore_file,
-        restore_file_if_revision, runtime_port_mapping, shared_mount_source, snapshot_file,
-        update_shared_mount, ComposeErrorKind,
+        host_port_for_guest, parse_port_mapping, plan_shared_mount, port_mapping_value,
+        prepare_runtime_compose_baseline, replace_runtime_port_mappings, restore_file,
+        restore_file_if_revision, runtime_port_mapping, runtime_port_mappings, shared_mount_source,
+        snapshot_file, update_shared_mount, ComposeErrorKind, RuntimePortMapping,
     };
     use serde_yaml::Value;
     use std::fs;
@@ -1259,11 +1411,11 @@ mod tests {
 
     #[test]
     fn runtime_baseline_removes_only_stale_studio_port_mappings() {
-        for (mapping, expected_removed) in [
-            ("127.0.0.1::8080/tcp", 1),
-            ("0.0.0.0:8080:8080/tcp", 1),
-            ("127.0.0.1:8080:8080/tcp", 1),
-            ("127.0.0.1:32768:8081/tcp", 0),
+        for (mapping, expected_removed, exact_managed) in [
+            ("127.0.0.1::8080/tcp", 1, false),
+            ("0.0.0.0:8080:8080/tcp", 1, false),
+            ("127.0.0.1:8080:8080/tcp", 0, true),
+            ("127.0.0.1:32768:8081/tcp", 0, false),
         ] {
             let temporary = tempfile::tempdir().expect("temp dir");
             let compose = temporary.path().join("docker-compose.yml");
@@ -1276,16 +1428,129 @@ mod tests {
                 prepare_runtime_compose_baseline(&compose, 8080).expect("prepare baseline");
             assert_eq!(baseline.removed_mappings.len(), expected_removed);
             let baseline_text = String::from_utf8(baseline.bytes).expect("baseline YAML");
-            assert!(!baseline_text.contains(":8080/tcp"));
-            assert!(!baseline_text.contains(":8080:"));
             assert!(baseline_text.contains("127.0.0.1:47280:7148"));
             assert!(baseline_text.contains("127.0.0.1:5900:5900/tcp"));
             assert!(baseline_text.contains("winboat-data:/storage"));
+            if exact_managed {
+                // An already exact managed mapping is adopted in place: no
+                // rewrite, no forced VM recreation, other Runtimes preserved.
+                assert_eq!(baseline_text, content);
+                assert!(!ensure_runtime_port_mapping(&compose, 8080).expect("adopt mapping"));
+                assert_eq!(
+                    fs::read_to_string(&compose).expect("unchanged Compose"),
+                    content
+                );
+            } else {
+                assert!(!baseline_text.contains(":8080/tcp"));
+                assert!(!baseline_text.contains(":8080:"));
+                assert!(ensure_runtime_port_mapping(&compose, 8080).expect("add managed mapping"));
+                assert!(fs::read_to_string(&compose)
+                    .expect("managed Compose")
+                    .contains("127.0.0.1:8080:8080/tcp"));
+            }
+        }
+    }
 
-            assert!(ensure_runtime_port_mapping(&compose, 8080).expect("add managed mapping"));
-            assert!(fs::read_to_string(&compose)
-                .expect("managed Compose")
-                .contains("127.0.0.1:8080:8080/tcp"));
+    #[test]
+    fn replace_runtime_port_mappings_restores_pre_existing_and_preserves_others() {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let compose = temporary.path().join("docker-compose.yml");
+        fs::write(
+            &compose,
+            "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: WinBoat\n    volumes:\n      - data:/storage\n    ports:\n      - 127.0.0.1:47280:7148\n      - 127.0.0.1:47290:3389\n      - 127.0.0.1:8080:8080/tcp\n      - 127.0.0.1:18080:18080/tcp\nvolumes:\n  data: {}\n",
+        )
+        .expect("managed Compose");
+
+        // Remove 18080 entirely; restore the user's dynamic mapping on 8080.
+        let replacements = vec![
+            (
+                8_080u16,
+                vec![RuntimePortMapping {
+                    host_ip: "127.0.0.1".into(),
+                    host_port: None,
+                    guest_port: 8_080,
+                    protocol: "tcp".into(),
+                }],
+            ),
+            (18_080u16, Vec::new()),
+        ];
+        assert!(replace_runtime_port_mappings(&compose, &replacements).expect("replace"));
+        let mappings = runtime_port_mappings(&compose).expect("read mappings");
+        assert_eq!(
+            mappings,
+            vec![
+                RuntimePortMapping {
+                    host_ip: "127.0.0.1".into(),
+                    host_port: Some(47_280),
+                    guest_port: 7_148,
+                    protocol: "tcp".into(),
+                },
+                RuntimePortMapping {
+                    host_ip: "127.0.0.1".into(),
+                    host_port: Some(47_290),
+                    guest_port: 3_389,
+                    protocol: "tcp".into(),
+                },
+                RuntimePortMapping {
+                    host_ip: "127.0.0.1".into(),
+                    host_port: None,
+                    guest_port: 8_080,
+                    protocol: "tcp".into(),
+                },
+            ]
+        );
+
+        // Idempotent: the same replacement is a no-op.
+        assert!(!replace_runtime_port_mappings(&compose, &replacements).expect("re-place"));
+
+        // A guest port without forwarding and without a restored mapping is a
+        // no-op, not an error.
+        assert!(
+            !replace_runtime_port_mappings(&compose, &[(18_080u16, Vec::new())]).expect("no-op")
+        );
+    }
+
+    #[test]
+    fn port_mapping_values_round_trip_through_the_parser() {
+        for mapping in [
+            RuntimePortMapping {
+                host_ip: String::new(),
+                host_port: None,
+                guest_port: 8_080,
+                protocol: "tcp".into(),
+            },
+            RuntimePortMapping {
+                host_ip: String::new(),
+                host_port: Some(18_081),
+                guest_port: 8_080,
+                protocol: "tcp".into(),
+            },
+            RuntimePortMapping {
+                host_ip: "127.0.0.1".into(),
+                host_port: None,
+                guest_port: 8_080,
+                protocol: "tcp".into(),
+            },
+            RuntimePortMapping {
+                host_ip: "127.0.0.1".into(),
+                host_port: Some(8_080),
+                guest_port: 8_080,
+                protocol: "tcp".into(),
+            },
+            RuntimePortMapping {
+                host_ip: "127.0.0.1".into(),
+                host_port: Some(8_082),
+                guest_port: 8_080,
+                protocol: "udp".into(),
+            },
+        ] {
+            let value = port_mapping_value(&mapping);
+            assert_eq!(
+                parse_port_mapping(&value).expect("round trip"),
+                mapping,
+                "value {:?} must parse back exactly",
+                value
+            );
         }
     }
 

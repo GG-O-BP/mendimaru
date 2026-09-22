@@ -6,9 +6,12 @@ lifecycle operation must obtain exclusive use before changing Compose, recreatin
 the container, or recovering UEFI. This is the foundation from #150. Session participation and cleanup
 ownership (#151) now builds on it — `browser session prepare/finalize` and
 `browser test --shared-session-id` hold shared use, and a finalize stop takes
-exclusive use through the normal Runtime stop path. UI arbitration (#152),
-multi-project ownership (#153), and the parallel suite runner (#155) remain
-separate work. [Environment change observation](browser-environment-observation.md)
+exclusive use through the normal Runtime stop path. UI arbitration (#152) and
+the parallel suite runner (#155) remain separate work. Multi-project port,
+Compose, and data ownership (#153) is defined in
+[Multi-project Runtime ownership](winboat-multi-runtime.md).
+[Environment change observation](browser-environment-observation.md)
+now supplies retrospective evidence for #154.
 now supplies retrospective evidence for #154.
 
 ## Using it

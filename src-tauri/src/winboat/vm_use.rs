@@ -67,6 +67,13 @@ pub(crate) async fn acquire_for(
     }
 }
 
+/// The host-wide management identity of the VM named by this configuration.
+/// Shared by the VM use locks and the Runtime port ownership registry.
+#[cfg(target_os = "linux")]
+pub(crate) fn identity_key(config: &AppConfig) -> Result<String, &'static str> {
+    linux::key(config)
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn vm_key(config: &AppConfig) -> Result<String, &'static str> {
     linux::key(config)

@@ -1,10 +1,13 @@
 use super::container::{
     guest_is_online, recreate_container, runtime_host_binding, storage_mount_identity,
 };
+use super::vm_ports::{self, PreservedMapping};
 use crate::app_paths::AppPaths;
 use crate::config::{
-    ensure_runtime_port_mapping, prepare_runtime_compose_baseline, restore_file,
-    runtime_port_mapping, FileSnapshot, RuntimeComposeBaseline, RuntimePortMapping,
+    ensure_runtime_port_mapping, expected_runtime_port_mapping, original_port_mappings,
+    prepare_runtime_compose_baseline, replace_runtime_port_mappings, restore_file,
+    runtime_port_mapping, runtime_port_mappings, FileSnapshot, RuntimeComposeBaseline,
+    RuntimePortMapping,
 };
 use crate::contracts::{
     secure_identifier, ArtifactDescriptor, ArtifactKind, BackendError, BackendErrorCode, BackendId,
@@ -379,10 +382,105 @@ fn active_runtime_session_for_port(
     active_runtime_session_in_root(&layout()?.join("sessions"), guest_port)
 }
 
+/// The Runtime/Studio stop record probe used by the VM-wide ownership
+/// registry. Records are never mutated here; quarantine stays a scan-time
+/// decision inside `load_active_record`.
+fn record_liveness(path: &Path) -> vm_ports::RecordLiveness {
+    let Ok(bytes) = read_direct_bounded(path, MAX_RECORD_BYTES) else {
+        return vm_ports::RecordLiveness::Gone;
+    };
+    let Ok(record) = serde_json::from_slice::<SessionRecord>(&bytes) else {
+        return vm_ports::RecordLiveness::Gone;
+    };
+    let expected_session_id = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|value| value.to_str());
+    if expected_session_id != Some(record.session_id.as_str())
+        || !crate::contracts::compatible_record_schema(&record.schema_version)
+        || record.backend != BackendId::LinuxWinboat
+        || record.mode != RuntimeMode::StudioRunLocally
+    {
+        return vm_ports::RecordLiveness::Gone;
+    }
+    if record.state == RuntimeState::Stopped {
+        vm_ports::RecordLiveness::Stopped
+    } else {
+        vm_ports::RecordLiveness::Active
+    }
+}
+
+/// Find the active Runtime that owns a guest port on this VM. The VM-wide
+/// registry finds records written by other caches first; records created
+/// before the registry existed still resolve through the local-cache scan.
+fn active_runtime_session(
+    config: &AppConfig,
+    guest_port: u16,
+    capability: CapabilityId,
+) -> BackendResult<Option<(PathBuf, SessionRecord)>> {
+    match vm_ports::snapshot(config, record_liveness) {
+        Ok(entries) => {
+            for entry in entries
+                .iter()
+                .filter(|entry| entry.is_live() && entry.guest_port == guest_port)
+            {
+                match load_active_record(Path::new(&entry.record_path)) {
+                    Ok(Some((directory, record))) if record.guest_port == guest_port => {
+                        return Ok(Some((directory, record)))
+                    }
+                    Ok(_) => continue,
+                    Err(_) => {
+                        return Err(runtime_error(
+                            capability,
+                            BackendErrorCode::OperationFailed,
+                            false,
+                            None,
+                        ))
+                    }
+                }
+            }
+        }
+        Err(error) => return Err(registry_error(capability, &error)),
+    }
+    active_runtime_session_for_port(guest_port)
+        .map_err(|_| runtime_error(capability, BackendErrorCode::OperationFailed, false, None))
+}
+
+fn load_active_record(record_path: &Path) -> Result<Option<(PathBuf, SessionRecord)>, String> {
+    if !record_path.is_file() {
+        return Ok(None);
+    }
+    let bytes = read_direct_bounded(record_path, MAX_RECORD_BYTES).map_err(|e| e.to_string())?;
+    let Some(directory) = record_path.parent().map(Path::to_path_buf) else {
+        return Err("the Runtime record path is invalid".to_string());
+    };
+    let expected_session_id = directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "the Runtime session directory name is not valid UTF-8".to_string())?;
+    let Ok(envelope) = serde_json::from_slice::<SessionRecordEnvelope>(&bytes) else {
+        return Ok(None);
+    };
+    if let Some(reason) = runtime_record_incompatibility(&envelope, expected_session_id) {
+        quarantine_runtime_record(&directory, &envelope, reason)?;
+        return Ok(None);
+    }
+    let Ok(record) = serde_json::from_slice::<SessionRecord>(&bytes) else {
+        return Ok(None);
+    };
+    if record.state != RuntimeState::Stopped {
+        Ok(Some((directory, record)))
+    } else {
+        Ok(None)
+    }
+}
+
 fn active_runtime_session_in_root(
     sessions: &Path,
     guest_port: u16,
 ) -> Result<Option<(PathBuf, SessionRecord)>, String> {
+    // The whole root is scanned even after a match: quarantining incompatible
+    // records is a scan-wide obligation, not a short-circuit side effect.
     let mut active = None;
     for entry in fs::read_dir(sessions).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -393,30 +491,10 @@ fn active_runtime_session_in_root(
         {
             continue;
         }
-        let record_path = entry.path().join("session.json");
-        if !record_path.is_file() {
-            continue;
-        }
-        let Ok(bytes) = read_direct_bounded(&record_path, MAX_RECORD_BYTES) else {
-            continue;
-        };
-        let directory = entry.path();
-        let file_name = entry.file_name();
-        let expected_session_id = file_name
-            .to_str()
-            .ok_or_else(|| "the Runtime session directory name is not valid UTF-8".to_string())?;
-        let Ok(envelope) = serde_json::from_slice::<SessionRecordEnvelope>(&bytes) else {
-            continue;
-        };
-        if let Some(reason) = runtime_record_incompatibility(&envelope, expected_session_id) {
-            quarantine_runtime_record(&directory, &envelope, reason)?;
-            continue;
-        }
-        let Ok(record) = serde_json::from_slice::<SessionRecord>(&bytes) else {
-            continue;
-        };
-        if record.state != RuntimeState::Stopped && record.guest_port == guest_port {
-            active = active.or(Some((directory, record)));
+        if let Some((directory, record)) = load_active_record(&entry.path().join("session.json"))? {
+            if record.guest_port == guest_port {
+                active = active.or(Some((directory, record)));
+            }
         }
     }
     Ok(active)
@@ -627,14 +705,7 @@ async fn start_with_lease(
     }
 
     if let Some((directory, mut record)) =
-        active_runtime_session_for_port(guest_port).map_err(|_| {
-            runtime_error(
-                CapabilityId::RuntimeStart,
-                BackendErrorCode::RuntimePortConflict,
-                true,
-                None,
-            )
-        })?
+        active_runtime_session(config, guest_port, CapabilityId::RuntimeStart)?
     {
         let unlinked = record.studio_session_id.is_none();
         let same_session =
@@ -711,14 +782,7 @@ async fn prepare_studio_session_with_lease(
     };
     let guest_port = configured_port.unwrap_or(DEFAULT_GUEST_PORT);
     if let Some((directory, mut record)) =
-        active_runtime_session_for_port(guest_port).map_err(|_| {
-            runtime_error(
-                CapabilityId::RuntimeStart,
-                BackendErrorCode::RuntimePortConflict,
-                true,
-                None,
-            )
-        })?
+        active_runtime_session(config, guest_port, CapabilityId::RuntimeStatus)?
     {
         if record.studio_session_id.is_some() {
             observe_studio(config, &mut record).await;
@@ -827,6 +891,24 @@ async fn create_session(
             None,
         )
     })?;
+    // Ownership and recreation guard: while other Runtimes are live on this
+    // VM, forwarding must already be prepared exactly. Rewriting Compose or
+    // recreating the VM would destroy their sessions, so the request waits
+    // behind an explicit, retryable refusal instead of a silent recreation.
+    let entries = vm_ports::snapshot(config, record_liveness)
+        .map_err(|error| registry_error(CapabilityId::RuntimeStart, &error))?;
+    let others_live = entries.iter().any(vm_ports::PortEntry::is_live);
+    let mapping_prepared = runtime_port_mapping(&compose_path, guest_port)
+        .ok()
+        .flatten()
+        .is_some_and(|mapping| mapping == expected_runtime_port_mapping(guest_port));
+    if !mapping_prepared && others_live {
+        return Err(forwarding_change_blocked_error(
+            CapabilityId::RuntimeStart,
+            guest_port,
+        ));
+    }
+    let deferred_cleanup = forwarding_cleanup_targets(None, &entries, None);
     let RuntimeComposeBaseline {
         previous,
         snapshot,
@@ -856,6 +938,27 @@ async fn create_session(
         },
     )?;
     let mut transaction = ComposeTransaction::new(snapshot);
+    // Reserve the port VM-wide before touching Compose or the VM: a crash
+    // after this point leaves an evictable entry, never a hidden duplicate.
+    let mut reservation = vm_ports::reserve(
+        config,
+        vm_ports::PortEntry {
+            session_id: session_id.clone(),
+            guest_port,
+            host_port: guest_port,
+            record_path: session_record_path(&layout, &session_id)
+                .to_string_lossy()
+                .to_string(),
+            started_at: Utc::now(),
+            stopped_at: None,
+            pre_existing: removed_mappings
+                .iter()
+                .map(PreservedMapping::from)
+                .collect(),
+        },
+        record_liveness,
+    )
+    .map_err(|error| registry_error(CapabilityId::RuntimeStart, &error))?;
     let storage_before = storage_mount_identity(config).await.map_err(|_| {
         runtime_error(
             CapabilityId::RuntimeStart,
@@ -877,6 +980,20 @@ async fn create_session(
         }
     };
     if compose_changed {
+        // Fold deferred forwarding cleanup into this recreation so ports of
+        // sessions that stopped while others were live do not linger forever.
+        if !deferred_cleanup.ports.is_empty() {
+            replace_runtime_port_mappings(&compose_path, &deferred_cleanup.ports).map_err(
+                |_| {
+                    runtime_error(
+                        CapabilityId::RuntimeStart,
+                        BackendErrorCode::RuntimePortForwardingInvalid,
+                        false,
+                        None,
+                    )
+                },
+            )?;
+        }
         if let Err(error) = recreate_container(config).await {
             let code = if port_conflict_message(&error) {
                 BackendErrorCode::RuntimePortConflict
@@ -912,6 +1029,15 @@ async fn create_session(
                 true,
                 None,
             ));
+        }
+        if !deferred_cleanup.session_ids.is_empty() {
+            let cleaned = deferred_cleanup
+                .session_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            vm_ports::remove(config, &cleaned)
+                .map_err(|error| registry_error(CapabilityId::RuntimeStart, &error))?;
         }
     }
 
@@ -1029,6 +1155,7 @@ async fn create_session(
         .map_err(|_| record_error(&record, CapabilityId::RuntimeStart))?;
     transaction.commit();
     baseline_guard.commit();
+    reservation.commit();
     Ok((directory, record))
 }
 
@@ -1159,9 +1286,6 @@ async fn stop_with_lease(config: &AppConfig, session_id: &str) -> BackendResult<
     let _maintenance = super::maintenance::shared(config)
         .map_err(|_| super::startup::failure(BackendErrorCode::PreconditionFailed))?;
     let (_, record) = load_session(session_id, CapabilityId::RuntimeStop)?;
-    if record.state == RuntimeState::Stopped {
-        return Ok(());
-    }
     // Compose recreation disconnects the keeper's RDP client. Hold this lease
     // through recovery and the final record write, then reload after waiting so
     // that the keeper (or another CLI process) observes the completed stop.
@@ -1174,9 +1298,41 @@ async fn stop_with_lease(config: &AppConfig, session_id: &str) -> BackendResult<
         )
     })?;
     let (directory, mut record) = load_session(session_id, CapabilityId::RuntimeStop)?;
-    if record.state == RuntimeState::Stopped {
+    let compose_path = direct_compose_path(config, CapabilityId::RuntimeStop)?;
+    let entries = vm_ports::snapshot(config, record_liveness)
+        .map_err(|error| registry_error(CapabilityId::RuntimeStop, &error))?;
+    let others_live = entries
+        .iter()
+        .any(|entry| entry.is_live() && entry.session_id != record.session_id);
+    if others_live {
+        // Runtime shutdown and VM forwarding removal are separate events.
+        // Other live Runtimes keep their mappings, containers, Studio and app
+        // state: this stop only ends the session and releases port ownership;
+        // the deferred forwarding is removed by the last stopping session or
+        // folded into the next start that recreates the VM.
+        if record.state == RuntimeState::Stopped {
+            return Ok(());
+        }
+        record.state = RuntimeState::Stopped;
+        record.http_ready = false;
+        record.failure_code = None;
+        record.studio_state = StudioProcessState::Stopped;
+        record.studio_process_id = None;
+        append_log(
+            &directory,
+            "WinBoat Runtime stopped; forwarding removal deferred while other Runtime sessions are active on this VM.",
+        );
+        write_record(&directory, &record)
+            .map_err(|_| record_error(&record, CapabilityId::RuntimeStop))?;
+        vm_ports::mark_stopped(config, &record.session_id)
+            .map_err(|error| registry_error(CapabilityId::RuntimeStop, &error))?;
         return Ok(());
     }
+
+    // Last live session on this VM: replace Runtime-owned forwarding — this
+    // session's and every session whose removal was deferred earlier — with
+    // the forwarding that existed before Mendimaru took each port over.
+    // External edits elsewhere in the file are preserved.
     let original = read_direct_bounded(&directory.join("compose.original.yml"), MAX_COMPOSE_BYTES)
         .map_err(|_| {
             runtime_error(
@@ -1194,28 +1350,9 @@ async fn stop_with_lease(config: &AppConfig, session_id: &str) -> BackendResult<
             Some(record.log_artifact.artifact_id.clone()),
         ));
     }
-    let compose_path = direct_compose_path(config, CapabilityId::RuntimeStop)?;
-    let managed = read_direct_bounded(&compose_path, MAX_COMPOSE_BYTES).map_err(|_| {
-        runtime_error(
-            CapabilityId::RuntimeStop,
-            BackendErrorCode::RuntimeComposeRecoveryFailed,
-            false,
-            Some(record.log_artifact.artifact_id.clone()),
-        )
-    })?;
-    let current_compose_sha256 = format!("{:x}", Sha256::digest(&managed));
-    if current_compose_sha256 != record.managed_compose_sha256
-        && current_compose_sha256 != record.original_compose_sha256
-    {
-        return Err(runtime_error(
-            CapabilityId::RuntimeStop,
-            BackendErrorCode::RuntimeComposeRecoveryFailed,
-            false,
-            Some(record.log_artifact.artifact_id.clone()),
-        ));
-    }
-    if current_compose_sha256 != record.original_compose_sha256 {
-        write_atomic_compose(&compose_path, &original).map_err(|_| {
+    let cleanup = forwarding_cleanup_targets(Some(&record), &entries, Some(&original));
+    if !cleanup.ports.is_empty() {
+        let snapshot = crate::config::snapshot_file(&compose_path).map_err(|_| {
             runtime_error(
                 CapabilityId::RuntimeStop,
                 BackendErrorCode::RuntimeComposeRecoveryFailed,
@@ -1223,50 +1360,122 @@ async fn stop_with_lease(config: &AppConfig, session_id: &str) -> BackendResult<
                 Some(record.log_artifact.artifact_id.clone()),
             )
         })?;
+        let mut transaction = ComposeTransaction::new(snapshot);
+        // Single-session fast path: with no deferred cleanups and an untouched
+        // managed file, the user's original Compose bytes are restored exactly.
+        let current = read_direct_bounded(&compose_path, MAX_COMPOSE_BYTES).map_err(|_| {
+            runtime_error(
+                CapabilityId::RuntimeStop,
+                BackendErrorCode::RuntimeComposeRecoveryFailed,
+                false,
+                Some(record.log_artifact.artifact_id.clone()),
+            )
+        })?;
+        let current_sha = format!("{:x}", Sha256::digest(&current));
+        let original_sha = format!("{:x}", Sha256::digest(&original));
+        // Only a file Mendimaru itself wrote (or one already equal to the
+        // original) may be byte-restored; anything else preserves external
+        // edits through the scoped path below.
+        let byte_exact = entries.iter().all(|entry| entry.stopped_at.is_none())
+            && cleanup.ports.len() == 1
+            && cleanup.ports[0].0 == record.guest_port
+            && (current_sha == record.managed_compose_sha256 || current_sha == original_sha)
+            && original_port_mappings(&original, record.guest_port)
+                .is_some_and(|restored| restored == cleanup.ports[0].1);
+        let changed = if byte_exact {
+            if current_sha != original_sha {
+                write_atomic_compose(&compose_path, &original).map_err(|_| {
+                    runtime_error(
+                        CapabilityId::RuntimeStop,
+                        BackendErrorCode::RuntimeComposeRecoveryFailed,
+                        false,
+                        Some(record.log_artifact.artifact_id.clone()),
+                    )
+                })?;
+                true
+            } else {
+                false
+            }
+        } else {
+            replace_runtime_port_mappings(&compose_path, &cleanup.ports).map_err(|_| {
+                runtime_error(
+                    CapabilityId::RuntimeStop,
+                    BackendErrorCode::RuntimeComposeRecoveryFailed,
+                    false,
+                    Some(record.log_artifact.artifact_id.clone()),
+                )
+            })?
+        };
+        if changed {
+            recreate_container(config).await.map_err(|_| {
+                runtime_error(
+                    CapabilityId::RuntimeStop,
+                    BackendErrorCode::RuntimeComposeRecoveryFailed,
+                    true,
+                    Some(record.log_artifact.artifact_id.clone()),
+                )
+            })?;
+            wait_for_guest(config).await.map_err(|_| {
+                runtime_error(
+                    CapabilityId::RuntimeStop,
+                    BackendErrorCode::RuntimeGuestOffline,
+                    true,
+                    Some(record.log_artifact.artifact_id.clone()),
+                )
+            })?;
+            let storage_after = storage_mount_identity(config).await.map_err(|_| {
+                runtime_error(
+                    CapabilityId::RuntimeStop,
+                    BackendErrorCode::RuntimeComposeRecoveryFailed,
+                    false,
+                    Some(record.log_artifact.artifact_id.clone()),
+                )
+            })?;
+            if storage_after != record.storage_mount_identity {
+                return Err(runtime_error(
+                    CapabilityId::RuntimeStop,
+                    BackendErrorCode::RuntimeComposeRecoveryFailed,
+                    false,
+                    Some(record.log_artifact.artifact_id.clone()),
+                ));
+            }
+            let mappings = runtime_port_mappings(&compose_path).map_err(|_| {
+                runtime_error(
+                    CapabilityId::RuntimeStop,
+                    BackendErrorCode::RuntimeComposeRecoveryFailed,
+                    false,
+                    Some(record.log_artifact.artifact_id.clone()),
+                )
+            })?;
+            for (guest_port, restored) in &cleanup.ports {
+                let current = mappings
+                    .iter()
+                    .filter(|mapping| mapping.guest_port == *guest_port)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if current != *restored {
+                    return Err(runtime_error(
+                        CapabilityId::RuntimeStop,
+                        BackendErrorCode::RuntimeComposeRecoveryFailed,
+                        false,
+                        Some(record.log_artifact.artifact_id.clone()),
+                    ));
+                }
+            }
+        }
+        transaction.commit();
     }
-    recreate_container(config).await.map_err(|_| {
-        runtime_error(
-            CapabilityId::RuntimeStop,
-            BackendErrorCode::RuntimeComposeRecoveryFailed,
-            true,
-            Some(record.log_artifact.artifact_id.clone()),
-        )
-    })?;
-    wait_for_guest(config).await.map_err(|_| {
-        runtime_error(
-            CapabilityId::RuntimeStop,
-            BackendErrorCode::RuntimeGuestOffline,
-            true,
-            Some(record.log_artifact.artifact_id.clone()),
-        )
-    })?;
-    let storage_after = storage_mount_identity(config).await.map_err(|_| {
-        runtime_error(
-            CapabilityId::RuntimeStop,
-            BackendErrorCode::RuntimeComposeRecoveryFailed,
-            false,
-            Some(record.log_artifact.artifact_id.clone()),
-        )
-    })?;
-    if storage_after != record.storage_mount_identity {
-        return Err(runtime_error(
-            CapabilityId::RuntimeStop,
-            BackendErrorCode::RuntimeComposeRecoveryFailed,
-            false,
-            Some(record.log_artifact.artifact_id.clone()),
-        ));
-    }
-    if runtime_port_mapping(&compose_path, record.guest_port)
-        .ok()
-        .flatten()
-        .is_some()
-    {
-        return Err(runtime_error(
-            CapabilityId::RuntimeStop,
-            BackendErrorCode::RuntimeComposeRecoveryFailed,
-            false,
-            Some(record.log_artifact.artifact_id.clone()),
-        ));
+    if record.state == RuntimeState::Stopped {
+        // Retry of a stop whose deferred cleanup failed earlier: the record is
+        // already terminal, only finish the forwarding removal.
+        let cleaned = cleanup
+            .session_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        vm_ports::remove(config, &cleaned)
+            .map_err(|error| registry_error(CapabilityId::RuntimeStop, &error))?;
+        return Ok(());
     }
     record.state = RuntimeState::Stopped;
     record.http_ready = false;
@@ -1275,9 +1484,17 @@ async fn stop_with_lease(config: &AppConfig, session_id: &str) -> BackendResult<
     record.studio_process_id = None;
     append_log(
         &directory,
-        "WinBoat Runtime stopped and original Compose restored.",
+        "WinBoat Runtime stopped and Runtime forwarding removed.",
     );
-    write_record(&directory, &record).map_err(|_| record_error(&record, CapabilityId::RuntimeStop))
+    write_record(&directory, &record)
+        .map_err(|_| record_error(&record, CapabilityId::RuntimeStop))?;
+    let cleaned = cleanup
+        .session_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    vm_ports::remove(config, &cleaned)
+        .map_err(|error| registry_error(CapabilityId::RuntimeStop, &error))
 }
 
 pub(crate) fn logs(session_id: &str, cursor: Option<&str>) -> BackendResult<RuntimeLogBatch> {
@@ -1753,6 +1970,100 @@ fn host_allocation_conflict_error(capability: CapabilityId, port: u16) -> Backen
     error
 }
 
+/// The port is owned by another active Mendimaru Runtime session. Users can
+/// resolve this safely by stopping that session or changing the project port.
+fn registry_error(capability: CapabilityId, error: &vm_ports::RegistryError) -> BackendError {
+    if error.conflicting_entry().is_some() {
+        return previous_session_conflict_error(capability);
+    }
+    if error.is_busy() {
+        let mut error = runtime_error(capability, BackendErrorCode::PreconditionFailed, true, None);
+        error.message = vm_ports::BUSY.to_string();
+        return error;
+    }
+    let mut error = runtime_error(
+        capability,
+        BackendErrorCode::PreconditionFailed,
+        false,
+        None,
+    );
+    error.message = vm_ports::UNTRUSTED.to_string();
+    error
+}
+
+/// Preparing the port would rewrite Compose and recreate the VM, which would
+/// destroy other live Runtime sessions on this VM. Never recreate silently.
+fn forwarding_change_blocked_error(capability: CapabilityId, guest_port: u16) -> BackendError {
+    let mut error = runtime_error(
+        capability,
+        BackendErrorCode::RuntimePortConflict,
+        true,
+        None,
+    );
+    error.message = format!(
+        "Runtime forwarding for localhost:{guest_port} is not prepared and another Mendimaru Runtime session is active on this WinBoat VM; stop the other session before changing port forwarding"
+    );
+    error
+}
+
+/// Forwarding that must be replaced when Runtime ownership of a VM ends, and
+/// the registry entries whose cleanup this completes.
+#[derive(Debug, Default)]
+struct ForwardingCleanup {
+    ports: Vec<(u16, Vec<RuntimePortMapping>)>,
+    session_ids: Vec<String>,
+}
+
+fn forwarding_cleanup_targets(
+    record: Option<&SessionRecord>,
+    entries: &[vm_ports::PortEntry],
+    legacy_original: Option<&[u8]>,
+) -> ForwardingCleanup {
+    let mut owners: std::collections::BTreeMap<u16, &vm_ports::PortEntry> =
+        std::collections::BTreeMap::new();
+    let mut session_ids = Vec::new();
+    for entry in entries {
+        if entry.stopped_at.is_some() {
+            session_ids.push(entry.session_id.clone());
+        }
+        // The earliest owner of a port holds the forwarding that existed
+        // before Mendimaru took the port over; later owners saw either the
+        // managed mapping or the restored original.
+        match owners.entry(entry.guest_port) {
+            std::collections::btree_map::Entry::Occupied(mut occupied) => {
+                if entry.started_at < occupied.get().started_at {
+                    occupied.insert(entry);
+                }
+            }
+            std::collections::btree_map::Entry::Vacant(vacant) => {
+                vacant.insert(entry);
+            }
+        }
+    }
+    let mut wanted: std::collections::BTreeSet<u16> = owners.keys().copied().collect();
+    if let Some(record) = record {
+        wanted.insert(record.guest_port);
+        session_ids.push(record.session_id.clone());
+    }
+    let ports = wanted
+        .into_iter()
+        .map(|guest_port| {
+            let restored = match owners.get(&guest_port) {
+                Some(owner) => owner
+                    .pre_existing
+                    .iter()
+                    .map(PreservedMapping::to_mapping)
+                    .collect::<Vec<_>>(),
+                None => legacy_original
+                    .and_then(|bytes| original_port_mappings(bytes, guest_port))
+                    .unwrap_or_default(),
+            };
+            (guest_port, restored)
+        })
+        .collect();
+    ForwardingCleanup { ports, session_ids }
+}
+
 fn error_message(code: BackendErrorCode) -> &'static str {
     match code {
         BackendErrorCode::RuntimeGuestOffline => "the WinBoat guest is offline",
@@ -1866,6 +2177,40 @@ fn read_json_bounded<T: for<'de> Deserialize<'de>>(
         .map_err(|error| format!("could not parse private state: {error}"))
 }
 
+fn write_atomic_compose(path: &Path, content: &[u8]) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("could not inspect Compose file: {error}"))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("the Compose target is not a direct file".to_string());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "the Compose file has no parent".to_string())?;
+    let parent_metadata = fs::symlink_metadata(parent)
+        .map_err(|error| format!("could not inspect Compose parent: {error}"))?;
+    if !parent_metadata.is_dir() || parent_metadata.file_type().is_symlink() {
+        return Err("the Compose parent is not a direct directory".to_string());
+    }
+    let nonce = secure_identifier("tmp")
+        .map_err(|error| format!("could not create Compose file nonce: {error}"))?;
+    let temporary = parent.join(format!(".{nonce}.compose.tmp"));
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|error| format!("could not create temporary Compose file: {error}"))?;
+    file.write_all(content)
+        .and_then(|()| file.sync_all())
+        .map_err(|error| format!("could not persist temporary Compose file: {error}"))?;
+    fs::set_permissions(&temporary, metadata.permissions())
+        .map_err(|error| format!("could not protect temporary Compose file: {error}"))?;
+    drop(file);
+    fs::rename(&temporary, path).map_err(|error| {
+        let _ = fs::remove_file(&temporary);
+        format!("could not restore Compose file: {error}")
+    })
+}
+
 fn write_private_file(path: &Path, content: &[u8]) -> Result<(), String> {
     let parent = path
         .parent()
@@ -1906,40 +2251,6 @@ fn write_atomic_private(path: &Path, content: &[u8]) -> Result<(), String> {
     fs::rename(&temporary, path).map_err(|error| {
         let _ = fs::remove_file(&temporary);
         format!("could not replace private file: {error}")
-    })
-}
-
-fn write_atomic_compose(path: &Path, content: &[u8]) -> Result<(), String> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| format!("could not inspect Compose file: {error}"))?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Err("the Compose target is not a direct file".to_string());
-    }
-    let parent = path
-        .parent()
-        .ok_or_else(|| "the Compose file has no parent".to_string())?;
-    let parent_metadata = fs::symlink_metadata(parent)
-        .map_err(|error| format!("could not inspect Compose parent: {error}"))?;
-    if !parent_metadata.is_dir() || parent_metadata.file_type().is_symlink() {
-        return Err("the Compose parent is not a direct directory".to_string());
-    }
-    let nonce = secure_identifier("tmp")
-        .map_err(|error| format!("could not create Compose file nonce: {error}"))?;
-    let temporary = parent.join(format!(".{nonce}.compose.tmp"));
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary)
-        .map_err(|error| format!("could not create temporary Compose file: {error}"))?;
-    file.write_all(content)
-        .and_then(|()| file.sync_all())
-        .map_err(|error| format!("could not persist temporary Compose file: {error}"))?;
-    fs::set_permissions(&temporary, metadata.permissions())
-        .map_err(|error| format!("could not protect temporary Compose file: {error}"))?;
-    drop(file);
-    fs::rename(&temporary, path).map_err(|error| {
-        let _ = fs::remove_file(&temporary);
-        format!("could not restore Compose file: {error}")
     })
 }
 
@@ -2648,6 +2959,403 @@ mod tests {
             assert!(result.is_err(), "hanging Compose command must time out");
             drop(transaction);
             assert_eq!(std::fs::read(&compose).expect("restored Compose"), original);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    mod multi_runtime_ownership {
+        use super::super::{
+            active_runtime_session, create_session, forwarding_cleanup_targets, record_liveness,
+            stop, ForwardingCleanup, SessionRecord,
+        };
+        use super::{
+            write_runtime_fixture, ArtifactKind, BackendErrorCode, BackendId, RuntimeMode,
+            RuntimeState, StudioProcessState,
+        };
+        use crate::contracts::CapabilityId;
+        use crate::models::{AppConfig, ContainerRuntime};
+        use crate::winboat::vm_ports::{self, PortEntry, PreservedMapping, RecordLiveness};
+        use chrono::Utc;
+        use std::fs;
+        use std::path::Path;
+        use std::sync::Mutex;
+
+        static ENVIRONMENT: Mutex<()> = Mutex::new(());
+
+        fn config(name: &str, compose: &Path) -> AppConfig {
+            AppConfig {
+                language_preference: "en-US".into(),
+                winboat_setup_pending: false,
+                winboat_executable: "fixture".into(),
+                compose_file: compose.to_string_lossy().to_string(),
+                container_runtime: ContainerRuntime::Docker,
+                container_name: name.into(),
+                api_url: "http://127.0.0.1:9".into(),
+                rdp_host: "127.0.0.1".into(),
+                rdp_port: 9,
+                shared_directory: "/missing".into(),
+                windows_shared_directory: "fixture".into(),
+                freerdp_binary: "fixture".into(),
+                mendix_install_root: "fixture".into(),
+                mendix_data_root: "fixture".into(),
+                windows_studio_paths: vec![],
+                startup_timeout_seconds: 1,
+            }
+        }
+
+        struct CacheEnvironment {
+            previous: Option<std::ffi::OsString>,
+            _guard: std::sync::MutexGuard<'static, ()>,
+        }
+
+        impl CacheEnvironment {
+            fn isolate(cache: &Path) -> Self {
+                let guard = ENVIRONMENT
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
+                let previous = std::env::var_os("MENDIMARU_CACHE_DIR");
+                std::env::set_var("MENDIMARU_CACHE_DIR", cache);
+                Self {
+                    previous,
+                    _guard: guard,
+                }
+            }
+        }
+
+        impl Drop for CacheEnvironment {
+            fn drop(&mut self) {
+                match self.previous.take() {
+                    Some(value) => std::env::set_var("MENDIMARU_CACHE_DIR", value),
+                    None => std::env::remove_var("MENDIMARU_CACHE_DIR"),
+                }
+            }
+        }
+
+        fn multi_session_compose(name: &str) -> String {
+            format!(
+                "services:\n  {name}:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: {name}\n    volumes:\n      - data:/storage\n    ports:\n      - 127.0.0.1:47280:7148\n      - 127.0.0.1:47290:3389\n      - 127.0.0.1:8080:8080/tcp\n      - 127.0.0.1:18080:18080/tcp\nvolumes:\n  data: {{}}\n"
+            )
+        }
+
+        fn live_entry(session_id: &str, port: u16, record_path: &Path) -> PortEntry {
+            PortEntry {
+                session_id: session_id.to_string(),
+                guest_port: port,
+                host_port: port,
+                record_path: record_path.to_string_lossy().to_string(),
+                started_at: Utc::now(),
+                stopped_at: None,
+                pre_existing: Vec::new(),
+            }
+        }
+
+        fn reserve(config: &AppConfig, entry: PortEntry) {
+            vm_ports::reserve(config, entry, record_liveness)
+                .expect("reserve port ownership")
+                .commit();
+        }
+
+        #[test]
+        fn record_liveness_classifies_stop_gone_and_incompatible_records() {
+            let directory = tempfile::tempdir().expect("record root");
+            let sessions = directory.path().join("sessions");
+            let active = write_runtime_fixture(
+                &sessions,
+                &format!("runtime_{}", "1".repeat(32)),
+                super::super::CONTRACT_SCHEMA_VERSION,
+                RuntimeState::Starting,
+                8_080,
+            );
+            let stopped = write_runtime_fixture(
+                &sessions,
+                &format!("runtime_{}", "2".repeat(32)),
+                super::super::CONTRACT_SCHEMA_VERSION,
+                RuntimeState::Stopped,
+                8_080,
+            );
+            let incompatible = write_runtime_fixture(
+                &sessions,
+                &format!("runtime_{}", "3".repeat(32)),
+                "3.0.0",
+                RuntimeState::Starting,
+                8_080,
+            );
+
+            assert_eq!(
+                record_liveness(&active.0.join("session.json")),
+                RecordLiveness::Active
+            );
+            assert_eq!(
+                record_liveness(&stopped.0.join("session.json")),
+                RecordLiveness::Stopped
+            );
+            assert_eq!(
+                record_liveness(&incompatible.0.join("session.json")),
+                RecordLiveness::Gone
+            );
+            assert_eq!(
+                record_liveness(&sessions.join("runtime_missing")),
+                RecordLiveness::Gone
+            );
+        }
+
+        #[test]
+        fn registry_locates_active_runtime_records_across_caches() {
+            let directory = tempfile::tempdir().expect("isolation");
+            let cache = directory.path().join("cache-a");
+            fs::create_dir_all(&cache).expect("cache a");
+            let other_cache_sessions = directory.path().join("cache-b").join("sessions");
+            fs::create_dir_all(&other_cache_sessions).expect("cache b");
+            let compose = directory.path().join("compose.yml");
+            fs::write(&compose, multi_session_compose("vm153cross")).expect("compose");
+            let config = config("vm153cross", &compose);
+            let _environment = CacheEnvironment::isolate(&cache);
+
+            // An active record in another cache, invisible to the local scan.
+            let (record_directory, _) = write_runtime_fixture(
+                &other_cache_sessions,
+                &format!("runtime_{}", "4".repeat(32)),
+                super::super::CONTRACT_SCHEMA_VERSION,
+                RuntimeState::Starting,
+                8_080,
+            );
+            reserve(
+                &config,
+                live_entry(
+                    &format!("runtime_{}", "4".repeat(32)),
+                    8_080,
+                    &record_directory.join("session.json"),
+                ),
+            );
+
+            let found = active_runtime_session(&config, 8_080, CapabilityId::RuntimeStart)
+                .expect("registry lookup")
+                .expect("cross-cache record found");
+            assert_eq!(found.1.guest_port, 8_080);
+            assert_eq!(found.1.session_id, format!("runtime_{}", "4".repeat(32)));
+
+            // A different port resolves to nothing.
+            assert!(
+                active_runtime_session(&config, 18_080, CapabilityId::RuntimeStart)
+                    .expect("registry lookup")
+                    .is_none()
+            );
+
+            vm_ports::remove(&config, &[&format!("runtime_{}", "4".repeat(32))])
+                .expect("release ownership");
+        }
+
+        #[tokio::test]
+        async fn stopping_one_session_defers_forwarding_removal_while_others_run() {
+            let directory = tempfile::tempdir().expect("isolation");
+            let cache = directory.path().join("cache");
+            let sessions = cache.join("winboat-runtime").join("sessions");
+            fs::create_dir_all(&sessions).expect("session root");
+            let compose_path = directory.path().join("compose.yml");
+            let compose_bytes = multi_session_compose("vm153defer");
+            fs::write(&compose_path, &compose_bytes).expect("compose");
+            let config = config("vm153defer", &compose_path);
+            let _environment = CacheEnvironment::isolate(&cache);
+
+            let alpha_id = format!("runtime_{}", "a".repeat(32));
+            let beta_id = format!("runtime_{}", "b".repeat(32));
+            let (alpha_directory, _) = write_runtime_fixture(
+                &sessions,
+                &alpha_id,
+                super::super::CONTRACT_SCHEMA_VERSION,
+                RuntimeState::Ready,
+                8_080,
+            );
+            fs::write(alpha_directory.join("runtime.log"), b"").expect("runtime log");
+            // Beta's record lives in a different cache: only the VM-wide
+            // registry can see it.
+            let other_sessions = directory.path().join("cache-b").join("sessions");
+            fs::create_dir_all(&other_sessions).expect("other cache");
+            let (beta_directory, _) = write_runtime_fixture(
+                &other_sessions,
+                &beta_id,
+                super::super::CONTRACT_SCHEMA_VERSION,
+                RuntimeState::Ready,
+                18_080,
+            );
+            reserve(
+                &config,
+                live_entry(&alpha_id, 8_080, &alpha_directory.join("session.json")),
+            );
+            reserve(
+                &config,
+                live_entry(&beta_id, 18_080, &beta_directory.join("session.json")),
+            );
+
+            stop(&config, &alpha_id).await.expect("deferred stop");
+
+            // Alpha stopped; both mappings, the Compose file and Beta survive.
+            let alpha: serde_json::Value = serde_json::from_slice(
+                &fs::read(alpha_directory.join("session.json")).expect("alpha record"),
+            )
+            .expect("alpha record");
+            assert_eq!(alpha["state"], "stopped");
+            assert_eq!(
+                fs::read_to_string(&compose_path).expect("compose"),
+                compose_bytes
+            );
+            let beta: serde_json::Value = serde_json::from_slice(
+                &fs::read(beta_directory.join("session.json")).expect("beta record"),
+            )
+            .expect("beta record");
+            assert_eq!(beta["state"], "ready");
+
+            let entries = vm_ports::snapshot(&config, record_liveness).expect("registry");
+            let alpha_entry = entries
+                .iter()
+                .find(|entry| entry.session_id == alpha_id)
+                .expect("alpha entry retained until cleanup");
+            assert!(alpha_entry.stopped_at.is_some());
+            assert!(entries
+                .iter()
+                .find(|entry| entry.session_id == beta_id)
+                .expect("beta entry")
+                .is_live());
+
+            // The runtime log explains the deferred forwarding removal.
+            let log = fs::read_to_string(alpha_directory.join("runtime.log")).expect("runtime log");
+            assert!(log.contains("forwarding removal deferred"));
+
+            vm_ports::remove(&config, &[&alpha_id, &beta_id]).expect("release ownership");
+        }
+
+        #[tokio::test]
+        async fn creating_a_session_never_recreates_the_vm_while_others_are_live() {
+            let directory = tempfile::tempdir().expect("isolation");
+            let cache = directory.path().join("cache");
+            fs::create_dir_all(&cache).expect("cache");
+            let compose_path = directory.path().join("compose.yml");
+            // Port 19000 has no forwarding prepared yet.
+            fs::write(
+                &compose_path,
+                "services:\n  vm153guard:\n    image: ghcr.io/dockur/windows:6.03\n    container_name: vm153guard\n    volumes:\n      - data:/storage\n    ports:\n      - 127.0.0.1:47280:7148\n      - 127.0.0.1:47290:3389\nvolumes:\n  data: {}\n",
+            )
+            .expect("compose");
+            let config = config("vm153guard", &compose_path);
+            let _environment = CacheEnvironment::isolate(&cache);
+
+            let other_sessions = directory.path().join("cache-b").join("sessions");
+            fs::create_dir_all(&other_sessions).expect("other cache");
+            let other_id = format!("runtime_{}", "c".repeat(32));
+            let (other_directory, _) = write_runtime_fixture(
+                &other_sessions,
+                &other_id,
+                super::super::CONTRACT_SCHEMA_VERSION,
+                RuntimeState::Ready,
+                8_080,
+            );
+            reserve(
+                &config,
+                live_entry(&other_id, 8_080, &other_directory.join("session.json")),
+            );
+
+            // The unprepared port is refused loudly, never recreated silently.
+            let error = create_session(&config, 19_000, None, 60)
+                .await
+                .expect_err("implicit recreation blocked");
+            assert_eq!(error.code, BackendErrorCode::RuntimePortConflict);
+            assert!(error.retryable);
+            assert!(error.message.contains("stop the other session"));
+            assert!(error.message.contains("localhost:19000"));
+
+            // A prepared, unowned port passes the ownership guard; whatever
+            // fails afterwards, it is never the silent-recreation refusal.
+            fs::write(&compose_path, multi_session_compose("vm153guard")).expect("compose");
+            let error = create_session(&config, 18_080, None, 60)
+                .await
+                .expect_err("fixture environment fails after the guard");
+            assert!(!error.message.contains("stop the other session"));
+
+            vm_ports::remove(&config, &[&other_id]).expect("release ownership");
+        }
+
+        #[test]
+        fn cleanup_targets_cover_deferred_sessions_and_restore_the_earliest_state() {
+            let started = |seconds: i64| Utc::now() + chrono::Duration::seconds(seconds);
+            let entry =
+                |session_id: &str, port: u16, started_at, pre_existing: Vec<&str>| PortEntry {
+                    session_id: session_id.to_string(),
+                    guest_port: port,
+                    host_port: port,
+                    record_path: format!("/records/{session_id}/session.json"),
+                    started_at,
+                    stopped_at: Some(started_at + chrono::Duration::seconds(1)),
+                    pre_existing: pre_existing
+                        .iter()
+                        .map(|raw| crate::config::RuntimePortMapping {
+                            host_ip: raw.split(':').next().unwrap_or("").to_string(),
+                            host_port: None,
+                            guest_port: port,
+                            protocol: "tcp".to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .iter()
+                        .map(PreservedMapping::from)
+                        .collect(),
+                };
+            let original = b"services:\n  vm:\n    ports:\n      - 127.0.0.1::8080/tcp\n";
+            let record = SessionRecord {
+                schema_version: super::super::CONTRACT_SCHEMA_VERSION.to_string(),
+                session_id: format!("runtime_{}", "d".repeat(32)),
+                backend: BackendId::LinuxWinboat,
+                mode: RuntimeMode::StudioRunLocally,
+                studio_session_id: None,
+                studio_state: StudioProcessState::Running,
+                studio_process_id: None,
+                state: RuntimeState::Ready,
+                http_ready: true,
+                host_port: 8_080,
+                guest_port: 8_080,
+                started_at: started(0),
+                readiness_timeout_seconds: 60,
+                failure_code: None,
+                log_artifact: crate::contracts::ArtifactDescriptor::create(
+                    "session",
+                    BackendId::LinuxWinboat,
+                    ArtifactKind::RuntimeLog,
+                )
+                .expect("artifact"),
+                compose_changed: true,
+                original_compose_sha256: "a".repeat(64),
+                managed_compose_sha256: "b".repeat(64),
+                storage_mount_identity: vec!["storage".into()],
+            };
+
+            // Two deferred sessions on other ports plus the stopping record's
+            // own port. The earliest starter of port 8080 recorded the user's
+            // dynamic mapping, so that state wins over the later taker.
+            let entries = vec![
+                entry("runtime_early", 8_080, started(-600), vec!["127.0.0.1"]),
+                entry("runtime_late", 8_080, started(-60), vec![]),
+                entry("runtime_other", 18_080, started(-300), vec![]),
+            ];
+            let cleanup = forwarding_cleanup_targets(Some(&record), &entries, Some(original));
+            let ForwardingCleanup { ports, session_ids } = cleanup;
+
+            assert_eq!(
+                ports,
+                vec![
+                    (
+                        8_080,
+                        vec![crate::config::RuntimePortMapping {
+                            host_ip: "127.0.0.1".into(),
+                            host_port: None,
+                            guest_port: 8_080,
+                            protocol: "tcp".into(),
+                        }]
+                    ),
+                    (18_080, Vec::new()),
+                ]
+            );
+            assert!(session_ids.contains(&"runtime_early".to_string()));
+            assert!(session_ids.contains(&"runtime_late".to_string()));
+            assert!(session_ids.contains(&"runtime_other".to_string()));
+            assert!(session_ids.contains(&record.session_id));
         }
     }
 }
