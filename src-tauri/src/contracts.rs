@@ -821,6 +821,20 @@ pub struct BrowserTestRequest {
     pub suite_path: String,
     pub runtime_context: BrowserRuntimeContext,
     pub policy: BrowserTestPolicy,
+    /// Whether this process prepared the shared Runtime or only attached to
+    /// one prepared by an owner (#151). A participant never runs VM
+    /// lifecycle work of its own.
+    #[serde(default)]
+    pub session_role: BrowserSessionRole,
+}
+
+/// The caller's relationship to the Runtime under test.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum BrowserSessionRole {
+    #[default]
+    Owner,
+    Participant,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -850,6 +864,87 @@ pub struct BrowserTestPolicy {
     pub record_har: bool,
     pub max_artifact_bytes: u64,
     pub retention_runs: u32,
+    /// Opt-in bounded parallel execution (#155). Absent keeps the historical
+    /// single-worker schedule and sends no concurrency request at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<BrowserConcurrencyPolicy>,
+}
+
+/// The requested worker budget for one suite. Workers are bounded by the
+/// runner as well: the host's CPU and memory headroom and the suite's own
+/// declarations can lower the effective number.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserConcurrencyPolicy {
+    pub workers: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_timeout_milliseconds: Option<u64>,
+}
+
+/// The shared resource a declarative test needs. Anything a suite does not
+/// declare is treated as an unproven data change, never as parallel-safe.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "kebab-case")]
+pub enum BrowserResourceKind {
+    AppRead,
+    DataWrite,
+    StudioUi,
+    VmLifecycle,
+}
+
+/// How a declared group of tests may overlap.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "kebab-case")]
+pub enum BrowserConcurrencyMode {
+    Parallel,
+    ScopedParallel,
+    Serial,
+    Exclusive,
+}
+
+/// Which bound produced the effective worker count.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum BrowserWorkerLimit {
+    Request,
+    Cpu,
+    Memory,
+    Suite,
+}
+
+/// Why a test produced no valid verdict. An invalidated test is never a pass.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum BrowserTestInvalidation {
+    EnvironmentChange,
+    Timeout,
+    Cancelled,
+}
+
+/// One row of the parallel-permission table published with every run.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserConcurrencyGroup {
+    pub resource: BrowserResourceKind,
+    pub mode: BrowserConcurrencyMode,
+    pub tests: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scopes: Option<u32>,
+}
+
+/// What the run actually scheduled, so a sequential result and a parallel
+/// result can never be confused for one another.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserConcurrencyReport {
+    pub requested_workers: u32,
+    pub effective_workers: u32,
+    pub limited_by: BrowserWorkerLimit,
+    pub max_observed_parallel: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_timeout_milliseconds: Option<u64>,
+    pub session_role: BrowserSessionRole,
+    pub groups: Vec<BrowserConcurrencyGroup>,
 }
 
 /// Explicit control over the automation-only `host.lan` asset mirror.
@@ -908,6 +1003,10 @@ pub struct BrowserTestCaseSummary {
     pub total_steps: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failure: Option<String>,
+    /// Present when the verdict is invalid rather than merely negative:
+    /// an environment generation change, a worker deadline, or a cancellation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invalidated_by: Option<BrowserTestInvalidation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -934,6 +1033,9 @@ pub struct BrowserTestSummary {
     /// stored before #141.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser_parity: Option<BrowserParity>,
+    /// What the run scheduled (#155); absent for records stored before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<BrowserConcurrencyReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<crate::browser::environment::Report>,
 }
@@ -979,6 +1081,45 @@ mod tests {
         assert_registry(
             "browserTestCorrectionKind",
             [BrowserTestCorrectionKind::HostLanAssetMirror],
+        );
+        assert_registry(
+            "browserSessionRole",
+            [BrowserSessionRole::Owner, BrowserSessionRole::Participant],
+        );
+        assert_registry(
+            "browserResourceKind",
+            [
+                BrowserResourceKind::AppRead,
+                BrowserResourceKind::DataWrite,
+                BrowserResourceKind::StudioUi,
+                BrowserResourceKind::VmLifecycle,
+            ],
+        );
+        assert_registry(
+            "browserConcurrencyMode",
+            [
+                BrowserConcurrencyMode::Parallel,
+                BrowserConcurrencyMode::ScopedParallel,
+                BrowserConcurrencyMode::Serial,
+                BrowserConcurrencyMode::Exclusive,
+            ],
+        );
+        assert_registry(
+            "browserWorkerLimit",
+            [
+                BrowserWorkerLimit::Request,
+                BrowserWorkerLimit::Cpu,
+                BrowserWorkerLimit::Memory,
+                BrowserWorkerLimit::Suite,
+            ],
+        );
+        assert_registry(
+            "browserTestInvalidation",
+            [
+                BrowserTestInvalidation::EnvironmentChange,
+                BrowserTestInvalidation::Timeout,
+                BrowserTestInvalidation::Cancelled,
+            ],
         );
         assert_registry("capabilityId", CapabilityId::ALL);
         assert_registry(

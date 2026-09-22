@@ -1,9 +1,10 @@
 use crate::app_paths::AppPaths;
 use crate::contracts::{
     ArtifactDescriptor, BackendError, BackendErrorCode, BackendId, BrowserRuntimeContext,
-    BrowserTestPolicy, BrowserTestRequest, BrowserTestSummary, CapabilityId, CapabilityLimitation,
-    RuntimeBuildRequest, RuntimeBuildResult, RuntimeForgetResult, RuntimeLogBatch, RuntimeMode,
-    RuntimeSessionList, RuntimeStartRequest, RuntimeStatus, StudioSessionStatus,
+    BrowserSessionRole, BrowserTestPolicy, BrowserTestRequest, BrowserTestSummary, CapabilityId,
+    CapabilityLimitation, RuntimeBuildRequest, RuntimeBuildResult, RuntimeForgetResult,
+    RuntimeLogBatch, RuntimeMode, RuntimeSessionList, RuntimeStartRequest, RuntimeStatus,
+    StudioSessionStatus,
 };
 use crate::downloads::{DownloadCancellation, InstallError};
 use crate::models::{
@@ -510,6 +511,7 @@ async fn browser_test_url_with_lease(
             runtime_version: None,
         },
         policy,
+        session_role: BrowserSessionRole::Owner,
     };
     crate::browser::test(&request, backend)
         .await
@@ -621,6 +623,7 @@ async fn browser_test_runtime_with_lease(
             runtime_version,
         },
         policy,
+        session_role: BrowserSessionRole::Owner,
     };
     crate::platform::run_browser_test(config, &request)
         .await
@@ -1073,6 +1076,7 @@ async fn run_shared_session_test(
             runtime_version: identity.runtime_version.clone(),
         },
         policy,
+        session_role: BrowserSessionRole::Participant,
     };
     let summary = crate::platform::run_browser_test(config, &request)
         .await

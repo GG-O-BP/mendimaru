@@ -88,7 +88,7 @@ fn live_environment_generation_gate() {
                 });
                 let result = crate::application::browser_test_url(BackendId::LinuxWinboat, Some(&config), marker.to_str(), &url, suite.to_str().unwrap(), BrowserTestPolicy {
                     navigation_timeout_milliseconds: 10000, action_timeout_milliseconds: 3000, assertion_timeout_milliseconds: 3000,
-                    fail_on_console_error: false, fail_on_network_failure: false, record_video: false, record_har: false, max_artifact_bytes: 32*1024*1024, retention_runs: 20,
+                    fail_on_console_error: false, fail_on_network_failure: false, record_video: false, record_har: false, max_artifact_bytes: 32*1024*1024, retention_runs: 20, concurrency: None,
                 }).await;
                 server.await.unwrap();
                 let after_controller = Source { config: config.clone(), management: crate::winboat::vm_use::observation(), runtime_id: None, studio_id: None, build: None, build_requested: false }.snapshot().await;

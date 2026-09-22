@@ -23,6 +23,33 @@
   "browserTestCorrectionKind": {
     "host-lan-asset-mirror": true
   },
+  "browserSessionRole": {
+    "owner": true,
+    "participant": true
+  },
+  "browserResourceKind": {
+    "app-read": true,
+    "data-write": true,
+    "studio-ui": true,
+    "vm-lifecycle": true
+  },
+  "browserConcurrencyMode": {
+    "parallel": true,
+    "scoped-parallel": true,
+    "serial": true,
+    "exclusive": true
+  },
+  "browserWorkerLimit": {
+    "request": true,
+    "cpu": true,
+    "memory": true,
+    "suite": true
+  },
+  "browserTestInvalidation": {
+    "environment-change": true,
+    "timeout": true,
+    "cancelled": true
+  },
   "capabilityId": {
     "studio.detect": true,
     "studio.install": true,
