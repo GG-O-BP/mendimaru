@@ -660,6 +660,430 @@ async fn browser_studio_version(config: &AppConfig, session_id: &str) -> Applica
     Ok(session.version)
 }
 
+/// Fails an attach or finalize attempt with the exact allowlisted registry
+/// reason. `BrowserTest` is the owning capability for shared session flows.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn shared_session_error(message: &'static str) -> CommandError {
+    #[cfg(target_os = "linux")]
+    {
+        use crate::winboat::test_session as shared;
+        match message {
+            shared::UNKNOWN => invalid_request(message),
+            shared::UNTRUSTED => precondition_error(CapabilityId::BrowserTest, message, false),
+            shared::STILL_PREPARING
+            | shared::FINALIZING
+            | shared::FINALIZE_BUSY
+            | shared::DRAINED_TIMEOUT => {
+                precondition_error(CapabilityId::BrowserTest, message, true)
+            }
+            _ => precondition_error(CapabilityId::BrowserTest, message, false),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        precondition_error(CapabilityId::BrowserTest, message, false)
+    }
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) const BROWSER_SESSION_NO_OWNERSHIP: &str =
+    "the shared session did not claim Runtime ownership; stop the Runtime explicitly";
+
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) const SHARED_SESSION_LINUX_ONLY: &str =
+    "shared browser sessions require the linux-winboat backend";
+
+/// Owner step of a shared browser test session: verifies the Runtime through
+/// the existing single-run contracts under shared VM use, then publishes the
+/// stabilized identity for participants. A Runtime stop at finalize requires
+/// the explicit `owns_runtime` claim; attaching to a user-started Runtime
+/// records `AttachedExisting` and can never stop it.
+pub(crate) async fn browser_session_prepare(
+    config: &AppConfig,
+    runtime_session_id: &str,
+    build_marker: Option<&str>,
+    owns_runtime: bool,
+    finalize_stop: bool,
+) -> ApplicationResult<serde_json::Value> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (
+            config,
+            runtime_session_id,
+            build_marker,
+            owns_runtime,
+            finalize_stop,
+        );
+        Err(precondition_error(
+            CapabilityId::BrowserTest,
+            SHARED_SESSION_LINUX_ONLY,
+            false,
+        ))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use crate::winboat::test_session::FinalizePolicy;
+        let finalize_policy = if finalize_stop {
+            FinalizePolicy::Stop
+        } else {
+            FinalizePolicy::Keep
+        };
+        if finalize_policy == FinalizePolicy::Stop && !owns_runtime {
+            return Err(invalid_request(
+                "--finalize-policy stop requires --owns-runtime; attach-only sessions never stop the Runtime",
+            ));
+        }
+        if !runtime_session_id.starts_with("runtime_") || runtime_session_id.len() != 40 {
+            return Err(invalid_request("invalid Runtime session ID"));
+        }
+        let lease = crate::winboat::vm_use::acquire(
+            config,
+            crate::winboat::vm_use::Mode::Shared,
+            CapabilityId::BrowserTest,
+        )
+        .await?;
+        lease
+            .run(prepare_shared_session(
+                config,
+                runtime_session_id,
+                build_marker,
+                owns_runtime,
+                finalize_policy,
+            ))
+            .await
+            .map(|descriptor| serde_json::to_value(descriptor).unwrap_or_default())
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn prepare_shared_session(
+    config: &AppConfig,
+    runtime_session_id: &str,
+    build_marker: Option<&str>,
+    owns_runtime: bool,
+    finalize_policy: crate::winboat::test_session::FinalizePolicy,
+) -> ApplicationResult<crate::winboat::test_session::Descriptor> {
+    use crate::winboat::test_session::{self, RuntimeOrigin};
+    let vm_key = crate::winboat::vm_use::vm_key(config)
+        .map_err(|_| shared_session_error(test_session::UNTRUSTED))?;
+    let session_id = test_session::create(&test_session::NewSession {
+        vm_key,
+        runtime_session_id: runtime_session_id.to_string(),
+        build_marker: build_marker.map(str::to_string),
+        finalize_policy,
+        runtime_origin: if owns_runtime {
+            RuntimeOrigin::OwnerStarted
+        } else {
+            RuntimeOrigin::AttachedExisting
+        },
+    })
+    .map_err(shared_session_error)?;
+    match verify_and_publish_identity(config, &session_id, runtime_session_id).await {
+        Ok(descriptor) => Ok(descriptor),
+        Err(error) => {
+            // The identifier was never published, so no participant can hold
+            // a stake in the preparing record.
+            let _ = test_session::discard(&session_id);
+            Err(error)
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn verify_and_publish_identity(
+    config: &AppConfig,
+    session_id: &str,
+    runtime_session_id: &str,
+) -> ApplicationResult<crate::winboat::test_session::Descriptor> {
+    use crate::winboat::test_session;
+    let status = runtime_status(config, runtime_session_id).await?;
+    if !status.http_ready {
+        return Err(precondition_error(
+            CapabilityId::BrowserTest,
+            "the Runtime session is not HTTP-ready",
+            true,
+        ));
+    }
+    let base_url = status.url.clone().ok_or_else(|| {
+        precondition_error(
+            CapabilityId::BrowserTest,
+            "the Runtime session has no HTTP URL",
+            true,
+        )
+    })?;
+    let studio_version = if let Some(studio_session_id) = status.studio_session_id.as_deref() {
+        Some(browser_studio_version(config, studio_session_id).await?)
+    } else {
+        None
+    };
+    let runtime_version = status.runtime_version.clone().or_else(|| {
+        (status.mode == RuntimeMode::StudioRunLocally)
+            .then(|| studio_version.clone())
+            .flatten()
+    });
+    let identity = test_session::Identity {
+        studio_session_id: status.studio_session_id.clone(),
+        runtime_mode: status.mode,
+        studio_version,
+        runtime_version,
+        base_url,
+        host_port: status.host_port,
+        guest_port: status.guest_port,
+    };
+    test_session::mark_ready(session_id, identity).map_err(shared_session_error)
+}
+
+/// Reports the recorded descriptor plus live kernel-held participation.
+/// Participation counts are diagnostics; they never drive cleanup.
+pub(crate) async fn browser_session_status(
+    shared_session_id: &str,
+) -> ApplicationResult<serde_json::Value> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = shared_session_id;
+        Err(precondition_error(
+            CapabilityId::BrowserTest,
+            SHARED_SESSION_LINUX_ONLY,
+            false,
+        ))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use crate::winboat::test_session;
+        let descriptor = test_session::load(shared_session_id).map_err(shared_session_error)?;
+        let live =
+            test_session::live_participants(shared_session_id).map_err(shared_session_error)?;
+        let mut report = serde_json::to_value(&descriptor).unwrap_or_default();
+        if let Some(object) = report.as_object_mut() {
+            object.insert("liveParticipants".into(), serde_json::json!(live));
+        }
+        Ok(report)
+    }
+}
+
+/// Owner cleanup step. Waits bounded for live participants, then applies the
+/// recorded policy exactly once under the session's finalize lock. A stop
+/// additionally requires the recorded owner claim; an attached-existing
+/// session can never stop the Runtime through finalize.
+pub(crate) async fn browser_session_finalize(
+    config: &AppConfig,
+    shared_session_id: &str,
+    drain_timeout: Duration,
+) -> ApplicationResult<serde_json::Value> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (config, shared_session_id, drain_timeout);
+        Err(precondition_error(
+            CapabilityId::BrowserTest,
+            SHARED_SESSION_LINUX_ONLY,
+            false,
+        ))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use crate::contracts::CONTRACT_SCHEMA_VERSION;
+        use crate::winboat::test_session::{self, State};
+        let descriptor = test_session::load(shared_session_id).map_err(shared_session_error)?;
+        if descriptor.state == State::Finalized {
+            return Ok(serde_json::json!({
+                "schemaVersion": CONTRACT_SCHEMA_VERSION,
+                "sessionId": shared_session_id,
+                "runtimeSessionId": descriptor.runtime_session_id,
+                "state": "finalized",
+                "finalized": true,
+                "alreadyFinalized": true,
+                "cleanup": "none",
+            }));
+        }
+        let _guard = test_session::acquire_finalize(shared_session_id, Duration::from_secs(3))
+            .map_err(shared_session_error)?;
+        let descriptor = test_session::load(shared_session_id).map_err(shared_session_error)?;
+        match descriptor.state {
+            State::Preparing => {
+                // Recovery for a prepare that crashed before publishing an
+                // identity: participants never joined, so nothing is cleaned.
+                test_session::transition(shared_session_id, State::Preparing, State::Finalized)
+                    .map_err(shared_session_error)?;
+                return Ok(serde_json::json!({
+                    "schemaVersion": CONTRACT_SCHEMA_VERSION,
+                    "sessionId": shared_session_id,
+                    "runtimeSessionId": descriptor.runtime_session_id,
+                    "state": "finalized",
+                    "finalized": true,
+                    "alreadyFinalized": false,
+                    "cleanup": "none",
+                }));
+            }
+            State::Ready | State::Finalizing => {}
+            State::Finalized => {
+                return Ok(serde_json::json!({
+                    "schemaVersion": CONTRACT_SCHEMA_VERSION,
+                    "sessionId": shared_session_id,
+                    "state": "finalized",
+                    "finalized": true,
+                    "alreadyFinalized": true,
+                    "cleanup": "none",
+                }));
+            }
+        }
+        if descriptor.state == State::Ready {
+            test_session::transition(shared_session_id, State::Ready, State::Finalizing)
+                .map_err(shared_session_error)?;
+        }
+        let deadline = Instant::now() + drain_timeout;
+        loop {
+            let live =
+                test_session::live_participants(shared_session_id).map_err(shared_session_error)?;
+            if live == 0 {
+                break;
+            }
+            if Instant::now() >= deadline {
+                // Releasing the finalizing state lets attach resume and keeps
+                // the observable contract honest: the Runtime is untouched.
+                test_session::transition(shared_session_id, State::Finalizing, State::Ready)
+                    .map_err(shared_session_error)?;
+                return Err(shared_session_error(test_session::DRAINED_TIMEOUT));
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let cleanup = match descriptor.finalize_policy {
+            test_session::FinalizePolicy::Keep => "none",
+            test_session::FinalizePolicy::Stop => {
+                if descriptor.runtime_origin != test_session::RuntimeOrigin::OwnerStarted {
+                    test_session::transition(shared_session_id, State::Finalizing, State::Ready)
+                        .map_err(shared_session_error)?;
+                    return Err(precondition_error(
+                        CapabilityId::BrowserTest,
+                        BROWSER_SESSION_NO_OWNERSHIP,
+                        false,
+                    ));
+                }
+                runtime_stop(config, &descriptor.runtime_session_id).await?;
+                "runtime-stopped"
+            }
+        };
+        test_session::transition(shared_session_id, State::Finalizing, State::Finalized)
+            .map_err(shared_session_error)?;
+        let _ = test_session::prune_participants(shared_session_id);
+        Ok(serde_json::json!({
+            "schemaVersion": CONTRACT_SCHEMA_VERSION,
+            "sessionId": shared_session_id,
+            "runtimeSessionId": descriptor.runtime_session_id,
+            "state": "finalized",
+            "finalized": true,
+            "alreadyFinalized": false,
+            "cleanup": cleanup,
+        }))
+    }
+}
+
+/// Participant step: joins a prepared session with the recorded identity.
+/// The whole command holds shared VM use; no Runtime status read and no
+/// Studio metadata discovery runs here, so attaching opens no RDP path.
+pub(crate) async fn browser_test_shared_session(
+    config: &AppConfig,
+    shared_session_id: &str,
+    suite_path: &str,
+    asset_mirror: crate::contracts::AssetMirrorPolicy,
+    policy: BrowserTestPolicy,
+) -> ApplicationResult<BrowserTestSummary> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (config, shared_session_id, suite_path, asset_mirror, policy);
+        Err(precondition_error(
+            CapabilityId::BrowserTest,
+            SHARED_SESSION_LINUX_ONLY,
+            false,
+        ))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let lease = crate::winboat::vm_use::acquire(
+            config,
+            crate::winboat::vm_use::Mode::Shared,
+            CapabilityId::BrowserTest,
+        )
+        .await?;
+        lease
+            .run(run_shared_session_test(
+                config,
+                shared_session_id,
+                suite_path,
+                asset_mirror,
+                policy,
+            ))
+            .await
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn run_shared_session_test(
+    config: &AppConfig,
+    shared_session_id: &str,
+    suite_path: &str,
+    asset_mirror: crate::contracts::AssetMirrorPolicy,
+    policy: BrowserTestPolicy,
+) -> ApplicationResult<BrowserTestSummary> {
+    use crate::winboat::test_session;
+    let vm_key = crate::winboat::vm_use::vm_key(config)
+        .map_err(|_| shared_session_error(test_session::UNTRUSTED))?;
+    let guard = test_session::register_participant(shared_session_id, &vm_key)
+        .map_err(shared_session_error)?;
+    let descriptor = test_session::load(shared_session_id).map_err(shared_session_error)?;
+    let identity = descriptor
+        .identity
+        .clone()
+        .ok_or_else(|| shared_session_error(test_session::UNTRUSTED))?;
+    let manifest = crate::platform::capability_manifest(None).map_err(CommandError::from)?;
+    let observer = crate::browser::environment::start(
+        Some(config),
+        Some(&descriptor.runtime_session_id),
+        descriptor.build_marker.as_deref(),
+    )
+    .await?;
+    let runtime_platform = match identity.runtime_mode {
+        RuntimeMode::Portable => Some(manifest.host_platform),
+        RuntimeMode::StudioRunLocally => Some(manifest.studio_platform),
+        RuntimeMode::ExternalUrl => None,
+    };
+    let (asset_mirror_url, _asset_mirror_guard) = if identity.runtime_mode
+        == RuntimeMode::StudioRunLocally
+        && asset_mirror == crate::contracts::AssetMirrorPolicy::Auto
+    {
+        let mirror = crate::winboat::AssetMirrorServer::start(Path::new(&config.shared_directory))
+            .await
+            .map_err(|message| precondition_error(CapabilityId::BrowserTest, &message, true))?;
+        (Some(mirror.url().to_string()), Some(mirror))
+    } else {
+        (None, None)
+    };
+    let request = BrowserTestRequest {
+        session_id: crate::contracts::secure_identifier("session")?,
+        base_url: identity.base_url.clone(),
+        asset_mirror_url,
+        environment_observer_url: observer.as_ref().map(|observer| observer.url().to_owned()),
+        suite_path: suite_path.to_string(),
+        runtime_context: BrowserRuntimeContext {
+            host_platform: manifest.host_platform,
+            studio_platform: manifest.studio_platform,
+            runtime_platform,
+            backend: manifest.backend,
+            runtime_mode: identity.runtime_mode,
+            studio_version: identity.studio_version.clone(),
+            runtime_version: identity.runtime_version.clone(),
+        },
+        policy,
+    };
+    let summary = crate::platform::run_browser_test(config, &request)
+        .await
+        .map_err(CommandError::from)?;
+    // Success, failure, and cancellation all release only this process's own
+    // participation through `Drop`; the guard never touches the Runtime,
+    // keeper, VM, or another participant's artifacts.
+    guard.detach();
+    Ok(summary)
+}
+
 pub(crate) fn browser_artifacts(
     backend: BackendId,
     session_id: &str,

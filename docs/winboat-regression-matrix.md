@@ -138,6 +138,31 @@ The [2026-09-15 verification record](issue-148-verification.md) includes an actu
 restored-VM browser run, missing-owner diagnostic, RDP loss, authenticated Studio
 stop, and original-environment restoration, with explicit app-test limitations.
 
+## Shared test session ownership (#151)
+
+`winboat::test_session::tests` covers the registry state machine, trust
+boundaries (symlinked/public/oversized/drifted records fail closed), duplicate
+transitions, wrong-VM attach refusal, kernel-owned participation liveness, and
+finalize-lock serialization with kernel recovery. `cli::browser_session_tests`
+runs real CLI dispatch and real Chromium participants against the keeper-linked
+HTTP fixture: two workers join one prepared session and pass; a SIGKILLed
+worker's participation disappears while the other worker, container, Compose,
+keeper, and Studio identity stay intact; finalize with `keep` performs no
+Runtime action and is idempotent on duplicates; an owner-claimed session stops
+the Runtime exactly once through the normal serialized stop path after an
+authenticated Studio-exit report; a drain timeout is retryable and returns the
+session to `ready`; attach during `preparing`/`finalizing`/`finalized` is an
+explicit refusal; a crashed finalizer is recovered by re-running finalize; and
+the #150 exclusion holds in both directions (participants block lifecycle,
+exclusive reservations block new participants). Participants open no RDP
+connection and perform no Runtime status read: the fixture's `unexpected-rdp`
+marker and untouched Compose/inspect fixtures assert this.
+
+Docker, RDP, guest health, and keeper internals remain fixtures here; this is
+not an actual-VM lifecycle claim. Real F5 multi-worker participation still
+requires the disposable snapshot workflow above, with the owner preparing from
+a real `runtime start`/F5 session and at least two worker processes.
+
 ## Contract schema upgrade checklist
 
 Whenever `CONTRACT_SCHEMA_VERSION`, a runtime schema, or a persisted WinBoat

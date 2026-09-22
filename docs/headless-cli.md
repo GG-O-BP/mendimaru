@@ -32,7 +32,10 @@ mendimaru runtime logs --session-id RUNTIME_SESSION_ID [--cursor CURSOR]
 mendimaru browser frontend-health (--base-url URL | --runtime-session-id RUNTIME_SESSION_ID)
 mendimaru browser doctor
 mendimaru browser install chromium
-mendimaru browser test (--base-url URL | --runtime-session-id RUNTIME_SESSION_ID) --suite-path SUITE_JSON
+mendimaru browser test (--base-url URL | --runtime-session-id RUNTIME_SESSION_ID | --shared-session-id SHARED_SESSION_ID) --suite-path SUITE_JSON
+mendimaru browser session prepare --runtime-session-id RUNTIME_SESSION_ID [--build-marker FILE] [--owns-runtime] [--finalize-policy keep|stop]
+mendimaru browser session finalize --shared-session-id SHARED_SESSION_ID [--timeout-ms MILLISECONDS]
+mendimaru browser session status --shared-session-id SHARED_SESSION_ID
 mendimaru browser artifacts --session-id BROWSER_SESSION_ID
 mendimaru operation list
 mendimaru operation status --operation-id OPERATION_ID
@@ -277,6 +280,54 @@ requires the Linux WinBoat backend and a URL target. Lifecycle lock acquisition
 waits at most three seconds per VM (or the shorter command timeout) and returns
 `precondition_failed` with a retryable, path-free busy message on contention.
 See [WinBoat VM use](winboat-vm-use.md) for identity, generations, and limitations.
+
+## Shared browser test sessions (#151)
+
+One owner prepares a shared session from a readiness-verified WinBoat Runtime;
+any number of test workers then join that prepared app instead of each opening
+their own Runtime discovery:
+
+```bash
+mendimaru browser session prepare --runtime-session-id runtime_<id> --json
+# ... workers, possibly from other caches/worktrees against the same VM:
+mendimaru browser test --shared-session-id shared_<id> --suite-path suite.json --json
+mendimaru browser session finalize --shared-session-id shared_<id> --json
+```
+
+`prepare` runs under shared VM use, verifies HTTP readiness through the existing
+single-run contracts, and records the exact Runtime/Studio identity (mode,
+sessions, versions, URL, ports, build marker) in a host-scoped registry at
+`/tmp/mendimaru-test-sessions-<uid>` (`0700`, entry trust enforced). The record
+contains no paths, credentials, or command payloads. Participants inherit that
+recorded identity; attaching performs no Runtime status read and no Studio
+metadata discovery, so it never opens an RDP connection. The whole participant
+command holds shared VM use, and success, failure, cancellation, or a crash
+releases only that participant's own browser, context, artifacts, and
+participation lock.
+
+Participation liveness is kernel `flock` ownership only — never a reference
+count, PID record, or RDP disconnect — so a crashed worker's participation
+disappears with its process and nothing else is cleaned on its behalf.
+`finalize` waits a bounded `--timeout-ms` (default 60000, maximum 3600000) for
+live participants, then applies the recorded policy exactly once under the
+session's finalize lock: `keep` performs no Runtime action, while `stop` also
+requires the prepare-time `--owns-runtime` claim. A session that attached to a
+user-started Runtime (`attached-existing` origin, the default) can never stop
+it through finalize; stopping requires the explicit owner claim, and the parse
+level already refuses `--finalize-policy stop` without `--owns-runtime`. A drain
+timeout returns a retryable `precondition_failed` and returns the session to
+`ready` so workers can continue; duplicate finalize is idempotent; a finalize
+interrupted by a crash is recovered by running finalize again (the kernel
+releases its lock and the recorded policy still applies).
+
+Attaching during `preparing`, `finalizing`, or after `finalized` is an explicit
+refusal with its own allowlisted message, as is attaching from a configuration
+whose VM management identity differs from the recorded one. Lifecycle
+operations keep the #150 exclusion in both directions: a participant's shared
+use makes concurrent stop/recreate return busy, and an exclusive reservation
+refuses new participants with the same bounded busy precondition. `browser
+session status` reports the recorded descriptor plus the current live
+participant count; the count is diagnostic and never drives cleanup.
 
 ## Foreground generated-asset repair (Linux)
 
