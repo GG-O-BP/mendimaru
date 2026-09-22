@@ -143,6 +143,8 @@ struct UiReply {
 pub(super) async fn serve_ui(
     line: &str,
     session_id: &str,
+    caller: crate::ui_automation::coordination::Caller,
+    reservation: crate::ui_automation::coordination::Reservation,
     reader: &mut tokio::io::Take<tokio::io::BufReader<tokio::net::unix::OwnedReadHalf>>,
     writer: &mut tokio::net::unix::OwnedWriteHalf,
 ) {
@@ -152,6 +154,7 @@ pub(super) async fn serve_ui(
         Ok(r) if r.session_id == session_id && r.validate().is_ok() => {
             let operation = r.operation;
             let cancellation = crate::process::CancellationToken::default();
+            let cancellation_for_job = cancellation.clone();
             let execute = async {
                 let paths = AppPaths::discover_for_cli().map_err(|_| {
                     crate::ui_automation::error(operation, "ui-session-unavailable")
@@ -159,18 +162,42 @@ pub(super) async fn serve_ui(
                 let config = crate::application::load_config(&paths).map_err(|_| {
                     crate::ui_automation::error(operation, "ui-session-unavailable")
                 })?;
-                let lease = crate::winboat::vm_use::acquire(
+                // Coordination (#152): every accepted request joins the
+                // session queue under its keeper-accept arrival, then the
+                // desktop foreground scope when it needs one. Both waits stay
+                // inside this request's own timeout budget.
+                let coordinator = crate::ui_automation::coordination::global();
+                let job =
+                    crate::ui_automation::coordination::Job::new(reservation.arrival(), &r, caller)
+                        .map_err(|_| {
+                            crate::ui_automation::error(operation, "ui-invalid-request")
+                        })?;
+                let deadline = tokio::time::Instant::now() + Duration::from_millis(r.timeout_ms);
+                let ticket = coordinator.enqueue(reservation, job)?;
+                let mut entered = ticket.admit(&config, deadline, Some(&cancellation)).await?;
+                let mode = crate::ui_automation::coordination::vm_mode(entered.job().concurrency);
+                let wait = deadline.saturating_duration_since(tokio::time::Instant::now());
+                let lease = crate::winboat::vm_use::acquire_for(
                     &config,
-                    crate::winboat::vm_use::Mode::Exclusive,
+                    mode,
                     operation.capability(),
+                    wait,
                 )
                 .await?;
                 lease
-                    .run(crate::ui_automation::owned_request(
-                        &config,
-                        &r,
-                        Some(&cancellation),
-                    ))
+                    .run(async move {
+                        let result = crate::ui_automation::owned_request(
+                            &config,
+                            &r,
+                            Some(&cancellation_for_job),
+                        )
+                        .await;
+                        entered.finish(match &result {
+                            Ok(_) => None,
+                            Err(failure) => Some(failure.message.as_str()),
+                        });
+                        result
+                    })
                     .await
             };
             tokio::pin!(execute);
@@ -241,8 +268,11 @@ pub(crate) async fn request_keeper_ui(
         .map_err(|_| failure())?;
     let mut reader = BufReader::new(stream).take(crate::ui_automation::MAX_RESPONSE + 1);
     let mut line = String::new();
+    // The job's own budget bounds queue admission and the helper phase each,
+    // so a queued request may legitimately take up to twice its timeout plus
+    // the cancellation-response grace before its reply must arrive.
     let count = tokio::time::timeout(
-        Duration::from_millis(request.timeout_ms + 6500),
+        Duration::from_millis(request.timeout_ms.saturating_mul(2) + 6500),
         reader.read_line(&mut line),
     )
     .await
@@ -323,5 +353,104 @@ mod tests {
         ]
         .map(str::to_string);
         assert!(parse_ui(&args).is_ok());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn serve_ui_never_strands_the_queue_after_rejected_requests() {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+
+        const SESSION: &str = "studio-4242-639250850131064367";
+        let coordinator = crate::ui_automation::coordination::global();
+        let caller = crate::ui_automation::coordination::Caller::self_identity();
+
+        async fn keeper_round_trip(
+            line: &str,
+            session: &str,
+            caller: crate::ui_automation::coordination::Caller,
+            reservation: crate::ui_automation::coordination::Reservation,
+        ) -> serde_json::Value {
+            let (caller_side, keeper_side) = tokio::net::UnixStream::pair().expect("pair");
+            let (read_half, mut write_half) = keeper_side.into_split();
+            let mut reader = BufReader::new(read_half).take(crate::ui_automation::MAX_REQUEST + 16);
+            serve_ui(
+                line,
+                session,
+                caller,
+                reservation,
+                &mut reader,
+                &mut write_half,
+            )
+            .await;
+            let mut reply = String::new();
+            let mut caller_reader =
+                BufReader::new(caller_side).take(crate::ui_automation::MAX_RESPONSE + 1);
+            caller_reader
+                .read_line(&mut reply)
+                .await
+                .expect("keeper reply");
+            serde_json::from_str(&reply).expect("bounded JSON reply")
+        }
+
+        // A request addressed to another session is rejected outright; its
+        // keeper-accepted reservation must free its queue position.
+        let foreign = Request::new("studio-4243-639250850131064368", Operation::Tree);
+        let (_arrival, reservation) = coordinator.reserve(SESSION);
+        let line = format!("ui {}\n", serde_json::to_string(&foreign).expect("JSON"));
+        let reply = keeper_round_trip(&line, SESSION, caller, reservation).await;
+        let error = reply["error"].as_object().expect("rejected with an error");
+        assert_eq!(error["message"].as_str(), Some("invalid UI keeper request"));
+
+        // A well-formed request for this keeper resolves to a bounded reply
+        // even when the environment cannot serve it.
+        let mut valid = Request::new(SESSION, Operation::Tree);
+        valid.timeout_ms = 300;
+        let (_arrival, reservation) = coordinator.reserve(SESSION);
+        let line = format!("ui {}\n", serde_json::to_string(&valid).expect("JSON"));
+        let reply = keeper_round_trip(&line, SESSION, caller, reservation).await;
+        let error = reply["error"].as_object().expect("bounded failure");
+        let message = error["message"].as_str().expect("text");
+        assert!(message.starts_with("ui-"), "bounded reason, got {message}");
+
+        // Later arrivals on the same session still admit: neither the
+        // rejected request nor the bounded failure stranded the queue.
+        let (_arrival, reservation) = coordinator.reserve(SESSION);
+        let job =
+            crate::ui_automation::coordination::Job::new(reservation.arrival(), &valid, caller)
+                .expect("job");
+        let ticket = coordinator
+            .enqueue(reservation, job)
+            .expect("later arrival enqueues");
+        let mut entered = ticket
+            .admit(
+                &fixture_app_config(),
+                tokio::time::Instant::now() + std::time::Duration::from_millis(300),
+                None,
+            )
+            .await
+            .expect("the queue keeps admitting after rejections");
+        entered.finish(None);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn fixture_app_config() -> crate::models::AppConfig {
+        crate::models::AppConfig {
+            language_preference: "en-US".into(),
+            winboat_setup_pending: false,
+            winboat_executable: "fixture".into(),
+            compose_file: "missing-compose.yml".into(),
+            container_runtime: crate::models::ContainerRuntime::Docker,
+            container_name: format!("serve-ui-fixture-{}", std::process::id()),
+            api_url: "http://127.0.0.1:9".into(),
+            rdp_host: "127.0.0.1".into(),
+            rdp_port: 9,
+            shared_directory: "/missing".into(),
+            windows_shared_directory: "fixture".into(),
+            freerdp_binary: "fixture".into(),
+            mendix_install_root: "fixture".into(),
+            mendix_data_root: "fixture".into(),
+            windows_studio_paths: Vec::new(),
+            startup_timeout_seconds: 1,
+        }
     }
 }

@@ -1794,6 +1794,8 @@ async fn serve_session_keeper(
     let Ok(listener) = tokio::net::UnixListener::from_std(listener) else {
         return;
     };
+    let coordinator = crate::ui_automation::coordination::global();
+    let stopped = std::sync::Arc::new(tokio::sync::Notify::new());
     let mut observation = tokio::time::interval(Duration::from_secs(1));
     observation.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
@@ -1802,60 +1804,78 @@ async fn serve_session_keeper(
                 let Ok((stream, _)) = accepted else {
                     return;
                 };
-                if stream.peer_cred().ok().is_none_or(|cred| cred.uid() != unsafe { libc::geteuid() }) { continue; }
-                let (read_half, mut write_half) = stream.into_split();
-                let mut reader = BufReader::new(read_half).take(crate::ui_automation::MAX_REQUEST + 16);
-                let mut request = String::new();
-                let read = tokio::time::timeout(
-                    Duration::from_secs(2),
-                    reader.read_line(&mut request),
-                ).await;
-                if matches!(read, Ok(Ok(count)) if count > 0) && request.starts_with("ui ") && request.ends_with('\n') {
-                    ui::serve_ui(&request, session_id, &mut reader, &mut write_half).await;
-                    continue;
-                }
-                let mut should_stop = false;
-                let response = if matches!(read, Ok(Ok(count)) if count > 0)
-                    && request.trim_end() == "status"
-                {
-                    SessionKeeperIpcResponse {
-                        ok: true,
-                        session: crate::winboat::registered_client_sessions()
-                            .into_iter()
-                            .find(|session| session.session_id == session_id),
-                    }
-                } else if matches!(read, Ok(Ok(count)) if count > 0)
-                    && request.trim_end() == "stop"
-                {
-                    should_stop = crate::winboat::stop_registered_client(session_id)
-                        .await
-                        .unwrap_or(false);
-                    SessionKeeperIpcResponse {
-                        ok: should_stop,
-                        session: None,
-                    }
-                } else {
-                    SessionKeeperIpcResponse {
-                        ok: false,
-                        session: None,
-                    }
-                };
-                if let Ok(mut payload) = serde_json::to_vec(&response) {
-                    payload.push(b'\n');
-                    let _ = tokio::time::timeout(
+                // Same-UID peers only; the caller identity labels ownership
+                // (#152) and never authorizes by itself.
+                let Some(caller) = crate::ui_automation::coordination::Caller::peer(&stream) else { continue; };
+                // Reserve the queue position at accept time so same-session
+                // jobs execute in accept order even under task scheduling
+                // races (#152). A dropped reservation frees its position.
+                let (_arrival, reservation) = coordinator.reserve(session_id);
+                let stop_signal = std::sync::Arc::clone(&stopped);
+                let session = session_id.to_string();
+                tokio::spawn(async move {
+                    let (read_half, mut write_half) = stream.into_split();
+                    let mut reader = BufReader::new(read_half).take(crate::ui_automation::MAX_REQUEST + 16);
+                    let mut request = String::new();
+                    let read = tokio::time::timeout(
                         Duration::from_secs(2),
-                        write_half.write_all(&payload),
+                        reader.read_line(&mut request),
                     ).await;
-                }
-                if should_stop {
-                    cleanup_linked_runtimes(session_id).await;
-                    return;
-                }
+                    if matches!(read, Ok(Ok(count)) if count > 0) && request.starts_with("ui ") && request.ends_with('\n') {
+                        ui::serve_ui(&request, &session, caller, reservation, &mut reader, &mut write_half).await;
+                        return;
+                    }
+                    drop(reservation);
+                    let mut should_stop = false;
+                    let response = if matches!(read, Ok(Ok(count)) if count > 0)
+                        && request.trim_end() == "status"
+                    {
+                        SessionKeeperIpcResponse {
+                            ok: true,
+                            session: crate::winboat::registered_client_sessions()
+                                .into_iter()
+                                .find(|registered| registered.session_id == session),
+                        }
+                    } else if matches!(read, Ok(Ok(count)) if count > 0)
+                        && request.trim_end() == "stop"
+                    {
+                        should_stop = crate::winboat::stop_registered_client(&session)
+                            .await
+                            .unwrap_or(false);
+                        SessionKeeperIpcResponse {
+                            ok: should_stop,
+                            session: None,
+                        }
+                    } else {
+                        SessionKeeperIpcResponse {
+                            ok: false,
+                            session: None,
+                        }
+                    };
+                    if let Ok(mut payload) = serde_json::to_vec(&response) {
+                        payload.push(b'\n');
+                        let _ = tokio::time::timeout(
+                            Duration::from_secs(2),
+                            write_half.write_all(&payload),
+                        ).await;
+                    }
+                    if should_stop {
+                        cleanup_linked_runtimes(&session).await;
+                        stop_signal.notify_one();
+                    }
+                });
+            }
+            _ = stopped.notified() => {
+                // Best-effort drain of in-flight UI jobs; each keeps its own
+                // bounded deadline, so this wait cannot hang the shutdown.
+                coordinator.wait_idle(tokio::time::Instant::now() + Duration::from_secs(3)).await;
+                return;
             }
             _ = observation.tick() => {
                 if crate::winboat::registered_session_ended(session_id) {
                     cleanup_linked_runtimes(session_id).await;
                     crate::winboat::disconnect_client(session_id);
+                    coordinator.wait_idle(tokio::time::Instant::now() + Duration::from_secs(3)).await;
                     return;
                 }
             }

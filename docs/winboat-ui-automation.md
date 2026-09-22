@@ -133,14 +133,22 @@ The existing `studio status` command remains the process/session inventory.
   and a 512 MiB process-memory ceiling. A hung UIA call cannot hang the parent
   Studio monitor. Release, crash, timeout and cancellation discard the worker;
   the next request lazily starts a fresh one. Studio and runtime are preserved.
-- The keeper serializes requests and holds VM use through the operation and
-  cancellation response. Conservative exclusive VM use also excludes other
-  cooperating UI/lifecycle requests. External controllers and older versions
-  do not participate in this advisory lock.
+- The keeper serves connections concurrently and coordinates them through a
+  per-session FIFO queue plus a desktop foreground scope (#152): safe tree and
+  capture observations may overlap, same-session state changes serialize in
+  accept order, and focus/keyboard actions exclude each other across the
+  whole interactive desktop even between separate windows or keepers.
+  Observations hold shared VM use; every state change or foreground action
+  holds exclusive VM use through the operation and its cancellation response.
+  See [winboat-ui-coordination.md](winboat-ui-coordination.md). External
+  controllers and older versions do not participate in this advisory lock.
 - Defaults: 15 s command budget; explicit 100–60,000 ms; 3,000 nodes, depth 48,
   16 windows, 256-character text fields, 8 MiB PNG, 16 MiB signed reply. Capture
   is limited to 4096×4096 and 8,388,608 pixels. UIA collection may return a
-  partial tree; querying a partial tree as complete is forbidden.
+  partial tree; querying a partial tree as complete is forbidden. A queued
+  request waits at most its own budget for coordination; the caller-visible
+  reply deadline is at most twice its timeout plus the cancellation-response
+  grace.
 - UI effects already dispatched before cancellation cannot be undone. Callers
   must inspect current state before retrying a mutation. Old keepers without UI
   support require an explicit Studio close/start; the CLI does not replace an
@@ -162,7 +170,8 @@ Errors use existing backend codes and exact path-free messages:
   `ui-no-interactive-desktop`, `ui-wrong-session`, `ui-stale-element`,
   `ui-ambiguous-element`, `ui-tree-truncated`, `ui-modal-blocked`,
   `ui-foreground-lost`, `ui-effect-unverified`, `ui-capture-failed`,
-  `ui-request-expired`, `ui-bridge-untrusted`, `ui-provider-failed`.
+  `ui-request-expired`, `ui-bridge-untrusted`, `ui-coordination-busy`
+  (retryable), `ui-provider-failed`.
 
 Known CLR exception types and signed HRESULTs are returned as bounded
 `uia:TYPE:CODE` diagnostic references. Exception messages, source, stack traces

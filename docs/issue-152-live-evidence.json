@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "1.0.0",
+  "issue": 152,
+  "title": "shared WinBoat helper UI coordination",
+  "environment": "Linux host + WinBoat VM, Studio 11.12.4, real session keeper",
+  "session": "studio-7700-639256353447687880",
+  "recordedAt": "2026-09-22T00:58:22Z",
+  "steps": [
+    {
+      "step": "short-wait-observation",
+      "command": "ui wait --condition running --timeout-ms 12000",
+      "wallSeconds": 12.62,
+      "ok": false,
+      "errorMessage": "ui-helper-timeout"
+    },
+    {
+      "step": "tree-queued-behind-wait",
+      "command": "ui tree",
+      "wallSeconds": 18.2,
+      "ok": true,
+      "errorMessage": null,
+      "note": "accepted while the 12 s wait held the session turn"
+    },
+    {
+      "step": "status-responsiveness",
+      "command": "studio status",
+      "wallSeconds": 0.3,
+      "ok": true,
+      "errorMessage": null
+    },
+    {
+      "step": "find-window",
+      "command": "ui find --role Window",
+      "wallSeconds": 9.64,
+      "ok": true,
+      "errorMessage": null
+    },
+    {
+      "step": "focus-first-desktop-class",
+      "command": "ui action --action focus",
+      "wallSeconds": 13.32,
+      "ok": false,
+      "errorMessage": "ui-foreground-lost"
+    },
+    {
+      "step": "focus-second-desktop-class",
+      "command": "ui action --action focus",
+      "wallSeconds": 7.9,
+      "ok": false,
+      "errorMessage": "ui-foreground-lost"
+    },
+    {
+      "step": "long-wait-caller-killed",
+      "command": "ui wait --timeout-ms 45000",
+      "wallSeconds": 0.0,
+      "ok": true,
+      "errorMessage": null,
+      "note": "caller EOF-cancelled mid-poll"
+    },
+    {
+      "step": "tree-after-caller-death",
+      "command": "ui tree",
+      "wallSeconds": 15.1,
+      "ok": true,
+      "errorMessage": null,
+      "note": "queue served the next arrival without waiting out the killed 45 s poll"
+    },
+    {
+      "step": "final-status",
+      "command": "studio status",
+      "wallSeconds": 0.13,
+      "ok": true,
+      "errorMessage": null
+    },
+    {
+      "step": "concurrent-trees-same-session",
+      "command": "ui tree x2 (A at t=0.0s, B at t=+0.3s)",
+      "wallSeconds": 6.2,
+      "ok": true,
+      "errorMessage": null,
+      "note": "A wall 6.20s; B wall 11.91s — B's extra wait matches A's turn exactly; both succeeded through one mailbox with no corruption"
+    },
+    {
+      "step": "focus-timing-observation",
+      "command": "ui action --action focus x2",
+      "wallSeconds": 13.32,
+      "ok": false,
+      "errorMessage": "ui-foreground-lost",
+      "note": "both bounded ui-foreground-lost (RemoteApp window not foreground); caller-side walls are not turn intervals, so ordering is proven by the fake queue tests and the additive waits above"
+    }
+  ],
+  "finalSessionCount": 1,
+  "outcome": {
+    "queueOrderObserved": true,
+    "treeQueuedAndSucceeded": true,
+    "adminResponsiveDuringUiJobs": true,
+    "callerDeathFreedQueueImmediately": true,
+    "sessionSurvivedAllObservationsAndFailures": true,
+    "finalSessionCount": 1,
+    "newRdpOrTeardownTriggeredByObservation": false,
+    "boundedReasonsObserved": [
+      "ui-helper-timeout",
+      "ui-foreground-lost",
+      "ui-coordination-busy (fake tests)"
+    ]
+  }
+}
