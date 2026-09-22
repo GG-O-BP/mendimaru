@@ -146,27 +146,39 @@ test("build flags and toolchain identity are part of the key", () => {
   );
 });
 
-test("runner image and architecture are part of the key", () => {
+test("runner OS, architecture, and native build tools are part of the key", () => {
   const objectId = stubObjectIds();
   const base = buildFingerprint({
     commit,
-    salt: ["runner-image=ubuntu24-20260901.1", "runner-arch=X64"],
+    salt: [
+      "runner-os=ubuntu24",
+      "runner-arch=X64",
+      "native-tools=GNU ld 2.45; gcc 15.2",
+    ],
     objectId,
   });
   assert.notEqual(
     base,
     buildFingerprint({
       commit,
-      salt: ["runner-image=ubuntu24-20260908.1", "runner-arch=X64"],
+      salt: [
+        "runner-os=ubuntu24",
+        "runner-arch=X64",
+        "native-tools=GNU ld 2.46; gcc 15.2",
+      ],
       objectId,
     }),
-    "a hosted-runner image update must invalidate native artifacts",
+    "a native linker update must invalidate native artifacts",
   );
   assert.notEqual(
     base,
     buildFingerprint({
       commit,
-      salt: ["runner-image=ubuntu24-20260901.1", "runner-arch=ARM64"],
+      salt: [
+        "runner-os=ubuntu24",
+        "runner-arch=ARM64",
+        "native-tools=GNU ld 2.45; gcc 15.2",
+      ],
       objectId,
     }),
     "a different runner architecture must invalidate native artifacts",

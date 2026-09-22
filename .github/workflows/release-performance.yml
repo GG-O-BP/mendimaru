@@ -102,14 +102,26 @@ jobs:
           if ! git cat-file -e "$MEASURED_COMMIT^{commit}" 2>/dev/null; then
             git fetch origin "$MEASURED_COMMIT" --depth=1
           fi
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            native_tools="$(
+              ld --version
+              cc --version
+              ldd --version
+            )"
+            native_tools="${native_tools//$'\r'/ }"
+            native_tools="${native_tools//$'\n'/ }"
+          else
+            native_tools="vs=${VisualStudioVersion:-unknown};vc=${VCToolsVersion:-unknown};sdk=${WindowsSDKVersion:-unknown}"
+          fi
           node scripts/perf/build-fingerprint.mjs \
             --commit "$MEASURED_COMMIT" \
             --salt "recipe=$BUILD_RECIPE" \
             --salt "rustc=$(rustc --version --verbose | tr '\n' ' ')" \
             --salt "node=22.22.2" \
             --salt "runner=${{ matrix.runner }}" \
-            --salt "runner-image=${ImageOS:-${RUNNER_OS:-unknown}}-${ImageVersion:-unknown}" \
+            --salt "runner-os=${ImageOS:-${RUNNER_OS:-unknown}}" \
             --salt "runner-arch=${RUNNER_ARCH:-unknown}" \
+            --salt "native-tools=$native_tools" \
             --github-output "$GITHUB_OUTPUT"
 
       # Keyed by build-input content rather than by commit, so a revision that
@@ -600,14 +612,16 @@ jobs:
           if ! git cat-file -e "$MEASURED_COMMIT^{commit}" 2>/dev/null; then
             git fetch origin "$MEASURED_COMMIT" --depth=1
           fi
+          native_tools="vs=${VisualStudioVersion:-unknown};vc=${VCToolsVersion:-unknown};sdk=${WindowsSDKVersion:-unknown}"
           node scripts/perf/build-fingerprint.mjs \
             --commit "$MEASURED_COMMIT" \
             --salt "recipe=$BUILD_RECIPE" \
             --salt "rustc=$(rustc --version --verbose | tr '\n' ' ')" \
             --salt "node=22.22.2" \
             --salt "runner=windows-latest" \
-            --salt "runner-image=${ImageOS:-${RUNNER_OS:-unknown}}-${ImageVersion:-unknown}" \
+            --salt "runner-os=${ImageOS:-${RUNNER_OS:-unknown}}" \
             --salt "runner-arch=${RUNNER_ARCH:-unknown}" \
+            --salt "native-tools=$native_tools" \
             --github-output "$GITHUB_OUTPUT"
 
       # Same content-keyed reuse as the WebView binaries, for both variants.

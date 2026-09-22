@@ -40,11 +40,14 @@ change them, not on a commit sha. The fingerprint covers `src`, `src-tauri`,
 `public`, `.cargo`, the frontend build inputs and every non-Node Tauri
 resource — including the bundled `scripts/browser-*.mjs`, which live outside
 `src-tauri` — together with the platform build recipe and the resolved `rustc`
-identity, hosted-runner image version, and runner architecture. A Tauri
-resource outside the repository fails the fingerprint step rather than being
-silently omitted. Budgets, schemas, `scripts/perf` and the workflow itself are
-deliberately excluded: they change what is measured, not what is built, and
-the relevance classifier above already forces the full suite to run for them.
+identity, runner OS and architecture, and the native linker/compiler/SDK
+identity. The broad hosted-runner image release is not used because GitHub can
+roll two image revisions across parallel matrix jobs even when their
+artifact-affecting toolchains are unchanged. A Tauri resource outside the
+repository fails the fingerprint step rather than being silently omitted.
+Budgets, schemas, `scripts/perf` and the workflow itself are deliberately
+excluded: they change what is measured, not what is built, and the relevance
+classifier above already forces the full suite to run for them.
 
 Caching both variants, rather than only the baseline, is what keeps the
 comparison honest. A sha-keyed baseline could restore a binary produced by an
