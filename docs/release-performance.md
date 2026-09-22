@@ -31,9 +31,54 @@ non-Node resources declared in `tauri.conf.json`.
 Skipped build and measurement matrix legs still publish their diagnostic
 `skip-reason.txt` artifacts, while required gate jobs remain green without
 installing dependencies or downloading those artifacts. Pushes to `main`,
-scheduled runs, and manual dispatch always measure in full. Any pull request
-that touches a measured input gets exactly the same matrix dimensions, sample
-counts, 300-second idle windows, and gates as before.
+scheduled runs, and manual dispatch always measure in full. A pull request that
+touches a measured input gets the same matrix dimensions, sample counts, and
+gates as before for every phase it still runs; which phases those are is
+defined by the split SLA below.
+
+## Split measurement SLA
+
+Pull-request checks and exhaustive performance measurement have separate
+wall-clock targets:
+
+| Scope                                                          | Target     |
+| -------------------------------------------------------------- | ---------- |
+| Pull-request required checks, first start to last completion   | 10 minutes |
+| Push to `main` and the weekly schedule, exhaustive performance | 15 minutes |
+
+Pull requests keep the candidate and baseline binary builds, the fingerprint
+cache, the full latency phase, and both the absolute and the relative gates,
+plus every functional, security, and packaging check.
+
+The 300-second idle window moves to push-to-`main`, the weekly schedule, and
+manual dispatch. It was the single largest item on the pull-request critical
+path: in run 35726346591 every idle leg measured 363 to 411 seconds while
+latency measured 132 to 149.
+
+Nothing about the measurement itself changes. The idle window is still 300
+seconds, the sample counts are unchanged, and `performance/budgets.idle.json`
+keeps the same thresholds, which are calibrated to a five-minute window and are
+`CODEOWNERS`-reviewed with `environmentOverridesAllowed: false`. Shortening the
+window instead would have required rescaling `privateMemoryGrowthBytes`,
+`workingSetGrowthBytes`, and `processCountGrowth`, re-collecting baselines
+across Linux and Windows for the executable, MSI, and NSIS package kinds, and
+versioning the sampling contract. Only the point at which a leak regression is
+detected moves, not the sensitivity with which it is detected.
+
+The whole `installed-bundle` suite defers rather than splitting, because
+`scripts/e2e/windows-bundle-smoke.ps1 -Performance` performs its seven
+install/launch/uninstall samples and its 300-second idle window in one
+inseparable pass. Packaging coverage on pull requests is unaffected: the
+`windows-bundle` job in `ci.yml` still builds, installs, launches, and
+uninstalls both the MSI and the NSIS installer on every pull request, using the
+same script without `-Performance`.
+
+The cost of this split is real and deliberate: an idle or leak regression no
+longer blocks the pull request that introduced it and is instead detected on
+`main`. A post-merge idle failure must therefore be treated as a revert
+candidate, and `changeControl.performanceFailureRerun` stays
+`preserve-original-failure` so the first failing result cannot be papered over
+by a re-run.
 
 Both measured binaries are cached on a fingerprint of the inputs that can
 change them, not on a commit sha. The fingerprint covers `src`, `src-tauri`,
@@ -89,8 +134,9 @@ CI registry shows it. The refresh stays.
 
 Baseline and candidate measurements run as parallel matrix jobs and a separate
 gate job compares the two reports, so the previous strictly sequential
-baseline-then-candidate schedule (including the two 300-second idle windows on
-pull requests) no longer doubles the wall time.
+baseline-then-candidate schedule no longer doubles the wall time. On the
+push-to-`main` and scheduled runs that carry the two 300-second idle windows,
+this parallelism is what keeps the exhaustive run inside its own budget.
 
 ## Fixtures and measurements
 
