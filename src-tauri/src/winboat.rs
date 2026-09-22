@@ -23,6 +23,7 @@ pub(crate) mod test_session;
 
 pub(crate) use asset_mirror::AssetMirrorServer;
 mod version_cache;
+mod vm_ports;
 pub(crate) mod vm_use;
 
 use crate::models::{AppConfig, StudioVersion};

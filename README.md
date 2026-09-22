@@ -20,7 +20,7 @@ Mendimaru is a Tauri GUI app for discovering, installing, launching, and removin
 - **Install queue**: Resume verified installer partials and queue multiple Studio Pro versions with reorder, cancel, retry, and restart recovery (see the [install queue guide](docs/install-queue.md))
 - **Settings**: Configure a native Windows workspace and optional portable Studio paths, or the WinBoat environment on Linux
 - **Portable Runtime**: Build with the project's exact MxBuild and run isolated, readiness-gated web apps on Windows or Linux
-- **WinBoat Run Locally**: Mirror a Windows guest Runtime to the same Linux `localhost` port with readiness and Compose rollback
+- **WinBoat Run Locally**: Mirror a Windows guest Runtime to the same Linux `localhost` port with readiness and Compose rollback; multiple projects may share one WinBoat VM with VM-wide port ownership (see the [multi-Runtime ownership guide](docs/winboat-multi-runtime.md))
 
 Mendimaru does not provide a dashboard, VM resource information, advanced download URLs, or manual build-number entry.
 

@@ -2342,7 +2342,7 @@ fn real_binary_never_reports_winboat_ready_before_http_responds() {
 
 #[cfg(unix)]
 #[test]
-fn real_binary_refuses_to_overwrite_a_concurrent_compose_edit_on_stop() {
+fn real_binary_stops_through_a_concurrent_compose_edit_without_losing_it() {
     let fixture = WinboatRuntimeFixture::new();
     let started = stdout_json(&fixture.run(&[
         "runtime",
@@ -2356,8 +2356,11 @@ fn real_binary_refuses_to_overwrite_a_concurrent_compose_edit_on_stop() {
     let session_id = started["runtimeSessionId"]
         .as_str()
         .expect("WinBoat Runtime session");
+    // A concurrent user edit adds a top-level key after Mendimaru wrote the
+    // managed mapping. The scoped stop must remove only the Runtime-owned
+    // forwarding and keep the rest of the file, including the edit.
     let mut compose = fs::read_to_string(&fixture.compose_path).expect("managed Compose");
-    compose.push_str("# concurrent-user-edit\n");
+    compose.push_str("x-concurrent-user-edit: retained\n");
     fs::write(&fixture.compose_path, &compose).expect("concurrent Compose edit");
 
     let stopped = fixture.run(&[
@@ -2369,13 +2372,20 @@ fn real_binary_refuses_to_overwrite_a_concurrent_compose_edit_on_stop() {
         "--timeout-seconds",
         "15",
     ]);
-    assert_eq!(
-        stderr_json(&stopped)["error"]["code"],
-        "runtime_compose_recovery_failed"
+    stdout_json(&stopped);
+    let final_compose = fs::read_to_string(&fixture.compose_path).expect("stopped Compose");
+    assert!(
+        final_compose.contains("x-concurrent-user-edit"),
+        "the concurrent edit must survive the scoped stop: {final_compose}"
     );
-    assert!(fs::read_to_string(&fixture.compose_path)
-        .expect("preserved concurrent Compose edit")
-        .contains("# concurrent-user-edit"));
+    let managed = format!(
+        "127.0.0.1:{}:{}/tcp",
+        fixture.runtime_port, fixture.runtime_port
+    );
+    assert!(
+        !final_compose.contains(&managed),
+        "the Runtime-owned forwarding must be removed: {final_compose}"
+    );
 }
 
 #[cfg(windows)]
