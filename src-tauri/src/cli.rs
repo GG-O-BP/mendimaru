@@ -111,12 +111,26 @@ enum CliCommand {
         winboat_use: bool,
         base_url: Option<String>,
         runtime_session_id: Option<String>,
+        shared_session_id: Option<String>,
         suite_path: String,
         asset_mirror: AssetMirrorPolicy,
         policy: BrowserTestPolicy,
     },
     BrowserArtifacts {
         session_id: String,
+    },
+    BrowserSessionPrepare {
+        runtime_session_id: String,
+        build_marker: Option<String>,
+        owns_runtime: bool,
+        finalize_stop: bool,
+    },
+    BrowserSessionFinalize {
+        shared_session_id: String,
+        timeout_ms: u64,
+    },
+    BrowserSessionStatus {
+        shared_session_id: String,
     },
     ProjectList,
     ProjectVersion {
@@ -158,6 +172,9 @@ impl CliCommand {
             Self::BrowserInstallChromium => "browser.install",
             Self::BrowserTest { .. } => "browser.test",
             Self::BrowserArtifacts { .. } => "browser.artifacts",
+            Self::BrowserSessionPrepare { .. } => "browser.session-prepare",
+            Self::BrowserSessionFinalize { .. } => "browser.session-finalize",
+            Self::BrowserSessionStatus { .. } => "browser.session-status",
             Self::ProjectList => "project.list",
             Self::ProjectVersion { .. } => "project.version",
             Self::OperationList => "operation.list",
@@ -562,7 +579,7 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
         (Some("browser"), None) => Some(
             "Usage: mendimaru browser COMMAND\n\
              \n\
-             Commands: doctor, install chromium, frontend-health, test, artifacts",
+             Commands: doctor, install chromium, frontend-health, test, session, artifacts",
         ),
         (Some("browser"), Some("frontend-health")) => Some(
             "Usage: mendimaru browser frontend-health (--base-url URL | --runtime-session-id ID)\n\
@@ -580,14 +597,28 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
              Installs the pinned Chromium browser used by browser tests.",
         ),
         (Some("browser"), Some("test")) => Some(
-            "Usage: mendimaru browser test (--base-url URL | --runtime-session-id ID)\n\
+            "Usage: mendimaru browser test (--base-url URL | --runtime-session-id ID | --shared-session-id ID)\n\
                     --suite-path SUITE_JSON [options]\n\
              \n\
              Options include --winboat-use (protect the configured VM with --base-url),\n\
              --build-marker FILE (updated on each WinBoat build), timeout controls, --record-video, --record-har,\n\
              --fail-on-console-error, --fail-on-network-failure,\n\
-             --asset-mirror auto|off (Runtime Studio targets only; off runs an unmodified browser),\n\
-             --max-artifact-mib, and --retention-runs. See browser-testing.md.",
+             --asset-mirror auto|off (Runtime and shared session Studio targets only; off runs an unmodified browser),\n\
+             --max-artifact-mib, and --retention-runs. A shared session target joins a\n\
+             prepared session with its recorded identity. See browser-testing.md.",
+        ),
+        (Some("browser"), Some("session")) => Some(
+            "Usage: mendimaru browser session prepare --runtime-session-id RUNTIME_SESSION_ID\n\
+                    [--build-marker FILE] [--owns-runtime] [--finalize-policy keep|stop]\n\
+             Usage: mendimaru browser session finalize --shared-session-id SHARED_SESSION_ID\n\
+                    [--timeout-ms MILLISECONDS]\n\
+             Usage: mendimaru browser session status --shared-session-id SHARED_SESSION_ID\n\
+             \n\
+             prepare records the stabilized Runtime/Studio identity under shared VM use.\n\
+             --finalize-policy stop also requires --owns-runtime; attaching to a\n\
+             user-started Runtime never stops it. finalize waits bounded for\n\
+             participants, then applies the recorded policy exactly once. status\n\
+             reports the recorded state and live participation. Linux WinBoat only.",
         ),
         (Some("browser"), Some("artifacts")) => Some(
             "Usage: mendimaru browser artifacts --session-id BROWSER_SESSION_ID\n\
@@ -703,6 +734,9 @@ Commands:
   browser doctor                  Check the browser test toolchain
   browser install chromium        Install the pinned Chromium test browser
   browser test [...]              Run a browser test suite
+  browser session prepare [...]   Prepare a shared browser test session
+  browser session finalize [...]  Finalize a shared browser test session
+  browser session status [...]    Report a shared browser test session
   browser artifacts --session-id ID
                                     Export retained browser test artifacts
   project list                    List projects in the configured workspace
@@ -737,7 +771,10 @@ async fn run_command(
         CliCommand::BrowserDoctor
         | CliCommand::BrowserInstallChromium
         | CliCommand::BrowserTest { .. }
-        | CliCommand::BrowserFrontendHealth { .. } => Some(CapabilityId::BrowserTest),
+        | CliCommand::BrowserFrontendHealth { .. }
+        | CliCommand::BrowserSessionPrepare { .. }
+        | CliCommand::BrowserSessionFinalize { .. }
+        | CliCommand::BrowserSessionStatus { .. } => Some(CapabilityId::BrowserTest),
         CliCommand::BrowserArtifacts { .. } => Some(CapabilityId::BrowserArtifacts),
         _ => None,
     };
@@ -793,6 +830,7 @@ async fn run_command(
         CliCommand::BrowserTest {
             base_url: Some(base_url),
             runtime_session_id: None,
+            shared_session_id: None,
             build_marker,
             winboat_use,
             suite_path,
@@ -833,6 +871,11 @@ async fn run_command(
                 capability_snapshot.manifest.backend,
                 session_id,
             )?);
+        }
+        CliCommand::BrowserSessionStatus { shared_session_id } => {
+            return CommandOutput::data(
+                crate::application::browser_session_status(shared_session_id).await?,
+            );
         }
         _ => {}
     }
@@ -1081,6 +1124,7 @@ async fn run_command(
         CliCommand::BrowserTest {
             base_url: None,
             runtime_session_id: Some(runtime_session_id),
+            shared_session_id: None,
             build_marker,
             winboat_use: _,
             suite_path,
@@ -1097,8 +1141,64 @@ async fn run_command(
             )
             .await?,
         ),
+        CliCommand::BrowserTest {
+            base_url: None,
+            runtime_session_id: None,
+            shared_session_id: Some(shared_session_id),
+            build_marker: _,
+            winboat_use: _,
+            suite_path,
+            asset_mirror,
+            policy,
+        } => {
+            let mut output = CommandOutput::data(
+                crate::application::browser_test_shared_session(
+                    &config,
+                    shared_session_id,
+                    suite_path,
+                    *asset_mirror,
+                    policy.clone(),
+                )
+                .await?,
+            )?;
+            output.runtime_session_id = Some(shared_session_id.clone());
+            Ok(output)
+        }
         CliCommand::BrowserTest { .. } => {
             unreachable!("browser test target invariant was validated")
+        }
+        CliCommand::BrowserSessionPrepare {
+            runtime_session_id,
+            build_marker,
+            owns_runtime,
+            finalize_stop,
+        } => {
+            let descriptor = crate::application::browser_session_prepare(
+                &config,
+                runtime_session_id,
+                build_marker.as_deref(),
+                *owns_runtime,
+                *finalize_stop,
+            )
+            .await?;
+            let mut output = CommandOutput::data(descriptor)?;
+            output.runtime_session_id = Some(runtime_session_id.clone());
+            Ok(output)
+        }
+        CliCommand::BrowserSessionFinalize {
+            shared_session_id,
+            timeout_ms,
+        } => {
+            let report = crate::application::browser_session_finalize(
+                &config,
+                shared_session_id,
+                Duration::from_millis(*timeout_ms),
+            )
+            .await?;
+            CommandOutput::data(report)
+        }
+        CliCommand::BrowserSessionStatus { .. } => {
+            unreachable!("handled without configuration")
         }
         CliCommand::BrowserArtifacts { .. } => unreachable!("handled without configuration"),
         CliCommand::ProjectList => CommandOutput::data(crate::application::projects(&config)?),
@@ -2186,6 +2286,94 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
         {
             Ok(CliCommand::BrowserInstallChromium)
         }
+        Some("session") => match values.get(1).map(String::as_str) {
+            Some("prepare") => {
+                let (options, flags) = parse_options(
+                    &values[2..],
+                    &[
+                        "--runtime-session-id",
+                        "--build-marker",
+                        "--finalize-policy",
+                    ],
+                    &["--owns-runtime"],
+                )?;
+                let runtime_session_id =
+                    options
+                        .get("--runtime-session-id")
+                        .cloned()
+                        .ok_or_else(|| {
+                            BackendError::invalid_request("--runtime-session-id is required")
+                        })?;
+                if !runtime_session_id.starts_with("runtime_")
+                    || runtime_session_id.len() != 40
+                    || !runtime_session_id[8..]
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                {
+                    return Err(BackendError::invalid_request("invalid Runtime session ID"));
+                }
+                let finalize_stop = match options.get("--finalize-policy").map(String::as_str) {
+                    None => false,
+                    Some("keep") => false,
+                    Some("stop") => true,
+                    _ => {
+                        return Err(BackendError::invalid_request(
+                            "--finalize-policy must be keep or stop",
+                        ))
+                    }
+                };
+                let owns_runtime = flags.contains("--owns-runtime");
+                if finalize_stop && !owns_runtime {
+                    return Err(BackendError::invalid_request(
+                        "--finalize-policy stop requires --owns-runtime; attach-only sessions never stop the Runtime",
+                    ));
+                }
+                Ok(CliCommand::BrowserSessionPrepare {
+                    runtime_session_id,
+                    build_marker: options.get("--build-marker").cloned(),
+                    owns_runtime,
+                    finalize_stop,
+                })
+            }
+            Some("finalize") => {
+                let (options, _) =
+                    parse_options(&values[2..], &["--shared-session-id", "--timeout-ms"], &[])?;
+                let shared_session_id =
+                    options.get("--shared-session-id").cloned().ok_or_else(|| {
+                        BackendError::invalid_request("--shared-session-id is required")
+                    })?;
+                if !valid_shared_session_id(&shared_session_id) {
+                    return Err(BackendError::invalid_request(
+                        "invalid shared browser session ID",
+                    ));
+                }
+                let timeout_ms = options
+                    .get("--timeout-ms")
+                    .map(|value| parse_finalize_drain_timeout(value))
+                    .transpose()?
+                    .unwrap_or(DEFAULT_SHARED_FINALIZE_DRAIN_MS);
+                Ok(CliCommand::BrowserSessionFinalize {
+                    shared_session_id,
+                    timeout_ms,
+                })
+            }
+            Some("status") => {
+                let (options, _) = parse_options(&values[2..], &["--shared-session-id"], &[])?;
+                let shared_session_id =
+                    options.get("--shared-session-id").cloned().ok_or_else(|| {
+                        BackendError::invalid_request("--shared-session-id is required")
+                    })?;
+                if !valid_shared_session_id(&shared_session_id) {
+                    return Err(BackendError::invalid_request(
+                        "invalid shared browser session ID",
+                    ));
+                }
+                Ok(CliCommand::BrowserSessionStatus { shared_session_id })
+            }
+            _ => Err(BackendError::invalid_request(
+                "expected browser session prepare, finalize, or status",
+            )),
+        },
         Some("artifacts") => Ok(CliCommand::BrowserArtifacts {
             session_id: required_option(&values[1..], "--session-id")?,
         }),
@@ -2195,6 +2383,7 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
                 &[
                     "--base-url",
                     "--runtime-session-id",
+                    "--shared-session-id",
                     "--suite-path",
                     "--build-marker",
                     "--asset-mirror",
@@ -2214,15 +2403,27 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
             )?;
             let base_url = options.get("--base-url").cloned();
             let runtime_session_id = options.get("--runtime-session-id").cloned();
-            if base_url.is_some() == runtime_session_id.is_some() {
+            let shared_session_id = options.get("--shared-session-id").cloned();
+            let targets = [&base_url, &runtime_session_id, &shared_session_id]
+                .iter()
+                .filter(|target| target.is_some())
+                .count();
+            if targets != 1 {
                 return Err(BackendError::invalid_request(
-                    "exactly one of --base-url or --runtime-session-id is required",
+                    "exactly one of --base-url, --runtime-session-id, or --shared-session-id is required",
                 ));
+            }
+            if let Some(id) = shared_session_id.as_deref() {
+                if !valid_shared_session_id(id) {
+                    return Err(BackendError::invalid_request(
+                        "invalid shared browser session ID",
+                    ));
+                }
             }
             let winboat_use = flags.contains("--winboat-use");
             if winboat_use && base_url.is_none() {
                 return Err(BackendError::invalid_request(
-                    "--winboat-use requires --base-url; Runtime targets acquire use automatically",
+                    "--winboat-use requires --base-url; Runtime and shared session targets acquire use automatically",
                 ));
             }
             let asset_mirror = match options.get("--asset-mirror").map(String::as_str) {
@@ -2237,7 +2438,7 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
             };
             if options.contains_key("--asset-mirror") && base_url.is_some() {
                 return Err(BackendError::invalid_request(
-                    "--asset-mirror requires --runtime-session-id; --base-url never mirrors assets",
+                    "--asset-mirror requires --runtime-session-id or --shared-session-id; --base-url never mirrors assets",
                 ));
             }
             let policy = BrowserTestPolicy {
@@ -2278,6 +2479,7 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
                 ));
             }
             Ok(CliCommand::BrowserTest {
+                shared_session_id,
                 build_marker,
                 winboat_use,
                 base_url,
@@ -2502,6 +2704,29 @@ fn parse_timeout(value: &str) -> Result<u64, BackendError> {
         .filter(|seconds| (1..=MAX_TIMEOUT_SECONDS).contains(seconds))
         .ok_or_else(|| {
             BackendError::invalid_request("timeout must be an integer from 1 through 3600")
+        })
+}
+
+const DEFAULT_SHARED_FINALIZE_DRAIN_MS: u64 = 60_000;
+
+fn valid_shared_session_id(value: &str) -> bool {
+    value.len() == 39
+        && value.strip_prefix("shared_").is_some_and(|suffix| {
+            suffix
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        })
+}
+
+fn parse_finalize_drain_timeout(value: &str) -> Result<u64, BackendError> {
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|milliseconds| (0..=3_600_000).contains(milliseconds))
+        .ok_or_else(|| {
+            BackendError::invalid_request(
+                "finalize drain timeout must be an integer from 0 through 3600000 milliseconds",
+            )
         })
 }
 
@@ -2782,6 +3007,20 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
             | crate::winboat::vm_use::UNTRUSTED
             | crate::winboat::vm_use::UPGRADE),
         ) => message,
+        #[cfg(target_os = "linux")]
+        (
+            BackendErrorCode::PreconditionFailed,
+            Some(BackendId::LinuxWinboat),
+            Some(CapabilityId::BrowserTest),
+            message @ (crate::winboat::test_session::STILL_PREPARING
+            | crate::winboat::test_session::FINALIZING
+            | crate::winboat::test_session::FINALIZED
+            | crate::winboat::test_session::WRONG_VM
+            | crate::winboat::test_session::FINALIZE_BUSY
+            | crate::winboat::test_session::DRAINED_TIMEOUT
+            | crate::winboat::test_session::UNTRUSTED
+            | crate::application::BROWSER_SESSION_NO_OWNERSHIP),
+        ) => message,
         (_, Some(BackendId::LinuxWinboat), Some(capability), message)
             if matches!(
                 capability,
@@ -3031,6 +3270,10 @@ mod tests {
             vec!["browser", "doctor"],
             vec!["browser", "install"],
             vec!["browser", "test"],
+            vec!["browser", "session"],
+            vec!["browser", "session", "prepare"],
+            vec!["browser", "session", "finalize"],
+            vec!["browser", "session", "status"],
             vec!["browser", "artifacts"],
             vec!["project"],
             vec!["project", "list"],
@@ -3884,5 +4127,7 @@ mod tests {
     }
 }
 
+#[cfg(all(test, target_os = "linux"))]
+mod browser_session_tests;
 #[cfg(all(test, target_os = "linux"))]
 mod runtime_stop_tests;

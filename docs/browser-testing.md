@@ -479,6 +479,23 @@ Lifecycle changes return a bounded, retryable busy precondition while tests hold
 use. See [VM use policy and boundaries](winboat-vm-use.md) for modes, timeout and
 cancellation, generations, and the advisory trust boundary.
 
+## Shared test sessions (#151)
+
+`browser session prepare` records a readiness-verified Runtime identity once;
+`browser test --shared-session-id` then joins it. Workers inherit the recorded
+Runtime/Studio identity and stabilized ready state instead of re-running
+discovery, so attaching opens no metadata path and no RDP connection. Each
+worker's success, failure, cancellation, or crash cleans only its own browser,
+context, artifacts, and participation — never the Studio session, keeper, or
+VM. The last participant leaving triggers nothing by itself: cleanup happens
+only when the owner runs `browser session finalize`, which waits bounded for
+live participants and applies the recorded policy exactly once. A stop at
+finalize requires the explicit prepare-time `--owns-runtime` claim; sessions
+that attached to a user-started Runtime keep it running. Participation
+liveness is kernel lock ownership, not a reference count or RDP state. See
+[headless CLI](headless-cli.md#shared-browser-test-sessions-151) for the full
+state, recovery, and race contract.
+
 ## Browser environment change evidence (#154)
 
 WinBoat browser runs now record bounded environment observations and interrupt on

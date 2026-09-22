@@ -3,10 +3,12 @@
 Linux WinBoat browser tests can protect the VM for the **whole command**, including
 metadata lookup, browser startup, suite execution, and artifact collection. A
 lifecycle operation must obtain exclusive use before changing Compose, recreating
-the container, or recovering UEFI. This is the foundation from #150; session
-participation/cleanup ownership (#151), UI arbitration (#152), multi-project
-ownership (#153), and the parallel suite runner
-(#155) remain separate work. [Environment change observation](browser-environment-observation.md)
+the container, or recovering UEFI. This is the foundation from #150. Session participation and cleanup
+ownership (#151) now builds on it — `browser session prepare/finalize` and
+`browser test --shared-session-id` hold shared use, and a finalize stop takes
+exclusive use through the normal Runtime stop path. UI arbitration (#152),
+multi-project ownership (#153), and the parallel suite runner (#155) remain
+separate work. [Environment change observation](browser-environment-observation.md)
 now supplies retrospective evidence for #154.
 
 ## Using it

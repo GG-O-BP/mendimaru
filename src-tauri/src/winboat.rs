@@ -19,6 +19,7 @@ mod staging;
 pub(crate) mod startup;
 mod startup_diagnostics;
 mod studio;
+pub(crate) mod test_session;
 
 pub(crate) use asset_mirror::AssetMirrorServer;
 mod version_cache;

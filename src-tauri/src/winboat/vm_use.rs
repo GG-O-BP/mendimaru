@@ -68,6 +68,11 @@ pub(crate) async fn acquire_for(
 }
 
 #[cfg(target_os = "linux")]
+pub(crate) fn vm_key(config: &AppConfig) -> Result<String, &'static str> {
+    linux::key(config)
+}
+
+#[cfg(target_os = "linux")]
 pub(crate) struct Observation {
     key: String,
     file: std::fs::File,
@@ -141,7 +146,7 @@ mod linux {
         Ok(ProcessIdentity { pid, start })
     }
 
-    fn key(config: &AppConfig) -> Result<String, &'static str> {
+    pub(super) fn key(config: &AppConfig) -> Result<String, &'static str> {
         let name = &config.container_name;
         if name.is_empty()
             || name.len() > 255
