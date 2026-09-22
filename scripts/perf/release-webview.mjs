@@ -231,14 +231,19 @@ try {
   const before = await driver.snapshot();
   let previous = before;
   let peak = { ...before };
+  const idleSamplingStarted = performance.now();
+  let previousSampleFinished = idleSamplingStarted;
+  const idleSampleMilliseconds = sampling.idleSampleSeconds * 1000;
   const idleSamples = Math.ceil(
     sampling.idleWindowSeconds / sampling.idleSampleSeconds,
   );
   for (let sample = 0; sample < idleSamples; sample += 1) {
-    const windowStarted = performance.now();
-    await delay(sampling.idleSampleSeconds * 1000);
+    await delayUntil(
+      idleSamplingStarted + (sample + 1) * idleSampleMilliseconds,
+    );
     const current = await driver.snapshot();
-    const elapsedSeconds = (performance.now() - windowStarted) / 1000;
+    const sampleFinished = performance.now();
+    const elapsedSeconds = (sampleFinished - previousSampleFinished) / 1000;
     idleCpuPercent.push(
       normalizedCpuPercent({
         beforeCpuSeconds: previous.cpuSeconds,
@@ -252,6 +257,7 @@ try {
     processCount.push(current.processCount);
     peak = maximumSnapshot(peak, current);
     previous = current;
+    previousSampleFinished = sampleFinished;
     if ((sample + 1) % 12 === 0) {
       process.stdout.write(
         `release performance idle sample ${sample + 1}/${idleSamples}\n`,
@@ -451,6 +457,12 @@ async function waitFor(action, timeoutMs, label) {
   throw new Error(
     `timed out waiting for ${label}${lastError ? `: ${lastError.message}` : ""}`,
   );
+}
+
+async function delayUntil(deadline) {
+  while (performance.now() < deadline) {
+    await delay(Math.max(1, Math.ceil(deadline - performance.now())));
+  }
 }
 
 function maximumSnapshot(left, right) {

@@ -19,15 +19,27 @@ ordinary release bundles.
 ## Measurement relevance on pull requests
 
 On pull requests the workflow first asks whether the commit can change the
-measured artifacts at all. If no path under `src-tauri`, `src`, `scripts`,
-`tests`, `performance`, the build configuration files, or the workflow itself
-changed since the pull request base, the measurement, builds, and gates are
-skipped for that push and the job records a `skip-reason.txt` artifact instead.
-This keeps the required check green without spending 20–30 minutes per runner
-re-measuring binaries that are bit-for-bit inputs of `main`. Pushes to `main`,
-scheduled runs, and manual dispatch always measure in full, and any pull
-request that does touch a measured path gets exactly the same full measurement
-as before.
+measured artifacts or their measurement contract at all. Product sources,
+Tauri sources and packaged resources, build inputs, `scripts/perf`, the
+installed-bundle smoke harness, performance policies and schemas, and the
+workflow itself trigger the full suite. Unrelated automation such as
+`scripts/aur`, functional-test fixtures, documentation, lint configuration, and
+other workflows use the fast skip path. The classifier is shared by every
+build, measurement, and gate job and is covered by unit tests, including all
+non-Node resources declared in `tauri.conf.json`.
+
+Skipped build and measurement matrix legs still publish their diagnostic
+`skip-reason.txt` artifacts, while required gate jobs remain green without
+installing dependencies or downloading those artifacts. Pushes to `main`,
+scheduled runs, and manual dispatch always measure in full. Any pull request
+that touches a measured input gets exactly the same matrix dimensions, sample
+counts, 300-second idle windows, and gates as before.
+
+Release-build caches retain workspace-crate outputs as well as dependencies.
+Cargo still validates its normal source and configuration fingerprints before
+reusing an output, so unchanged application code avoids a redundant release
+link while product changes rebuild normally. The cache key is versioned
+separately from older dependency-only entries.
 
 Baseline and candidate measurements run as parallel matrix jobs and a separate
 gate job compares the two reports, so the previous strictly sequential
@@ -70,6 +82,19 @@ The common metric meanings are:
   `processCountGrowth`: positive end-minus-start leak signals from that same
   window. Negative deltas are retained in `resources.delta` but become zero for
   the upper-bound leak metric.
+
+Idle samples use fixed five-second deadlines. Snapshot collection time is part
+of each CPU interval and is subtracted from the next sleep instead of being
+added after every interval. This retains sixty observations covering at least
+300 seconds while avoiding an extra minute of PowerShell process-enumeration
+overhead on hosted Windows.
+
+Linux runs Xvfb inside a private D-Bus session because WebKitGTK desktop
+services expect a session bus even on a hosted headless runner. Launch-stage
+timing keeps WebKitWebDriver `POST /session`, the explicit ready-shell wait, and
+process discovery separately attributable. The ready-shell assertion still
+defines the end of every startup sample; no WebDriver response alone is treated
+as application readiness.
 
 Windows MSI and NSIS runs use the same cold/warm definition, repeat count, idle
 window, process-tree scope, and resource meanings. Application data and WebView2

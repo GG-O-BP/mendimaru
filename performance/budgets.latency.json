@@ -27,6 +27,10 @@
       {
         "source": "Main runs 33919703993 and 33925549585: Linux release navigation p95 missed its relative gate by 3.441 ms and 21.326 ms respectively on unrelated test-only changes",
         "recordedAt": "2026-09-04T23:01:35Z"
+      },
+      {
+        "source": "Issue #176 runs 35697751425 and 35703788546: unpacking the AppImage once and requesting pageLoadStrategy none both left Linux cold/warm startup near 32 seconds; launch-stage instrumentation isolated 17.9-32.4 seconds inside hosted WebKitWebDriver POST /session while the explicit shell wait took 0.5-1.1 seconds",
+        "recordedAt": "2026-09-22T08:10:00Z"
       }
     ]
   },
@@ -65,13 +69,13 @@
               "statistic": "p95",
               "absoluteMax": 40000,
               "relativeMaxPercent": 20,
-              "rationale": "The hosted Linux AppImage fallback measured 31.40 to 31.47 seconds; 40 seconds preserves bounded runner headroom while remaining far below the former 120 second debug timeout."
+              "rationale": "Hosted Linux custom-binary WebKitWebDriver spends 17.9 to 32.4 seconds inside POST /session before the explicit application-shell wait, while AppImage extraction mode and the standard pageLoadStrategy capability do not change the plateau. The workflow now supplies the desktop session bus expected by WebKitGTK and keeps launch-stage timing visible. The 40 second absolute rail remains unchanged until corrected hosted evidence is reviewed; the same-host 20 percent comparison is the working regression gate."
             },
             "warmStartupMs": {
               "statistic": "p95",
               "absoluteMax": 40000,
               "relativeMaxPercent": 20,
-              "rationale": "The hosted AppImage launch path still performs fallback package extraction on warm runs, so its measured 31.46 to 31.68 seconds receives the same 40 second safety ceiling."
+              "rationale": "Warm startup shares the same hosted WebKitWebDriver POST /session plateau as cold startup even though the following explicit shell wait is only 0.5 to 1.1 seconds. The workflow supplies a desktop session bus without changing the ready-shell condition, sample count, or cache semantics. The unchanged 40 second safety rail will be tightened only after corrected hosted evidence is available."
             },
             "firstIpcMs": {
               "statistic": "p95",

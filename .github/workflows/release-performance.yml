@@ -64,27 +64,22 @@ jobs:
         id: relevance
         shell: bash
         run: |
-          relevant=false
           if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            relevant=true
-          else
-            base="${{ steps.revisions.outputs.baseline }}"
-            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              git fetch origin "$base" --depth=1
-            fi
-            if git diff --name-only "$base" HEAD -- \
-              'src-tauri' 'src' 'scripts' 'tests' 'performance' \
-              'package.json' 'package-lock.json' 'vite.config.ts' \
-              'tsconfig.json' 'tsconfig.node.json' 'index.html' \
-              '.github/workflows/release-performance.yml' | grep -q .; then
-              relevant=true
-            fi
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Measured-artifact relevance: true (non-PR run)"
+            exit 0
           fi
-          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
-          echo "Measured-artifact relevance: $relevant"
+          base="${{ steps.revisions.outputs.baseline }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch origin "$base" --depth=1
+          fi
+          node scripts/perf/release-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Cache the built baseline binary
-        if: matrix.variant == 'baseline'
+        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true'
         id: baseline-binary
         uses: actions/cache@v6
         with:
@@ -148,6 +143,8 @@ jobs:
         with:
           workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
           shared-key: release-performance-${{ matrix.platform }}-${{ matrix.variant }}
+          key: workspace-crates-v1
+          cache-workspace-crates: true
 
       - name: Install dependencies
         if: steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
@@ -269,24 +266,19 @@ jobs:
         id: relevance
         shell: bash
         run: |
-          relevant=false
           if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            relevant=true
-          else
-            base="${{ steps.revisions.outputs.baseline }}"
-            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              git fetch origin "$base" --depth=1
-            fi
-            if git diff --name-only "$base" HEAD -- \
-              'src-tauri' 'src' 'scripts' 'tests' 'performance' \
-              'package.json' 'package-lock.json' 'vite.config.ts' \
-              'tsconfig.json' 'tsconfig.node.json' 'index.html' \
-              '.github/workflows/release-performance.yml' | grep -q .; then
-              relevant=true
-            fi
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Measured-artifact relevance: true (non-PR run)"
+            exit 0
           fi
-          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
-          echo "Measured-artifact relevance: $relevant"
+          base="${{ steps.revisions.outputs.baseline }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch origin "$base" --depth=1
+          fi
+          node scripts/perf/release-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
@@ -349,6 +341,7 @@ jobs:
             fi
           done
           test -x "$chrome_path"
+          command -v dbus-run-session >/dev/null
           export MENDIMARU_CHROME_PATH="$chrome_path"
           variants=(${{ matrix.variant }})
           if [[ "${{ matrix.phase }}" == "latency" ]]; then variants=(baseline candidate); fi
@@ -360,7 +353,8 @@ jobs:
             if [[ "$variant" == "candidate" ]]; then
               commit="${{ steps.revisions.outputs.candidate }}"
             fi
-            xvfb-run --auto-servernum node scripts/perf/release-webview.mjs \
+            dbus-run-session -- xvfb-run --auto-servernum \
+              node scripts/perf/release-webview.mjs \
               --application "$application" \
               --report "artifacts/e2e/release-performance/${{ matrix.platform }}-$variant-${{ matrix.phase }}.json" \
               --commit "$commit" \
@@ -434,17 +428,55 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Resolve measured revisions
+        id: revisions
+        shell: bash
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          candidate="$(git rev-parse HEAD)"
+          if [[ -n "$PULL_REQUEST_BASE_SHA" ]]; then
+            baseline="$PULL_REQUEST_BASE_SHA"
+          else
+            baseline="$(git rev-parse HEAD^)"
+          fi
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether measured artifacts can change
+        id: relevance
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Measured-artifact relevance: true (non-PR run)"
+            exit 0
+          fi
+          base="${{ steps.revisions.outputs.baseline }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch origin "$base" --depth=1
+          fi
+          node scripts/perf/release-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
+        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
           cache: npm
 
       - name: Install dependencies
+        if: steps.relevance.outputs.relevant == 'true'
         run: npm ci
 
       - name: Download measurement reports
+        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/download-artifact@v7
         with:
           pattern: webview-report-${{ matrix.platform }}-*
@@ -452,28 +484,26 @@ jobs:
           path: reports
 
       - name: Gate the latency phase against current main
+        if: steps.relevance.outputs.relevant == 'true'
         shell: bash
         run: |
-          if [[ -f reports/skip-reason.txt ]]; then
-            echo "Measurement skipped for this push:"
-            cat reports/skip-reason.txt
-            exit 0
-          fi
           node scripts/perf/performance-gate.mjs \
             "reports/${{ matrix.platform }}-candidate-latency.json" \
             "reports/${{ matrix.platform }}-baseline-latency.json" \
             performance/budgets.latency.json
 
       - name: Gate the idle phase against current main
+        if: steps.relevance.outputs.relevant == 'true'
         shell: bash
         run: |
-          if [[ -f reports/skip-reason.txt ]]; then
-            exit 0
-          fi
           node scripts/perf/performance-gate.mjs \
             "reports/${{ matrix.platform }}-candidate-idle.json" \
             "reports/${{ matrix.platform }}-baseline-idle.json" \
             performance/budgets.idle.json
+
+      - name: Record skipped gate
+        if: steps.relevance.outputs.relevant != 'true'
+        run: echo "Release WebView gate skipped because measured inputs are unchanged."
 
   installed-bundle-build:
     name: Build installers (${{ matrix.variant }})
@@ -510,27 +540,22 @@ jobs:
         id: relevance
         shell: bash
         run: |
-          relevant=false
           if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            relevant=true
-          else
-            base="${{ steps.revisions.outputs.baseline }}"
-            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              git fetch origin "$base" --depth=1
-            fi
-            if git diff --name-only "$base" HEAD -- \
-              'src-tauri' 'src' 'scripts' 'tests' 'performance' \
-              'package.json' 'package-lock.json' 'vite.config.ts' \
-              'tsconfig.json' 'tsconfig.node.json' 'index.html' \
-              '.github/workflows/release-performance.yml' | grep -q .; then
-              relevant=true
-            fi
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Measured-artifact relevance: true (non-PR run)"
+            exit 0
           fi
-          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
-          echo "Measured-artifact relevance: $relevant"
+          base="${{ steps.revisions.outputs.baseline }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch origin "$base" --depth=1
+          fi
+          node scripts/perf/release-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Cache the built baseline installers
-        if: matrix.variant == 'baseline'
+        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true'
         id: baseline-installers
         uses: actions/cache@v6
         with:
@@ -562,6 +587,8 @@ jobs:
         with:
           workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
           shared-key: release-performance-windows-bundles-${{ matrix.variant }}
+          key: workspace-crates-v1
+          cache-workspace-crates: true
 
       - name: Install dependencies
         if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
@@ -651,24 +678,19 @@ jobs:
         id: relevance
         shell: bash
         run: |
-          relevant=false
           if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            relevant=true
-          else
-            base="${{ steps.revisions.outputs.baseline }}"
-            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              git fetch origin "$base" --depth=1
-            fi
-            if git diff --name-only "$base" HEAD -- \
-              'src-tauri' 'src' 'scripts' 'tests' 'performance' \
-              'package.json' 'package-lock.json' 'vite.config.ts' \
-              'tsconfig.json' 'tsconfig.node.json' 'index.html' \
-              '.github/workflows/release-performance.yml' | grep -q .; then
-              relevant=true
-            fi
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Measured-artifact relevance: true (non-PR run)"
+            exit 0
           fi
-          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
-          echo "Measured-artifact relevance: $relevant"
+          base="${{ steps.revisions.outputs.baseline }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch origin "$base" --depth=1
+          fi
+          node scripts/perf/release-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
         if: steps.relevance.outputs.relevant == 'true'
@@ -775,17 +797,55 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Resolve measured revisions
+        id: revisions
+        shell: bash
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          candidate="$(git rev-parse HEAD)"
+          if [[ -n "$PULL_REQUEST_BASE_SHA" ]]; then
+            baseline="$PULL_REQUEST_BASE_SHA"
+          else
+            baseline="$(git rev-parse HEAD^)"
+          fi
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether measured artifacts can change
+        id: relevance
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Measured-artifact relevance: true (non-PR run)"
+            exit 0
+          fi
+          base="${{ steps.revisions.outputs.baseline }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch origin "$base" --depth=1
+          fi
+          node scripts/perf/release-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
+        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
           cache: npm
 
       - name: Install dependencies
+        if: steps.relevance.outputs.relevant == 'true'
         run: npm ci
 
       - name: Download measurement reports
+        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/download-artifact@v7
         with:
           pattern: installed-bundle-report-*
@@ -793,25 +853,23 @@ jobs:
           path: reports
 
       - name: Gate MSI against current main
+        if: steps.relevance.outputs.relevant == 'true'
         shell: bash
         run: |
-          if [[ -f reports/skip-reason.txt ]]; then
-            echo "Measurement skipped for this push:"
-            cat reports/skip-reason.txt
-            exit 0
-          fi
           node scripts/perf/performance-gate.mjs \
             reports/candidate-msi.json \
             reports/baseline-msi.json \
             performance/budgets.bundle.json
 
       - name: Gate NSIS against current main
+        if: steps.relevance.outputs.relevant == 'true'
         shell: bash
         run: |
-          if [[ -f reports/skip-reason.txt ]]; then
-            exit 0
-          fi
           node scripts/perf/performance-gate.mjs \
             reports/candidate-nsis.json \
             reports/baseline-nsis.json \
             performance/budgets.bundle.json
+
+      - name: Record skipped gate
+        if: steps.relevance.outputs.relevant != 'true'
+        run: echo "Installed bundle gate skipped because measured inputs are unchanged."
