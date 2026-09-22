@@ -588,6 +588,19 @@ jobs:
         if: steps.relevance.outputs.relevant != 'true'
         run: echo "Release WebView gate skipped because measured inputs are unchanged."
 
+      # The gate writes its own verdict back into the candidate report. Publishing
+      # it lets the post-merge safety net quote that verdict instead of
+      # re-deriving one from the budgets, which would let the filed issue and the
+      # gate disagree after any budget change.
+      - name: Upload the evaluated gate reports
+        if: always() && steps.relevance.outputs.relevant == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: webview-gate-report-${{ matrix.platform }}
+          path: reports/${{ matrix.platform }}-candidate-*.json
+          if-no-files-found: ignore
+          retention-days: ${{ github.event_name == 'pull_request' && 30 || 90 }}
+
   installed-bundle-build:
     name: Build installers (${{ matrix.variant }})
     env:
@@ -984,3 +997,108 @@ jobs:
         run: >-
           echo "Installed bundle gate deferred to push-to-main and the weekly
           schedule; window, sampling, and budgets are unchanged."
+
+      - name: Upload the evaluated gate reports
+        if: always() && steps.relevance.outputs.relevant == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: installed-bundle-gate-report
+          path: reports/candidate-*.json
+          if-no-files-found: ignore
+          retention-days: ${{ github.event_name == 'pull_request' && 30 || 90 }}
+
+  # Closes the gap that the issue #176 split SLA opened. Moving idle and
+  # installed-bundle detection past the merge point is only defensible if the
+  # failure it finds cannot be silently ignored, so a post-merge gate failure
+  # files a labelled, deduplicated issue that the pull-request hold in ci.yml
+  # then reads.
+  post-merge-regression-report:
+    name: Post-merge performance regression report
+    needs:
+      - release-webview-gate
+      - installed-bundle-gate
+    # A pull request never reaches here: the deferred phases do not run there,
+    # and a pull request already fails visibly on its own checks.
+    if: >-
+      always()
+      && github.event_name != 'pull_request'
+      && (needs.release-webview-gate.result == 'failure'
+      || needs.installed-bundle-gate.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Scoped to this job only; every other job in this workflow stays read-only.
+      issues: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Resolve measured revisions
+        id: revisions
+        shell: bash
+        run: |
+          echo "candidate=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "baseline=$(git rev-parse HEAD^)" >> "$GITHUB_OUTPUT"
+
+      # Best effort. A missing or unreadable artifact must not stop the issue
+      # from being filed, because losing the record is the exact failure this
+      # job exists to prevent.
+      - name: Download the evaluated gate reports
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: "*gate-report*"
+          merge-multiple: true
+          path: reports
+
+      - name: Build the regression issue
+        id: decision
+        shell: bash
+        env:
+          GATE_JOB_RESULTS: >-
+            {"release-webview-gate":"${{ needs.release-webview-gate.result }}",
+            "installed-bundle-gate":"${{ needs.installed-bundle-gate.result }}"}
+          REGRESSION_COMMIT: ${{ steps.revisions.outputs.candidate }}
+          REGRESSION_BASELINE: ${{ steps.revisions.outputs.baseline }}
+          REGRESSION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPORT_DIRECTORY: reports
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          node scripts/ci/regression-issue.mjs > decision.json
+          echo "file=$(node -p 'JSON.parse(require("fs").readFileSync("decision.json","utf8")).file === true')" >> "$GITHUB_OUTPUT"
+          node -p 'JSON.parse(require("fs").readFileSync("decision.json","utf8")).title ?? "(nothing to file)"'
+
+      # Idempotent: a re-run of the same commit comments on the existing issue
+      # instead of opening a second one.
+      - name: File or update the regression issue
+        if: steps.decision.outputs.file == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DECISION_FILE: decision.json
+          OPEN_ISSUES_FILE: open-issues.json
+        run: |
+          set -euo pipefail
+          gh issue list \
+            --label "ci:perf-regression" \
+            --state open \
+            --limit 100 \
+            --json number,title,body,state > open-issues.json
+          existing="$(node scripts/ci/regression-issue.mjs --select-existing)"
+          node -p 'JSON.parse(require("fs").readFileSync("decision.json","utf8")).body' > issue-body.md
+          if [[ -n "$existing" ]]; then
+            node -p 'JSON.parse(require("fs").readFileSync("decision.json","utf8")).comment' > issue-comment.md
+            gh issue comment "$existing" --body-file issue-comment.md
+            echo "Updated existing regression issue #$existing"
+          else
+            labels="$(node -p 'JSON.parse(require("fs").readFileSync("decision.json","utf8")).labels.join(",")')"
+            title="$(node -p 'JSON.parse(require("fs").readFileSync("decision.json","utf8")).title')"
+            gh issue create \
+              --title "$title" \
+              --body-file issue-body.md \
+              --label "$labels"
+          fi

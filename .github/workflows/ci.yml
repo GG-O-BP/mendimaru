@@ -599,3 +599,36 @@ jobs:
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
+
+  # Counterpart to post-merge-regression-report in release-performance.yml.
+  # The issue #176 split SLA moved idle and installed-bundle detection past the
+  # merge point; without a hold, a regression found after merge would not stop
+  # further commits from stacking on top of it.
+  #
+  # Deliberately ungated and dependency-free: it is one API call, so it cannot
+  # meaningfully affect the pull-request wall clock this split SLA protects.
+  perf-regression-hold:
+    name: Post-merge performance hold
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      # Fails closed: an unreadable query result is reported as red rather than
+      # silently read as "main is healthy".
+      - name: Hold merges while a post-merge performance regression is open
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh issue list \
+            --label "ci:perf-regression" \
+            --state open \
+            --limit 100 \
+            --json number,title,url,state,labels > open-issues.json
+          node scripts/ci/regression-hold.mjs < open-issues.json
