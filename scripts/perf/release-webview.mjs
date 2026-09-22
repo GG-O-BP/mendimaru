@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -57,17 +56,9 @@ const processCount = [];
 const assertions = [];
 let fixture;
 let driver;
-let launchTarget;
 
 try {
   await mkdir(path.dirname(reportPath), { recursive: true });
-  launchTarget = await prepareLaunchTarget(
-    options.application,
-    options.packageKind,
-  );
-  process.stdout.write(
-    `release performance launch mode: ${launchTarget.mode} (${launchTarget.application})\n`,
-  );
   fixture = await createReleaseFixture(process.platform);
   const env = {
     ...process.env,
@@ -76,19 +67,12 @@ try {
     PATH: `${fixture.bin}${path.delimiter}${process.env.PATH ?? ""}`,
     XDG_CACHE_HOME: fixture.webviewCache,
     WEBVIEW2_USER_DATA_FOLDER: fixture.webviewData,
+    APPIMAGE_EXTRACT_AND_RUN: "1",
     WEBKIT_DISABLE_DMABUF_RENDERER:
       process.env.WEBKIT_DISABLE_DMABUF_RENDERER ?? "1",
   };
-  // Only the legacy fallback re-unpacks the package on every launch. Leaving
-  // it on would add tens of seconds of runner-local decompression to every
-  // measured startup and hide real regressions behind that constant.
-  if (launchTarget.mode === "appimage-extract-and-run") {
-    env.APPIMAGE_EXTRACT_AND_RUN = "1";
-  } else {
-    delete env.APPIMAGE_EXTRACT_AND_RUN;
-  }
   driver = await createWebviewDriver({
-    application: launchTarget.application,
+    application: options.application,
     env,
     root: fixture.root,
   });
@@ -304,7 +288,6 @@ try {
       workspaceTiers: fixture.workspaceTiers,
       catalogModes: ["cached", "isolated-refresh"],
       environmentModes: ["normal", "slow", "timeout-recovery"],
-      applicationLaunchMode: launchTarget.mode,
     },
     sampling,
     metricSamples: {
@@ -366,7 +349,6 @@ try {
 } finally {
   await driver?.close().catch(() => undefined);
   await fixture?.close().catch(() => undefined);
-  await launchTarget?.cleanup?.().catch(() => undefined);
 }
 
 function parseArguments(arguments_) {
@@ -421,51 +403,6 @@ function positiveIntegerOption(value, fallback, name) {
     throw new Error(`${name} must be a positive integer`);
   }
   return parsed;
-}
-
-// An AppImage that is unpacked once behaves like an installed release: every
-// launch execs the same already-extracted tree. The legacy extract-and-run
-// fallback instead unpacks the entire package before each launch, so the
-// recorded startup is dominated by a constant that no product change can move.
-// The resolved mode is reported and compared as a compatibility field, so
-// measurements taken in different modes can never be gated against each other.
-async function prepareLaunchTarget(application, packageKind) {
-  if (packageKind !== "appimage") {
-    return { application, mode: "native-executable" };
-  }
-  if (platform !== "linux") {
-    throw new Error("AppImage measurements run only on Linux");
-  }
-  const requested =
-    process.env.MENDIMARU_APPIMAGE_LAUNCH_MODE ?? "extract-once";
-  if (!["extract-once", "extract-and-run"].includes(requested)) {
-    throw new Error(
-      "MENDIMARU_APPIMAGE_LAUNCH_MODE must be extract-once or extract-and-run",
-    );
-  }
-  if (requested === "extract-and-run") {
-    return { application, mode: "appimage-extract-and-run" };
-  }
-  const root = await mkdtemp(path.join(os.tmpdir(), "mendimaru-appimage-"));
-  const cleanup = () => rm(root, { recursive: true, force: true });
-  try {
-    execFileSync(application, ["--appimage-extract"], {
-      cwd: root,
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    const appRun = path.join(root, "squashfs-root", "AppRun");
-    await access(appRun, fsConstants.X_OK);
-    return { application: appRun, mode: "appimage-extracted-once", cleanup };
-  } catch (error) {
-    await cleanup().catch(() => undefined);
-    const details = error.stderr?.toString().trim();
-    throw new Error(
-      `failed to unpack ${application} once for measurement: ${error.message}${
-        details ? `\n${details}` : ""
-      }`,
-      { cause: error },
-    );
-  }
 }
 
 function gitCommit() {

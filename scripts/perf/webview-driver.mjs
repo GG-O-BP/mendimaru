@@ -388,12 +388,7 @@ async function findLinuxApplication(application, expectedRoot) {
 
 async function linuxApplicationProcesses(application, expectedRoot) {
   const expectedBinary = await fs.realpath(application);
-  // A packaged launch never reports the launcher itself as the running
-  // binary: a mounted or unpacked AppImage execs the bundled `mendimaru`
-  // from inside the package, and `AppRun` is that package's entrypoint.
-  const acceptsBundledBinary =
-    application.toLowerCase().endsWith(".appimage") ||
-    path.basename(application) === "AppRun";
+  const acceptsBundledBinary = application.toLowerCase().endsWith(".appimage");
   const expectedEnvironment = `MENDIMARU_E2E_ROOT=${expectedRoot}`;
   const matches = [];
   for (const entry of await fs.readdir("/proc", { withFileTypes: true })) {

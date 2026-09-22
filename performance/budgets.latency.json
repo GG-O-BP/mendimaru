@@ -27,10 +27,6 @@
       {
         "source": "Main runs 33919703993 and 33925549585: Linux release navigation p95 missed its relative gate by 3.441 ms and 21.326 ms respectively on unrelated test-only changes",
         "recordedAt": "2026-09-04T23:01:35Z"
-      },
-      {
-        "source": "Issue #176: the Linux AppImage was re-unpacked before every launch, so run 35693049149 recorded 31.4-31.7 second cold and warm startups whose 20 percent relative gate tolerated 6.2 seconds of real regression. Measuring an AppImage that is unpacked once restores installed-release startup values and the sensitivity that goes with them; cold and warm startup therefore adopt the reviewed 600 ms relative noise floor already used for hosted Windows cold startup",
-        "recordedAt": "2026-09-22T00:00:00Z"
       }
     ]
   },
@@ -69,15 +65,13 @@
               "statistic": "p95",
               "absoluteMax": 40000,
               "relativeMaxPercent": 20,
-              "relativeNoiseFloor": 600,
-              "rationale": "The package is now unpacked once instead of before every launch, so this measures installed-release startup rather than 31.40 to 31.47 seconds of repeated decompression. The 40 second absolute rail stays as a safety ceiling while the 20 percent relative gate becomes the working limit; hosted WebKit startup jitters like hosted WebView2 startup, so it uses the same reviewed 600 ms floor."
+              "rationale": "The hosted Linux AppImage fallback measured 31.40 to 31.47 seconds; 40 seconds preserves bounded runner headroom while remaining far below the former 120 second debug timeout."
             },
             "warmStartupMs": {
               "statistic": "p95",
               "absoluteMax": 40000,
               "relativeMaxPercent": 20,
-              "relativeNoiseFloor": 600,
-              "rationale": "Warm launches no longer repeat package extraction, so the previous 31.46 to 31.68 second plateau is gone and warm startup is now distinguishable from cold startup. It keeps the 40 second safety ceiling and the same reviewed 600 ms relative floor as cold startup."
+              "rationale": "The hosted AppImage launch path still performs fallback package extraction on warm runs, so its measured 31.46 to 31.68 seconds receives the same 40 second safety ceiling."
             },
             "firstIpcMs": {
               "statistic": "p95",

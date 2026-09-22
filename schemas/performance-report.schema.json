@@ -240,13 +240,6 @@
               "maxItems": 0
             }
           ]
-        },
-        "applicationLaunchMode": {
-          "enum": [
-            "native-executable",
-            "appimage-extracted-once",
-            "appimage-extract-and-run"
-          ]
         }
       }
     },

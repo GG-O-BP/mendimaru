@@ -345,49 +345,6 @@ test("child, memory, and sustained CPU leak fixtures fail their budgets", () => 
   }
 });
 
-test("application launch mode is recorded and blocks mixed-mode gating", () => {
-  const testPolicy = structuredClone(policy);
-  assert(
-    testPolicy.compatibilityFields.includes("fixture"),
-    "the fixture must stay a compatibility field",
-  );
-
-  const baseline = makeReport({ commit: baselineCommit });
-  baseline.fixture.applicationLaunchMode = "appimage-extracted-once";
-  validatePerformanceReport(baseline);
-
-  const candidate = makeReport({ commit: candidateCommit });
-  candidate.fixture.applicationLaunchMode = "appimage-extracted-once";
-  assert.equal(
-    assertCompatibleReports(candidate, baseline, testPolicy),
-    true,
-    "identical launch modes must stay comparable",
-  );
-
-  const mixed = makeReport({ commit: candidateCommit });
-  mixed.fixture.applicationLaunchMode = "appimage-extract-and-run";
-  assert.throws(
-    () => assertCompatibleReports(mixed, baseline, testPolicy),
-    /fixture/,
-    "reports measured in different launch modes may not be gated together",
-  );
-
-  const missing = makeReport({ commit: candidateCommit });
-  assert.throws(
-    () => assertCompatibleReports(missing, baseline, testPolicy),
-    /fixture/,
-    "an unrecorded launch mode may not be compared with a recorded one",
-  );
-
-  const invalid = makeReport({ commit: candidateCommit });
-  invalid.fixture.applicationLaunchMode = "appimage-mounted-twice";
-  assert.throws(
-    () => validatePerformanceReport(invalid),
-    /schema/,
-    "unknown launch modes must fail the report schema",
-  );
-});
-
 function makeReport({
   commit,
   sampleValue = 100,
