@@ -27,6 +27,26 @@
       {
         "source": "Main runs 33919703993 and 33925549585: Linux release navigation p95 missed its relative gate by 3.441 ms and 21.326 ms respectively on unrelated test-only changes",
         "recordedAt": "2026-09-04T23:01:35Z"
+      },
+      {
+        "source": "Issue #181, runs 35703788546, 35707722474, 35708999733, 35710680908, 35712939220, 35715515352, 35718372051, 35721861004, 35723114107, 35725377349, 35726346591, and 35734525535: replaying the current gate expression over twelve product-unchanged Linux release-webview idle runs failed idleCpuPercent three times (p95 deltas +3.413, +1.253, and +1.400 percentage points) and backgroundPollingCpuPercent three times (+1.167, +1.253, and +1.740 points) against the shared 1-point floor",
+        "recordedAt": "2026-09-23T00:00:00Z"
+      },
+      {
+        "source": "Issue #181, same twelve runs: the candidate-minus-baseline idleCpuPercent p50 delta had median +0.264 percentage points and was positive in seven of twelve runs, so the spread is symmetric runner noise rather than a directional measurement bias; release-performance.yml line 418 measures only the matrix variant for the idle phase, so each comparison spans two runner VMs",
+        "recordedAt": "2026-09-23T00:00:00Z"
+      },
+      {
+        "source": "Issue #181 floor sweep over the same twelve runs: a 2 percentage-point floor removes five of the six observed false failures while leaving the relative limit at 4.3 percent for a typical 2.3 percent baseline, 3.7 points tighter than the 8 percent absolute rail; a 3.5-point floor would remove all six but raise the relative limit to 5.8 percent and leave only 2.2 points of separation, which was rejected as a loss of detection power",
+        "recordedAt": "2026-09-23T00:00:00Z"
+      },
+      {
+        "source": "Issue #181, run 35703788546: the one residual failure is retained deliberately. Its candidate idleCpuPercent p95 was 6.424 percent with six Tukey outliers and a 8.00 percent maximum against a baseline with zero outliers and 0.14 median absolute deviation, which is a spike worth investigating rather than runner noise",
+        "recordedAt": "2026-09-23T00:00:00Z"
+      },
+      {
+        "source": "Issue #181, runs 35703788546 through 35743578471: Windows release-webview idle showed no failures in thirteen runs, with maximum absolute p95 movement of 0.232 percentage points for idleCpuPercent and 0.315 points for backgroundPollingCpuPercent, so the Windows floors are left unchanged",
+        "recordedAt": "2026-09-23T00:00:00Z"
       }
     ]
   },
@@ -61,13 +81,15 @@
               "statistic": "p95",
               "absoluteMax": 8,
               "relativeMaxPercent": 20,
-              "rationale": "Five-second normalized samples catch sustained polling without treating a single wakeup as idle load."
+              "relativeNoiseFloor": 2,
+              "rationale": "Five-second normalized samples catch sustained polling without treating a single wakeup as idle load. The 2 percentage-point floor is measured, not chosen: across twelve product-unchanged runs the candidate-versus-baseline p95 moved by up to 1.74 points, and the shared 1-point floor turned three of those into failures. Linux idle measures each variant in a separate job on a separate runner VM, so this spread is cross-VM noise. The 8 percent absolute rail is unchanged and still does the tail work."
             },
             "idleCpuPercent": {
               "statistic": "p95",
               "absoluteMax": 8,
               "relativeMaxPercent": 20,
-              "rationale": "The previous normalized idle observation was 4.41 percent over a much shorter window."
+              "relativeNoiseFloor": 2,
+              "rationale": "The previous normalized idle observation was 4.41 percent over a much shorter window. The 2 percentage-point floor is measured: across twelve product-unchanged runs the candidate-versus-baseline p95 moved by up to 3.41 points with no directional bias, and the shared 1-point floor turned three of those into failures. At a typical 2.3 percent baseline the relative limit becomes 4.3 percent, still 3.7 points tighter than the 8 percent absolute rail, so the relative gate keeps its detection power."
             },
             "privateMemoryBytes": {
               "statistic": "p95",
