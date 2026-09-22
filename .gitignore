@@ -15,6 +15,9 @@
 # Local AUR packaging checkout
 /.aur-work/
 
+# Mounted compiler cache for the disposable AUR builder container
+/.aur-cache/
+
 # Mendimaru runtime files (downloaded installers and operation reports)
 /.mendimaru/
 

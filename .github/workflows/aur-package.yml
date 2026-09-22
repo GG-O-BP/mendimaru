@@ -26,8 +26,33 @@ jobs:
         with:
           node-version: 22.22.2
 
+      # The disposable Arch builder compiles every Rust dependency from
+      # scratch, which is the whole cost of this gate. A compiler cache only
+      # replays byte-identical rustc invocations, so the packaged binary and
+      # every smoke assertion stay exactly the same. Only pushes to main write
+      # the cache; pull requests read it, because branch-scoped caches are not
+      # visible to other branches.
+      - name: Restore the Arch builder compiler cache
+        id: aur-compiler-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .aur-cache
+          key: aur-sccache-v1-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            aur-sccache-v1-${{ hashFiles('src-tauri/Cargo.lock') }}-
+            aur-sccache-v1-
+
       - name: Build and test in separate disposable Arch containers
+        env:
+          MENDIMARU_AUR_CACHE_DIR: ${{ github.workspace }}/.aur-cache
         run: bash scripts/aur/package-gate.sh
+
+      - name: Save the Arch builder compiler cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6
+        with:
+          path: .aur-cache
+          key: aur-sccache-v1-${{ hashFiles('src-tauri/Cargo.lock') }}-${{ github.run_id }}
 
       - name: Upload package inventory and installed smoke evidence
         if: always()

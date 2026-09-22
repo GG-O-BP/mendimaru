@@ -12,6 +12,17 @@ cleanup() {
   rm -rf "$scratch"
 }
 trap cleanup EXIT
+# An optional compiler cache only replays byte-identical rustc invocations, so
+# the packaged binary is the same with or without it. It stays opt-in because
+# the gate must keep working on hosts that have no cache directory to offer.
+builder_mounts=()
+if [[ -n "${MENDIMARU_AUR_CACHE_DIR:-}" ]]; then
+  compiler_cache="$MENDIMARU_AUR_CACHE_DIR/sccache"
+  mkdir -p "$compiler_cache"
+  compiler_cache=$(realpath "$compiler_cache")
+  chmod 0777 "$compiler_cache"
+  builder_mounts+=(-v "$compiler_cache:/sccache")
+fi
 version=$(git show HEAD:package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version')
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 git archive HEAD --prefix="mendimaru-$version/" -o "$scratch/mendimaru-$version.tar"
@@ -27,6 +38,7 @@ for file in build-package.sh verify-package.mjs installed-package.mjs; do
 done
 docker run --rm --init --cpus=4 --memory=12g \
   -v "$scratch:/gate:ro" -v "$output:/output" \
+  ${builder_mounts[@]+"${builder_mounts[@]}"} \
   archlinux:base-devel bash /gate/build-package.sh
 
 # Only the package and standalone Node-built-in smoke fixtures enter this
