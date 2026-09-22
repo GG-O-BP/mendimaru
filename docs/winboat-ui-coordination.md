@@ -16,11 +16,11 @@ execution effort and [#155] adds the shared-Runtime browser gate on top.
 
 Every accepted UI request is classified before it touches the guest:
 
-| Class       | Requests                                                                 | Overlap rule                                      |
-| ----------- | ------------------------------------------------------------------------ | ------------------------------------------------- |
-| Observation | `capabilities`, `tree`, `find`, `screenshot`, semantic `wait`            | Shared VM use; parallel candidate across sessions  |
-| Session     | `action` with `invoke`/`click`/`set-value`, `release`, `reconnect`       | Serial per session, in accept order                |
-| Desktop     | `action` with `focus` or `keyboard-input`                                 | Serial per session and exclusive across the desktop |
+| Class       | Requests                                                           | Overlap rule                                        |
+| ----------- | ------------------------------------------------------------------ | --------------------------------------------------- |
+| Observation | `capabilities`, `tree`, `find`, `screenshot`, semantic `wait`      | Shared VM use; parallel candidate across sessions   |
+| Session     | `action` with `invoke`/`click`/`set-value`, `release`, `reconnect` | Serial per session, in accept order                 |
+| Desktop     | `action` with `focus` or `keyboard-input`                          | Serial per session and exclusive across the desktop |
 
 The split follows the #21 provider semantics. `invoke`, `click` and `set-value`
 act through window-targeted UIA patterns and do not steal desktop focus, so
