@@ -454,6 +454,15 @@ export function evaluatePerformance(candidate, baseline, policy) {
     if (!["p50", "p95", "max"].includes(statistic)) {
       throw new Error(`metric ${metric} has an unsupported statistic`);
     }
+    // The absolute rail and the relative comparison can read different
+    // statistics. A metric whose tail is a reproducible measurement artifact
+    // rather than a real tail can compare on p50 while the absolute ceiling
+    // still guards p95. Defaulting to `statistic` keeps every metric that does
+    // not opt in behaving exactly as before.
+    const relativeStatistic = budget.relativeStatistic ?? statistic;
+    if (!["p50", "p95", "max"].includes(relativeStatistic)) {
+      throw new Error(`metric ${metric} has an unsupported relative statistic`);
+    }
     const actualSummary = candidate.metrics[metric];
     const baselineSummary = baseline.metrics[metric];
     if (!actualSummary || !baselineSummary) {
@@ -471,25 +480,33 @@ export function evaluatePerformance(candidate, baseline, policy) {
     }
     const actual = actualSummary[statistic];
     const baselineValue = baselineSummary[statistic];
-    const relativeChangePercent = relativeChange(actual, baselineValue);
+    const relativeActual = actualSummary[relativeStatistic];
+    const relativeBaselineValue = baselineSummary[relativeStatistic];
+    const relativeChangePercent = relativeChange(
+      relativeActual,
+      relativeBaselineValue,
+    );
     const relativeNoiseFloor =
       budget.relativeNoiseFloor ??
       suitePolicy.relativeNoiseFloor[actualSummary.unit];
     const relativeLimit = rounded(
-      baselineValue +
+      relativeBaselineValue +
         Math.max(
-          (baselineValue * budget.relativeMaxPercent) / 100,
+          (relativeBaselineValue * budget.relativeMaxPercent) / 100,
           relativeNoiseFloor,
         ),
     );
     const absolutePassed = actual <= budget.absoluteMax;
-    const relativePassed = actual <= relativeLimit;
+    const relativePassed = relativeActual <= relativeLimit;
     const passed = absolutePassed && relativePassed;
     comparisons.push({
       metric,
       statistic,
       actual,
       baseline: baselineValue,
+      relativeStatistic,
+      relativeActual,
+      relativeBaseline: relativeBaselineValue,
       relativeChangePercent: rounded(relativeChangePercent),
       absoluteLimit: budget.absoluteMax,
       relativeLimitPercent: budget.relativeMaxPercent,
@@ -511,11 +528,11 @@ export function evaluatePerformance(candidate, baseline, policy) {
     if (!relativePassed) {
       violations.push({
         metric,
-        statistic,
+        statistic: relativeStatistic,
         kind: "relative",
-        actual,
+        actual: relativeActual,
         limit: relativeLimit,
-        baseline: baselineValue,
+        baseline: relativeBaselineValue,
         relativeChangePercent: rounded(relativeChangePercent),
       });
     }
@@ -567,8 +584,19 @@ export function renderPerformanceMarkdown(report) {
   for (const comparison of report.gate.comparisons) {
     const summary = report.metrics[comparison.metric];
     const unit = summary.unit;
+    // When one statistic feeds the absolute rail and another the relative
+    // comparison, print both so the row cannot be misread as a single number.
+    const dualStatistic =
+      comparison.relativeStatistic !== undefined &&
+      comparison.relativeStatistic !== comparison.statistic;
+    const gateValue = dualStatistic
+      ? `abs ${comparison.statistic}: ${formatMetric(comparison.actual, unit)}; rel ${comparison.relativeStatistic}: ${formatMetric(comparison.relativeActual, unit)}`
+      : `${comparison.statistic}: ${formatMetric(comparison.actual, unit)}`;
+    const baselineValue = dualStatistic
+      ? `abs ${formatMetric(comparison.baseline, unit)}; rel ${formatMetric(comparison.relativeBaseline, unit)}`
+      : formatMetric(comparison.baseline, unit);
     lines.push(
-      `| ${comparison.metric} | ${summary.sampleCount} | ${formatMetric(summary.p50, unit)} | ${formatMetric(summary.p95, unit)} | ${comparison.statistic}: ${formatMetric(comparison.actual, unit)} | ${formatMetric(comparison.baseline, unit)} | ${comparison.relativeChangePercent.toFixed(2)}% | abs ${formatMetric(comparison.absoluteLimit, unit)}; rel ${formatMetric(comparison.relativeLimit, unit)} (${comparison.relativeLimitPercent}% / floor ${formatMetric(comparison.relativeNoiseFloor, unit)}) | ${comparison.passed ? "pass" : "fail"} |`,
+      `| ${comparison.metric} | ${summary.sampleCount} | ${formatMetric(summary.p50, unit)} | ${formatMetric(summary.p95, unit)} | ${gateValue} | ${baselineValue} | ${comparison.relativeChangePercent.toFixed(2)}% | abs ${formatMetric(comparison.absoluteLimit, unit)}; rel ${formatMetric(comparison.relativeLimit, unit)} (${comparison.relativeLimitPercent}% / floor ${formatMetric(comparison.relativeNoiseFloor, unit)}) | ${comparison.passed ? "pass" : "fail"} |`,
     );
   }
   lines.push(

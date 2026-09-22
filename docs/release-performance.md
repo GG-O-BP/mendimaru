@@ -238,6 +238,22 @@ three same-host comparisons kept candidate medians within 16 percent while one
 visible in reports. At least five samples are required by the schema; the
 tracked policy uses seven.
 
+A metric may also split the two gates apart with `relativeStatistic`, which
+selects the statistic for the relative comparison while `statistic` keeps
+feeding the absolute ceiling. It defaults to `statistic`, so a metric that does
+not declare it is unchanged. The Linux `environmentTimeoutRecoveryMs` gate
+compares p50 and rails on p95, because its p95 is not a distribution tail: the
+latency phase takes three samples after one warm-up, and across twenty-six
+Linux sample sets the second sample was the maximum in twenty-two of them. A
+nearest-rank p95 at n=3 therefore re-measures one reproducible blip whose size
+swings between 1.05 and 2.36 times the median, so the relative gate was
+comparing two draws of that blip rather than two tails. Three of thirteen
+product-unchanged runs failed that way, including a +91.46 percent reading
+whose candidate median was faster than the baseline median. Comparing medians
+failed one of thirteen, and the 6000 ms absolute rail still reads p95, where
+the largest observed value was 3165.51 ms. Reports print both statistics on a
+split row so the comparison cannot be misread.
+
 A performance failure is not cleared by repeating until a favorable sample is
 found. One rerun is permitted only for an identified infrastructure failure,
 such as a runner or driver crash, and the original failure artifact must remain
@@ -268,7 +284,11 @@ unit noise floor. Linux floors are 50 ms, 32 MiB, one percentage point, and one
 process; Windows floors are 75 ms, 64 MiB, one percentage point, and two
 processes. A reviewed metric may declare a scoped unit-specific override; the
 Linux cached-catalog p95 uses 75 ms after three same-host comparisons observed a
-3–60 ms range. This keeps tiny or zero measurements from turning harmless
+3–60 ms range, and the Linux idle `idleCpuPercent` and
+`backgroundPollingCpuPercent` gates use two percentage points after twelve
+product-unchanged runs moved their p95 by up to 3.41 points. Unlike the latency
+phase, the idle phase measures one variant per job, so those two reports come
+from two runner VMs. This keeps tiny or zero measurements from turning harmless
 scheduler noise into an infinite percentage while 20–30 percent regressions
 above that floor still fail. Release-tag MSI and NSIS verification repeats the
 absolute ceiling check; the same-host relative comparison has already run
