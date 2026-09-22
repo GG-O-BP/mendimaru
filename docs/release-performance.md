@@ -80,10 +80,17 @@ candidate, and `changeControl.performanceFailureRerun` stays
 `preserve-original-failure` so the first failing result cannot be papered over
 by a re-run.
 
-That discipline is enforced rather than merely documented. A failing
-post-merge gate files a labelled, deduplicated issue, and an open issue with
-both the `ci:perf-regression` and `revert-candidate` labels turns the
-`Post-merge performance hold` check red on subsequent pull requests. See
+That discipline is mechanised, but deliberately stops short of enforcement. A
+failing post-merge gate files a labelled, deduplicated issue, and an open issue
+with both the `ci:perf-regression` and `revert-candidate` labels turns the
+`Post-merge performance hold` check red on subsequent pull requests.
+
+That check is **advisory**: it is not a required status check, so it makes the
+regression visible and red but does not mechanically block the merge. This is a
+decided trade, not a gap waiting to be closed — the first production firing of
+the safety net was a false positive, and a blocking hold would have stopped
+every merge in the repository over it. Raising it to blocking is a
+branch-protection setting rather than a code change. See
 [ci-post-merge-safety-net.md](ci-post-merge-safety-net.md).
 
 Both measured binaries are cached on a fingerprint of the inputs that can

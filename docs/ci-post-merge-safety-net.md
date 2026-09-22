@@ -74,18 +74,62 @@ Note that `changeControl.performanceFailureRerun` stays
 `preserve-original-failure`. Re-running a failed performance job to get green is
 not a way to clear a hold.
 
-## Open policy decision: is the hold blocking?
+## Decided: the hold is advisory, not blocking
 
-`Post-merge performance hold` reports on every pull request, but the required
-checks on `main` are:
+`Post-merge performance hold` reports on every pull request. It is deliberately
+**not** a required status check. The required checks on `main` are, and remain:
 
 `Test (ubuntu-latest)`, `Test (windows-latest)`, `Dependency security audit`,
 `Actual Windows Tauri dev E2E`,
 `Build, install, launch, and uninstall Windows bundles`,
 `Linux Tauri WebKit E2E`, `Rust tests and clippy (ubuntu)`.
 
-Until `Post-merge performance hold` is added to that list in branch protection,
-it is **advisory**: it turns the pull request red and is visible in the checks
-list, but it does not mechanically prevent a merge. Making it blocking is a
-repository-settings change, not a code change, and is left as an explicit
-decision because it lets one unresolved performance issue stop all merges.
+So the hold turns the pull request red and stays visible in the checks list,
+but it does not mechanically prevent a merge. A human decides whether the red
+is worth stopping for.
+
+### Why advisory won
+
+A blocking hold has a cost that is easy to miss when it is designed and
+impossible to miss when it fires: **one false positive stops every merge in the
+repository**, including the merge that would fix it, and the only way out is a
+human removing a label.
+
+That is not hypothetical here. The first production firing of this safety net
+was a false positive. The post-merge run on `504c28f` failed with **zero
+measured budget violations**; the cause was a WebDriver 30-second async-script
+timeout on the **baseline** leg, which structurally cannot be a regression in
+the candidate. Two open issues describe the same shape of false positive in the
+gates themselves — an idle CPU-percentage relative gate that fires on
+percentage-point noise, and a latency relative gate decided by a single
+nearest-rank outlier at n=3.
+
+With a known non-zero false-positive rate and a blast radius of "all merges",
+advisory is the honest setting. The signal is preserved in full; only the
+automatic punishment is withheld.
+
+### This narrows what the split SLA promised
+
+State this plainly rather than let the documentation imply otherwise. The split
+measurement SLA was accepted on the argument that a post-merge regression would
+**block subsequent merges**. What is implemented, and what this section now
+fixes as the final form, is weaker: it is **visible and red, but advisory**.
+
+The gap is real, and it is a deliberate trade, not an oversight. The reasoning
+is that an advisory hold that a human actually reads is worth more than a
+blocking hold that gets routed around — and every route around a blocking hold
+(removing the label, closing the issue, disabling the check) destroys the same
+signal the hold exists to preserve, while also training people to clear holds
+reflexively.
+
+### Raising it to blocking later
+
+Making the hold blocking is a repository-settings change, not a code change:
+add `Post-merge performance hold` to the required status checks on `main`. No
+file in this repository needs to change, and it is equally cheap to reverse.
+
+The precondition is evidence, not preference. Raise it once the false-positive
+rate is low enough that a stopped repository is a proportionate response —
+concretely, once the relative-gate false positives tracked in the idle and
+latency gate issues are resolved and a stretch of post-merge runs has fired the
+hold only on genuine, attributable regressions.
