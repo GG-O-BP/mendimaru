@@ -35,11 +35,31 @@ scheduled runs, and manual dispatch always measure in full. Any pull request
 that touches a measured input gets exactly the same matrix dimensions, sample
 counts, 300-second idle windows, and gates as before.
 
-Release-build caches retain workspace-crate outputs as well as dependencies.
-Cargo still validates its normal source and configuration fingerprints before
-reusing an output, so unchanged application code avoids a redundant release
-link while product changes rebuild normally. The cache key is versioned
-separately from older dependency-only entries.
+Both measured binaries are cached on a fingerprint of the inputs that can
+change them, not on a commit sha. The fingerprint covers `src`, `src-tauri`,
+`public`, `.cargo`, the frontend build inputs and every non-Node Tauri
+resource — including the bundled `scripts/browser-*.mjs`, which live outside
+`src-tauri` — together with the platform build recipe and the resolved `rustc`
+identity. Budgets, schemas, `scripts/perf` and the workflow itself are
+deliberately excluded: they change what is measured, not what is built, and
+the relevance classifier above already forces the full suite to run for them.
+
+Caching both variants, rather than only the baseline, is what keeps the
+comparison honest. A sha-keyed baseline could restore a binary produced by an
+older toolchain while the candidate always compiled with the current one, so a
+toolchain delta could be read as a code regression. Equal keys mean the two
+variants now always hit together or rebuild together. When a revision changes
+no build input the two fingerprints coincide and both variants measure the
+same artifact, which is the correct reading of "nothing was rebuilt": the run
+then reports run-to-run noise against the same absolute rails.
+
+The build recipe lives in one place per platform and is fed both to the build
+command and to the fingerprint salt, so changed build flags cannot silently
+reuse a binary produced by the old ones. Release builds keep an ordinary
+dependency cache for the genuine rebuild path; workspace-crate caching is
+deliberately not enabled, because the repository's Actions cache is already at
+its 10 GB ceiling and those entries would evict the far smaller binary caches
+that remove much more critical-path work per byte.
 
 Baseline and candidate measurements run as parallel matrix jobs and a separate
 gate job compares the two reports, so the previous strictly sequential

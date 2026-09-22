@@ -31,6 +31,10 @@
       {
         "source": "Issue #176 runs 35697751425 and 35703788546: unpacking the AppImage once and requesting pageLoadStrategy none both left Linux cold/warm startup near 32 seconds; launch-stage instrumentation isolated 17.9-32.4 seconds inside hosted WebKitWebDriver POST /session while the explicit shell wait took 0.5-1.1 seconds",
         "recordedAt": "2026-09-22T08:10:00Z"
+      },
+      {
+        "source": "Issue #176 run 35710680908: keying both variants' binary caches on a build-input fingerprint cut the candidate legs from 222-312 s to 12-28 s and the Release performance wall clock from 978 s to 481 s with every gate green and no change to matrix dimensions, sample counts, or the 300-second idle windows",
+        "recordedAt": "2026-09-22T10:00:00Z"
       }
     ]
   },
