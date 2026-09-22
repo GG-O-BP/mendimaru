@@ -40,7 +40,9 @@ change them, not on a commit sha. The fingerprint covers `src`, `src-tauri`,
 `public`, `.cargo`, the frontend build inputs and every non-Node Tauri
 resource — including the bundled `scripts/browser-*.mjs`, which live outside
 `src-tauri` — together with the platform build recipe and the resolved `rustc`
-identity. Budgets, schemas, `scripts/perf` and the workflow itself are
+identity, hosted-runner image version, and runner architecture. A Tauri
+resource outside the repository fails the fingerprint step rather than being
+silently omitted. Budgets, schemas, `scripts/perf` and the workflow itself are
 deliberately excluded: they change what is measured, not what is built, and
 the relevance classifier above already forces the full suite to run for them.
 

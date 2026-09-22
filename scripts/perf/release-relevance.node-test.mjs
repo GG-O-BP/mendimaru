@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
 import {
   isReleasePerformanceRelevantPath,
   releasePerformanceRelevance,
+  tauriResourceInputs,
+  tauriResourceInputsFromConfig,
 } from "./release-relevance.mjs";
 
 test("release inputs and measurement contracts remain relevant", () => {
@@ -38,21 +39,33 @@ test("release inputs and measurement contracts remain relevant", () => {
 });
 
 test("every non-node Tauri resource remains relevant", () => {
-  const repository = path.resolve(import.meta.dirname, "..", "..");
-  const config = JSON.parse(
-    readFileSync(path.join(repository, "src-tauri", "tauri.conf.json"), "utf8"),
-  );
-  for (const resource of Object.keys(config.bundle.resources)) {
-    if (resource.includes("node_modules")) continue;
-    const repositoryPath = path
-      .relative(repository, path.resolve(repository, "src-tauri", resource))
-      .replaceAll(path.sep, "/");
+  for (const repositoryPath of tauriResourceInputs()) {
     assert.equal(
       isReleasePerformanceRelevantPath(repositoryPath),
       true,
       `${repositoryPath} is packaged into the measured artifact`,
     );
   }
+});
+
+test("Tauri resource arrays and node_modules path segments are normalized", () => {
+  const repositoryRoot = path.resolve("/repository");
+  const configDirectory = path.join(repositoryRoot, "src-tauri");
+  assert.deepEqual(
+    tauriResourceInputsFromConfig(
+      {
+        bundle: {
+          resources: [
+            "../scripts/node_modules-audit.mjs",
+            "../node_modules/package/index.js",
+            "assets/runtime.json",
+          ],
+        },
+      },
+      { repositoryRoot, configDirectory },
+    ),
+    ["scripts/node_modules-audit.mjs", "src-tauri/assets/runtime.json"],
+  );
 });
 
 test("unrelated automation, tests, and documentation use the fast skip path", () => {

@@ -108,6 +108,8 @@ jobs:
             --salt "rustc=$(rustc --version --verbose | tr '\n' ' ')" \
             --salt "node=22.22.2" \
             --salt "runner=${{ matrix.runner }}" \
+            --salt "runner-image=${ImageOS:-${RUNNER_OS:-unknown}}-${ImageVersion:-unknown}" \
+            --salt "runner-arch=${RUNNER_ARCH:-unknown}" \
             --github-output "$GITHUB_OUTPUT"
 
       # Keyed by build-input content rather than by commit, so a revision that
@@ -604,6 +606,8 @@ jobs:
             --salt "rustc=$(rustc --version --verbose | tr '\n' ' ')" \
             --salt "node=22.22.2" \
             --salt "runner=windows-latest" \
+            --salt "runner-image=${ImageOS:-${RUNNER_OS:-unknown}}-${ImageVersion:-unknown}" \
+            --salt "runner-arch=${RUNNER_ARCH:-unknown}" \
             --github-output "$GITHUB_OUTPUT"
 
       # Same content-keyed reuse as the WebView binaries, for both variants.

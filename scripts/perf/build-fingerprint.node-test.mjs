@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import test from "node:test";
 
 import { buildFingerprint, buildInputPaths } from "./build-fingerprint.mjs";
-import { isReleasePerformanceRelevantPath } from "./release-relevance.mjs";
+import {
+  isReleasePerformanceRelevantPath,
+  tauriResourceInputs,
+} from "./release-relevance.mjs";
 
 const commit = "0".repeat(40);
 const other = "1".repeat(40);
@@ -19,6 +20,8 @@ function stubObjectIds(overrides = {}) {
 test("every compiled input is fingerprinted", () => {
   const inputs = buildInputPaths();
   for (const required of [
+    ".cargo",
+    ".npmrc",
     "src",
     "src-tauri",
     "public",
@@ -28,6 +31,8 @@ test("every compiled input is fingerprinted", () => {
     "vite.config.ts",
     "tsconfig.json",
     "tsconfig.node.json",
+    "rust-toolchain",
+    "rust-toolchain.toml",
   ]) {
     assert.ok(
       inputs.includes(required),
@@ -37,20 +42,26 @@ test("every compiled input is fingerprinted", () => {
 });
 
 test("Tauri resources outside src-tauri are fingerprinted", () => {
-  const repository = path.resolve(import.meta.dirname, "..", "..");
-  const config = JSON.parse(
-    readFileSync(path.join(repository, "src-tauri", "tauri.conf.json"), "utf8"),
-  );
   const inputs = buildInputPaths();
-  for (const resource of Object.keys(config.bundle.resources)) {
-    if (resource.includes("node_modules")) continue;
-    const repositoryPath = path
-      .relative(repository, path.resolve(repository, "src-tauri", resource))
-      .replaceAll(path.sep, "/");
+  for (const repositoryPath of tauriResourceInputs()) {
     if (repositoryPath.startsWith("src-tauri/")) continue;
     assert.ok(
       inputs.includes(repositoryPath),
       `${repositoryPath} is packaged into the binary and must be fingerprinted`,
+    );
+  }
+});
+
+test("Tauri resources outside the repository fail closed", () => {
+  for (const resource of [
+    "../outside-resource",
+    "/outside-resource",
+    "C:\\outside-resource",
+  ]) {
+    assert.throws(
+      () => buildInputPaths({ resourceInputs: [resource] }),
+      /outside the repository/,
+      `${resource} cannot be represented by a Git object id`,
     );
   }
 });
@@ -132,6 +143,33 @@ test("build flags and toolchain identity are part of the key", () => {
       objectId,
     }),
     "a different rustc must invalidate the cached binary",
+  );
+});
+
+test("runner image and architecture are part of the key", () => {
+  const objectId = stubObjectIds();
+  const base = buildFingerprint({
+    commit,
+    salt: ["runner-image=ubuntu24-20260901.1", "runner-arch=X64"],
+    objectId,
+  });
+  assert.notEqual(
+    base,
+    buildFingerprint({
+      commit,
+      salt: ["runner-image=ubuntu24-20260908.1", "runner-arch=X64"],
+      objectId,
+    }),
+    "a hosted-runner image update must invalidate native artifacts",
+  );
+  assert.notEqual(
+    base,
+    buildFingerprint({
+      commit,
+      salt: ["runner-image=ubuntu24-20260901.1", "runner-arch=ARM64"],
+      objectId,
+    }),
+    "a different runner architecture must invalidate native artifacts",
   );
 });
 

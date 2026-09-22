@@ -33,10 +33,24 @@ const buildInputFiles = [
   "vite.config.ts",
 ];
 
-export function buildInputPaths() {
-  const resources = tauriResourceInputs().filter(
-    (resource) => !resource.startsWith("../"),
-  );
+export function buildInputPaths({
+  resourceInputs = tauriResourceInputs(),
+} = {}) {
+  const resources = resourceInputs.map((resource) => {
+    const normalized = resource.replaceAll("\\", "/").replace(/^\.\/+/, "");
+    if (
+      !normalized ||
+      normalized === ".." ||
+      normalized.startsWith("../") ||
+      normalized.startsWith("/") ||
+      /^[A-Za-z]:\//.test(normalized)
+    ) {
+      throw new Error(
+        `build fingerprint cannot safely hash Tauri resource outside the repository: ${resource}`,
+      );
+    }
+    return normalized;
+  });
   return [
     ...new Set([...buildInputTrees, ...buildInputFiles, ...resources]),
   ].sort();
@@ -53,10 +67,11 @@ export function gitObjectId(commit, relativePath) {
     )
       .toString("utf8")
       .trim();
-  } catch {
+  } catch (error) {
     // Optional inputs (rust-toolchain, .npmrc) are absent in most revisions.
     // Record the absence so adding the file later changes the fingerprint.
-    return "absent";
+    if (error?.status === 1) return "absent";
+    throw error;
   }
 }
 

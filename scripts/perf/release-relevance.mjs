@@ -67,19 +67,32 @@ function changedPaths(base, head) {
   return output.toString("utf8").split("\0").filter(Boolean);
 }
 
+export function tauriResourceInputsFromConfig(
+  config,
+  {
+    repositoryRoot = repository,
+    configDirectory = path.join(repository, "src-tauri"),
+  } = {},
+) {
+  const resources = config.bundle?.resources ?? {};
+  const inputs = Array.isArray(resources) ? resources : Object.keys(resources);
+  return inputs
+    .filter(
+      (resource) =>
+        !resource.replaceAll("\\", "/").split("/").includes("node_modules"),
+    )
+    .map((resource) =>
+      path
+        .relative(repositoryRoot, path.resolve(configDirectory, resource))
+        .replaceAll(path.sep, "/"),
+    );
+}
+
 export function tauriResourceInputs() {
   const config = JSON.parse(
     readFileSync(path.join(repository, "src-tauri", "tauri.conf.json"), "utf8"),
   );
-  const resources = config.bundle?.resources ?? {};
-  const inputs = Array.isArray(resources) ? resources : Object.keys(resources);
-  return inputs
-    .filter((resource) => !resource.includes("node_modules"))
-    .map((resource) =>
-      path
-        .relative(repository, path.resolve(repository, "src-tauri", resource))
-        .replaceAll(path.sep, "/"),
-    );
+  return tauriResourceInputsFromConfig(config);
 }
 
 function parseArguments(arguments_) {
