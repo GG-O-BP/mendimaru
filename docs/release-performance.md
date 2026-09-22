@@ -45,6 +45,9 @@ identity. The broad hosted-runner image release is not used because GitHub can
 roll two image revisions across parallel matrix jobs even when their
 artifact-affecting toolchains are unchanged. A Tauri resource outside the
 repository fails the fingerprint step rather than being silently omitted.
+Each variant reads the resource declaration from its own measured revision,
+not from the candidate checkout, so changing or removing an external resource
+cannot make the baseline key omit a file that the baseline still packages.
 Budgets, schemas, `scripts/perf` and the workflow itself are deliberately
 excluded: they change what is measured, not what is built, and the relevance
 classifier above already forces the full suite to run for them.

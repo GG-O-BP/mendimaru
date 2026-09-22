@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildFingerprint, buildInputPaths } from "./build-fingerprint.mjs";
+import {
+  buildFingerprint,
+  buildInputPaths,
+  tauriResourceInputsAtCommit,
+} from "./build-fingerprint.mjs";
 import {
   isReleasePerformanceRelevantPath,
   tauriResourceInputs,
@@ -15,6 +19,10 @@ const other = "1".repeat(40);
 function stubObjectIds(overrides = {}) {
   return (_commit, relativePath) =>
     overrides[relativePath] ?? `oid-${relativePath}`;
+}
+
+function fingerprint(options) {
+  return buildFingerprint({ resourceInputs: [], ...options });
 }
 
 test("every compiled input is fingerprinted", () => {
@@ -98,18 +106,18 @@ test("measurement-only inputs do not invalidate a reusable binary", () => {
 test("identical build inputs produce one shared key across revisions", () => {
   const salt = ["recipe=build --bundles msi,nsis", "rustc=1.0.0"];
   assert.equal(
-    buildFingerprint({ commit, salt, objectId: stubObjectIds() }),
-    buildFingerprint({ commit: other, salt, objectId: stubObjectIds() }),
+    fingerprint({ commit, salt, objectId: stubObjectIds() }),
+    fingerprint({ commit: other, salt, objectId: stubObjectIds() }),
   );
 });
 
 test("a changed compiled input produces a different key", () => {
   const salt = ["recipe=build"];
-  const base = buildFingerprint({ commit, salt, objectId: stubObjectIds() });
+  const base = fingerprint({ commit, salt, objectId: stubObjectIds() });
   for (const changed of ["src", "src-tauri", "package-lock.json"]) {
     assert.notEqual(
       base,
-      buildFingerprint({
+      fingerprint({
         commit,
         salt,
         objectId: stubObjectIds({ [changed]: "changed" }),
@@ -121,14 +129,14 @@ test("a changed compiled input produces a different key", () => {
 
 test("build flags and toolchain identity are part of the key", () => {
   const objectId = stubObjectIds();
-  const base = buildFingerprint({
+  const base = fingerprint({
     commit,
     salt: ["recipe=build --bundles msi,nsis", "rustc=1.0.0"],
     objectId,
   });
   assert.notEqual(
     base,
-    buildFingerprint({
+    fingerprint({
       commit,
       salt: ["recipe=build --bundles msi", "rustc=1.0.0"],
       objectId,
@@ -137,7 +145,7 @@ test("build flags and toolchain identity are part of the key", () => {
   );
   assert.notEqual(
     base,
-    buildFingerprint({
+    fingerprint({
       commit,
       salt: ["recipe=build --bundles msi,nsis", "rustc=1.0.1"],
       objectId,
@@ -148,7 +156,7 @@ test("build flags and toolchain identity are part of the key", () => {
 
 test("runner OS, architecture, and native build tools are part of the key", () => {
   const objectId = stubObjectIds();
-  const base = buildFingerprint({
+  const base = fingerprint({
     commit,
     salt: [
       "runner-os=ubuntu24",
@@ -159,7 +167,7 @@ test("runner OS, architecture, and native build tools are part of the key", () =
   });
   assert.notEqual(
     base,
-    buildFingerprint({
+    fingerprint({
       commit,
       salt: [
         "runner-os=ubuntu24",
@@ -172,7 +180,7 @@ test("runner OS, architecture, and native build tools are part of the key", () =
   );
   assert.notEqual(
     base,
-    buildFingerprint({
+    fingerprint({
       commit,
       salt: [
         "runner-os=ubuntu24",
@@ -188,14 +196,66 @@ test("runner OS, architecture, and native build tools are part of the key", () =
 test("salt order does not change the key", () => {
   const objectId = stubObjectIds();
   assert.equal(
-    buildFingerprint({ commit, salt: ["a=1", "b=2"], objectId }),
-    buildFingerprint({ commit, salt: ["b=2", "a=1"], objectId }),
+    fingerprint({ commit, salt: ["a=1", "b=2"], objectId }),
+    fingerprint({ commit, salt: ["b=2", "a=1"], objectId }),
+  );
+});
+
+test("each revision fingerprints the resources declared by its own config", () => {
+  const configs = {
+    [commit]: JSON.stringify({
+      bundle: {
+        resources: {
+          "../scripts/baseline-resource.mjs": "browser/resource.mjs",
+        },
+      },
+    }),
+    [other]: JSON.stringify({
+      bundle: {
+        resources: {
+          "../scripts/candidate-resource.mjs": "browser/resource.mjs",
+        },
+      },
+    }),
+  };
+  const readConfig = (revision) => configs[revision];
+  assert.deepEqual(tauriResourceInputsAtCommit(commit, { readConfig }), [
+    "scripts/baseline-resource.mjs",
+  ]);
+  assert.deepEqual(tauriResourceInputsAtCommit(other, { readConfig }), [
+    "scripts/candidate-resource.mjs",
+  ]);
+
+  const objectId = stubObjectIds({
+    "scripts/baseline-resource.mjs": "baseline-resource-v1",
+    "scripts/candidate-resource.mjs": "candidate-resource-v1",
+  });
+  const resourceInputsForCommit = (revision) =>
+    tauriResourceInputsAtCommit(revision, { readConfig });
+  const baseline = buildFingerprint({
+    commit,
+    objectId,
+    resourceInputsForCommit,
+  });
+  const candidate = buildFingerprint({
+    commit: other,
+    objectId,
+    resourceInputsForCommit,
+  });
+  assert.notEqual(
+    baseline,
+    candidate,
+    "the baseline key must not be derived from the candidate resource list",
   );
 });
 
 test("an abbreviated revision is rejected rather than silently hashed", () => {
   assert.throws(
-    () => buildFingerprint({ commit: "abc1234", objectId: stubObjectIds() }),
+    () => fingerprint({ commit: "abc1234", objectId: stubObjectIds() }),
+    /full commit sha/,
+  );
+  assert.throws(
+    () => tauriResourceInputsAtCommit("abc1234", { readConfig: () => "{}" }),
     /full commit sha/,
   );
 });

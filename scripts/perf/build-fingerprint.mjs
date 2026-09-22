@@ -5,7 +5,10 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { tauriResourceInputs } from "./release-relevance.mjs";
+import {
+  tauriResourceInputs,
+  tauriResourceInputsFromConfig,
+} from "./release-relevance.mjs";
 
 const repository = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -75,16 +78,40 @@ export function gitObjectId(commit, relativePath) {
   }
 }
 
+export function tauriResourceInputsAtCommit(
+  commit,
+  { readConfig = gitTauriConfig } = {},
+) {
+  if (!/^[0-9a-f]{40}$/.test(commit)) {
+    throw new Error(
+      `Tauri resource discovery requires a full commit sha: ${commit}`,
+    );
+  }
+  return tauriResourceInputsFromConfig(JSON.parse(readConfig(commit)));
+}
+
+function gitTauriConfig(commit) {
+  return execFileSync("git", ["show", `${commit}:src-tauri/tauri.conf.json`], {
+    cwd: repository,
+    stdio: ["ignore", "pipe", "ignore"],
+  }).toString("utf8");
+}
+
 export function buildFingerprint({
   commit,
   salt = [],
   objectId = gitObjectId,
+  resourceInputs,
+  resourceInputsForCommit = tauriResourceInputsAtCommit,
 }) {
   if (!/^[0-9a-f]{40}$/.test(commit)) {
     throw new Error(`build fingerprint requires a full commit sha: ${commit}`);
   }
+  const inputs = buildInputPaths({
+    resourceInputs: resourceInputs ?? resourceInputsForCommit(commit),
+  });
   const digest = createHash("sha256");
-  for (const input of buildInputPaths()) {
+  for (const input of inputs) {
     digest.update(`path\u0000${input}\u0000${objectId(commit, input)}\n`);
   }
   for (const entry of [...salt].sort()) {
@@ -113,13 +140,14 @@ function parseArguments(arguments_) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const options = parseArguments(process.argv.slice(2));
+  const resourceInputs = tauriResourceInputsAtCommit(options.commit);
+  const inputs = buildInputPaths({ resourceInputs });
   const fingerprint = buildFingerprint({
     commit: options.commit,
     salt: options.salt,
+    resourceInputs,
   });
-  process.stdout.write(
-    `Build fingerprint inputs: ${JSON.stringify(buildInputPaths())}\n`,
-  );
+  process.stdout.write(`Build fingerprint inputs: ${JSON.stringify(inputs)}\n`);
   process.stdout.write(
     `Build fingerprint salt: ${JSON.stringify([...options.salt].sort())}\n`,
   );
