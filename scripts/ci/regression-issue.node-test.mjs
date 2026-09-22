@@ -9,6 +9,7 @@ import {
   buildRegressionIssue,
   buildRerunComment,
   failedGateJobs,
+  gateStatuses,
   readEvaluatedReports,
   regressionLabel,
   regressionMarker,
@@ -129,6 +130,48 @@ test("a report the gate never evaluated is marked, not invented", () => {
   assert.deepEqual(summary.violations, []);
 });
 
+// The shape above is defensive; this is the shape the harness actually writes.
+// createPerformanceReport() stamps `gate.status: "not-evaluated"` on every
+// report, so the idle leg uploads one whenever the latency gate fails first.
+// Rejecting it would file a perfectly good measurement as unreadable.
+test("the real un-evaluated gate block is ordinary, not a problem", () => {
+  const summary = summarizeEvaluatedReport(
+    evaluatedReport({
+      gate: {
+        status: "not-evaluated",
+        baselineCompatible: false,
+        violations: [],
+        comparisons: [],
+      },
+    }),
+  );
+  assert.equal(summary.status, "not-evaluated");
+  assert.deepEqual(summary.violations, []);
+});
+
+test("the accepted gate statuses stay equal to the report schema enum", () => {
+  const schema = JSON.parse(
+    readFileSync(
+      path.join(repository, "schemas", "performance-report.schema.json"),
+      "utf8",
+    ),
+  );
+  const enumerated = resolve(schema, schema.properties.gate)?.properties?.status
+    ?.enum;
+  assert.ok(enumerated, "schema must declare a gate.status enum");
+  assert.deepEqual([...gateStatuses].sort(), [...enumerated].sort());
+});
+
+// The report schema keeps `gate` behind a local `$ref`, so read the pointer
+// rather than a hard-coded definition name.
+function resolve(schema, node) {
+  if (!node?.$ref) return node;
+  return node.$ref
+    .replace(/^#\//, "")
+    .split("/")
+    .reduce((current, key) => current?.[key], schema);
+}
+
 test("a structurally unusable report is rejected rather than half-read", () => {
   assert.throws(() => summarizeEvaluatedReport(null), /not an object/);
   assert.throws(() => summarizeEvaluatedReport("nope"), /not an object/);
@@ -148,6 +191,19 @@ test("a structurally unusable report is rejected rather than half-read", () => {
         }),
       ),
     /passed report contains gate violations/,
+  );
+  // Same contradiction, other legitimate status.
+  assert.throws(
+    () =>
+      summarizeEvaluatedReport(
+        evaluatedReport({
+          gate: {
+            status: "not-evaluated",
+            violations: [{ metric: "impossible" }],
+          },
+        }),
+      ),
+    /not-evaluated report contains gate violations/,
   );
 });
 
@@ -374,6 +430,23 @@ test("a report for another commit is never attributed to this merge", () => {
   assert.deepEqual(result.summaries, []);
   assert.equal(result.problems.length, 1);
   assert.ok(result.problems[0].includes("does not match"));
+});
+
+test("an unusable commit filter degrades instead of losing the report", () => {
+  // Throwing here would abort the job that exists to record the failure, so
+  // the filter is dropped and the reports are still reported.
+  const directory = scratch();
+  writeFileSync(
+    path.join(directory, "good.json"),
+    JSON.stringify(evaluatedReport()),
+  );
+  const result = readEvaluatedReports(directory, "not-a-sha");
+  assert.equal(result.summaries.length, 1);
+  assert.ok(
+    result.problems.some((problem) =>
+      problem.includes("commit filter disabled"),
+    ),
+  );
 });
 
 test("release-performance.yml actually wires this safety net up", () => {

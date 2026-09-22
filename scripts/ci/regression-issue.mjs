@@ -23,6 +23,13 @@ const maxBodyLength = 60000;
 
 const jobsWithoutMetricGates = new Set(["cancelled", "skipped", "success"]);
 
+// Mirrors the `gate.status` enum in schemas/performance-report.schema.json.
+// `not-evaluated` is the value every report is born with, so a report the gate
+// never reached is ordinary rather than broken. A unit test asserts this stays
+// equal to the schema enum, because silently rejecting a legitimate status
+// would file the report as unreadable and hide a real measurement.
+export const gateStatuses = ["not-evaluated", "passed", "failed"];
+
 export function regressionMarker(commit) {
   const sha = requireCommit(commit);
   return `<!-- post-merge-performance-regression:${sha} -->`;
@@ -51,9 +58,17 @@ export function shouldFileRegressionIssue(jobResults) {
 export function readEvaluatedReports(directory, expectedCommit = "") {
   const summaries = [];
   const problems = [];
-  const normalizedExpectedCommit = expectedCommit
-    ? requireCommit(expectedCommit)
-    : "";
+  // Degrade rather than throw. A bad commit must not abort the run that is
+  // supposed to record the failure, so an unusable filter is downgraded to a
+  // recorded problem and every report is kept.
+  let normalizedExpectedCommit = "";
+  if (expectedCommit) {
+    try {
+      normalizedExpectedCommit = requireCommit(expectedCommit);
+    } catch (error) {
+      problems.push(`commit filter disabled: ${message(error)}`);
+    }
+  }
   let entries;
   try {
     entries = collectJsonFiles(directory);
@@ -105,13 +120,16 @@ export function summarizeEvaluatedReport(report, name = "report.json") {
   const gate =
     report.gate && typeof report.gate === "object" ? report.gate : null;
   const violations = Array.isArray(gate?.violations) ? gate.violations : [];
-  if (gate && !["passed", "failed"].includes(String(gate.status))) {
+  if (gate && !gateStatuses.includes(String(gate.status))) {
     throw new Error(
       `report has unsupported gate status ${JSON.stringify(gate.status)}`,
     );
   }
-  if (gate?.status === "passed" && violations.length > 0) {
-    throw new Error("passed report contains gate violations");
+  // Only `failed` may carry violations. A `passed` or `not-evaluated` report
+  // that lists them contradicts itself, and quoting it would attribute
+  // violations the gate never actually returned.
+  if (gate && gate.status !== "failed" && violations.length > 0) {
+    throw new Error(`${String(gate.status)} report contains gate violations`);
   }
   return {
     name,
