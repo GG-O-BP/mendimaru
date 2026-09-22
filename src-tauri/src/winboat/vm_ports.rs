@@ -109,8 +109,7 @@ impl RegistryError {
 /// A reserved entry that releases ownership unless explicitly committed.
 #[derive(Debug)]
 pub(crate) struct Reservation {
-    #[cfg(target_os = "linux")]
-    paths: Option<(PathBuf, PathBuf)>,
+    paths: (PathBuf, PathBuf),
     session_id: String,
     committed: bool,
 }
@@ -126,14 +125,11 @@ impl Drop for Reservation {
         if self.committed {
             return;
         }
-        #[cfg(target_os = "linux")]
-        if let Some(paths) = &self.paths {
-            linux::update_at(paths, |entries| {
-                entries.retain(|entry| entry.session_id != self.session_id);
-                Ok(())
-            })
-            .ok();
-        }
+        linux::update_at(&self.paths, |entries| {
+            entries.retain(|entry| entry.session_id != self.session_id);
+            Ok(())
+        })
+        .ok();
     }
 }
 
@@ -145,71 +141,24 @@ pub(crate) fn reserve(
     entry: PortEntry,
     probe: Probe,
 ) -> Result<Reservation, RegistryError> {
-    #[cfg(target_os = "linux")]
-    {
-        match linux::paths(config) {
-            Ok(paths) => reserve_at(&paths, entry, probe),
-            Err(error) => Err(error),
-        }
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (config, probe);
-        Ok(Reservation {
-            session_id: entry.session_id,
-            committed: false,
-        })
-    }
+    linux::paths(config).and_then(|paths| reserve_at(&paths, entry, probe))
 }
 
 /// Reconciled entries for this VM. Crashed writers (record gone) and records
 /// that say Stopped are folded in before the entries are returned.
 pub(crate) fn snapshot(config: &AppConfig, probe: Probe) -> Result<Vec<PortEntry>, RegistryError> {
-    #[cfg(target_os = "linux")]
-    {
-        match linux::paths(config) {
-            Ok(paths) => snapshot_at(&paths, probe),
-            Err(error) => Err(error),
-        }
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (config, probe);
-        Ok(Vec::new())
-    }
+    linux::paths(config).and_then(|paths| snapshot_at(&paths, probe))
 }
 
 /// Record that a session stopped but its forwarding removal is deferred while
 /// other sessions are still live on this VM.
 pub(crate) fn mark_stopped(config: &AppConfig, session_id: &str) -> Result<(), RegistryError> {
-    #[cfg(target_os = "linux")]
-    {
-        match linux::paths(config) {
-            Ok(paths) => mark_stopped_at(&paths, session_id),
-            Err(error) => Err(error),
-        }
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (config, session_id);
-        Ok(())
-    }
+    linux::paths(config).and_then(|paths| mark_stopped_at(&paths, session_id))
 }
 
 /// Drop entries whose forwarding was actually removed from the Compose file.
 pub(crate) fn remove(config: &AppConfig, session_ids: &[&str]) -> Result<(), RegistryError> {
-    #[cfg(target_os = "linux")]
-    {
-        match linux::paths(config) {
-            Ok(paths) => remove_at(&paths, session_ids),
-            Err(error) => Err(error),
-        }
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (config, session_ids);
-        Ok(())
-    }
+    linux::paths(config).and_then(|paths| remove_at(&paths, session_ids))
 }
 
 #[cfg(target_os = "linux")]
@@ -250,7 +199,7 @@ fn reserve_at(
         Ok(())
     })?;
     Ok(Reservation {
-        paths: Some(paths.clone()),
+        paths: paths.clone(),
         session_id,
         committed: false,
     })
