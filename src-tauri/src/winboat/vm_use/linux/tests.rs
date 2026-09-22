@@ -368,3 +368,53 @@ fn waiter_revalidates_management_name_after_another_owner_changes_compose() {
         assert_eq!(waiting.await.err().unwrap(), UNTRUSTED);
     });
 }
+
+#[test]
+fn desktop_scope_excludes_other_opens_and_frees_when_released() {
+    tauri::async_runtime::block_on(async {
+        let config = config(&crate::contracts::secure_identifier("desk").unwrap());
+        let holder = desktop_scope(&config, tokio::time::Instant::now() + WAIT)
+            .await
+            .unwrap();
+        // A second open — the analogue of a second keeper process — cannot
+        // hold the same interactive desktop, and reports a bounded busy
+        // failure instead of blocking past its own deadline.
+        let contender = desktop_scope(
+            &config,
+            tokio::time::Instant::now() + Duration::from_millis(75),
+        )
+        .await;
+        assert_eq!(contender.err().unwrap(), super::super::DESKTOP_BUSY);
+        drop(holder);
+        desktop_scope(&config, tokio::time::Instant::now() + WAIT)
+            .await
+            .expect("the desktop frees when its foreground action drops");
+    });
+}
+
+#[test]
+fn desktop_scope_keys_one_namespace_per_vm_identity() {
+    let first = config("WinBoat");
+    let mut second = config("WinBoat");
+    // Compose paths and caches do not split a desktop; the identity is the
+    // runtime and management name, deliberately like VM use.
+    second.compose_file = "elsewhere-compose.yml".into();
+    assert_eq!(desktop_key(&first).unwrap(), desktop_key(&second).unwrap());
+    assert_ne!(
+        desktop_key(&first).unwrap(),
+        desktop_key(&config("WinBoatTwo")).unwrap()
+    );
+    // A separate namespace from VM use: holding a desktop is not a
+    // lifecycle transaction.
+    assert_ne!(desktop_key(&first).unwrap(), key(&first).unwrap());
+
+    let mut mismatched = config("WinBoat");
+    let directory = tempfile::tempdir().unwrap();
+    mismatched.compose_file = directory
+        .path()
+        .join("compose.yml")
+        .to_string_lossy()
+        .into_owned();
+    fs::write(&mismatched.compose_file, "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    labels:\n      io.winboat.managed: 'true'\n    container_name: other-vm\n    volumes:\n      - data:/storage\n").unwrap();
+    assert_eq!(desktop_key(&mismatched).err().unwrap(), UNTRUSTED);
+}

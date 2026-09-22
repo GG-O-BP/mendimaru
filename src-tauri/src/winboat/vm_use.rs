@@ -104,6 +104,29 @@ pub(crate) fn observation() -> Option<Observation> {
 }
 
 #[cfg(target_os = "linux")]
+pub(crate) const DESKTOP_BUSY: &str =
+    "another foreground action holds this desktop; retry after it finishes";
+
+/// Exclusive foreground scope for one interactive VM desktop (#152). Focus
+/// and keyboard UI actions hold it across every session, window and
+/// cooperating process; the advisory flock releases when the guard drops.
+#[cfg(target_os = "linux")]
+pub(crate) struct DesktopGuard {
+    // flock is released when the open file description closes.
+    _file: std::fs::File,
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) async fn desktop_scope(
+    config: &AppConfig,
+    deadline: tokio::time::Instant,
+) -> Result<DesktopGuard, &'static str> {
+    linux::desktop_scope(config, deadline)
+        .await
+        .map(|file| DesktopGuard { _file: file })
+}
+
+#[cfg(target_os = "linux")]
 fn error(capability: CapabilityId, message: &'static str) -> BackendError {
     let mut error = BackendError::operation(BackendId::LinuxWinboat, capability, message);
     error.code = BackendErrorCode::PreconditionFailed;
@@ -154,6 +177,33 @@ mod linux {
     }
 
     pub(super) fn key(config: &AppConfig) -> Result<String, &'static str> {
+        // Deliberately independent of cache, Compose path, Docker context and
+        // endpoint aliases. Same-named VMs on different daemons over-exclude.
+        // Container IDs are generations, never management identities.
+        Ok(format!(
+            "{:x}",
+            Sha256::digest(format!(
+                "vm-use-v1\0{}\0{}",
+                config.container_runtime.as_str(),
+                validated_name(config)?
+            ))
+        ))
+    }
+
+    /// Same identity discipline as VM use, in a separate namespace: one key
+    /// per interactive desktop of the same-named VM.
+    fn desktop_key(config: &AppConfig) -> Result<String, &'static str> {
+        Ok(format!(
+            "{:x}",
+            Sha256::digest(format!(
+                "ui-desktop-v1\0{}\0{}",
+                config.container_runtime.as_str(),
+                validated_name(config)?
+            ))
+        ))
+    }
+
+    fn validated_name(config: &AppConfig) -> Result<&str, &'static str> {
         let name = &config.container_name;
         if name.is_empty()
             || name.len() > 255
@@ -174,22 +224,24 @@ mod linux {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err(UNTRUSTED),
         }
-        // Deliberately independent of cache, Compose path, Docker context and
-        // endpoint aliases. Same-named VMs on different daemons over-exclude.
-        // Container IDs are generations, never management identities.
-        Ok(format!(
-            "{:x}",
-            Sha256::digest(format!(
-                "vm-use-v1\0{}\0{name}",
-                config.container_runtime.as_str()
-            ))
-        ))
+        Ok(name)
     }
 
     fn directory() -> Result<Dir, &'static str> {
         let uid = unsafe { libc::geteuid() };
         // A fixed local namespace: TMPDIR/XDG/cache overrides cannot split it.
         let path = std::path::PathBuf::from(format!("/tmp/mendimaru-vm-use-{uid}"));
+        match std::fs::DirBuilder::new().mode(0o700).create(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(_) => return Err(UNTRUSTED),
+        }
+        trusted_directory(&path)
+    }
+
+    fn desktop_directory() -> Result<Dir, &'static str> {
+        let uid = unsafe { libc::geteuid() };
+        let path = std::path::PathBuf::from(format!("/tmp/mendimaru-ui-desktop-{uid}"));
         match std::fs::DirBuilder::new().mode(0o700).create(&path) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -243,6 +295,37 @@ mod linux {
         })
         .ok()
         .flatten()
+    }
+
+    /// Cross-process foreground exclusion for one VM desktop (#152). Unlike
+    /// VM use this writes no generation token: holding the desktop is not a
+    /// lifecycle transaction, and an interrupted waiter owns nothing.
+    pub(super) async fn desktop_scope(
+        config: &AppConfig,
+        deadline: tokio::time::Instant,
+    ) -> Result<File, &'static str> {
+        let scope = desktop_key(config)?;
+        let file = open(&desktop_directory()?, &scope)?;
+        loop {
+            match fs2::FileExt::try_lock_exclusive(&file) {
+                Ok(()) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => return Err(UNTRUSTED),
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(super::DESKTOP_BUSY);
+            }
+            tokio::time::sleep_until(
+                deadline.min(tokio::time::Instant::now() + Duration::from_millis(25)),
+            )
+            .await;
+        }
+        // A settings transaction may have retargeted the desktop while we
+        // waited; never act on a scope the caller no longer selected.
+        if desktop_key(config).as_deref() != Ok(scope.as_str()) {
+            return Err(UNTRUSTED);
+        }
+        Ok(file)
     }
 
     pub(super) async fn acquire(

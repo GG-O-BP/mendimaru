@@ -5,6 +5,9 @@ use crate::contracts::{BackendErrorCode, BackendId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[cfg(any(target_os = "linux", test))]
+pub(crate) mod coordination;
+
 #[cfg(target_os = "linux")]
 mod bridge;
 
@@ -247,6 +250,7 @@ pub(crate) fn safe_reason(reason: &str) -> Option<&'static str> {
         "ui-invalid-request",
         "ui-capture-failed",
         "ui-request-expired",
+        "ui-coordination-busy",
     ]
     .into_iter()
     .find(|v| *v == reason)
@@ -281,10 +285,14 @@ pub(crate) fn error(operation: Operation, reason: &str) -> BackendError {
         "ui-invalid-request" => BackendErrorCode::InvalidRequest,
         _ => BackendErrorCode::PreconditionFailed,
     };
-    BackendError {
+    let mut failure = BackendError {
         code,
         ..BackendError::operation(BackendId::LinuxWinboat, operation.capability(), reason)
-    }
+    };
+    // Another caller holds the session or desktop for now; the request
+    // itself remains valid and may be retried after its holder finishes.
+    failure.retryable = reason == "ui-coordination-busy";
+    failure
 }
 
 pub(crate) async fn execute(
@@ -307,13 +315,28 @@ pub(crate) async fn linux_request(
         .iter()
         .any(|s| s.session_id == request.session_id)
     {
-        let lease = crate::winboat::vm_use::acquire(
-            config,
-            crate::winboat::vm_use::Mode::Exclusive,
-            request.operation.capability(),
-        )
-        .await?;
-        lease.run(owned_request(config, request, None)).await
+        let coordinator = coordination::global();
+        let (arrival, reservation) = coordinator.reserve(&request.session_id);
+        let job = coordination::Job::new(arrival, request, coordination::Caller::self_identity())?;
+        let deadline =
+            tokio::time::Instant::now() + std::time::Duration::from_millis(request.timeout_ms);
+        let ticket = coordinator.enqueue(reservation, job)?;
+        let mut entered = ticket.admit(config, deadline, None).await?;
+        let mode = coordination::vm_mode(entered.job().concurrency);
+        let wait = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let lease =
+            crate::winboat::vm_use::acquire_for(config, mode, request.operation.capability(), wait)
+                .await?;
+        lease
+            .run(async move {
+                let result = owned_request(config, request, None).await;
+                entered.finish(match &result {
+                    Ok(_) => None,
+                    Err(failure) => Some(failure.message.as_str()),
+                });
+                result
+            })
+            .await
     } else {
         crate::cli::request_keeper_ui(&paths, request).await
     }
