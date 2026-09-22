@@ -10,7 +10,8 @@ release and publishes the package automatically.
 - The package is built from the immutable GitHub tag archive and installs the
   application binary, desktop entry, icons, license, translated readmes, and
   browser runtime resources under `/usr/lib/mendimaru/browser/`. The resources
-  include `browser-runner.mjs`, `browser-artifact-safety.mjs`, and the complete
+  include `browser-runner.mjs`, `browser-parallel.mjs`,
+  `browser-artifact-safety.mjs`, and the complete
   locked `@playwright/test`, `playwright`, `playwright-core`, and `fflate`
   packages, including their licenses. Cargo alone does not copy Tauri resources.
 - Node.js `>=22.22.2` is a required runtime dependency. npm is needed only to

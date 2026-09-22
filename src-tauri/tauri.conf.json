@@ -38,6 +38,7 @@
       "../scripts/browser-frontend-health.mjs": "browser/browser-frontend-health.mjs",
       "../scripts/browser-environment.mjs": "browser/browser-environment.mjs",
       "../scripts/browser-runner.mjs": "browser/browser-runner.mjs",
+      "../scripts/browser-parallel.mjs": "browser/browser-parallel.mjs",
       "../node_modules/@playwright/test/": "browser/node_modules/@playwright/test/",
       "../node_modules/fflate/": "browser/node_modules/fflate/",
       "../node_modules/playwright/": "browser/node_modules/playwright/",

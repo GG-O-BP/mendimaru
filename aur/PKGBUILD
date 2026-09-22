@@ -121,6 +121,7 @@ package() {
   install -Dm644 scripts/browser-frontend-health.mjs "$browser_dir/browser-frontend-health.mjs"
   install -Dm644 scripts/browser-environment.mjs "$browser_dir/browser-environment.mjs"
   install -Dm644 scripts/browser-runner.mjs "$browser_dir/browser-runner.mjs"
+  install -Dm644 scripts/browser-parallel.mjs "$browser_dir/browser-parallel.mjs"
   install -Dm644 scripts/browser-artifact-safety.mjs \
     "$browser_dir/browser-artifact-safety.mjs"
   install -dm755 "$browser_dir/node_modules/@playwright"
