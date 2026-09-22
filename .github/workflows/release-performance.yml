@@ -186,9 +186,16 @@ jobs:
 
       - name: Cache the Rust release build
         if: steps.relevance.outputs.relevant == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
+        id: rust-cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
+          # Deliberately per variant. The two variants compile the same crate
+          # graph, but they compile it in different directories, and a cache
+          # entry restores to the path it was saved from. Collapsing this to one
+          # key per platform would let whichever variant won the save race
+          # publish a target directory the other cannot use, turning its next
+          # dependency restore into a full recompile.
           shared-key: release-performance-${{ matrix.platform }}-${{ matrix.variant }}
 
       - name: Install dependencies
@@ -202,6 +209,13 @@ jobs:
         if: steps.relevance.outputs.relevant == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
         working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
         shell: bash
+        env:
+          # An exact dependency-cache hit means the restored registry already
+          # satisfies this Cargo.lock, so refreshing the index can only return
+          # what is already on disk. Skipping it removes a measured 31 s from
+          # the Windows critical path. Only an exact hit qualifies: a partial
+          # restore may predate the lockfile, so that path stays online.
+          CARGO_NET_OFFLINE: ${{ steps.rust-cache.outputs.cache-hit == 'true' }}
         run: npm run tauri -- ${{ matrix.build-recipe }}
 
       - name: Stage the binary for caching and artifact upload
@@ -650,9 +664,13 @@ jobs:
 
       - name: Cache the Rust bundle build
         if: steps.relevance.outputs.relevant == 'true' && steps.installer-cache.outputs.cache-hit != 'true'
+        id: rust-cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
+          # Per variant for the same path reason as the WebView build, and
+          # separate from the WebView key because the bundle recipe enables
+          # different features and so compiles a different dependency set.
           shared-key: release-performance-windows-bundles-${{ matrix.variant }}
 
       - name: Install dependencies
@@ -664,6 +682,8 @@ jobs:
         if: steps.relevance.outputs.relevant == 'true' && steps.installer-cache.outputs.cache-hit != 'true'
         working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
         shell: bash
+        env:
+          CARGO_NET_OFFLINE: ${{ steps.rust-cache.outputs.cache-hit == 'true' }}
         run: npm run tauri -- ${{ env.BUNDLE_BUILD_RECIPE }}
 
       - name: Stage the built installers
