@@ -510,6 +510,12 @@ async function runSuite({
   const result = await invokeRunner("run", request);
   assert.equal(result.sessionId, sessionId);
   assert.equal(result.schemaVersion, "5.0.0");
+  // These suites never pass an asset mirror URL, so the runner must report an
+  // unmodified browser with an explicit, unused correction record (#141).
+  assert.equal(result.browserParity, "unmodified");
+  assert.deepEqual(result.corrections, [
+    { kind: "host-lan-asset-mirror", applied: false, interceptedRequests: 0 },
+  ]);
   const actualFiles = new Set(await fs.readdir(directory));
   assert.deepEqual(
     actualFiles,
@@ -593,6 +599,9 @@ async function verifyManifest(directory, mode, runtimePlatform) {
     await fs.readFile(path.join(directory, "artifact-manifest.json"), "utf8"),
   );
   assert.equal(manifest.schemaVersion, "5.0.0");
+  assert.deepEqual(manifest.corrections, [
+    { kind: "host-lan-asset-mirror", applied: false, interceptedRequests: 0 },
+  ]);
   assert.equal(manifest.hostPlatform, "linux");
   assert.equal(manifest.studioPlatform, "windows");
   assert.equal(manifest.runtimePlatform, runtimePlatform);

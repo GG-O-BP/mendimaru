@@ -20,6 +20,9 @@
     "studio-run-locally": true,
     "external-url": true
   },
+  "browserTestCorrectionKind": {
+    "host-lan-asset-mirror": true
+  },
   "capabilityId": {
     "studio.detect": true,
     "studio.install": true,

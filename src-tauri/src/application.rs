@@ -521,6 +521,7 @@ pub(crate) async fn browser_test_runtime(
     runtime_session_id: &str,
     build_marker: Option<&str>,
     suite_path: &str,
+    asset_mirror: crate::contracts::AssetMirrorPolicy,
     policy: BrowserTestPolicy,
 ) -> ApplicationResult<BrowserTestSummary> {
     #[cfg(target_os = "linux")]
@@ -537,12 +538,20 @@ pub(crate) async fn browser_test_runtime(
                 runtime_session_id,
                 build_marker,
                 suite_path,
+                asset_mirror,
                 policy,
             ))
             .await;
     }
-    browser_test_runtime_with_lease(config, runtime_session_id, build_marker, suite_path, policy)
-        .await
+    browser_test_runtime_with_lease(
+        config,
+        runtime_session_id,
+        build_marker,
+        suite_path,
+        asset_mirror,
+        policy,
+    )
+    .await
 }
 
 async fn browser_test_runtime_with_lease(
@@ -550,6 +559,7 @@ async fn browser_test_runtime_with_lease(
     runtime_session_id: &str,
     build_marker: Option<&str>,
     suite_path: &str,
+    asset_mirror: crate::contracts::AssetMirrorPolicy,
     policy: BrowserTestPolicy,
 ) -> ApplicationResult<BrowserTestSummary> {
     let manifest = crate::platform::capability_manifest(None).map_err(CommandError::from)?;
@@ -581,7 +591,9 @@ async fn browser_test_runtime_with_lease(
             .flatten()
     });
     #[cfg(target_os = "linux")]
-    let (asset_mirror_url, _asset_mirror_guard) = if status.mode == RuntimeMode::StudioRunLocally {
+    let (asset_mirror_url, _asset_mirror_guard) = if status.mode == RuntimeMode::StudioRunLocally
+        && asset_mirror == crate::contracts::AssetMirrorPolicy::Auto
+    {
         let mirror = crate::winboat::AssetMirrorServer::start(Path::new(&config.shared_directory))
             .await
             .map_err(|message| precondition_error(CapabilityId::BrowserTest, &message, true))?;
@@ -591,6 +603,8 @@ async fn browser_test_runtime_with_lease(
     };
     #[cfg(not(target_os = "linux"))]
     let asset_mirror_url = None;
+    #[cfg(not(target_os = "linux"))]
+    let _ = asset_mirror;
     let request = BrowserTestRequest {
         session_id: crate::contracts::secure_identifier("session")?,
         base_url,

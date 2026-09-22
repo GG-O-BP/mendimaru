@@ -119,11 +119,21 @@ The browser-specific controls are:
 | `--assertion-timeout-ms`  |    5000 |  100–300000 ms |
 | `--max-artifact-mib`      |     128 |      1–512 MiB |
 | `--retention-runs`        |      20 |     1–100 runs |
+| `--asset-mirror`          |  `auto` |         `auto` | `off` |
 
 `--fail-on-console-error` and `--fail-on-network-failure` promote the
 corresponding diagnostics to test failures. Uncaught page errors always fail a
 test. `--record-video` and `--record-har` are opt-in; HAR response/request
 content is omitted.
+
+`--asset-mirror` controls the automation-only `host.lan` asset correction for
+Runtime targets (#141). It requires `--runtime-session-id`; `--base-url` never
+mirrors assets. `auto` (the default) preserves the historical Studio
+Run Locally behavior, while `off` starts no mirror and installs no browser
+route, so Chromium runs unmodified exactly like an ordinary Linux Chrome.
+Every run records what happened in `corrections` and `browserParity` (see
+[Results and artifacts](#results-and-artifacts)), so an assisted pass can
+never be mistaken for ordinary-Chrome parity.
 
 A passed suite exits `0`. An executed suite with failed assertions or policy
 violations still writes its complete, schema-valid result envelope to stdout
@@ -213,7 +223,10 @@ needs no hosts/privileged-port setup or browser interception.
 The older `browser test --runtime-session-id` path still starts an ephemeral
 loopback-only asset mirror and installs a Chromium route for
 `http(s)://host.lan/Data/**`. This is an automation-only compatibility path; it
-must not be used as evidence that ordinary Chrome works. Requests are restricted
+must not be used as evidence that ordinary Chrome works. Pass
+`--asset-mirror off` to disable it and run the unmodified-browser path instead;
+both variants record their corrections and parity in the result (see
+[Results and artifacts](#results-and-artifacts)). Requests are restricted
 to `<shared-directory>/<project>/deployment/web/**`. Query-bearing paths,
 non-GET/HEAD requests, traversal, symlinks, directories, and files over 64 MiB
 are rejected. The mirror is destroyed with the browser run and never exposes a
@@ -279,10 +292,20 @@ errors all abort publication. These ceilings cannot be raised with
 The result validates against
 [`browser.schema.json#/$defs/summary`](../schemas/browser.schema.json). It
 contains per-test outcomes and step counts, timestamps, browser/Playwright
-versions, and content-addressed artifact descriptors. The artifact manifest
-also records host, Studio, Runtime, backend/mode, available Studio/Runtime
-versions, suite metadata, and the effective policy without recording the base
-URL, query data, suite path, or credentials.
+versions, and content-addressed artifact descriptors. Every summary and the
+artifact manifest also record the automation-only corrections the runner
+did or did not apply (#141): a `corrections` array with one entry per kind —
+today `host-lan-asset-mirror` with `applied` and the number of
+`interceptedRequests` it rewrote — plus a top-level `browserParity` of
+`unmodified` or `assisted`. `assisted` means the runner modified the browser
+context (for example by routing `host.lan`), so that pass is **not** evidence
+that ordinary Chrome works; only `unmodified` runs are. The Rust validator
+rejects a summary whose corrections disagree with the requested mirror or whose
+parity disagrees with its corrections, and the HTML report shows the parity and
+correction counts next to the outcome. The manifest also records host, Studio,
+Runtime, backend/mode, available Studio/Runtime versions, suite metadata, and
+the effective policy without recording the base URL, query data, suite path,
+or credentials.
 
 Every run stores machine-readable `summary.json`, diagnostic JSON, an artifact
 manifest, and a human-readable `report.html`. Failed tests additionally store a
@@ -326,6 +349,40 @@ the compiled executable and runs that exact smoke suite through both a real
 Portable supervisor URL and a WinBoat loopback adapter URL. It also verifies
 exit/stream semantics and Runtime readiness rejection, re-queries artifacts,
 checks integrity, and scans trace members again.
+
+## Mirror correction parity (#141)
+
+A dedicated Rust CLI E2E regression test runs the **same fake-WinBoat fixture
+and the same suite twice** against one Studio Run Locally Runtime: once with
+the default mirror and once with `--asset-mirror off`. The assisted run must
+pass with `browserParity=assisted`, `applied=true`, and at least one
+intercepted request, while the unmodified run must fail on the ordinary
+`host.lan` path with `browserParity=unmodified` and zero interceptions. Both
+runs stay retained as separate sessions with their own artifacts, so a mirror
+assisted pass can never silently stand in for the ordinary-browser result.
+
+The same fixture isolation cannot prove the real user path, so the release
+workflow also runs a self-hosted **Studio F5 → Linux Chrome parity gate** on a
+runner labeled `linux, winboat-studio` before a GitHub release is created. It
+builds the Linux release binary, starts a real shared-project Studio Run
+Locally Runtime, and requires the suite to pass with `--asset-mirror off` —
+unmodified Chromium, no fake fixture, no Portable Runtime substitute. An
+assisted (`--asset-mirror auto`) run is executed afterwards purely as
+comparison evidence and can never satisfy the gate. The gate script is
+`scripts/e2e/studio-f5-parity-gate.mjs` and is driven by:
+
+- `MENDIMARU_STUDIO_PARITY_BINARY` — absolute path to the release binary,
+- `MENDIMARU_STUDIO_PARITY_SUITE` — absolute path to the parity suite,
+- `MENDIMARU_STUDIO_PARITY_EVIDENCE` — evidence JSON output path (default
+  `artifacts/e2e/studio-f5-parity.json`).
+
+Because widget-usability claims need representative state changes, the gate
+rejects pure-navigation suites (`goto`/`expectVisible` only): the suite must
+contain at least one state-changing action (`fill`, `click`, `selectOption`,
+`press`, `check`, `uncheck`) and one value assertion (`expectText`,
+`expectValue`) — for example a cell edit followed by the computed value.
+Write-back and file import/export coverage follow the same rule: assert the
+observed state, not the absence of runner errors.
 
 ## Opt-in frontend health (#144)
 

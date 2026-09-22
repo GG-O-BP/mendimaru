@@ -852,6 +852,45 @@ pub struct BrowserTestPolicy {
     pub retention_runs: u32,
 }
 
+/// Explicit control over the automation-only `host.lan` asset mirror.
+/// `Auto` preserves the historical behavior (Linux `studio-run-locally`
+/// Runtime sessions mirror shared `deployment/web` assets); `Off` never
+/// starts the mirror so the browser runs unmodified (#141).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AssetMirrorPolicy {
+    #[default]
+    Auto,
+    Off,
+}
+
+/// The kind of automation-only correction a browser run applied.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum BrowserTestCorrectionKind {
+    HostLanAssetMirror,
+}
+
+/// One automation-only correction and whether the run actually used it.
+/// A correction with `applied: true` still counts as an assisted browser;
+/// only `intercepted_requests` shows how much of the traffic it rewrote.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserTestCorrection {
+    pub kind: BrowserTestCorrectionKind,
+    pub applied: bool,
+    pub intercepted_requests: u32,
+}
+
+/// Whether the browser that produced a summary was modified by the runner.
+/// `Assisted` results must not be reported as ordinary-Chrome parity.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum BrowserParity {
+    Unmodified,
+    Assisted,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BrowserTestOutcome {
@@ -887,6 +926,14 @@ pub struct BrowserTestSummary {
     pub playwright_version: String,
     pub tests: Vec<BrowserTestCaseSummary>,
     pub artifacts: Vec<ArtifactDescriptor>,
+    /// Automation-only corrections, recorded per kind. Always present for new
+    /// runs; absent for records stored before #141.
+    #[serde(default)]
+    pub corrections: Vec<BrowserTestCorrection>,
+    /// `assisted` whenever a correction was applied; absent for records
+    /// stored before #141.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_parity: Option<BrowserParity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<crate::browser::environment::Report>,
 }
@@ -928,6 +975,10 @@ mod tests {
                 RuntimeMode::StudioRunLocally,
                 RuntimeMode::ExternalUrl,
             ],
+        );
+        assert_registry(
+            "browserTestCorrectionKind",
+            [BrowserTestCorrectionKind::HostLanAssetMirror],
         );
         assert_registry("capabilityId", CapabilityId::ALL);
         assert_registry(
