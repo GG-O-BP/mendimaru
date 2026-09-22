@@ -67,7 +67,7 @@ function changedPaths(base, head) {
   return output.toString("utf8").split("\0").filter(Boolean);
 }
 
-function tauriResourceInputs() {
+export function tauriResourceInputs() {
   const config = JSON.parse(
     readFileSync(path.join(repository, "src-tauri", "tauri.conf.json"), "utf8"),
   );
