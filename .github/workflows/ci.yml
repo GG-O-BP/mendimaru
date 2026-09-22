@@ -5,6 +5,11 @@ on:
     branches:
       - main
   pull_request:
+  # Relevance gating below can skip a gate on a pull request. This weekly run
+  # exercises every gate against main regardless of what changed, so a path
+  # contract that has drifted away from reality cannot hide indefinitely.
+  schedule:
+    - cron: "17 4 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -21,30 +26,72 @@ jobs:
     timeout-minutes: 5
     outputs:
       aur: ${{ steps.filter.outputs.aur }}
+      bundle: ${{ steps.filter.outputs.bundle }}
+      windows_e2e: ${{ steps.filter.outputs.windows_e2e }}
+      linux_e2e: ${{ steps.filter.outputs.linux_e2e }}
+      security: ${{ steps.filter.outputs.security }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6
         with:
           fetch-depth: 2
-      - name: Detect packaging-relevant changes
+
+      # Fail closed in every direction. A non-pull-request event, a missing or
+      # unreachable base commit, a classifier crash, or an incomplete decision
+      # all run every gate. Only a complete, successful classification can mark
+      # a gate skippable, and the decision file is copied into the job outputs
+      # in one step so a partial write can never be read as a full answer.
+      - name: Classify which gates the change can affect
         id: filter
         shell: bash
         env:
           PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          aur=true
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            base="${PULL_REQUEST_BASE_SHA:-}"
-            if [[ -n "$base" ]] \
-              && git cat-file -e "$base^{commit}" 2>/dev/null \
-              && ! git diff --name-only "$base" HEAD -- \
-                'aur' 'scripts/aur' 'src' 'src-tauri' 'package.json' \
-                '.github/workflows/aur-package.yml' | grep -q .; then
-              aur=false
-            fi
+          set -euo pipefail
+          gates=(aur bundle windows_e2e linux_e2e security)
+
+          run_every_gate() {
+            for gate in "${gates[@]}"; do
+              echo "$gate=true" >> "$GITHUB_OUTPUT"
+            done
+            echo "CI gate relevance: every gate runs ($1)"
+          }
+
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            run_every_gate "non-pull-request run"
+            exit 0
           fi
-          echo "aur=$aur" >> "$GITHUB_OUTPUT"
-          echo "AUR gate relevance: $aur"
+
+          base="${PULL_REQUEST_BASE_SHA:-}"
+          if [[ ! "$base" =~ ^[0-9a-f]{40}$ ]]; then
+            run_every_gate "no usable base commit"
+            exit 0
+          fi
+
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$base" 2>/dev/null || true
+          fi
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            run_every_gate "base commit $base is unreachable"
+            exit 0
+          fi
+
+          decision="$(mktemp)"
+          if ! node scripts/ci/gate-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$decision"; then
+            run_every_gate "the classifier failed"
+            exit 0
+          fi
+          for gate in "${gates[@]}"; do
+            if ! grep -q "^$gate=" "$decision"; then
+              run_every_gate "the classifier omitted $gate"
+              exit 0
+            fi
+          done
+          cat "$decision" >> "$GITHUB_OUTPUT"
+          cat "$decision"
 
   aur-package:
     needs: changes
@@ -180,6 +227,13 @@ jobs:
       - name: Test bounded browser artifact scanning
         run: npm run test:browser:security
 
+      # This job is never relevance-gated, so the contracts that decide whether
+      # the gated jobs may be skipped are always verified on every run.
+      - name: Test CI gate relevance and performance harness contracts
+        run: |
+          npm run test:ci:gates
+          npm run test:perf
+
       - name: Run strict Playwright browser E2E
         run: |
           npm run test:browser
@@ -211,6 +265,7 @@ jobs:
 
   linux-webkit-e2e:
     name: Linux Tauri WebKit E2E
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -218,6 +273,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install Linux desktop dependencies
+        if: needs.changes.outputs.linux_e2e == 'true'
         shell: bash
         run: |
           sudo apt-get update
@@ -231,23 +287,28 @@ jobs:
             xvfb
 
       - name: Set up Node.js
+        if: needs.changes.outputs.linux_e2e == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
           cache: npm
 
       - name: Set up Rust
+        if: needs.changes.outputs.linux_e2e == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build outputs
+        if: needs.changes.outputs.linux_e2e == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
       - name: Install frontend dependencies
+        if: needs.changes.outputs.linux_e2e == 'true'
         run: npm ci
 
       - name: Cache pinned Tauri WebDriver bridge
+        if: needs.changes.outputs.linux_e2e == 'true'
         uses: actions/cache@v6
         with:
           path: |
@@ -257,18 +318,27 @@ jobs:
           key: tauri-driver-2.0.6-x86_64-unknown-linux-gnu
 
       - name: Install pinned Tauri WebDriver bridge
+        if: needs.changes.outputs.linux_e2e == 'true'
         run: cargo install tauri-driver --version 2.0.6 --locked
 
       - name: Run real Tauri WebKit E2E
+        if: needs.changes.outputs.linux_e2e == 'true'
         env:
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
         run: xvfb-run --auto-servernum npm run test:e2e
 
       - name: Verify Linux and Windows E2E coverage levels
+        if: needs.changes.outputs.linux_e2e == 'true'
         run: npm run test:e2e:coverage
 
+      - name: Record skipped gate
+        if: needs.changes.outputs.linux_e2e != 'true'
+        run: >-
+          echo "Linux WebKit E2E skipped: no application, packaged resource, or
+          E2E harness path changed."
+
       - name: Upload Tauri WebKit E2E failure evidence
-        if: always()
+        if: always() && needs.changes.outputs.linux_e2e == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: mendimaru-linux-e2e
@@ -358,6 +428,7 @@ jobs:
 
   security:
     name: Dependency security audit
+    needs: changes
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -365,10 +436,18 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run dependency audit action
+        if: needs.changes.outputs.security == 'true'
         uses: ./actions/dependency-audit
+
+      - name: Record skipped gate
+        if: needs.changes.outputs.security != 'true'
+        run: >-
+          echo "Dependency audit skipped: no npm or Cargo manifest, RustSec
+          policy, or audit action path changed."
 
   windows-native-e2e:
     name: Actual Windows Tauri dev E2E
+    needs: changes
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -376,29 +455,40 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up Node.js
+        if: needs.changes.outputs.windows_e2e == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
           cache: npm
 
       - name: Set up Rust
+        if: needs.changes.outputs.windows_e2e == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build outputs
+        if: needs.changes.outputs.windows_e2e == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
       - name: Install frontend dependencies
+        if: needs.changes.outputs.windows_e2e == 'true'
         run: npm ci
 
       - name: Run actual Tauri, WebView2, IPC, Windows, and performance E2E
+        if: needs.changes.outputs.windows_e2e == 'true'
         run: npm run test:e2e:windows
         env:
           MENDIMARU_E2E_MAX_STARTUP_MS: 180000
 
+      - name: Record skipped gate
+        if: needs.changes.outputs.windows_e2e != 'true'
+        run: >-
+          echo "Windows native E2E skipped: no application, packaged resource,
+          or E2E harness path changed."
+
       - name: Upload native E2E diagnostics
-        if: always()
+        if: always() && needs.changes.outputs.windows_e2e == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: mendimaru-windows-native-e2e
@@ -407,6 +497,7 @@ jobs:
 
   windows-bundle:
     name: Build, install, launch, and uninstall Windows bundles
+    needs: changes
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -414,26 +505,32 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up Node.js
+        if: needs.changes.outputs.bundle == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
           cache: npm
 
       - name: Set up Rust
+        if: needs.changes.outputs.bundle == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build outputs
+        if: needs.changes.outputs.bundle == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
       - name: Install frontend dependencies
+        if: needs.changes.outputs.bundle == 'true'
         run: npm ci
 
       - name: Build MSI and NSIS bundles
+        if: needs.changes.outputs.bundle == 'true'
         run: npm run tauri -- build --bundles msi,nsis
 
       - name: Verify installer outputs
+        if: needs.changes.outputs.bundle == 'true'
         shell: pwsh
         run: |
           if (-not (Get-ChildItem "src-tauri/target/release/bundle/msi" -Filter "*.msi" -File)) {
@@ -444,6 +541,7 @@ jobs:
           }
 
       - name: Install, launch, and uninstall MSI in the ephemeral VM
+        if: needs.changes.outputs.bundle == 'true'
         shell: pwsh
         env:
           MENDIMARU_EPHEMERAL_WINDOWS_VM: mendimaru-github-hosted-ephemeral-vm
@@ -461,6 +559,7 @@ jobs:
             -InstallerPath $installers[0].FullName
 
       - name: Install, launch, and uninstall NSIS in the ephemeral VM
+        if: needs.changes.outputs.bundle == 'true'
         shell: pwsh
         env:
           MENDIMARU_EPHEMERAL_WINDOWS_VM: mendimaru-github-hosted-ephemeral-vm
@@ -477,8 +576,14 @@ jobs:
             -InstallerKind nsis `
             -InstallerPath $installers[0].FullName
 
+      - name: Record skipped gate
+        if: needs.changes.outputs.bundle != 'true'
+        run: >-
+          echo "Windows bundle gate skipped: no application, packaged resource,
+          or bundle smoke harness path changed."
+
       - name: Upload bundle smoke diagnostics
-        if: always()
+        if: always() && needs.changes.outputs.bundle == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: mendimaru-windows-bundle-smoke
@@ -486,6 +591,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Windows smoke artifacts
+        if: needs.changes.outputs.bundle == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: mendimaru-windows-installers

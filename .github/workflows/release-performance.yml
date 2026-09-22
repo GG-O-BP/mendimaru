@@ -325,8 +325,34 @@ jobs:
             --head HEAD \
             --github-output "$GITHUB_OUTPUT"
 
+      # Split SLA (issue #176). The 300 second idle window is the single
+      # largest item on the pull-request critical path: every idle leg measured
+      # 363-411 seconds against 132-149 for latency. It moves to push-to-main
+      # and the weekly schedule with its window, sample count, and budgets
+      # untouched, so the measurement keeps its full leak sensitivity and only
+      # the point at which a regression is detected moves.
+      - name: Decide whether this phase runs for this event
+        id: phase
+        shell: bash
+        env:
+          PHASE: ${{ matrix.phase }}
+          RELEVANT: ${{ steps.relevance.outputs.relevant }}
+        run: |
+          run=true
+          reason="relevant"
+          if [[ "$RELEVANT" != "true" ]]; then
+            run=false
+            reason="no measured-artifact paths changed"
+          elif [[ "$PHASE" == "idle" && "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            run=false
+            reason="the idle phase is measured after merge on push to main and on the weekly schedule"
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          printf 'Phase %s runs: %s (%s)\n' "$PHASE" "$run" "$reason"
+
       - name: Install Linux desktop dependencies
-        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
+        if: runner.os == 'Linux' && steps.phase.outputs.run == 'true'
         shell: bash
         run: |
           sudo apt-get update
@@ -340,18 +366,18 @@ jobs:
             xvfb
 
       - name: Set up Node.js
-        if: steps.relevance.outputs.relevant == 'true'
+        if: steps.phase.outputs.run == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
           cache: npm
 
       - name: Install dependencies
-        if: steps.relevance.outputs.relevant == 'true'
+        if: steps.phase.outputs.run == 'true'
         run: npm ci
 
       - name: Cache pinned Tauri WebDriver bridge
-        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
+        if: runner.os == 'Linux' && steps.phase.outputs.run == 'true'
         uses: actions/cache@v6
         with:
           path: |
@@ -361,18 +387,18 @@ jobs:
           key: tauri-driver-2.0.6-x86_64-unknown-linux-gnu
 
       - name: Install pinned Tauri WebDriver bridge
-        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
+        if: runner.os == 'Linux' && steps.phase.outputs.run == 'true'
         run: cargo install tauri-driver --version 2.0.6 --locked
 
       - name: Download the built binaries
-        if: steps.relevance.outputs.relevant == 'true'
+        if: steps.phase.outputs.run == 'true'
         uses: actions/download-artifact@v7
         with:
           pattern: webview-binary-${{ matrix.platform }}-*
           path: binary
 
       - name: Measure the Linux AppImage phase
-        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
+        if: runner.os == 'Linux' && steps.phase.outputs.run == 'true'
         shell: bash
         env:
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
@@ -411,7 +437,7 @@ jobs:
           done
 
       - name: Measure the Windows executable phase
-        if: runner.os == 'Windows' && steps.relevance.outputs.relevant == 'true'
+        if: runner.os == 'Windows' && steps.phase.outputs.run == 'true'
         shell: pwsh
         run: |
           New-Item -ItemType Directory `
@@ -441,13 +467,15 @@ jobs:
           }
 
       - name: Record skipped measurement
-        if: steps.relevance.outputs.relevant != 'true'
+        if: steps.phase.outputs.run != 'true'
         shell: bash
         run: |
           mkdir -p artifacts/e2e/release-performance
           {
             echo "release-performance: measurement skipped"
-            echo "no measured-artifact paths changed since ${{ steps.revisions.outputs.baseline }}"
+            echo "phase: ${{ matrix.phase }}"
+            echo "reason: ${{ steps.phase.outputs.reason }}"
+            echo "baseline: ${{ steps.revisions.outputs.baseline }}"
           } > artifacts/e2e/release-performance/skip-reason.txt
 
       - name: Upload the measurement report
@@ -538,13 +566,23 @@ jobs:
             performance/budgets.latency.json
 
       - name: Gate the idle phase against current main
-        if: steps.relevance.outputs.relevant == 'true'
+        # Paired with the idle measurement above: on a pull request there is no
+        # idle report to gate, and on push to main and the weekly schedule this
+        # runs against the same 300 second window and the same
+        # performance/budgets.idle.json thresholds as before.
+        if: steps.relevance.outputs.relevant == 'true' && github.event_name != 'pull_request'
         shell: bash
         run: |
           node scripts/perf/performance-gate.mjs \
             "reports/${{ matrix.platform }}-candidate-idle.json" \
             "reports/${{ matrix.platform }}-baseline-idle.json" \
             performance/budgets.idle.json
+
+      - name: Record deferred idle gate
+        if: steps.relevance.outputs.relevant == 'true' && github.event_name == 'pull_request'
+        run: >-
+          echo "Idle gate deferred to push-to-main and the weekly schedule; the
+          window, sampling, and budgets are unchanged."
 
       - name: Record skipped gate
         if: steps.relevance.outputs.relevant != 'true'
@@ -585,23 +623,25 @@ jobs:
           echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
           echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
 
-      - name: Decide whether measured artifacts can change
+      # Split SLA (issue #176). This suite runs
+      # scripts/e2e/windows-bundle-smoke.ps1 -Performance, which performs seven
+      # install/launch/uninstall samples and a 300 second idle window in one
+      # inseparable pass, so the suite moves to push-to-main and the weekly
+      # schedule as a whole rather than being split at a measurement boundary
+      # that does not exist. Pull requests keep full packaging coverage from
+      # the windows-bundle job in ci.yml, which still builds, installs,
+      # launches, and uninstalls both installers on every run.
+      - name: Decide whether the installed-bundle suite runs
         id: relevance
         shell: bash
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "Measured-artifact relevance: true (non-PR run)"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "Installed-bundle suite: deferred to push-to-main and the weekly schedule"
             exit 0
           fi
-          base="${{ steps.revisions.outputs.baseline }}"
-          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-            git fetch origin "$base" --depth=1
-          fi
-          node scripts/perf/release-relevance.mjs \
-            --base "$base" \
-            --head HEAD \
-            --github-output "$GITHUB_OUTPUT"
+          echo "relevant=true" >> "$GITHUB_OUTPUT"
+          echo "Installed-bundle suite: runs (non-pull-request run)"
 
       - name: Set up Rust
         if: steps.relevance.outputs.relevant == 'true'
@@ -702,7 +742,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p staged-installers
-          echo "release-performance build skipped: no measured-artifact paths changed" \
+          echo "release-performance: installer build deferred to push-to-main and the weekly schedule" \
             > staged-installers/skip-reason.txt
 
       - name: Publish the installer artifacts
@@ -749,23 +789,20 @@ jobs:
           echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
           echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
 
-      - name: Decide whether measured artifacts can change
+      # Paired with the installed-bundle build above: the -Performance pass is
+      # a single seven-sample plus 300 second idle measurement, so it runs
+      # after merge and on the weekly schedule with its parameters unchanged.
+      - name: Decide whether the installed-bundle suite runs
         id: relevance
         shell: bash
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "Measured-artifact relevance: true (non-PR run)"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "Installed-bundle suite: deferred to push-to-main and the weekly schedule"
             exit 0
           fi
-          base="${{ steps.revisions.outputs.baseline }}"
-          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-            git fetch origin "$base" --depth=1
-          fi
-          node scripts/perf/release-relevance.mjs \
-            --base "$base" \
-            --head HEAD \
-            --github-output "$GITHUB_OUTPUT"
+          echo "relevant=true" >> "$GITHUB_OUTPUT"
+          echo "Installed-bundle suite: runs (non-pull-request run)"
 
       - name: Set up Node.js
         if: steps.relevance.outputs.relevant == 'true'
@@ -852,7 +889,8 @@ jobs:
           mkdir -p artifacts/e2e/release-performance
           {
             echo "release-performance: installed-bundle measurement skipped"
-            echo "no measured-artifact paths changed since ${{ steps.revisions.outputs.baseline }}"
+            echo "deferred to push-to-main and the weekly schedule (issue #176 split SLA)"
+            echo "baseline: ${{ steps.revisions.outputs.baseline }}"
           } > artifacts/e2e/release-performance/skip-reason.txt
 
       - name: Upload the measurement report
@@ -890,23 +928,19 @@ jobs:
           echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
           echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
 
-      - name: Decide whether measured artifacts can change
+      # Gates the suite that now runs after merge, so it follows the same
+      # deferral rather than gating reports that a pull request never produced.
+      - name: Decide whether the installed-bundle suite runs
         id: relevance
         shell: bash
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-            echo "Measured-artifact relevance: true (non-PR run)"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "Installed-bundle suite: deferred to push-to-main and the weekly schedule"
             exit 0
           fi
-          base="${{ steps.revisions.outputs.baseline }}"
-          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-            git fetch origin "$base" --depth=1
-          fi
-          node scripts/perf/release-relevance.mjs \
-            --base "$base" \
-            --head HEAD \
-            --github-output "$GITHUB_OUTPUT"
+          echo "relevant=true" >> "$GITHUB_OUTPUT"
+          echo "Installed-bundle suite: runs (non-pull-request run)"
 
       - name: Set up Node.js
         if: steps.relevance.outputs.relevant == 'true'
@@ -947,4 +981,6 @@ jobs:
 
       - name: Record skipped gate
         if: steps.relevance.outputs.relevant != 'true'
-        run: echo "Installed bundle gate skipped because measured inputs are unchanged."
+        run: >-
+          echo "Installed bundle gate deferred to push-to-main and the weekly
+          schedule; window, sampling, and budgets are unchanged."
