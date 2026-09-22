@@ -333,8 +333,12 @@ pub(crate) struct Coordinator {
     registry: Mutex<Registry>,
 }
 
+// Production callers live in the Linux keeper and request paths; Windows
+// test builds compile the pure queue without them.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 static COORDINATOR: OnceLock<Arc<Coordinator>> = OnceLock::new();
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn global() -> Arc<Coordinator> {
     Arc::clone(COORDINATOR.get_or_init(|| Arc::new(Coordinator::default())))
 }
@@ -350,6 +354,7 @@ pub(crate) struct Reservation {
 }
 
 impl Reservation {
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn arrival(&self) -> u64 {
         self.arrival
     }
@@ -652,10 +657,6 @@ mod tests {
     }
 
     fn coordinator() -> Arc<Coordinator> {
-        Arc::new(Coordinator::default())
-    }
-
-    fn fresh_coordinator() -> Arc<Coordinator> {
         Arc::new(Coordinator::default())
     }
 
@@ -1011,7 +1012,7 @@ mod tests {
             .expect("first foreground action holds the desktop");
         // A separate keeper coordinator (separate process analogue) contends
         // for the same desktop through its own flock.
-        let second_coordinator = fresh_coordinator();
+        let second_coordinator = Arc::new(Coordinator::default());
         let second_request = {
             let mut request = fixture_request(OTHER_SESSION, Operation::Action);
             request.element_id = Some(format!("{}:1.2", "b".repeat(32)));
