@@ -422,6 +422,21 @@
       }
     },
     "outcome": { "enum": ["passed", "failed", "skipped"] },
+    "browserParity": { "enum": ["unmodified", "assisted"] },
+    "correction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "applied", "interceptedRequests"],
+      "properties": {
+        "kind": { "enum": ["host-lan-asset-mirror"] },
+        "applied": { "type": "boolean" },
+        "interceptedRequests": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
+      }
+    },
     "testCase": {
       "type": "object",
       "additionalProperties": false,
@@ -511,6 +526,12 @@
           "minLength": 1,
           "maxLength": 80
         },
+        "browserParity": { "$ref": "#/$defs/browserParity" },
+        "corrections": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/correction" }
+        },
         "tests": {
           "type": "array",
           "minItems": 1,
@@ -589,6 +610,11 @@
           }
         },
         "policy": { "$ref": "#/$defs/policy" },
+        "corrections": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/correction" }
+        },
         "artifacts": {
           "type": "array",
           "maxItems": 511,

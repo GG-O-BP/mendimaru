@@ -167,6 +167,7 @@ async function run(rawRequest) {
   );
   const baseUrl = validateBaseUrl(request.baseUrl);
   const assetMirrorUrl = validateOptionalAssetMirrorUrl(request.assetMirrorUrl);
+  const mirrorCounters = { intercepted: 0 };
   const { secrets, storageState } = await collectSecrets(suite);
   const startedAt = new Date().toISOString();
   const environment = new EnvironmentMonitor(
@@ -207,6 +208,7 @@ async function run(rawRequest) {
         browser,
         baseUrl,
         assetMirrorUrl,
+        mirrorCounters,
         files,
         index,
         outputDirectory,
@@ -257,6 +259,18 @@ async function run(rawRequest) {
   const skipped = results.filter(({ outcome }) => outcome === "skipped").length;
   const outcome =
     failed === 0 && !environment.interrupted ? "passed" : "failed";
+  // Automation-only corrections are recorded per kind so an assisted pass is
+  // never mistaken for ordinary-browser parity (#141).
+  const corrections = [
+    {
+      kind: "host-lan-asset-mirror",
+      applied: Boolean(assetMirrorUrl),
+      interceptedRequests: mirrorCounters.intercepted,
+    },
+  ];
+  const browserParity = corrections.some((correction) => correction.applied)
+    ? "assisted"
+    : "unmodified";
   const summary = {
     schemaVersion: SCHEMA_VERSION,
     sessionId: request.sessionId,
@@ -269,6 +283,8 @@ async function run(rawRequest) {
     browserName: "chromium",
     browserVersion,
     playwrightVersion,
+    browserParity,
+    corrections,
     tests: results,
     ...(environment.report ? { environment: environment.report } : {}),
   };
@@ -317,6 +333,7 @@ async function run(rawRequest) {
       tests: suite.tests.length,
     },
     policy: request.policy,
+    corrections,
     artifacts: describedFiles,
     ...(environment.report ? { environment: environment.report } : {}),
   };
@@ -339,6 +356,7 @@ async function runTest({
   browser,
   baseUrl,
   assetMirrorUrl,
+  mirrorCounters,
   files,
   index,
   outputDirectory,
@@ -380,7 +398,7 @@ async function runTest({
   };
   const context = await browser.newContext(contextOptions);
   if (assetMirrorUrl) {
-    await installHostLanAssetRoute(context, assetMirrorUrl);
+    await installHostLanAssetRoute(context, assetMirrorUrl, mirrorCounters);
   }
   await context.addInitScript((style) => {
     const apply = () => {
@@ -917,8 +935,9 @@ function validateOptionalAssetMirrorUrl(value) {
   return url;
 }
 
-async function installHostLanAssetRoute(context, mirrorUrl) {
+async function installHostLanAssetRoute(context, mirrorUrl, counters) {
   await context.route(/^https?:\/\/host\.lan\/Data\//i, async (route) => {
+    counters.intercepted += 1;
     const original = new URL(route.request().url());
     const mirrored = new URL(
       `${original.pathname}${original.search}`,
@@ -1688,11 +1707,21 @@ function renderHtmlReport(suiteName, summary) {
         )}</td></tr>`,
     )
     .join("");
+  const correctionText = (summary.corrections || [])
+    .map(
+      (correction) =>
+        `${escapeHtml(correction.kind)}: ${correction.applied ? "applied" : "not applied"} (${correction.interceptedRequests} intercepted)`,
+    )
+    .join(" · ");
+  const parityLine = summary.browserParity
+    ? `<p>Browser parity: <strong>${escapeHtml(summary.browserParity)}</strong>${correctionText ? ` — ${correctionText}` : ""}</p>`
+    : "";
   return `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Mendimaru browser report</title>
-<style>body{font:14px system-ui;margin:2rem;color:#17202a}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccd1d1;padding:.5rem;text-align:left}th{background:#f4f6f7}.passed{color:#196f3d}.failed{color:#922b21}</style></head>
+<style>body{font:14px system-ui;margin:2rem;color:#17202a}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccd1d1;padding:.5rem;text-align:left}th{background:#f4f6f7}.passed{color:#196f3d}.failed{color:#922b21}.assisted{color:#b9770e}</style></head>
 <body><h1>${escapeHtml(suiteName)}</h1><p class="${summary.outcome}">Outcome: ${summary.outcome}</p>
+${parityLine}
 <p>Chromium ${escapeHtml(summary.browserVersion)} · Playwright ${escapeHtml(
     summary.playwrightVersion,
   )}</p><table><thead><tr><th>Test</th><th>Outcome</th><th>Steps</th><th>Failure</th></tr></thead><tbody>${rows}</tbody></table></body></html>\n`;

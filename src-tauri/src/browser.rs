@@ -1,8 +1,9 @@
 use crate::app_paths::AppPaths;
 use crate::contracts::{
     ArtifactDescriptor, ArtifactKind, BackendError, BackendErrorCode, BackendId, BackendResult,
-    BrowserTestCaseSummary, BrowserTestOutcome, BrowserTestPolicy, BrowserTestRequest,
-    BrowserTestSummary, CapabilityId, PlatformId, RuntimeMode, CONTRACT_SCHEMA_VERSION,
+    BrowserParity, BrowserTestCaseSummary, BrowserTestCorrection, BrowserTestCorrectionKind,
+    BrowserTestOutcome, BrowserTestPolicy, BrowserTestRequest, BrowserTestSummary, CapabilityId,
+    PlatformId, RuntimeMode, CONTRACT_SCHEMA_VERSION,
 };
 use aho_corasick::AhoCorasick;
 use chrono::{DateTime, Utc};
@@ -27,6 +28,8 @@ const MAX_SUITE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_RUNNER_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_ARTIFACT_FILES: usize = 512;
+const MAX_CORRECTION_RECORDS: usize = 8;
+const MAX_INTERCEPTED_REQUESTS: u32 = 1_000_000;
 const MAX_STORE_BYTES: u64 = 1024 * 1024 * 1024;
 const ARTIFACT_SCAN_BUFFER_BYTES: usize = 64 * 1024;
 const DEFAULT_ARTIFACT_SCAN_LIMITS: ArtifactScanLimits = ArtifactScanLimits {
@@ -193,6 +196,11 @@ struct RunnerSummary {
     playwright_version: String,
     tests: Vec<BrowserTestCaseSummary>,
     files: Vec<RunnerArtifact>,
+    /// Automation-only corrections the runner applied (or did not); always
+    /// present for current runners. Recorded so an assisted pass is never
+    /// mistaken for ordinary-browser parity (#141).
+    corrections: Vec<BrowserTestCorrection>,
+    browser_parity: BrowserParity,
     #[serde(default)]
     environment: Option<environment::Report>,
 }
@@ -226,6 +234,7 @@ struct RunnerManifest {
     runner_version: String,
     suite: RunnerSuiteIdentity,
     policy: BrowserTestPolicy,
+    corrections: Vec<BrowserTestCorrection>,
     artifacts: Vec<RunnerManifestArtifact>,
     #[serde(default)]
     environment: Option<environment::Report>,
@@ -621,6 +630,8 @@ pub(crate) async fn test(
         browser_version: runner.browser_version,
         playwright_version: runner.playwright_version,
         tests: runner.tests,
+        corrections: runner.corrections.clone(),
+        browser_parity: Some(runner.browser_parity),
         environment: runner.environment,
         artifacts: artifacts
             .iter()
@@ -1002,6 +1013,32 @@ fn validate_runner_summary(
     {
         return Err("invalid environment observation".into());
     }
+    let mirror_applied = request.asset_mirror_url.is_some();
+    let mirror_corrections = summary
+        .corrections
+        .iter()
+        .filter(|correction| correction.kind == BrowserTestCorrectionKind::HostLanAssetMirror)
+        .count();
+    let expected_parity = if summary.corrections.iter().any(|c| c.applied) {
+        BrowserParity::Assisted
+    } else {
+        BrowserParity::Unmodified
+    };
+    if summary.corrections.len() > MAX_CORRECTION_RECORDS
+        || mirror_corrections != 1
+        || summary
+            .corrections
+            .iter()
+            .any(|correction| correction.intercepted_requests > MAX_INTERCEPTED_REQUESTS)
+        || summary
+            .corrections
+            .iter()
+            .find(|correction| correction.kind == BrowserTestCorrectionKind::HostLanAssetMirror)
+            .is_none_or(|correction| correction.applied != mirror_applied)
+        || summary.browser_parity != expected_parity
+    {
+        return Err("the browser correction report is inconsistent".into());
+    }
     for (actual, expected) in summary.tests.iter().zip(expected_tests) {
         let expected_name = expected.get("name").and_then(Value::as_str).unwrap_or("");
         let test_steps = expected
@@ -1159,6 +1196,7 @@ fn verify_runner_manifest(
         || manifest.suite.tests != suite_tests
         || manifest.environment != summary.environment
         || manifest.policy != request.policy
+        || manifest.corrections != summary.corrections
     {
         return Err("the browser artifact manifest metadata is inconsistent".to_string());
     }
@@ -2158,6 +2196,133 @@ mod tests {
         assert!(validate_session_id(&format!("session_{}", "A".repeat(32))).is_err());
         assert!(validate_artifact_name("test-001-trace.zip").is_ok());
         assert!(validate_artifact_name("../trace.zip").is_err());
+    }
+
+    fn runner_summary_fixture(
+        corrections: Vec<BrowserTestCorrection>,
+        browser_parity: BrowserParity,
+    ) -> RunnerSummary {
+        RunnerSummary {
+            schema_version: CONTRACT_SCHEMA_VERSION.to_string(),
+            session_id: format!("session_{}", "ab".repeat(16)),
+            outcome: BrowserTestOutcome::Passed,
+            passed: 1,
+            failed: 0,
+            skipped: 0,
+            started_at: DateTime::parse_from_rfc3339("2026-09-22T00:00:00Z")
+                .expect("start timestamp")
+                .with_timezone(&Utc),
+            finished_at: DateTime::parse_from_rfc3339("2026-09-22T00:00:01Z")
+                .expect("finish timestamp")
+                .with_timezone(&Utc),
+            browser_name: "chromium".to_string(),
+            browser_version: "151.0.7922.34".to_string(),
+            playwright_version: "1.62.1".to_string(),
+            tests: vec![BrowserTestCaseSummary {
+                name: "one".to_string(),
+                outcome: BrowserTestOutcome::Passed,
+                completed_steps: 0,
+                total_steps: 0,
+                failure: None,
+            }],
+            files: vec![RunnerArtifact {
+                path: "summary.json".to_string(),
+                kind: ArtifactKind::BrowserReport,
+                media_type: "application/json".to_string(),
+            }],
+            corrections,
+            browser_parity,
+            environment: None,
+        }
+    }
+
+    #[test]
+    fn correction_report_must_match_the_request_and_parity() {
+        let suite = json!({
+            "name": "corrections",
+            "beforeEach": [],
+            "tests": [{ "name": "one", "steps": [] }]
+        });
+        let request = request(Path::new("suite.json"));
+        let unmodified_correction = BrowserTestCorrection {
+            kind: BrowserTestCorrectionKind::HostLanAssetMirror,
+            applied: false,
+            intercepted_requests: 0,
+        };
+        assert!(validate_runner_summary(
+            &runner_summary_fixture(
+                vec![unmodified_correction.clone()],
+                BrowserParity::Unmodified,
+            ),
+            &request,
+            &suite,
+        )
+        .is_ok());
+
+        let mirrored_request = BrowserTestRequest {
+            asset_mirror_url: Some("http://127.0.0.1:41234".to_string()),
+            ..request.clone()
+        };
+        let applied_correction = BrowserTestCorrection {
+            kind: BrowserTestCorrectionKind::HostLanAssetMirror,
+            applied: true,
+            intercepted_requests: 2,
+        };
+        assert!(validate_runner_summary(
+            &runner_summary_fixture(vec![applied_correction.clone()], BrowserParity::Assisted,),
+            &mirrored_request,
+            &suite,
+        )
+        .is_ok());
+
+        // Assisted parity without a mirror URL, or an applied correction
+        // reported as unmodified parity, must not survive validation.
+        assert!(validate_runner_summary(
+            &runner_summary_fixture(vec![applied_correction.clone()], BrowserParity::Assisted,),
+            &request,
+            &suite,
+        )
+        .is_err());
+        assert!(validate_runner_summary(
+            &runner_summary_fixture(vec![applied_correction], BrowserParity::Unmodified,),
+            &request,
+            &suite,
+        )
+        .is_err());
+        // A mirrored run that hides its correction is rejected.
+        assert!(validate_runner_summary(
+            &runner_summary_fixture(
+                vec![unmodified_correction.clone()],
+                BrowserParity::Unmodified,
+            ),
+            &mirrored_request,
+            &suite,
+        )
+        .is_err());
+        // Missing, duplicated, and out-of-bound correction records are rejected.
+        assert!(validate_runner_summary(
+            &runner_summary_fixture(vec![], BrowserParity::Unmodified),
+            &request,
+            &suite,
+        )
+        .is_err());
+        assert!(validate_runner_summary(
+            &runner_summary_fixture(
+                vec![unmodified_correction.clone(), unmodified_correction.clone()],
+                BrowserParity::Unmodified,
+            ),
+            &request,
+            &suite,
+        )
+        .is_err());
+        let mut oversized = unmodified_correction;
+        oversized.intercepted_requests = MAX_INTERCEPTED_REQUESTS + 1;
+        assert!(validate_runner_summary(
+            &runner_summary_fixture(vec![oversized], BrowserParity::Unmodified),
+            &request,
+            &suite,
+        )
+        .is_err());
     }
 
     #[test]

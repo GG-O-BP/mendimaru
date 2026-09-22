@@ -101,9 +101,46 @@ jobs:
           path: artifacts/e2e
           if-no-files-found: warn
 
+  studio-f5-parity:
+    name: Studio F5 to Linux Chrome parity gate
+    needs: dependency-audit
+    runs-on: [self-hosted, linux, winboat-studio]
+    timeout-minutes: 45
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build the Linux release binary
+        run: cargo build --release --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Run the shared-project Studio F5 parity gate
+        env:
+          MENDIMARU_STUDIO_PARITY_BINARY: ${{ github.workspace }}/src-tauri/target/release/mendimaru
+          MENDIMARU_STUDIO_PARITY_SUITE: ${{ vars.STUDIO_F5_PARITY_SUITE }}
+        run: node scripts/e2e/studio-f5-parity-gate.mjs
+
+      - name: Upload parity evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-studio-f5-parity-evidence
+          path: artifacts/e2e/studio-f5-parity.json
+          if-no-files-found: warn
+
   release:
     name: Create GitHub release
-    needs: [verify-windows, verify-aur]
+    needs: [verify-windows, verify-aur, studio-f5-parity]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

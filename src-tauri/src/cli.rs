@@ -1,7 +1,7 @@
 use crate::app_paths::AppPaths;
 use crate::contracts::{
-    BackendError, BackendErrorCode, BackendId, BrowserTestPolicy, CapabilityId, CapabilitySnapshot,
-    PlatformId, RuntimeMode, SessionDescriptor, CONTRACT_SCHEMA_VERSION,
+    AssetMirrorPolicy, BackendError, BackendErrorCode, BackendId, BrowserTestPolicy, CapabilityId,
+    CapabilitySnapshot, PlatformId, RuntimeMode, SessionDescriptor, CONTRACT_SCHEMA_VERSION,
 };
 use crate::models::{CommandError, CommandErrorCode, DownloadProgress};
 #[cfg(target_os = "linux")]
@@ -112,6 +112,7 @@ enum CliCommand {
         base_url: Option<String>,
         runtime_session_id: Option<String>,
         suite_path: String,
+        asset_mirror: AssetMirrorPolicy,
         policy: BrowserTestPolicy,
     },
     BrowserArtifacts {
@@ -585,6 +586,7 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
              Options include --winboat-use (protect the configured VM with --base-url),\n\
              --build-marker FILE (updated on each WinBoat build), timeout controls, --record-video, --record-har,\n\
              --fail-on-console-error, --fail-on-network-failure,\n\
+             --asset-mirror auto|off (Runtime Studio targets only; off runs an unmodified browser),\n\
              --max-artifact-mib, and --retention-runs. See browser-testing.md.",
         ),
         (Some("browser"), Some("artifacts")) => Some(
@@ -794,6 +796,7 @@ async fn run_command(
             build_marker,
             winboat_use,
             suite_path,
+            asset_mirror: _,
             policy,
         } => {
             let vm_config = if *winboat_use {
@@ -1081,6 +1084,7 @@ async fn run_command(
             build_marker,
             winboat_use: _,
             suite_path,
+            asset_mirror,
             policy,
         } => CommandOutput::data(
             crate::application::browser_test_runtime(
@@ -1088,6 +1092,7 @@ async fn run_command(
                 runtime_session_id,
                 build_marker.as_deref(),
                 suite_path,
+                *asset_mirror,
                 policy.clone(),
             )
             .await?,
@@ -2192,6 +2197,7 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
                     "--runtime-session-id",
                     "--suite-path",
                     "--build-marker",
+                    "--asset-mirror",
                     "--navigation-timeout-ms",
                     "--action-timeout-ms",
                     "--assertion-timeout-ms",
@@ -2217,6 +2223,21 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
             if winboat_use && base_url.is_none() {
                 return Err(BackendError::invalid_request(
                     "--winboat-use requires --base-url; Runtime targets acquire use automatically",
+                ));
+            }
+            let asset_mirror = match options.get("--asset-mirror").map(String::as_str) {
+                None => AssetMirrorPolicy::Auto,
+                Some("auto") => AssetMirrorPolicy::Auto,
+                Some("off") => AssetMirrorPolicy::Off,
+                Some(_) => {
+                    return Err(BackendError::invalid_request(
+                        "--asset-mirror expects auto or off",
+                    ))
+                }
+            };
+            if options.contains_key("--asset-mirror") && base_url.is_some() {
+                return Err(BackendError::invalid_request(
+                    "--asset-mirror requires --runtime-session-id; --base-url never mirrors assets",
                 ));
             }
             let policy = BrowserTestPolicy {
@@ -2262,6 +2283,7 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
                 base_url,
                 runtime_session_id,
                 suite_path: required_map_option(&options, "--suite-path")?,
+                asset_mirror,
                 policy,
             })
         }
@@ -3034,6 +3056,84 @@ mod tests {
             assert!(!execution.stdout.contains("schemaVersion"));
             assert!(!execution.stdout.contains("snapshotId"));
         }
+    }
+
+    #[test]
+    fn asset_mirror_option_controls_automation_corrections_explicitly() {
+        let parsed = parse(&args(&[
+            "browser",
+            "test",
+            "--runtime-session-id",
+            "runtime_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--suite-path",
+            "suite.json",
+        ]))
+        .unwrap();
+        assert!(matches!(
+            parsed.command,
+            CliCommand::BrowserTest {
+                asset_mirror: AssetMirrorPolicy::Auto,
+                ..
+            }
+        ));
+        let parsed = parse(&args(&[
+            "browser",
+            "test",
+            "--runtime-session-id",
+            "runtime_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--suite-path",
+            "suite.json",
+            "--asset-mirror",
+            "off",
+        ]))
+        .unwrap();
+        assert!(matches!(
+            parsed.command,
+            CliCommand::BrowserTest {
+                asset_mirror: AssetMirrorPolicy::Off,
+                ..
+            }
+        ));
+        let parsed = parse(&args(&[
+            "browser",
+            "test",
+            "--runtime-session-id",
+            "runtime_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--suite-path",
+            "suite.json",
+            "--asset-mirror",
+            "auto",
+        ]))
+        .unwrap();
+        assert!(matches!(
+            parsed.command,
+            CliCommand::BrowserTest {
+                asset_mirror: AssetMirrorPolicy::Auto,
+                ..
+            }
+        ));
+        assert!(parse(&args(&[
+            "browser",
+            "test",
+            "--runtime-session-id",
+            "runtime_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--suite-path",
+            "suite.json",
+            "--asset-mirror",
+            "always",
+        ]))
+        .is_err());
+        assert!(parse(&args(&[
+            "browser",
+            "test",
+            "--base-url",
+            "http://127.0.0.1:8080/",
+            "--suite-path",
+            "suite.json",
+            "--asset-mirror",
+            "off",
+        ]))
+        .is_err());
     }
 
     #[test]

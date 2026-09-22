@@ -1827,6 +1827,143 @@ fn real_browser_tests_mirror_host_lan_assets_for_studio_runtime() {
     assert_eq!(fs::read(web.join("widget.js")).unwrap(), asset_before);
 }
 
+/// #141 regression: the same fixture and suite must produce two distinct,
+/// honestly labeled results — an assisted run (mirror applied, requests
+/// intercepted) and an unmodified run (`--asset-mirror off`) that fails on the
+/// ordinary-browser `host.lan` path instead of silently passing.
+#[cfg(unix)]
+#[test]
+fn browser_test_reports_mirror_correction_and_unmodified_parity_separately() {
+    let mut fixture = WinboatRuntimeFixture::new();
+    let web = fixture
+        ._temporary
+        .path()
+        .join("workspace/Project/deployment/web");
+    fs::create_dir_all(&web).expect("fixture project web directory");
+    fs::write(
+        web.join("widget.js"),
+        b"document.querySelector('h1').textContent = 'Asset loaded';",
+    )
+    .expect("fixture widget asset");
+    let suite = fixture._temporary.path().join("parity.browser.json");
+    fs::write(
+        &suite,
+        r#"{
+          "schemaVersion": "1.0.0",
+          "name": "Host.lan parity",
+          "beforeEach": [{ "action": "goto", "path": "/" }],
+          "tests": [{
+            "name": "UNC widget asset loads",
+            "steps": [{
+              "action": "expectText",
+              "locator": { "by": "role", "role": "heading", "name": "Asset loaded" },
+              "value": "Asset loaded"
+            }]
+          }]
+        }"#,
+    )
+    .expect("browser suite");
+    let asset_page_server = FixtureHttpServer::start_with_response(HOST_LAN_ASSET_PAGE_RESPONSE);
+    let asset_page_port = asset_page_server.port();
+    fixture._runtime_server = asset_page_server;
+    fixture.set_runtime_binding(asset_page_port, "127.0.0.1", "winboat-storage");
+
+    let started = stdout_json(&fixture.run(&[
+        "runtime",
+        "start",
+        "--mode",
+        "studio-run-locally",
+        "--json",
+        "--timeout-seconds",
+        "15",
+    ]));
+    let runtime_session_id = started["runtimeSessionId"]
+        .as_str()
+        .expect("Runtime session");
+    let suite_path = suite.to_str().expect("browser suite path");
+
+    // Assisted run: the default mirror rewires host.lan assets for Chromium.
+    let assisted_output = fixture.run(&[
+        "browser",
+        "test",
+        "--runtime-session-id",
+        runtime_session_id,
+        "--suite-path",
+        suite_path,
+        "--json",
+        "--fail-on-network-failure",
+    ]);
+    let assisted = stdout_json(&assisted_output);
+    assert_complete_envelope(&assisted, "browser.test");
+    assert_eq!(assisted["data"]["outcome"], "passed");
+    assert_eq!(assisted["data"]["browserParity"], "assisted");
+    assert_eq!(
+        assisted["data"]["corrections"].as_array().map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        assisted["data"]["corrections"][0]["kind"],
+        "host-lan-asset-mirror"
+    );
+    assert_eq!(assisted["data"]["corrections"][0]["applied"], true);
+    let intercepted = assisted["data"]["corrections"][0]["interceptedRequests"]
+        .as_u64()
+        .expect("intercepted request count");
+    assert!(intercepted >= 1, "mirror reported no intercepted requests");
+    let assisted_session = assisted["data"]["sessionId"]
+        .as_str()
+        .expect("assisted session id")
+        .to_string();
+
+    // Unmodified run: same fixture, same suite, mirror explicitly off. The
+    // ordinary-browser host.lan path must fail instead of being papered over.
+    let unmodified_output = fixture.run(&[
+        "browser",
+        "test",
+        "--runtime-session-id",
+        runtime_session_id,
+        "--suite-path",
+        suite_path,
+        "--asset-mirror",
+        "off",
+        "--json",
+        "--fail-on-network-failure",
+    ]);
+    assert_eq!(unmodified_output.status.code(), Some(1));
+    assert!(unmodified_output.stderr.is_empty());
+    let unmodified: Value =
+        serde_json::from_slice(&unmodified_output.stdout).expect("failed-run JSON envelope");
+    assert_complete_envelope(&unmodified, "browser.test");
+    assert_eq!(unmodified["data"]["outcome"], "failed");
+    assert_eq!(unmodified["data"]["passed"], 0);
+    assert_eq!(unmodified["data"]["failed"], 1);
+    assert_eq!(unmodified["data"]["browserParity"], "unmodified");
+    assert_eq!(
+        unmodified["data"]["corrections"][0]["kind"],
+        "host-lan-asset-mirror"
+    );
+    assert_eq!(unmodified["data"]["corrections"][0]["applied"], false);
+    assert_eq!(
+        unmodified["data"]["corrections"][0]["interceptedRequests"],
+        0
+    );
+    let unmodified_session = unmodified["data"]["sessionId"]
+        .as_str()
+        .expect("unmodified session id")
+        .to_string();
+    assert_ne!(assisted_session, unmodified_session);
+
+    // Both runs stay available as separate results with their own artifacts.
+    for session in [&assisted_session, &unmodified_session] {
+        let artifacts =
+            stdout_json(&fixture.run(&["browser", "artifacts", "--session-id", session, "--json"]));
+        assert_complete_envelope(&artifacts, "browser.artifacts");
+        let entries = artifacts["data"].as_array().expect("artifact descriptors");
+        assert!(!entries.is_empty());
+        assert!(entries.iter().all(|entry| entry["sessionId"] == *session));
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn real_binary_runs_winboat_runtime_through_loopback_and_restores_compose() {
