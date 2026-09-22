@@ -80,6 +80,12 @@ candidate, and `changeControl.performanceFailureRerun` stays
 `preserve-original-failure` so the first failing result cannot be papered over
 by a re-run.
 
+That discipline is enforced rather than merely documented. A failing
+post-merge gate files a labelled, deduplicated issue, and an open issue with
+both the `ci:perf-regression` and `revert-candidate` labels turns the
+`Post-merge performance hold` check red on subsequent pull requests. See
+[ci-post-merge-safety-net.md](ci-post-merge-safety-net.md).
+
 Both measured binaries are cached on a fingerprint of the inputs that can
 change them, not on a commit sha. The fingerprint covers `src`, `src-tauri`,
 `public`, `.cargo`, the frontend build inputs and every non-Node Tauri
