@@ -38,6 +38,10 @@ runuser -u aurbuild -- env "${build_environment[@]}" makepkg --nodeps --noconfir
 if [[ -d /sccache ]]; then
   runuser -u aurbuild -- env SCCACHE_DIR=/sccache /usr/bin/sccache --show-stats || true
   runuser -u aurbuild -- env SCCACHE_DIR=/sccache /usr/bin/sccache --stop-server >/dev/null || true
+  # The cache was chowned to the in-container build user, whose uid need not
+  # exist on the host. Hand it back readable and writable so whoever mounted
+  # the directory can archive it and reuse it on the next run.
+  chmod -R a+rwX /sccache || true
 fi
 packages=(/build/mendimaru-*.pkg.tar.zst)
 [[ ${#packages[@]} == 1 && -f "${packages[0]}" ]]
