@@ -423,6 +423,67 @@
     },
     "outcome": { "enum": ["passed", "failed", "skipped"] },
     "browserParity": { "enum": ["unmodified", "assisted"] },
+    "concurrencyPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workers"],
+      "properties": {
+        "workers": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "testTimeoutMilliseconds": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 1800000
+        }
+      }
+    },
+    "concurrencyGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource", "mode", "tests"],
+      "properties": {
+        "resource": {
+          "enum": ["app-read", "data-write", "studio-ui", "vm-lifecycle"]
+        },
+        "mode": {
+          "enum": ["parallel", "scoped-parallel", "serial", "exclusive"]
+        },
+        "tests": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "scopes": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+    "concurrencyReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestedWorkers",
+        "effectiveWorkers",
+        "limitedBy",
+        "maxObservedParallel",
+        "sessionRole",
+        "groups"
+      ],
+      "properties": {
+        "requestedWorkers": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "effectiveWorkers": { "type": "integer", "minimum": 1, "maximum": 8 },
+        "limitedBy": { "enum": ["request", "cpu", "memory", "suite"] },
+        "maxObservedParallel": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "testTimeoutMilliseconds": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 1800000
+        },
+        "sessionRole": { "enum": ["owner", "participant"] },
+        "groups": {
+          "type": "array",
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/concurrencyGroup" }
+        }
+      }
+    },
     "correction": {
       "type": "object",
       "additionalProperties": false,
@@ -446,8 +507,31 @@
         "outcome": { "$ref": "#/$defs/outcome" },
         "completedSteps": { "type": "integer", "minimum": 0 },
         "totalSteps": { "type": "integer", "minimum": 0 },
-        "failure": { "type": "string", "minLength": 1, "maxLength": 8192 }
-      }
+        "failure": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "invalidatedBy": {
+          "enum": ["environment-change", "timeout", "cancelled"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "passed" } }
+          },
+          "then": { "properties": { "invalidatedBy": false } }
+        },
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": { "outcome": { "const": "skipped" } }
+          },
+          "then": {
+            "properties": {
+              "invalidatedBy": { "const": "environment-change" }
+            }
+          }
+        }
+      ]
     },
     "policy": {
       "type": "object",
@@ -488,7 +572,8 @@
           "minimum": 1048576,
           "maximum": 536870912
         },
-        "retentionRuns": { "type": "integer", "minimum": 1, "maximum": 100 }
+        "retentionRuns": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "concurrency": { "$ref": "#/$defs/concurrencyPolicy" }
       }
     },
     "summary": {
@@ -532,6 +617,7 @@
           "maxItems": 8,
           "items": { "$ref": "#/$defs/correction" }
         },
+        "concurrency": { "$ref": "#/$defs/concurrencyReport" },
         "tests": {
           "type": "array",
           "minItems": 1,
@@ -615,6 +701,7 @@
           "maxItems": 8,
           "items": { "$ref": "#/$defs/correction" }
         },
+        "concurrency": { "$ref": "#/$defs/concurrencyReport" },
         "artifacts": {
           "type": "array",
           "maxItems": 511,

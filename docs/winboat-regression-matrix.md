@@ -219,3 +219,36 @@ WinBoat browser runs now record bounded environment observations and interrupt o
 changes. See [environment generations](browser-environment-observation.md) for
 `--build-marker`, JSON comparability, preparation boundaries, observation limits,
 and the separate external-change fixture and disposable-VM gates.
+
+## Bounded parallel test execution (#155)
+
+`node --test scripts/browser-parallel.node-test.mjs` locks the scheduler policy
+without a browser, a VM, or a filesystem: the closed and bounded worker policy
+(1–8 lanes, 1000–1800000 ms, unknown keys refused) and the single-worker default
+with no deadline; closed resource/scope/isolation validation, including
+`verified` without a scope and a scope on a non-`data-write` test; refusal of a
+`vm-lifecycle` test for a shared-session participant; head-of-line admission in
+declaration order; the exclusive barrier that later tests never overtake;
+reader sharing, unverified-write serialization, same-scope exclusion and
+distinct-scope overlap; one Studio UI action at a time; per-lane failure,
+deadline, and cancellation isolation; environment-change invalidation of both
+running and pending tests; deterministic result order under out-of-order
+completion; and worker-limit resolution against declared capacity, CPU, and
+memory.
+
+`npm run test:browser` adds the real-Chromium parallel scenario against the same
+fixture app: declared lanes overlap, each test keeps its own context and
+`test-NNN` artifacts, and the summary, manifest, and report stay in declaration
+order. The Rust CLI and summary validation tests cover `--workers` and
+`--worker-timeout-ms` parsing and range rejection and the `concurrency` record
+they produce.
+
+These remain fixtures and a single prepared Runtime; they are not a live VM
+claim. The following still require the real Linux+WinBoat gate under the
+disposable-snapshot and opt-in rules above:
+
+- one `browser session prepare`, two or more concurrent independent
+  verifications, and cleanup only after the last participant leaves (#151);
+- exclusive reservation of the #146 concurrent-stop and #148 connection-loss
+  reproductions, so no ordinary worker runs beside them;
+- artifact commit and pruning racing a concurrent read of the same cache.

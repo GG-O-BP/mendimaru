@@ -32,7 +32,7 @@ mendimaru runtime logs --session-id RUNTIME_SESSION_ID [--cursor CURSOR]
 mendimaru browser frontend-health (--base-url URL | --runtime-session-id RUNTIME_SESSION_ID)
 mendimaru browser doctor
 mendimaru browser install chromium
-mendimaru browser test (--base-url URL | --runtime-session-id RUNTIME_SESSION_ID | --shared-session-id SHARED_SESSION_ID) --suite-path SUITE_JSON
+mendimaru browser test (--base-url URL | --runtime-session-id RUNTIME_SESSION_ID | --shared-session-id SHARED_SESSION_ID) --suite-path SUITE_JSON [--workers N] [--worker-timeout-ms MS]
 mendimaru browser session prepare --runtime-session-id RUNTIME_SESSION_ID [--build-marker FILE] [--owns-runtime] [--finalize-policy keep|stop]
 mendimaru browser session finalize --shared-session-id SHARED_SESSION_ID [--timeout-ms MILLISECONDS]
 mendimaru browser session status --shared-session-id SHARED_SESSION_ID
@@ -357,3 +357,44 @@ WinBoat browser runs now record bounded environment observations and interrupt o
 changes. See [environment generations](browser-environment-observation.md) for
 `--build-marker`, JSON comparability, preparation boundaries, observation limits,
 and the separate external-change fixture and disposable-VM gates.
+
+## Bounded parallel browser tests (#155)
+
+`browser test` executes one suite sequentially by default. `--workers` opts into
+bounded parallel execution of that suite inside the same process, and
+`--worker-timeout-ms` is the per-test deadline that comes with it:
+
+| Option                | Default                          |  Accepted range |
+| --------------------- | -------------------------------- | --------------: |
+| `--workers`           | 1                                |     1–8 workers |
+| `--worker-timeout-ms` | none, or 600000 above one worker | 1000–1800000 ms |
+
+```bash
+mendimaru browser test --shared-session-id shared_<id> \
+  --suite-path suite.json --workers 4 --worker-timeout-ms 300000 --json
+```
+
+`--workers 1` is the historical path exactly: one browser, declaration order, no
+per-test deadline. Above one worker, only the tests whose suite declares a
+`concurrency` resource may overlap; an undeclared test joins the serial data
+group, so an existing suite is scheduled as before. Results, the artifact
+inventory, and diagnostics stay in suite declaration order regardless of
+completion order, one lane's failure or timeout invalidates only that test, and
+an environment change (#154) cancels the in-flight tests and skips the pending
+ones with an explicit `invalidatedBy` reason instead of a pass.
+
+Every result, artifact manifest, and HTML report records `requestedWorkers`,
+`effectiveWorkers`, `limitedBy` (`request`, `cpu`, `memory`, or `suite`),
+`maxObservedParallel`, the per-test deadline when one applies, `sessionRole`
+(`owner` or `participant`), and the declared permission groups. The runner
+lowers the requested count to host CPU and memory headroom and to what the
+suite could overlap, so requesting workers is never a promise of parallelism.
+
+A malformed `concurrency` declaration and a `--workers`/`--worker-timeout-ms`
+value outside its accepted range are both refused as invalid requests before any
+browser starts. A `vm-lifecycle` test inside a `--shared-session-id` participant
+is refused the same way, because a participant never starts or stops the
+Runtime; the owner prepares and finalizes (#151). See
+[bounded parallel test execution](browser-testing.md#bounded-parallel-test-execution-155)
+for the declaration format, the parallel permission table, the reported
+evidence, and the limits.

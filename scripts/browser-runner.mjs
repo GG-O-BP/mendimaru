@@ -5,6 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { promises as fsp } from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { URL } from "node:url";
@@ -19,6 +20,18 @@ import {
   unzipArchiveBounded,
 } from "./browser-artifact-safety.mjs";
 import { diagnoseFrontend } from "./browser-frontend-health.mjs";
+import {
+  ConcurrencyError,
+  WORKER_MEMORY_BUDGET_BYTES,
+  cancellable,
+  declaredParallelCapacity,
+  describeConcurrencyGroups,
+  normalizeConcurrencyPolicy,
+  normalizeSessionRole,
+  normalizeTestConcurrency,
+  resolveWorkerLimit,
+  runBounded,
+} from "./browser-parallel.mjs";
 
 const SCHEMA_VERSION = "5.0.0";
 const RUNNER_VERSION = "1.0.0";
@@ -161,24 +174,43 @@ async function installChromium() {
 async function run(rawRequest) {
   requireSupportedNode();
   const request = validateRequest(rawRequest);
-  const suite = validateSuite(request.suite);
+  const sessionRole = normalizeSessionRole(request.sessionRole);
+  const concurrencyPolicy = mapConcurrencyErrors(() =>
+    normalizeConcurrencyPolicy(request.policy.concurrency),
+  );
+  const suite = validateSuite(request.suite, sessionRole);
   const outputDirectory = await validateOutputDirectory(
     request.outputDirectory,
   );
   const baseUrl = validateBaseUrl(request.baseUrl);
   const assetMirrorUrl = validateOptionalAssetMirrorUrl(request.assetMirrorUrl);
-  const mirrorCounters = { intercepted: 0 };
   const { secrets, storageState } = await collectSecrets(suite);
+  const plans = suite.tests.map((test) => test.concurrency);
+  // CPU and memory headroom, and what the suite could ever overlap, bound the
+  // requested lanes. The effective number and its limit are reported.
+  const concurrency = resolveWorkerLimit({
+    requested: concurrencyPolicy.workers,
+    capacity: declaredParallelCapacity(plans),
+    testCount: suite.tests.length,
+    cpuCount: availableParallelism(),
+    availableMemoryBytes: availableMemoryBytes(),
+    memoryBudgetBytes: WORKER_MEMORY_BUDGET_BYTES,
+  });
   const startedAt = new Date().toISOString();
   const environment = new EnvironmentMonitor(
     request.environmentObserverUrl,
     request.sessionId,
   );
   await environment.start();
-  let browser;
+  // One Chromium process per lane. Lane 0 is launched eagerly so a broken
+  // toolchain still fails exactly like the historical single-worker path; a
+  // crash in one lane never removes another lane's browser or artifacts.
+  const lanes = createBrowserLanes(concurrency.workers);
+  let browserVersion;
   try {
-    browser = await chromium.launch({ headless: true });
+    browserVersion = (await lanes.browser(0)).version();
   } catch {
+    await lanes.close();
     await environment.finish();
     throw new RunnerError(
       "chromium_unavailable",
@@ -186,47 +218,85 @@ async function run(rawRequest) {
     );
   }
 
-  const browserVersion = browser.version();
-  const results = [];
-  const files = [];
-  const allConsole = [];
-  const allPageErrors = [];
-  const allNetworkFailures = [];
+  const results = new Array(suite.tests.length);
+  const perTestFiles = new Array(suite.tests.length);
+  const perTestConsole = new Array(suite.tests.length);
+  const perTestPageErrors = new Array(suite.tests.length);
+  const perTestNetworkFailures = new Array(suite.tests.length);
+  const mirrorCounters = { intercepted: 0 };
+  let maxObservedParallel;
   try {
+    const scheduled = await runBounded({
+      plans,
+      workers: concurrency.workers,
+      testTimeoutMilliseconds: concurrencyPolicy.testTimeoutMilliseconds,
+      isInterrupted: () => environment.interrupted,
+      // A test that never ran still has to carry a valid verdict. Only an
+      // environment change may be reported as `skipped`; every other reason
+      // is an invalid verdict, so it is reported as `failed` with the reason
+      // preserved rather than silently dropped.
+      skip: (index, invalidatedBy) => ({
+        value: {
+          summary: {
+            name: suite.tests[index].name,
+            outcome:
+              invalidatedBy === "environment-change" ? "skipped" : "failed",
+            completedSteps: 0,
+            totalSteps:
+              suite.beforeEach.length + suite.tests[index].steps.length,
+            ...(invalidatedBy === "environment-change"
+              ? { invalidatedBy }
+              : {
+                  failure: `the test did not run (${invalidatedBy})`,
+                  invalidatedBy,
+                }),
+          },
+          files: [],
+          consoleEntries: [],
+          pageErrors: [],
+          networkFailures: [],
+        },
+      }),
+      execute: async (index, signal, lane) =>
+        runTest({
+          environment,
+          browser: await lanes.browser(lane),
+          baseUrl,
+          assetMirrorUrl,
+          mirrorCounters,
+          index,
+          outputDirectory,
+          policy: request.policy,
+          secrets,
+          signal,
+          storageState,
+          suite,
+          test: suite.tests[index],
+        }),
+    });
+    maxObservedParallel = scheduled.maxObservedParallel;
     for (let index = 0; index < suite.tests.length; index += 1) {
-      if (environment.interrupted) {
-        results.push({
-          name: suite.tests[index].name,
-          outcome: "skipped",
-          completedSteps: 0,
-          totalSteps: suite.beforeEach.length + suite.tests[index].steps.length,
-        });
-        continue;
-      }
-      const result = await runTest({
-        environment,
-        browser,
-        baseUrl,
-        assetMirrorUrl,
-        mirrorCounters,
-        files,
-        index,
-        outputDirectory,
-        policy: request.policy,
-        secrets,
-        storageState,
-        suite,
-        test: suite.tests[index],
-      });
-      results.push(result.summary);
-      allConsole.push(...result.consoleEntries);
-      allPageErrors.push(...result.pageErrors);
-      allNetworkFailures.push(...result.networkFailures);
+      const outcome = scheduled.outcomes[index];
+      // A lane that crashed outside a test (for example a browser that never
+      // launched) still produces one explicit, invalid result for that test.
+      const result = outcome?.value ?? laneFailure(suite, index, outcome);
+      results[index] = result.summary;
+      perTestFiles[index] = result.files;
+      perTestConsole[index] = result.consoleEntries;
+      perTestPageErrors[index] = result.pageErrors;
+      perTestNetworkFailures[index] = result.networkFailures;
     }
   } finally {
-    await browser.close().catch(() => {});
+    await lanes.close();
     await environment.finish();
   }
+
+  // Completion order is not the report order: artifacts, diagnostics and test
+  // results are always assembled in suite declaration order.
+  const files = perTestFiles.flat();
+  const allConsole = perTestConsole.flat();
+  const allPageErrors = perTestPageErrors.flat();
+  const allNetworkFailures = perTestNetworkFailures.flat();
 
   await writeJsonArtifact(
     outputDirectory,
@@ -271,6 +341,19 @@ async function run(rawRequest) {
   const browserParity = corrections.some((correction) => correction.applied)
     ? "assisted"
     : "unmodified";
+  const concurrencyReport = {
+    requestedWorkers: concurrencyPolicy.workers,
+    effectiveWorkers: concurrency.workers,
+    limitedBy: concurrency.limitedBy,
+    maxObservedParallel,
+    ...(concurrencyPolicy.testTimeoutMilliseconds === null
+      ? {}
+      : {
+          testTimeoutMilliseconds: concurrencyPolicy.testTimeoutMilliseconds,
+        }),
+    sessionRole,
+    groups: describeConcurrencyGroups(plans),
+  };
   const summary = {
     schemaVersion: SCHEMA_VERSION,
     sessionId: request.sessionId,
@@ -285,6 +368,7 @@ async function run(rawRequest) {
     playwrightVersion,
     browserParity,
     corrections,
+    concurrency: concurrencyReport,
     tests: results,
     ...(environment.report ? { environment: environment.report } : {}),
   };
@@ -334,6 +418,7 @@ async function run(rawRequest) {
     },
     policy: request.policy,
     corrections,
+    concurrency: concurrencyReport,
     artifacts: describedFiles,
     ...(environment.report ? { environment: environment.report } : {}),
   };
@@ -357,15 +442,16 @@ async function runTest({
   baseUrl,
   assetMirrorUrl,
   mirrorCounters,
-  files,
   index,
   outputDirectory,
   policy,
   secrets,
+  signal,
   storageState,
   suite,
   test,
 }) {
+  const files = [];
   const ordinal = String(index + 1).padStart(3, "0");
   const harPath = policy.recordHar
     ? path.join(outputDirectory, `test-${ordinal}.har`)
@@ -440,18 +526,25 @@ async function runTest({
   );
   let outcome = "passed";
   let failure = null;
+  let invalidatedBy = null;
   let completedSteps = 0;
   try {
     for (const step of [...suite.beforeEach, ...test.steps]) {
-      await applyPrivateMasks(page, suite.maskLocators);
-      await environment.step(() =>
-        executeStep(page, baseUrl, step, policy, secrets),
+      await cancellable(signal, () =>
+        applyPrivateMasks(page, suite.maskLocators),
+      );
+      await cancellable(signal, () =>
+        environment.step(() =>
+          executeStep(page, baseUrl, step, policy, secrets),
+        ),
       );
       assertSameOrigin(page, baseUrl);
-      await applyPrivateMasks(page, suite.maskLocators);
+      await cancellable(signal, () =>
+        applyPrivateMasks(page, suite.maskLocators),
+      );
       completedSteps += 1;
     }
-    await page.waitForTimeout(100);
+    await cancellable(signal, () => page.waitForTimeout(100));
     assertSameOrigin(page, baseUrl);
     await applyPrivateMasks(page, suite.maskLocators);
     if (
@@ -477,6 +570,7 @@ async function runTest({
     }
   } catch (error) {
     outcome = "failed";
+    invalidatedBy = error?.invalidatedBy ?? null;
     failure = redactText(
       error instanceof Error ? error.message : "browser test failed",
       secrets,
@@ -549,11 +643,86 @@ async function runTest({
       completedSteps,
       totalSteps: suite.beforeEach.length + test.steps.length,
       ...(failure ? { failure } : {}),
+      ...(invalidatedBy ? { invalidatedBy } : {}),
     },
+    files,
     consoleEntries,
     pageErrors,
     networkFailures,
   };
+}
+
+/// Lazily launched Chromium processes, one per lane. Keeping the lanes
+/// separate means a browser crash, a forced context teardown, or a cancelled
+/// test in one lane cannot end another lane's run.
+function createBrowserLanes(size) {
+  const browsers = new Array(size).fill(null);
+  return {
+    async browser(lane) {
+      const existing = browsers[lane];
+      if (existing?.isConnected()) return existing;
+      const launched = await chromium.launch({ headless: true });
+      browsers[lane] = launched;
+      return launched;
+    },
+    async close() {
+      await Promise.all(
+        browsers.map((browser) => browser?.close().catch(() => {})),
+      );
+      browsers.fill(null);
+    },
+  };
+}
+
+/// A lane that could not produce a result at all (for example a browser that
+/// failed to launch for that lane) is recorded as an explicit failed test, not
+/// as a silent pass and not as a whole-run abort.
+function laneFailure(suite, index, outcome) {
+  const test = suite.tests[index];
+  const error = outcome?.failure;
+  const invalidatedBy = error?.invalidatedBy ?? null;
+  return {
+    summary: {
+      name: test.name,
+      outcome: "failed",
+      completedSteps: 0,
+      totalSteps: suite.beforeEach.length + test.steps.length,
+      failure: String(error?.message || "the browser worker failed").slice(
+        0,
+        MAX_TEXT_LENGTH,
+      ),
+      ...(invalidatedBy ? { invalidatedBy } : {}),
+    },
+    files: [],
+    consoleEntries: [],
+    pageErrors: [],
+    networkFailures: [],
+  };
+}
+
+function mapConcurrencyErrors(work) {
+  try {
+    return work();
+  } catch (error) {
+    if (error instanceof ConcurrencyError) {
+      throw new RunnerError(error.code, error.message);
+    }
+    throw error;
+  }
+}
+
+function availableParallelism() {
+  try {
+    return os.availableParallelism();
+  } catch {
+    return os.cpus().length || 1;
+  }
+}
+
+/// Free memory plus a conservative share of the total, so a host that keeps a
+/// large page cache is not treated as unable to run a second lane.
+function availableMemoryBytes() {
+  return Math.max(os.freemem(), Math.floor(os.totalmem() / 4));
 }
 
 function attachDiagnostics(
@@ -879,6 +1048,7 @@ function validateRequest(value) {
       "outputDirectory",
       "runtimeContext",
       "policy",
+      "sessionRole",
       "suite",
     ],
     "invalid browser runner request",
@@ -894,6 +1064,7 @@ function validateRequest(value) {
   }
   observerUrl(value.environmentObserverUrl);
   validateRuntimeContext(value.runtimeContext);
+  mapConcurrencyErrors(() => normalizeSessionRole(value.sessionRole));
   validatePolicy(value.policy);
   if (value.assetMirrorUrl !== undefined) {
     validateOptionalAssetMirrorUrl(value.assetMirrorUrl);
@@ -986,21 +1157,23 @@ function validateRuntimeContext(value) {
 
 function validatePolicy(value) {
   assertPlainObject(value, "invalid browser policy");
-  assertExactKeys(
+  const required = [
+    "navigationTimeoutMilliseconds",
+    "actionTimeoutMilliseconds",
+    "assertionTimeoutMilliseconds",
+    "failOnConsoleError",
+    "failOnNetworkFailure",
+    "recordVideo",
+    "recordHar",
+    "maxArtifactBytes",
+    "retentionRuns",
+  ];
+  assertAllowedKeys(
     value,
-    [
-      "navigationTimeoutMilliseconds",
-      "actionTimeoutMilliseconds",
-      "assertionTimeoutMilliseconds",
-      "failOnConsoleError",
-      "failOnNetworkFailure",
-      "recordVideo",
-      "recordHar",
-      "maxArtifactBytes",
-      "retentionRuns",
-    ],
+    [...required, "concurrency"],
     "invalid browser policy",
   );
+  assertRequiredKeys(value, required, "invalid browser policy");
   for (const key of [
     "navigationTimeoutMilliseconds",
     "actionTimeoutMilliseconds",
@@ -1020,9 +1193,10 @@ function validatePolicy(value) {
   }
   assertInteger(value.maxArtifactBytes, 1_048_576, 536_870_912);
   assertInteger(value.retentionRuns, 1, 100);
+  mapConcurrencyErrors(() => normalizeConcurrencyPolicy(value.concurrency));
 }
 
-function validateSuite(value) {
+function validateSuite(value, sessionRole = "owner") {
   assertPlainObject(value, "invalid browser suite");
   assertAllowedKeys(
     value,
@@ -1081,13 +1255,21 @@ function validateSuite(value) {
   }
   const tests = value.tests.map((test) => {
     assertPlainObject(test, "invalid browser test");
-    assertExactKeys(test, ["name", "steps"], "invalid browser test");
+    assertAllowedKeys(
+      test,
+      ["name", "steps", "concurrency"],
+      "invalid browser test",
+    );
+    assertRequiredKeys(test, ["name", "steps"], "invalid browser test");
     assertBoundedString(test.name, 1, 160);
     if (!Array.isArray(test.steps) || test.steps.length > MAX_STEPS_PER_TEST) {
       throw new RunnerError("invalid_suite", "invalid browser test steps");
     }
     test.steps.forEach(validateStep);
-    return { name: test.name, steps: test.steps };
+    const concurrency = mapConcurrencyErrors(() =>
+      normalizeTestConcurrency(test.concurrency, { sessionRole }),
+    );
+    return { name: test.name, steps: test.steps, concurrency };
   });
   return {
     name: value.name,
@@ -1703,7 +1885,9 @@ function renderHtmlReport(suiteName, summary) {
         `<tr><td>${escapeHtml(test.name)}</td><td>${escapeHtml(
           test.outcome,
         )}</td><td>${test.completedSteps}/${test.totalSteps}</td><td>${escapeHtml(
-          test.failure || "",
+          test.invalidatedBy
+            ? `[${test.invalidatedBy}] ${test.failure || ""}`.trim()
+            : test.failure || "",
         )}</td></tr>`,
     )
     .join("");
@@ -1716,12 +1900,32 @@ function renderHtmlReport(suiteName, summary) {
   const parityLine = summary.browserParity
     ? `<p>Browser parity: <strong>${escapeHtml(summary.browserParity)}</strong>${correctionText ? ` — ${correctionText}` : ""}</p>`
     : "";
+  const concurrency = summary.concurrency;
+  const concurrencyLine = concurrency
+    ? `<p>Workers: <strong>${concurrency.effectiveWorkers}</strong> of ${concurrency.requestedWorkers} requested (limited by ${escapeHtml(
+        concurrency.limitedBy,
+      )}), peak parallel ${concurrency.maxObservedParallel}, session role ${escapeHtml(
+        concurrency.sessionRole,
+      )}${
+        concurrency.groups.length > 0
+          ? ` — ${concurrency.groups
+              .map(
+                (group) =>
+                  `${escapeHtml(group.resource)}: ${group.tests} ${escapeHtml(
+                    group.mode,
+                  )}`,
+              )
+              .join(" · ")}`
+          : ""
+      }</p>`
+    : "";
   return `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Mendimaru browser report</title>
 <style>body{font:14px system-ui;margin:2rem;color:#17202a}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccd1d1;padding:.5rem;text-align:left}th{background:#f4f6f7}.passed{color:#196f3d}.failed{color:#922b21}.assisted{color:#b9770e}</style></head>
 <body><h1>${escapeHtml(suiteName)}</h1><p class="${summary.outcome}">Outcome: ${summary.outcome}</p>
 ${parityLine}
+${concurrencyLine}
 <p>Chromium ${escapeHtml(summary.browserVersion)} · Playwright ${escapeHtml(
     summary.playwrightVersion,
   )}</p><table><thead><tr><th>Test</th><th>Outcome</th><th>Steps</th><th>Failure</th></tr></thead><tbody>${rows}</tbody></table></body></html>\n`;
@@ -1758,6 +1962,10 @@ function assertAllowedKeys(value, keys, message) {
 
 function assertExactKeys(value, keys, message) {
   assertAllowedKeys(value, keys, message);
+  assertRequiredKeys(value, keys, message);
+}
+
+function assertRequiredKeys(value, keys, message) {
   if (keys.some((key) => !(key in value))) {
     throw new RunnerError("invalid_suite", message);
   }
@@ -1801,6 +2009,8 @@ function safeRunnerMessage(code) {
   const messages = {
     invalid_request: "the browser runner request is invalid",
     invalid_suite: "the browser suite is invalid",
+    concurrency_policy_refused:
+      "the browser suite conflicts with the requested parallel execution policy",
     contract_mismatch: "the browser runner contract does not match",
     chromium_unavailable: "the pinned Playwright Chromium build is unavailable",
     chromium_install_failed: "the explicit Chromium installation failed",

@@ -1,9 +1,11 @@
 use crate::app_paths::AppPaths;
 use crate::contracts::{
     ArtifactDescriptor, ArtifactKind, BackendError, BackendErrorCode, BackendId, BackendResult,
-    BrowserParity, BrowserTestCaseSummary, BrowserTestCorrection, BrowserTestCorrectionKind,
-    BrowserTestOutcome, BrowserTestPolicy, BrowserTestRequest, BrowserTestSummary, CapabilityId,
-    PlatformId, RuntimeMode, CONTRACT_SCHEMA_VERSION,
+    BrowserConcurrencyGroup, BrowserConcurrencyMode, BrowserConcurrencyReport, BrowserParity,
+    BrowserResourceKind, BrowserSessionRole, BrowserTestCaseSummary, BrowserTestCorrection,
+    BrowserTestCorrectionKind, BrowserTestInvalidation, BrowserTestOutcome, BrowserTestPolicy,
+    BrowserTestRequest, BrowserTestSummary, CapabilityId, PlatformId, RuntimeMode,
+    CONTRACT_SCHEMA_VERSION,
 };
 use aho_corasick::AhoCorasick;
 use chrono::{DateTime, Utc};
@@ -30,6 +32,12 @@ const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_ARTIFACT_FILES: usize = 512;
 const MAX_CORRECTION_RECORDS: usize = 8;
 const MAX_INTERCEPTED_REQUESTS: u32 = 1_000_000;
+/// Mirrors `MAX_BROWSER_WORKERS` in `scripts/browser-parallel.mjs`.
+const MAX_BROWSER_WORKERS: u32 = 8;
+const MIN_WORKER_TEST_TIMEOUT_MS: u64 = 1_000;
+const MAX_WORKER_TEST_TIMEOUT_MS: u64 = 1_800_000;
+const DEFAULT_WORKER_TEST_TIMEOUT_MS: u64 = 600_000;
+const MAX_CONCURRENCY_GROUPS: usize = 5;
 const MAX_STORE_BYTES: u64 = 1024 * 1024 * 1024;
 const ARTIFACT_SCAN_BUFFER_BYTES: usize = 64 * 1024;
 const DEFAULT_ARTIFACT_SCAN_LIMITS: ArtifactScanLimits = ArtifactScanLimits {
@@ -202,6 +210,8 @@ struct RunnerSummary {
     corrections: Vec<BrowserTestCorrection>,
     browser_parity: BrowserParity,
     #[serde(default)]
+    concurrency: Option<BrowserConcurrencyReport>,
+    #[serde(default)]
     environment: Option<environment::Report>,
 }
 
@@ -235,6 +245,11 @@ struct RunnerManifest {
     suite: RunnerSuiteIdentity,
     policy: BrowserTestPolicy,
     corrections: Vec<BrowserTestCorrection>,
+    /// The scheduling evidence the runner recorded beside the summary (#155).
+    /// It is cross-checked against the already validated summary report so a
+    /// manifest can never claim a different schedule than the run produced.
+    #[serde(default)]
+    concurrency: Option<BrowserConcurrencyReport>,
     artifacts: Vec<RunnerManifestArtifact>,
     #[serde(default)]
     environment: Option<environment::Report>,
@@ -276,6 +291,7 @@ struct RunnerRequest<'a> {
     output_directory: &'a Path,
     runtime_context: &'a crate::contracts::BrowserRuntimeContext,
     policy: &'a crate::contracts::BrowserTestPolicy,
+    session_role: crate::contracts::BrowserSessionRole,
     suite: &'a Value,
 }
 
@@ -515,6 +531,17 @@ pub(crate) async fn test(
             false,
         )
     })?;
+    // The suite's own resource declarations are checked before a browser
+    // starts: an attached participant must never carry VM lifecycle work,
+    // and an unverifiable isolation claim is refused rather than trusted.
+    let declared = declared_concurrency(&suite, request.session_role).map_err(|_| {
+        browser_error(
+            backend,
+            CapabilityId::BrowserTest,
+            BackendErrorCode::InvalidRequest,
+            false,
+        )
+    })?;
     let secrets = secret_values(&suite).map_err(|_| {
         browser_error(
             backend,
@@ -552,6 +579,7 @@ pub(crate) async fn test(
         output_directory: &staging,
         runtime_context: &request.runtime_context,
         policy: &request.policy,
+        session_role: request.session_role,
         suite: &suite,
     })
     .map_err(|_| {
@@ -578,7 +606,7 @@ pub(crate) async fn test(
             false,
         )
     })?;
-    validate_runner_summary(&runner, request, &suite).map_err(|_| {
+    validate_runner_summary(&runner, request, &suite, &declared).map_err(|_| {
         browser_error(
             backend,
             CapabilityId::BrowserTest,
@@ -632,6 +660,7 @@ pub(crate) async fn test(
         tests: runner.tests,
         corrections: runner.corrections.clone(),
         browser_parity: Some(runner.browser_parity),
+        concurrency: runner.concurrency.clone(),
         environment: runner.environment,
         artifacts: artifacts
             .iter()
@@ -955,6 +984,263 @@ fn validate_policy(request: &BrowserTestRequest) -> Result<(), String> {
     {
         return Err("browser artifact policy is outside the supported range".to_string());
     }
+    if let Some(concurrency) = request.policy.concurrency {
+        if !(1..=MAX_BROWSER_WORKERS).contains(&concurrency.workers) {
+            return Err("the browser worker count is outside the supported range".to_string());
+        }
+        if let Some(timeout) = concurrency.test_timeout_milliseconds {
+            if !(MIN_WORKER_TEST_TIMEOUT_MS..=MAX_WORKER_TEST_TIMEOUT_MS).contains(&timeout) {
+                return Err(
+                    "the browser worker test timeout is outside the supported range".to_string(),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// One test's declared shared-resource need, as the suite states it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DeclaredConcurrency {
+    resource: BrowserResourceKind,
+    scope: Option<String>,
+    verified: bool,
+}
+
+/// Parse and enforce every suite concurrency declaration. This repeats the
+/// runner's rules on purpose: an invalid or refused suite must fail before a
+/// browser, a mirror, or an observer is started.
+fn declared_concurrency(
+    suite: &Value,
+    session_role: BrowserSessionRole,
+) -> Result<Vec<DeclaredConcurrency>, String> {
+    let tests = suite
+        .get("tests")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "the browser suite test inventory is invalid".to_string())?;
+    tests
+        .iter()
+        .map(|test| declared_test_concurrency(test, session_role))
+        .collect()
+}
+
+fn declared_test_concurrency(
+    test: &Value,
+    session_role: BrowserSessionRole,
+) -> Result<DeclaredConcurrency, String> {
+    let Some(value) = test.get("concurrency") else {
+        // Undeclared tests are unproven data changes, never free parallelism.
+        return Ok(DeclaredConcurrency {
+            resource: BrowserResourceKind::DataWrite,
+            scope: None,
+            verified: false,
+        });
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| "invalid browser test concurrency".to_string())?;
+    for key in object.keys() {
+        if !matches!(key.as_str(), "resource" | "scope" | "isolation") {
+            return Err(format!("unknown browser test concurrency key: {key}"));
+        }
+    }
+    let resource = match object.get("resource").and_then(Value::as_str) {
+        Some("app-read") => BrowserResourceKind::AppRead,
+        Some("data-write") => BrowserResourceKind::DataWrite,
+        Some("studio-ui") => BrowserResourceKind::StudioUi,
+        Some("vm-lifecycle") => BrowserResourceKind::VmLifecycle,
+        _ => return Err("invalid browser test concurrency resource".to_string()),
+    };
+    let scope = match object.get("scope") {
+        None => None,
+        Some(value) => {
+            let scope = value
+                .as_str()
+                .ok_or_else(|| "invalid browser test concurrency scope".to_string())?;
+            if !valid_concurrency_scope(scope) {
+                return Err("invalid browser test concurrency scope".to_string());
+            }
+            if !matches!(
+                resource,
+                BrowserResourceKind::DataWrite | BrowserResourceKind::StudioUi
+            ) {
+                return Err(
+                    "a concurrency scope applies only to data-write and studio-ui tests"
+                        .to_string(),
+                );
+            }
+            Some(scope.to_string())
+        }
+    };
+    let verified = match object.get("isolation").map(|value| value.as_str()) {
+        None => false,
+        Some(Some("unverified")) => false,
+        Some(Some("verified")) => true,
+        _ => return Err("invalid browser test concurrency isolation".to_string()),
+    };
+    if verified && (resource != BrowserResourceKind::DataWrite || scope.is_none()) {
+        return Err("verified data isolation requires a data-write scope".to_string());
+    }
+    if resource == BrowserResourceKind::VmLifecycle
+        && session_role == BrowserSessionRole::Participant
+    {
+        return Err("a shared-session participant must not run a vm-lifecycle test".to_string());
+    }
+    Ok(DeclaredConcurrency {
+        resource,
+        scope,
+        verified,
+    })
+}
+
+fn valid_concurrency_scope(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphanumeric())
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
+}
+
+/// The permission table the runner must report for these declarations.
+fn expected_concurrency_groups(declared: &[DeclaredConcurrency]) -> Vec<BrowserConcurrencyGroup> {
+    let mut rows: Vec<(
+        BrowserResourceKind,
+        BrowserConcurrencyMode,
+        u32,
+        BTreeSet<String>,
+    )> = Vec::new();
+    let order = [
+        (
+            BrowserResourceKind::AppRead,
+            BrowserConcurrencyMode::Parallel,
+        ),
+        (
+            BrowserResourceKind::DataWrite,
+            BrowserConcurrencyMode::ScopedParallel,
+        ),
+        (
+            BrowserResourceKind::DataWrite,
+            BrowserConcurrencyMode::Serial,
+        ),
+        (
+            BrowserResourceKind::StudioUi,
+            BrowserConcurrencyMode::Serial,
+        ),
+        (
+            BrowserResourceKind::VmLifecycle,
+            BrowserConcurrencyMode::Exclusive,
+        ),
+    ];
+    for (resource, mode) in order {
+        rows.push((resource, mode, 0, BTreeSet::new()));
+    }
+    for entry in declared {
+        let (resource, mode) = match entry.resource {
+            BrowserResourceKind::AppRead => (
+                BrowserResourceKind::AppRead,
+                BrowserConcurrencyMode::Parallel,
+            ),
+            BrowserResourceKind::VmLifecycle => (
+                BrowserResourceKind::VmLifecycle,
+                BrowserConcurrencyMode::Exclusive,
+            ),
+            BrowserResourceKind::StudioUi => (
+                BrowserResourceKind::StudioUi,
+                BrowserConcurrencyMode::Serial,
+            ),
+            BrowserResourceKind::DataWrite if entry.verified => (
+                BrowserResourceKind::DataWrite,
+                BrowserConcurrencyMode::ScopedParallel,
+            ),
+            BrowserResourceKind::DataWrite => (
+                BrowserResourceKind::DataWrite,
+                BrowserConcurrencyMode::Serial,
+            ),
+        };
+        let row = rows
+            .iter_mut()
+            .find(|(candidate, candidate_mode, _, _)| {
+                *candidate == resource && *candidate_mode == mode
+            })
+            .expect("every declaration maps to a known group");
+        row.2 += 1;
+        if let Some(scope) = entry.scope.as_ref() {
+            if mode == BrowserConcurrencyMode::ScopedParallel {
+                row.3.insert(scope.clone());
+            }
+        }
+    }
+    rows.into_iter()
+        .filter(|(_, _, tests, _)| *tests > 0)
+        .map(|(resource, mode, tests, scopes)| BrowserConcurrencyGroup {
+            resource,
+            mode,
+            tests,
+            scopes: (mode == BrowserConcurrencyMode::ScopedParallel).then_some(scopes.len() as u32),
+        })
+        .collect()
+}
+
+/// The declarations also bound how much overlap the suite could ever reach.
+fn declared_parallel_capacity(declared: &[DeclaredConcurrency]) -> u32 {
+    let mut capacity = 0u32;
+    let mut scopes = BTreeSet::new();
+    let mut studio = false;
+    for entry in declared {
+        match entry.resource {
+            BrowserResourceKind::AppRead => capacity += 1,
+            BrowserResourceKind::StudioUi => studio = true,
+            BrowserResourceKind::DataWrite if entry.verified => {
+                scopes.insert(entry.scope.clone().unwrap_or_default());
+            }
+            _ => {}
+        }
+    }
+    capacity += scopes.len() as u32 + u32::from(studio);
+    capacity.max(1)
+}
+
+/// The runner may lower the worker count, but it may not invent parallelism,
+/// misreport the permission table, or claim a different session role.
+fn validate_concurrency_report(
+    summary: &RunnerSummary,
+    request: &BrowserTestRequest,
+    declared: &[DeclaredConcurrency],
+) -> Result<(), String> {
+    let report = summary
+        .concurrency
+        .as_ref()
+        .ok_or_else(|| "the browser runner reported no concurrency record".to_string())?;
+    let requested = request
+        .policy
+        .concurrency
+        .map_or(1, |concurrency| concurrency.workers);
+    let expected_timeout = request
+        .policy
+        .concurrency
+        .and_then(|concurrency| concurrency.test_timeout_milliseconds)
+        .or_else(|| (requested > 1).then_some(DEFAULT_WORKER_TEST_TIMEOUT_MS));
+    let capacity = declared_parallel_capacity(declared).min(declared.len().max(1) as u32);
+    if report.requested_workers != requested
+        || report.effective_workers == 0
+        || report.effective_workers > requested
+        || report.effective_workers > capacity
+        || report.max_observed_parallel > report.effective_workers
+        || report.test_timeout_milliseconds != expected_timeout
+        || report.session_role != request.session_role
+        || report.groups.len() > MAX_CONCURRENCY_GROUPS
+        || report.groups != expected_concurrency_groups(declared)
+    {
+        return Err("the browser concurrency report is inconsistent".to_string());
+    }
+    // A single-worker run must never report overlap, whoever lowered the count.
+    if report.effective_workers == 1 && report.max_observed_parallel > 1 {
+        return Err("the browser concurrency report is inconsistent".to_string());
+    }
     Ok(())
 }
 
@@ -983,6 +1269,7 @@ fn validate_runner_summary(
     summary: &RunnerSummary,
     request: &BrowserTestRequest,
     suite: &Value,
+    declared: &[DeclaredConcurrency],
 ) -> Result<(), String> {
     let expected_tests = suite
         .get("tests")
@@ -1013,6 +1300,7 @@ fn validate_runner_summary(
     {
         return Err("invalid environment observation".into());
     }
+    validate_concurrency_report(summary, request, declared)?;
     let mirror_applied = request.asset_mirror_url.is_some();
     let mirror_corrections = summary
         .corrections
@@ -1056,12 +1344,32 @@ fn validate_runner_summary(
                 .is_some_and(|failure| !failure.is_empty() && failure.len() <= 8_192),
             BrowserTestOutcome::Skipped => actual.failure.is_none(),
         };
+        // An invalid verdict is never a pass, and a skipped test can only be
+        // invalid because the environment generation changed under it.
+        let valid_invalidation = matches!(
+            (actual.outcome, actual.invalidated_by),
+            (_, None)
+                | (BrowserTestOutcome::Failed, Some(_))
+                | (
+                    BrowserTestOutcome::Skipped,
+                    Some(BrowserTestInvalidation::EnvironmentChange)
+                )
+        );
+        if actual.invalidated_by == Some(BrowserTestInvalidation::EnvironmentChange)
+            && !summary
+                .environment
+                .as_ref()
+                .is_some_and(|report| report.interrupted())
+        {
+            return Err("an environment invalidation has no observed change".to_string());
+        }
         if actual.name != expected_name
             || actual.name.is_empty()
             || actual.name.len() > 160
             || actual.total_steps as usize != expected_total
             || actual.completed_steps > actual.total_steps
             || !valid_failure
+            || !valid_invalidation
         {
             return Err("the browser test summary is inconsistent with its suite".to_string());
         }
@@ -1197,6 +1505,7 @@ fn verify_runner_manifest(
         || manifest.environment != summary.environment
         || manifest.policy != request.policy
         || manifest.corrections != summary.corrections
+        || manifest.concurrency != summary.concurrency
     {
         return Err("the browser artifact manifest metadata is inconsistent".to_string());
     }
@@ -2084,6 +2393,7 @@ fn set_file_permissions(_path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::contracts::BrowserWorkerLimit;
     use crate::contracts::{BrowserRuntimeContext, BrowserTestPolicy, PlatformId, RuntimeMode};
     use serde_json::json;
     use std::io::Cursor;
@@ -2167,7 +2477,9 @@ mod tests {
                 record_har: false,
                 max_artifact_bytes: 128 * 1024 * 1024,
                 retention_runs: 20,
+                concurrency: None,
             },
+            session_role: BrowserSessionRole::Owner,
         }
     }
 
@@ -2224,6 +2536,7 @@ mod tests {
                 completed_steps: 0,
                 total_steps: 0,
                 failure: None,
+                invalidated_by: None,
             }],
             files: vec![RunnerArtifact {
                 path: "summary.json".to_string(),
@@ -2232,6 +2545,20 @@ mod tests {
             }],
             corrections,
             browser_parity,
+            concurrency: Some(BrowserConcurrencyReport {
+                requested_workers: 1,
+                effective_workers: 1,
+                limited_by: BrowserWorkerLimit::Request,
+                max_observed_parallel: 1,
+                test_timeout_milliseconds: None,
+                session_role: BrowserSessionRole::Owner,
+                groups: vec![BrowserConcurrencyGroup {
+                    resource: BrowserResourceKind::DataWrite,
+                    mode: BrowserConcurrencyMode::Serial,
+                    tests: 1,
+                    scopes: None,
+                }],
+            }),
             environment: None,
         }
     }
@@ -2244,6 +2571,8 @@ mod tests {
             "tests": [{ "name": "one", "steps": [] }]
         });
         let request = request(Path::new("suite.json"));
+        let declared = declared_concurrency(&suite, BrowserSessionRole::Owner)
+            .expect("the fixture suite declares valid concurrency");
         let unmodified_correction = BrowserTestCorrection {
             kind: BrowserTestCorrectionKind::HostLanAssetMirror,
             applied: false,
@@ -2256,6 +2585,7 @@ mod tests {
             ),
             &request,
             &suite,
+            &declared,
         )
         .is_ok());
 
@@ -2272,6 +2602,7 @@ mod tests {
             &runner_summary_fixture(vec![applied_correction.clone()], BrowserParity::Assisted,),
             &mirrored_request,
             &suite,
+            &declared,
         )
         .is_ok());
 
@@ -2281,12 +2612,14 @@ mod tests {
             &runner_summary_fixture(vec![applied_correction.clone()], BrowserParity::Assisted,),
             &request,
             &suite,
+            &declared,
         )
         .is_err());
         assert!(validate_runner_summary(
             &runner_summary_fixture(vec![applied_correction], BrowserParity::Unmodified,),
             &request,
             &suite,
+            &declared,
         )
         .is_err());
         // A mirrored run that hides its correction is rejected.
@@ -2297,6 +2630,7 @@ mod tests {
             ),
             &mirrored_request,
             &suite,
+            &declared,
         )
         .is_err());
         // Missing, duplicated, and out-of-bound correction records are rejected.
@@ -2304,6 +2638,7 @@ mod tests {
             &runner_summary_fixture(vec![], BrowserParity::Unmodified),
             &request,
             &suite,
+            &declared,
         )
         .is_err());
         assert!(validate_runner_summary(
@@ -2313,6 +2648,7 @@ mod tests {
             ),
             &request,
             &suite,
+            &declared,
         )
         .is_err());
         let mut oversized = unmodified_correction;
@@ -2321,6 +2657,7 @@ mod tests {
             &runner_summary_fixture(vec![oversized], BrowserParity::Unmodified),
             &request,
             &suite,
+            &declared,
         )
         .is_err());
     }

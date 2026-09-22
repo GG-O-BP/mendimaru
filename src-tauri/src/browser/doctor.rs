@@ -118,6 +118,7 @@ impl DoctorDiagnostic {
             "fflate",
             "browser-artifact-safety.mjs",
             "browser-frontend-health.mjs",
+            "browser-parallel.mjs",
         ]
         .into_iter()
         .find(|module| stderr.contains(module))

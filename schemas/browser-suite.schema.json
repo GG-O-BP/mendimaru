@@ -27,7 +27,8 @@
             "type": "array",
             "maxItems": 500,
             "items": { "$ref": "#/$defs/step" }
-          }
+          },
+          "concurrency": { "$ref": "#/$defs/concurrency" }
         }
       }
     },
@@ -44,6 +45,42 @@
     "storageStateEnv": { "$ref": "#/$defs/environmentName" }
   },
   "$defs": {
+    "concurrency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource"],
+      "properties": {
+        "resource": {
+          "enum": ["app-read", "data-write", "studio-ui", "vm-lifecycle"]
+        },
+        "scope": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+        },
+        "isolation": { "enum": ["verified", "unverified"] }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["resource"],
+            "properties": {
+              "resource": { "enum": ["app-read", "vm-lifecycle"] }
+            }
+          },
+          "then": { "properties": { "scope": false } }
+        },
+        {
+          "if": {
+            "required": ["isolation"],
+            "properties": { "isolation": { "const": "verified" } }
+          },
+          "then": {
+            "required": ["scope"],
+            "properties": { "resource": { "const": "data-write" } }
+          }
+        }
+      ]
+    },
     "environmentName": {
       "type": "string",
       "pattern": "^MENDIMARU_TEST_[A-Z0-9_]{1,64}$"

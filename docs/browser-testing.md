@@ -112,14 +112,16 @@ Portable Runtime and Linux+WinBoat Studio Pro Run Locally forwarding.
 
 The browser-specific controls are:
 
-| Option                    | Default | Accepted range |
-| ------------------------- | ------: | -------------: |
-| `--navigation-timeout-ms` |   30000 |  100–300000 ms |
-| `--action-timeout-ms`     |   10000 |  100–300000 ms |
-| `--assertion-timeout-ms`  |    5000 |  100–300000 ms |
-| `--max-artifact-mib`      |     128 |      1–512 MiB |
-| `--retention-runs`        |      20 |     1–100 runs |
-| `--asset-mirror`          |  `auto` |         `auto` | `off` |
+| Option                    |                          Default |  Accepted range |
+| ------------------------- | -------------------------------: | --------------: |
+| `--navigation-timeout-ms` |                            30000 |   100–300000 ms |
+| `--action-timeout-ms`     |                            10000 |   100–300000 ms |
+| `--assertion-timeout-ms`  |                             5000 |   100–300000 ms |
+| `--max-artifact-mib`      |                              128 |       1–512 MiB |
+| `--retention-runs`        |                               20 |      1–100 runs |
+| `--asset-mirror`          |                           `auto` |          `auto` | `off` |
+| `--workers`               |                                1 |     1–8 workers |
+| `--worker-timeout-ms`     | none, or 600000 above one worker | 1000–1800000 ms |
 
 `--fail-on-console-error` and `--fail-on-network-failure` promote the
 corresponding diagnostics to test failures. Uncaught page errors always fail a
@@ -134,6 +136,14 @@ route, so Chromium runs unmodified exactly like an ordinary Linux Chrome.
 Every run records what happened in `corrections` and `browserParity` (see
 [Results and artifacts](#results-and-artifacts)), so an assisted pass can
 never be mistaken for ordinary-Chrome parity.
+
+`--workers` opts into bounded parallel execution of one suite inside one runner
+process, and `--worker-timeout-ms` is the per-test deadline that comes with it.
+`--workers 1`, the default, is the historical path exactly: one Chromium, tests
+in declaration order, no per-test deadline. Asking for more workers alone
+changes nothing — each test must also declare the shared resource it needs, and
+the effective worker count is bounded by the host and the suite. See
+[Bounded parallel test execution (#155)](#bounded-parallel-test-execution-155).
 
 A passed suite exits `0`. An executed suite with failed assertions or policy
 violations still writes its complete, schema-valid result envelope to stdout
@@ -502,3 +512,140 @@ WinBoat browser runs now record bounded environment observations and interrupt o
 changes. See [environment generations](browser-environment-observation.md) for
 `--build-marker`, JSON comparability, preparation boundaries, observation limits,
 and the separate external-change fixture and disposable-VM gates.
+
+## Bounded parallel test execution (#155)
+
+`--workers N` (1–8, default 1) runs at most N tests of one suite at a time
+inside **one** runner process against **one** prepared Runtime.
+`--worker-timeout-ms MS` (1000–1800000) is the per-test deadline. Left unset it
+means no per-test deadline with one worker and 600000 with more than one; an
+explicit value always applies. One worker reproduces the historical behavior
+exactly — one Chromium, declaration order, no deadline — so an existing
+invocation is unchanged.
+
+Parallelism is opt-in twice. The operator asks for workers, **and** the suite
+declares, per test, which shared resource that test needs:
+
+```json
+{
+  "name": "read the order list",
+  "concurrency": { "resource": "app-read" },
+  "steps": []
+}
+```
+
+```json
+{
+  "name": "edit a cell in the isolated order set",
+  "concurrency": {
+    "resource": "data-write",
+    "scope": "orders-a",
+    "isolation": "verified"
+  },
+  "steps": []
+}
+```
+
+| Field       | Values                                                | Rules                                                                                                                          |
+| ----------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `resource`  | `app-read`, `data-write`, `studio-ui`, `vm-lifecycle` | Required whenever `concurrency` is present.                                                                                    |
+| `scope`     | `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`                   | Optional, and accepted only for `data-write` and `studio-ui`.                                                                  |
+| `isolation` | `verified`, `unverified` (default)                    | `verified` is accepted only for `data-write` and only together with a `scope`; `verified` without a scope is an invalid suite. |
+
+A test **without** a `concurrency` declaration is never assumed parallel-safe:
+it joins the serial `data-write` group. An existing suite therefore gains no
+unsafe overlap when workers are requested. Unknown keys and unknown values in a
+declaration are refused as an invalid suite before any browser starts; the host
+checks the declarations itself and does not rely on the runner to catch them.
+
+### Parallel permission table
+
+| Declared resource                                                                                         | Runs beside                                                       | Excluded from                                                                                                                      |
+| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `app-read` — stable app observation                                                                       | other `app-read` tests, scoped verified `data-write`, `studio-ui` | any `data-write` whose isolation is not verified                                                                                   |
+| `data-write` with `isolation: verified` and a `scope`                                                     | readers and other scopes                                          | another test in the same scope, any unverified write, `vm-lifecycle`                                                               |
+| `data-write` without verified isolation — write-back and import/export whose data isolation is not proven | nothing                                                           | every reader, every other writer, every Studio UI action                                                                           |
+| `studio-ui`                                                                                               | readers and scoped verified writes                                | any other Studio UI action, in any scope — one in-flight guest request per Studio, the [#152](winboat-ui-coordination.md) boundary |
+| `vm-lifecycle`                                                                                            | nothing; it runs alone                                            | everything, and it is refused outright for a shared-session participant                                                            |
+
+An exclusive `vm-lifecycle` test is a barrier. Admission is head-of-line in
+declaration order and later tests never overtake it, so a stream of short
+readers cannot starve it. `browser test --shared-session-id` refuses a
+`vm-lifecycle` test outright, before any browser starts
+(`concurrency_policy_refused` in the runner): an attached worker never starts
+or stops the Runtime, because the owner prepares and finalizes
+([#151](#shared-test-sessions-151)).
+
+### Determinism, isolation, and cancellation
+
+- Test results, the artifact inventory, console/page-error/network diagnostics,
+  and the report schema are assembled in **suite declaration order**, not
+  completion order. Only the schedule varies.
+- Each test keeps its own browser context and its own `test-NNN…` artifact
+  names, and each lane has its own Chromium process. One lane's crash, timeout,
+  or cancellation ends only that lane's entry: another lane's browser, context,
+  and artifacts survive it, and it never touches the VM, Studio, or Runtime.
+- A per-test deadline aborts only that test. An environment generation change
+  ([#154](browser-environment-observation.md)) cancels the in-flight tests and
+  skips the pending ones; the runner observes the change while every lane is
+  busy instead of waiting for the slowest lane.
+- Every affected test records `invalidatedBy`: `environment-change`, `timeout`,
+  or `cancelled`. An interrupted test that never started stays `skipped` with
+  `invalidatedBy: "environment-change"`; a cancelled in-flight test is
+  `failed`. Neither is ever recorded as a pass, and the HTML report prefixes
+  the failure text with that reason.
+- A lane that cannot produce a result at all — a Chromium that fails to launch
+  for that lane, for example — records one explicit `failed` test, not a silent
+  pass and not a whole-run abort.
+
+### Reported concurrency evidence
+
+Every summary, the artifact manifest, and the HTML report carry a `concurrency`
+record:
+
+| Field                     | Meaning                                                                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `requestedWorkers`        | The requested `--workers` value.                                                                                                                       |
+| `effectiveWorkers`        | The lanes the run actually used.                                                                                                                       |
+| `limitedBy`               | `request`, `cpu`, `memory`, or `suite` — the bound that produced `effectiveWorkers`.                                                                   |
+| `maxObservedParallel`     | The measured peak number of tests in flight at once, not the permitted number.                                                                         |
+| `testTimeoutMilliseconds` | The per-test deadline; omitted when none applies.                                                                                                      |
+| `sessionRole`             | `owner` or `participant`.                                                                                                                              |
+| `groups`                  | The declared permission table: `resource`, `mode` (`parallel`, `scoped-parallel`, `serial`, `exclusive`), `tests`, and `scopes` for `scoped-parallel`. |
+
+The runner lowers the requested count to the host CPU count
+(`os.availableParallelism()`), to a memory budget of 768 MiB per lane, and to
+what the suite could actually overlap — one lane per `app-read` test, per
+distinct verified `data-write` scope, and one Studio UI turn, capped by the
+test count. The bounds are applied in the order request → CPU → memory → suite,
+and `limitedBy` names the last one that lowered the count. Asking for workers
+is therefore never a promise of parallelism: a suite of undeclared tests
+reports `effectiveWorkers: 1`, with `limitedBy: "suite"` unless a tighter host
+bound applied first.
+
+### Mirror corrections under parallel execution (#141)
+
+`corrections` and `browserParity` keep their existing meaning. `assisted` still
+means the runner modified the browser context, so such a run is still not
+evidence that ordinary Chrome works; the `host-lan-asset-mirror` interception
+count remains a run total across lanes rather than a per-test count. An
+assisted run and an unmodified (`--asset-mirror off`) run stay **separate runs
+with separate results and artifacts** and must not be merged into one
+general-Chrome compatibility claim, and both runs must report the same build
+identity for the comparison to mean anything.
+
+### Limits and what is not proven
+
+- Parallelism lives inside one runner process against one prepared Runtime.
+  Starting several CLI processes does not make the shared VM lifecycle, the
+  shared build, or the shared server data safe. The safe multi-caller paths
+  remain [shared VM use](winboat-vm-use.md) (#150/#21),
+  [shared test sessions](#shared-test-sessions-151) (#151),
+  [Runtime port ownership](winboat-multi-runtime.md) (#153), and
+  [Studio UI job coordination](winboat-ui-coordination.md) (#152).
+- The scheduler enforces the declared policy; it cannot verify that a
+  declaration is true. `isolation: verified` is the suite author's claim,
+  backed by the named scope. A false claim is scheduled as written.
+- Fixture and Portable regressions do not substitute for the real Linux+WinBoat
+  gates, which keep their existing opt-in and disposable-snapshot conditions.
+  See the [#155 regressions](winboat-regression-matrix.md#bounded-parallel-test-execution-155).

@@ -1,7 +1,8 @@
 use crate::app_paths::AppPaths;
 use crate::contracts::{
-    AssetMirrorPolicy, BackendError, BackendErrorCode, BackendId, BrowserTestPolicy, CapabilityId,
-    CapabilitySnapshot, PlatformId, RuntimeMode, SessionDescriptor, CONTRACT_SCHEMA_VERSION,
+    AssetMirrorPolicy, BackendError, BackendErrorCode, BackendId, BrowserConcurrencyPolicy,
+    BrowserTestPolicy, CapabilityId, CapabilitySnapshot, PlatformId, RuntimeMode,
+    SessionDescriptor, CONTRACT_SCHEMA_VERSION,
 };
 use crate::models::{CommandError, CommandErrorCode, DownloadProgress};
 #[cfg(target_os = "linux")]
@@ -604,8 +605,11 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
              --build-marker FILE (updated on each WinBoat build), timeout controls, --record-video, --record-har,\n\
              --fail-on-console-error, --fail-on-network-failure,\n\
              --asset-mirror auto|off (Runtime and shared session Studio targets only; off runs an unmodified browser),\n\
-             --max-artifact-mib, and --retention-runs. A shared session target joins a\n\
-             prepared session with its recorded identity. See browser-testing.md.",
+             --max-artifact-mib, and --retention-runs. --workers N (1-8, default 1) opts into\n\
+             bounded parallel execution of the tests a suite declares as parallel-safe, and\n\
+             --worker-timeout-ms bounds one test (default 600000 with more than one worker).\n\
+             A shared session target joins a prepared session with its recorded identity.\n\
+             See browser-testing.md.",
         ),
         (Some("browser"), Some("session")) => Some(
             "Usage: mendimaru browser session prepare --runtime-session-id RUNTIME_SESSION_ID\n\
@@ -2412,6 +2416,8 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
                     "--assertion-timeout-ms",
                     "--max-artifact-mib",
                     "--retention-runs",
+                    "--workers",
+                    "--worker-timeout-ms",
                 ],
                 &[
                     "--fail-on-console-error",
@@ -2491,6 +2497,10 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
                     .map(|value| parse_retention_runs(value))
                     .transpose()?
                     .unwrap_or(DEFAULT_BROWSER_RETENTION_RUNS),
+                concurrency: parse_browser_concurrency(
+                    options.get("--workers").map(String::as_str),
+                    options.get("--worker-timeout-ms").map(String::as_str),
+                )?,
             };
             let build_marker = options.get("--build-marker").cloned();
             if build_marker.is_some() && !winboat_use && base_url.is_some() {
@@ -2785,6 +2795,47 @@ fn parse_retention_runs(value: &str) -> Result<u32, BackendError> {
                 "browser retention must be an integer from 1 through 100 runs",
             )
         })
+}
+
+/// Opt-in bounded parallel execution (#155). No `--workers` at all keeps the
+/// historical single-worker schedule and sends no concurrency request, so an
+/// existing invocation behaves exactly as before.
+fn parse_browser_concurrency(
+    workers: Option<&str>,
+    worker_timeout: Option<&str>,
+) -> Result<Option<BrowserConcurrencyPolicy>, BackendError> {
+    if workers.is_none() && worker_timeout.is_none() {
+        return Ok(None);
+    }
+    let workers = match workers {
+        None => 1,
+        Some(value) => value
+            .parse::<u32>()
+            .ok()
+            .filter(|count| (1..=8).contains(count))
+            .ok_or_else(|| {
+                BackendError::invalid_request(
+                    "--workers must be an integer from 1 through 8 browser workers",
+                )
+            })?,
+    };
+    let test_timeout_milliseconds = worker_timeout
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .ok()
+                .filter(|timeout| (1_000..=1_800_000).contains(timeout))
+                .ok_or_else(|| {
+                    BackendError::invalid_request(
+                        "--worker-timeout-ms must be an integer from 1000 through 1800000 milliseconds",
+                    )
+                })
+        })
+        .transpose()?;
+    Ok(Some(BrowserConcurrencyPolicy {
+        workers,
+        test_timeout_milliseconds,
+    }))
 }
 
 fn parse_runtime_mode(value: &str) -> Result<RuntimeMode, BackendError> {
