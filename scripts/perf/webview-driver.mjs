@@ -107,13 +107,28 @@ class LinuxWebviewDriver extends WebviewDriverBase {
     assert.equal(this.client, undefined, "a WebDriver session is already open");
     const started = performance.now();
     this.client = new WebDriverClient(this.driverUrl);
+    const sessionStarted = performance.now();
     await this.client.createLinuxSession(this.application);
+    const sessionFinished = performance.now();
+    process.stdout.write(
+      `release Linux WebDriver session created in ${rounded(
+        sessionFinished - sessionStarted,
+      )}ms\n`,
+    );
     await this.waitForShell();
+    const shellFinished = performance.now();
     this.applicationPid = await findLinuxApplication(
       this.application,
       this.root,
     );
     this.cpuTracker = createProcessCpuTracker();
+    process.stdout.write(
+      `release Linux launch stages: session=${rounded(
+        sessionFinished - sessionStarted,
+      )}ms shell=${rounded(shellFinished - sessionFinished)}ms process=${rounded(
+        performance.now() - shellFinished,
+      )}ms\n`,
+    );
     return rounded(performance.now() - started);
   }
 

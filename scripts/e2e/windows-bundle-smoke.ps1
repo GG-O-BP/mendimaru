@@ -173,10 +173,16 @@ try {
     $peakWorkingSetBytes = $beforeIdle.WorkingSetBytes
     $peakCpuSeconds = $beforeIdle.CpuSeconds
     $idleSamples = [Math]::Ceiling($idleWindowSeconds / $idleSampleSeconds)
+    $idleTimer = [Diagnostics.Stopwatch]::StartNew()
+    $previousSampleElapsed = $idleTimer.Elapsed
     for ($sample = 0; $sample -lt $idleSamples; $sample += 1) {
-        $sampleTimer = [Diagnostics.Stopwatch]::StartNew()
-        Start-Sleep -Seconds $idleSampleSeconds
-        $sampleTimer.Stop()
+        $sampleDeadline = [TimeSpan]::FromSeconds(
+            ($sample + 1) * $idleSampleSeconds
+        )
+        $remaining = $sampleDeadline - $idleTimer.Elapsed
+        if ($remaining -gt [TimeSpan]::Zero) {
+            Start-Sleep -Milliseconds ([Math]::Ceiling($remaining.TotalMilliseconds))
+        }
         $applicationProcess.Refresh()
         if ($applicationProcess.HasExited) {
             throw "Installed application exited during the idle performance sample with code $($applicationProcess.ExitCode)."
@@ -184,13 +190,15 @@ try {
         $afterIdle = Get-ProcessTreeSnapshot `
             -RootProcessId $applicationProcess.Id `
             -CpuTracker $cpuTracker
+        $sampleFinished = $idleTimer.Elapsed
+        $sampleElapsed = $sampleFinished - $previousSampleElapsed
         if ($afterIdle.CpuSeconds -lt $previousIdle.CpuSeconds) {
             throw 'Installed application process-tree CPU time moved backwards.'
         }
         $idleCpuPercent = [Math]::Round(
             (
                 ($afterIdle.CpuSeconds - $previousIdle.CpuSeconds) /
-                ($sampleTimer.Elapsed.TotalSeconds * $logicalProcessors)
+                ($sampleElapsed.TotalSeconds * $logicalProcessors)
             ) * 100,
             3
         )
@@ -209,6 +217,7 @@ try {
         )
         $peakCpuSeconds = [Math]::Max($peakCpuSeconds, $afterIdle.CpuSeconds)
         $previousIdle = $afterIdle
+        $previousSampleElapsed = $sampleFinished
     }
     $report.resources = [ordered]@{
         before = $beforeIdle

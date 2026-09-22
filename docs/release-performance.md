@@ -19,15 +19,70 @@ ordinary release bundles.
 ## Measurement relevance on pull requests
 
 On pull requests the workflow first asks whether the commit can change the
-measured artifacts at all. If no path under `src-tauri`, `src`, `scripts`,
-`tests`, `performance`, the build configuration files, or the workflow itself
-changed since the pull request base, the measurement, builds, and gates are
-skipped for that push and the job records a `skip-reason.txt` artifact instead.
-This keeps the required check green without spending 20–30 minutes per runner
-re-measuring binaries that are bit-for-bit inputs of `main`. Pushes to `main`,
-scheduled runs, and manual dispatch always measure in full, and any pull
-request that does touch a measured path gets exactly the same full measurement
-as before.
+measured artifacts or their measurement contract at all. Product sources,
+Tauri sources and packaged resources, build inputs, `scripts/perf`, the
+installed-bundle smoke harness, performance policies and schemas, and the
+workflow itself trigger the full suite. Unrelated automation such as
+`scripts/aur`, functional-test fixtures, documentation, lint configuration, and
+other workflows use the fast skip path. The classifier is shared by every
+build, measurement, and gate job and is covered by unit tests, including all
+non-Node resources declared in `tauri.conf.json`.
+
+Skipped build and measurement matrix legs still publish their diagnostic
+`skip-reason.txt` artifacts, while required gate jobs remain green without
+installing dependencies or downloading those artifacts. Pushes to `main`,
+scheduled runs, and manual dispatch always measure in full. Any pull request
+that touches a measured input gets exactly the same matrix dimensions, sample
+counts, 300-second idle windows, and gates as before.
+
+Both measured binaries are cached on a fingerprint of the inputs that can
+change them, not on a commit sha. The fingerprint covers `src`, `src-tauri`,
+`public`, `.cargo`, the frontend build inputs and every non-Node Tauri
+resource — including the bundled `scripts/browser-*.mjs`, which live outside
+`src-tauri` — together with the platform build recipe and the resolved `rustc`
+identity, runner OS and architecture, and the native linker/compiler/SDK
+identity. The broad hosted-runner image release is not used because GitHub can
+roll two image revisions across parallel matrix jobs even when their
+artifact-affecting toolchains are unchanged. A Tauri resource outside the
+repository fails the fingerprint step rather than being silently omitted.
+Budgets, schemas, `scripts/perf` and the workflow itself are deliberately
+excluded: they change what is measured, not what is built, and the relevance
+classifier above already forces the full suite to run for them.
+
+Caching both variants, rather than only the baseline, is what keeps the
+comparison honest. A sha-keyed baseline could restore a binary produced by an
+older toolchain while the candidate always compiled with the current one, so a
+toolchain delta could be read as a code regression. Equal keys mean the two
+variants now always hit together or rebuild together. When a revision changes
+no build input the two fingerprints coincide and both variants measure the
+same artifact, which is the correct reading of "nothing was rebuilt": the run
+then reports run-to-run noise against the same absolute rails.
+
+The build recipe lives in one place per platform and is fed both to the build
+command and to the fingerprint salt, so changed build flags cannot silently
+reuse a binary produced by the old ones. Release builds keep an ordinary
+dependency cache for the genuine rebuild path; workspace-crate caching is
+deliberately not enabled, because the repository's Actions cache is already at
+its 10 GB ceiling and those entries would evict the far smaller binary caches
+that remove much more critical-path work per byte.
+
+That dependency cache stays keyed per variant on purpose. Both variants
+compile the same crate graph, but they compile it in different directories,
+and an Actions cache entry restores to the path it was saved from. One shared
+key per platform would let whichever variant finished first publish a target
+directory the other cannot use, converting its next restore into a full
+dependency rebuild.
+
+Those builds still refresh the crates.io index, measured at 31.4 s on the
+Windows WebView leg and 4.0 s on Linux in run 35718372051. Skipping it with
+`CARGO_NET_OFFLINE` on an exact dependency-cache hit looks safe and is not:
+run 35720574481 failed the Linux baseline build with `no matching package
+named aho-corasick found`. The dependency cache prunes the registry index
+before saving, keeping the `.crate` files but not the index metadata that
+cargo needs to rebuild its resolve graph, so an offline build cannot resolve
+even though every crate it would download is already present. A developer
+machine keeps a complete index and so cannot reproduce this; only the pruned
+CI registry shows it. The refresh stays.
 
 Baseline and candidate measurements run as parallel matrix jobs and a separate
 gate job compares the two reports, so the previous strictly sequential
@@ -70,6 +125,19 @@ The common metric meanings are:
   `processCountGrowth`: positive end-minus-start leak signals from that same
   window. Negative deltas are retained in `resources.delta` but become zero for
   the upper-bound leak metric.
+
+Idle samples use fixed five-second deadlines. Snapshot collection time is part
+of each CPU interval and is subtracted from the next sleep instead of being
+added after every interval. This retains sixty observations covering at least
+300 seconds while avoiding an extra minute of PowerShell process-enumeration
+overhead on hosted Windows.
+
+Linux runs Xvfb inside a private D-Bus session because WebKitGTK desktop
+services expect a session bus even on a hosted headless runner. Launch-stage
+timing keeps WebKitWebDriver `POST /session`, the explicit ready-shell wait, and
+process discovery separately attributable. The ready-shell assertion still
+defines the end of every startup sample; no WebDriver response alone is treated
+as application readiness.
 
 Windows MSI and NSIS runs use the same cold/warm definition, repeat count, idle
 window, process-tree scope, and resource meanings. Application data and WebView2

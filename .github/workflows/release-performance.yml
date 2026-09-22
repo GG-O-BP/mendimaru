@@ -32,9 +32,15 @@ jobs:
           - platform: linux
             runner: ubuntu-latest
             package-kind: appimage
+            build-recipe: >-
+              build --bundles appimage --features e2e
+              --config src-tauri/tauri.e2e.conf.json
           - platform: windows
             runner: windows-latest
             package-kind: release-executable
+            build-recipe: >-
+              build --no-bundle --features e2e
+              --config src-tauri/tauri.e2e.conf.json
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -64,42 +70,82 @@ jobs:
         id: relevance
         shell: bash
         run: |
-          relevant=false
           if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            relevant=true
-          else
-            base="${{ steps.revisions.outputs.baseline }}"
-            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              git fetch origin "$base" --depth=1
-            fi
-            if git diff --name-only "$base" HEAD -- \
-              'src-tauri' 'src' 'scripts' 'tests' 'performance' \
-              'package.json' 'package-lock.json' 'vite.config.ts' \
-              'tsconfig.json' 'tsconfig.node.json' 'index.html' \
-              '.github/workflows/release-performance.yml' | grep -q .; then
-              relevant=true
-            fi
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Measured-artifact relevance: true (non-PR run)"
+            exit 0
           fi
-          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
-          echo "Measured-artifact relevance: $relevant"
+          base="${{ steps.revisions.outputs.baseline }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch origin "$base" --depth=1
+          fi
+          node scripts/perf/release-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
 
-      - name: Cache the built baseline binary
-        if: matrix.variant == 'baseline'
-        id: baseline-binary
+      # Resolved before the binary cache so the toolchain identity can enter the
+      # cache key. Without it a restored binary could have been compiled by a
+      # different rustc than the variant it is compared against.
+      - name: Set up Rust
+        if: steps.relevance.outputs.relevant == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Fingerprint the build inputs
+        id: fingerprint
+        if: steps.relevance.outputs.relevant == 'true'
+        shell: bash
+        env:
+          BUILD_RECIPE: ${{ matrix.build-recipe }}
+          MEASURED_COMMIT: ${{ matrix.variant == 'baseline' && steps.revisions.outputs.baseline || steps.revisions.outputs.candidate }}
+        run: |
+          if ! git cat-file -e "$MEASURED_COMMIT^{commit}" 2>/dev/null; then
+            git fetch origin "$MEASURED_COMMIT" --depth=1
+          fi
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            native_tools="$(
+              ld --version
+              cc --version
+              ldd --version
+            )"
+            native_tools="${native_tools//$'\r'/ }"
+            native_tools="${native_tools//$'\n'/ }"
+          else
+            native_tools="vs=${VisualStudioVersion:-unknown};vc=${VCToolsVersion:-unknown};sdk=${WindowsSDKVersion:-unknown}"
+          fi
+          node scripts/perf/build-fingerprint.mjs \
+            --commit "$MEASURED_COMMIT" \
+            --salt "recipe=$BUILD_RECIPE" \
+            --salt "rustc=$(rustc --version --verbose | tr '\n' ' ')" \
+            --salt "node=22.22.2" \
+            --salt "runner=${{ matrix.runner }}" \
+            --salt "runner-os=${ImageOS:-${RUNNER_OS:-unknown}}" \
+            --salt "runner-arch=${RUNNER_ARCH:-unknown}" \
+            --salt "native-tools=$native_tools" \
+            --github-output "$GITHUB_OUTPUT"
+
+      # Keyed by build-input content rather than by commit, so a revision that
+      # only changes measurement code reuses an identical binary instead of
+      # recompiling it. Both variants participate: the comparison is only valid
+      # when baseline and candidate are equally fresh, and leaving the candidate
+      # uncached kept a full release build on the critical path of every run.
+      - name: Cache the built binary
+        if: steps.relevance.outputs.relevant == 'true'
+        id: binary-cache
         uses: actions/cache@v6
         with:
-          path: cached-baseline-binary
-          key: webview-binary-${{ matrix.platform }}-${{ steps.revisions.outputs.baseline }}
+          path: cached-binary
+          key: webview-binary-${{ matrix.platform }}-${{ steps.fingerprint.outputs.fingerprint }}
 
       - name: Check out current-main baseline
-        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ steps.revisions.outputs.baseline }}
           path: baseline-source
 
       - name: Backport test-only fixture hooks for the bootstrap baseline
-        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           if ! grep -q MENDIMARU_E2E_MARKETPLACE_URL \
@@ -117,7 +163,7 @@ jobs:
           fi
 
       - name: Install Linux desktop dependencies
-        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           sudo apt-get update
@@ -131,63 +177,59 @@ jobs:
             xvfb
 
       - name: Set up Node.js
-        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        if: steps.relevance.outputs.relevant == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
           cache: npm
           cache-dependency-path: ${{ matrix.variant == 'baseline' && 'baseline-source/package-lock.json' || 'package-lock.json' }}
 
-      - name: Set up Rust
-        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Cache the Rust release build
-        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        if: steps.relevance.outputs.relevant == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
+          # Deliberately per variant. The two variants compile the same crate
+          # graph, but they compile it in different directories, and a cache
+          # entry restores to the path it was saved from. Collapsing this to one
+          # key per platform would let whichever variant won the save race
+          # publish a target directory the other cannot use, turning its next
+          # dependency restore into a full recompile.
           shared-key: release-performance-${{ matrix.platform }}-${{ matrix.variant }}
 
       - name: Install dependencies
-        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+        if: steps.relevance.outputs.relevant == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
         working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
         run: npm ci
 
-      - name: Build the Linux AppImage
-        if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
+      # One recipe per platform, shared with the fingerprint salt so a change to
+      # the build flags cannot silently reuse a binary built by the old ones.
+      - name: Build the measured binary
+        if: steps.relevance.outputs.relevant == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
         working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
-        run: >-
-          npm run tauri -- build --bundles appimage --features e2e
-          --config src-tauri/tauri.e2e.conf.json
-
-      - name: Build the Windows release executable
-        if: runner.os == 'Windows' && steps.relevance.outputs.relevant == 'true' && steps.baseline-binary.outputs.cache-hit != 'true'
-        working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
-        run: >-
-          npm run tauri -- build --no-bundle --features e2e
-          --config src-tauri/tauri.e2e.conf.json
+        shell: bash
+        run: npm run tauri -- ${{ matrix.build-recipe }}
 
       - name: Stage the binary for caching and artifact upload
         if: steps.relevance.outputs.relevant == 'true'
         shell: bash
         run: |
           mkdir -p staged-binary
-          if [[ "${{ steps.baseline-binary.outputs.cache-hit }}" == "true" ]]; then
-            cp cached-baseline-binary/* staged-binary/
+          if [[ "${{ steps.binary-cache.outputs.cache-hit }}" == "true" ]]; then
+            cp cached-binary/* staged-binary/
             exit 0
           fi
           root="."
           if [[ "${{ matrix.variant }}" == "baseline" ]]; then root="baseline-source"; fi
-          mkdir -p cached-baseline-binary
+          mkdir -p cached-binary
           if [[ "${{ runner.os }}" == "Linux" ]]; then
             mapfile -t app < <(find "$root/src-tauri/target/release/bundle/appimage" -maxdepth 1 -type f -name '*.AppImage')
             [[ ${#app[@]} -eq 1 ]]
             cp "${app[0]}" staged-binary/
-            if [[ "${{ matrix.variant }}" == "baseline" ]]; then cp "${app[0]}" cached-baseline-binary/; fi
+            cp "${app[0]}" cached-binary/
           else
             cp "$root/src-tauri/target/release/mendimaru.exe" staged-binary/
-            if [[ "${{ matrix.variant }}" == "baseline" ]]; then cp "$root/src-tauri/target/release/mendimaru.exe" cached-baseline-binary/; fi
+            cp "$root/src-tauri/target/release/mendimaru.exe" cached-binary/
           fi
 
       - name: Record skipped build
@@ -269,24 +311,19 @@ jobs:
         id: relevance
         shell: bash
         run: |
-          relevant=false
           if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            relevant=true
-          else
-            base="${{ steps.revisions.outputs.baseline }}"
-            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              git fetch origin "$base" --depth=1
-            fi
-            if git diff --name-only "$base" HEAD -- \
-              'src-tauri' 'src' 'scripts' 'tests' 'performance' \
-              'package.json' 'package-lock.json' 'vite.config.ts' \
-              'tsconfig.json' 'tsconfig.node.json' 'index.html' \
-              '.github/workflows/release-performance.yml' | grep -q .; then
-              relevant=true
-            fi
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Measured-artifact relevance: true (non-PR run)"
+            exit 0
           fi
-          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
-          echo "Measured-artifact relevance: $relevant"
+          base="${{ steps.revisions.outputs.baseline }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch origin "$base" --depth=1
+          fi
+          node scripts/perf/release-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux' && steps.relevance.outputs.relevant == 'true'
@@ -349,6 +386,7 @@ jobs:
             fi
           done
           test -x "$chrome_path"
+          command -v dbus-run-session >/dev/null
           export MENDIMARU_CHROME_PATH="$chrome_path"
           variants=(${{ matrix.variant }})
           if [[ "${{ matrix.phase }}" == "latency" ]]; then variants=(baseline candidate); fi
@@ -360,7 +398,8 @@ jobs:
             if [[ "$variant" == "candidate" ]]; then
               commit="${{ steps.revisions.outputs.candidate }}"
             fi
-            xvfb-run --auto-servernum node scripts/perf/release-webview.mjs \
+            dbus-run-session -- xvfb-run --auto-servernum \
+              node scripts/perf/release-webview.mjs \
               --application "$application" \
               --report "artifacts/e2e/release-performance/${{ matrix.platform }}-$variant-${{ matrix.phase }}.json" \
               --commit "$commit" \
@@ -434,17 +473,55 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Resolve measured revisions
+        id: revisions
+        shell: bash
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          candidate="$(git rev-parse HEAD)"
+          if [[ -n "$PULL_REQUEST_BASE_SHA" ]]; then
+            baseline="$PULL_REQUEST_BASE_SHA"
+          else
+            baseline="$(git rev-parse HEAD^)"
+          fi
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether measured artifacts can change
+        id: relevance
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Measured-artifact relevance: true (non-PR run)"
+            exit 0
+          fi
+          base="${{ steps.revisions.outputs.baseline }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch origin "$base" --depth=1
+          fi
+          node scripts/perf/release-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
+        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
           cache: npm
 
       - name: Install dependencies
+        if: steps.relevance.outputs.relevant == 'true'
         run: npm ci
 
       - name: Download measurement reports
+        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/download-artifact@v7
         with:
           pattern: webview-report-${{ matrix.platform }}-*
@@ -452,31 +529,33 @@ jobs:
           path: reports
 
       - name: Gate the latency phase against current main
+        if: steps.relevance.outputs.relevant == 'true'
         shell: bash
         run: |
-          if [[ -f reports/skip-reason.txt ]]; then
-            echo "Measurement skipped for this push:"
-            cat reports/skip-reason.txt
-            exit 0
-          fi
           node scripts/perf/performance-gate.mjs \
             "reports/${{ matrix.platform }}-candidate-latency.json" \
             "reports/${{ matrix.platform }}-baseline-latency.json" \
             performance/budgets.latency.json
 
       - name: Gate the idle phase against current main
+        if: steps.relevance.outputs.relevant == 'true'
         shell: bash
         run: |
-          if [[ -f reports/skip-reason.txt ]]; then
-            exit 0
-          fi
           node scripts/perf/performance-gate.mjs \
             "reports/${{ matrix.platform }}-candidate-idle.json" \
             "reports/${{ matrix.platform }}-baseline-idle.json" \
             performance/budgets.idle.json
 
+      - name: Record skipped gate
+        if: steps.relevance.outputs.relevant != 'true'
+        run: echo "Release WebView gate skipped because measured inputs are unchanged."
+
   installed-bundle-build:
     name: Build installers (${{ matrix.variant }})
+    env:
+      # Single source of truth: the fingerprint salt and the build command read
+      # the same recipe, so changing the flags always changes the cache key.
+      BUNDLE_BUILD_RECIPE: build --bundles msi,nsis
     strategy:
       fail-fast: false
       matrix:
@@ -510,71 +589,94 @@ jobs:
         id: relevance
         shell: bash
         run: |
-          relevant=false
           if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            relevant=true
-          else
-            base="${{ steps.revisions.outputs.baseline }}"
-            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              git fetch origin "$base" --depth=1
-            fi
-            if git diff --name-only "$base" HEAD -- \
-              'src-tauri' 'src' 'scripts' 'tests' 'performance' \
-              'package.json' 'package-lock.json' 'vite.config.ts' \
-              'tsconfig.json' 'tsconfig.node.json' 'index.html' \
-              '.github/workflows/release-performance.yml' | grep -q .; then
-              relevant=true
-            fi
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Measured-artifact relevance: true (non-PR run)"
+            exit 0
           fi
-          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
-          echo "Measured-artifact relevance: $relevant"
+          base="${{ steps.revisions.outputs.baseline }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch origin "$base" --depth=1
+          fi
+          node scripts/perf/release-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
 
-      - name: Cache the built baseline installers
-        if: matrix.variant == 'baseline'
-        id: baseline-installers
+      - name: Set up Rust
+        if: steps.relevance.outputs.relevant == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Fingerprint the build inputs
+        id: fingerprint
+        if: steps.relevance.outputs.relevant == 'true'
+        shell: bash
+        env:
+          BUILD_RECIPE: ${{ env.BUNDLE_BUILD_RECIPE }}
+          MEASURED_COMMIT: ${{ matrix.variant == 'baseline' && steps.revisions.outputs.baseline || steps.revisions.outputs.candidate }}
+        run: |
+          if ! git cat-file -e "$MEASURED_COMMIT^{commit}" 2>/dev/null; then
+            git fetch origin "$MEASURED_COMMIT" --depth=1
+          fi
+          native_tools="vs=${VisualStudioVersion:-unknown};vc=${VCToolsVersion:-unknown};sdk=${WindowsSDKVersion:-unknown}"
+          node scripts/perf/build-fingerprint.mjs \
+            --commit "$MEASURED_COMMIT" \
+            --salt "recipe=$BUILD_RECIPE" \
+            --salt "rustc=$(rustc --version --verbose | tr '\n' ' ')" \
+            --salt "node=22.22.2" \
+            --salt "runner=windows-latest" \
+            --salt "runner-os=${ImageOS:-${RUNNER_OS:-unknown}}" \
+            --salt "runner-arch=${RUNNER_ARCH:-unknown}" \
+            --salt "native-tools=$native_tools" \
+            --github-output "$GITHUB_OUTPUT"
+
+      # Same content-keyed reuse as the WebView binaries, for both variants.
+      - name: Cache the built installers
+        if: steps.relevance.outputs.relevant == 'true'
+        id: installer-cache
         uses: actions/cache@v6
         with:
           path: staged-installers
-          key: bundle-installers-${{ steps.revisions.outputs.baseline }}
+          key: bundle-installers-${{ steps.fingerprint.outputs.fingerprint }}
 
       - name: Check out current-main baseline
-        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
+        if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true' && steps.installer-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ steps.revisions.outputs.baseline }}
           path: baseline-source
 
       - name: Set up Node.js
-        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
+        if: steps.relevance.outputs.relevant == 'true' && steps.installer-cache.outputs.cache-hit != 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
           cache: npm
           cache-dependency-path: ${{ matrix.variant == 'baseline' && 'baseline-source/package-lock.json' || 'package-lock.json' }}
 
-      - name: Set up Rust
-        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
-        uses: dtolnay/rust-toolchain@stable
-
       - name: Cache the Rust bundle build
-        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
+        if: steps.relevance.outputs.relevant == 'true' && steps.installer-cache.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
+          # Per variant for the same path reason as the WebView build, and
+          # separate from the WebView key because the bundle recipe enables
+          # different features and so compiles a different dependency set.
           shared-key: release-performance-windows-bundles-${{ matrix.variant }}
 
       - name: Install dependencies
-        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
+        if: steps.relevance.outputs.relevant == 'true' && steps.installer-cache.outputs.cache-hit != 'true'
         working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
         run: npm ci
 
       - name: Build MSI and NSIS
-        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
+        if: steps.relevance.outputs.relevant == 'true' && steps.installer-cache.outputs.cache-hit != 'true'
         working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
-        run: npm run tauri -- build --bundles msi,nsis
+        shell: bash
+        run: npm run tauri -- ${{ env.BUNDLE_BUILD_RECIPE }}
 
       - name: Stage the built installers
-        if: steps.relevance.outputs.relevant == 'true' && steps.baseline-installers.outputs.cache-hit != 'true'
+        if: steps.relevance.outputs.relevant == 'true' && steps.installer-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $root = if ('${{ matrix.variant }}' -eq 'baseline') {
@@ -651,24 +753,19 @@ jobs:
         id: relevance
         shell: bash
         run: |
-          relevant=false
           if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            relevant=true
-          else
-            base="${{ steps.revisions.outputs.baseline }}"
-            if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              git fetch origin "$base" --depth=1
-            fi
-            if git diff --name-only "$base" HEAD -- \
-              'src-tauri' 'src' 'scripts' 'tests' 'performance' \
-              'package.json' 'package-lock.json' 'vite.config.ts' \
-              'tsconfig.json' 'tsconfig.node.json' 'index.html' \
-              '.github/workflows/release-performance.yml' | grep -q .; then
-              relevant=true
-            fi
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Measured-artifact relevance: true (non-PR run)"
+            exit 0
           fi
-          echo "relevant=$relevant" >> "$GITHUB_OUTPUT"
-          echo "Measured-artifact relevance: $relevant"
+          base="${{ steps.revisions.outputs.baseline }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch origin "$base" --depth=1
+          fi
+          node scripts/perf/release-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
         if: steps.relevance.outputs.relevant == 'true'
@@ -775,17 +872,55 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Resolve measured revisions
+        id: revisions
+        shell: bash
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          candidate="$(git rev-parse HEAD)"
+          if [[ -n "$PULL_REQUEST_BASE_SHA" ]]; then
+            baseline="$PULL_REQUEST_BASE_SHA"
+          else
+            baseline="$(git rev-parse HEAD^)"
+          fi
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether measured artifacts can change
+        id: relevance
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Measured-artifact relevance: true (non-PR run)"
+            exit 0
+          fi
+          base="${{ steps.revisions.outputs.baseline }}"
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch origin "$base" --depth=1
+          fi
+          node scripts/perf/release-relevance.mjs \
+            --base "$base" \
+            --head HEAD \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
+        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
           cache: npm
 
       - name: Install dependencies
+        if: steps.relevance.outputs.relevant == 'true'
         run: npm ci
 
       - name: Download measurement reports
+        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/download-artifact@v7
         with:
           pattern: installed-bundle-report-*
@@ -793,25 +928,23 @@ jobs:
           path: reports
 
       - name: Gate MSI against current main
+        if: steps.relevance.outputs.relevant == 'true'
         shell: bash
         run: |
-          if [[ -f reports/skip-reason.txt ]]; then
-            echo "Measurement skipped for this push:"
-            cat reports/skip-reason.txt
-            exit 0
-          fi
           node scripts/perf/performance-gate.mjs \
             reports/candidate-msi.json \
             reports/baseline-msi.json \
             performance/budgets.bundle.json
 
       - name: Gate NSIS against current main
+        if: steps.relevance.outputs.relevant == 'true'
         shell: bash
         run: |
-          if [[ -f reports/skip-reason.txt ]]; then
-            exit 0
-          fi
           node scripts/perf/performance-gate.mjs \
             reports/candidate-nsis.json \
             reports/baseline-nsis.json \
             performance/budgets.bundle.json
+
+      - name: Record skipped gate
+        if: steps.relevance.outputs.relevant != 'true'
+        run: echo "Installed bundle gate skipped because measured inputs are unchanged."
