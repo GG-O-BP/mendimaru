@@ -628,7 +628,8 @@ jobs:
           set -euo pipefail
           gh issue list \
             --label "ci:perf-regression" \
+            --label "revert-candidate" \
             --state open \
-            --limit 100 \
+            --limit 1000 \
             --json number,title,url,state,labels > open-issues.json
           node scripts/ci/regression-hold.mjs < open-issues.json

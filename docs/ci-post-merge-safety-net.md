@@ -13,14 +13,16 @@ quietly ignored. This is the machinery that makes it hard to ignore.
    everything downstream quotes the gate rather than re-deriving a verdict from
    the budgets. Re-deriving would let the filed issue and the gate disagree the
    moment a budget changes.
-2. `post-merge-regression-report` runs when either gate reports `failure` on a
-   non-pull-request event. It is the only job in either workflow with
-   `issues: write`.
+2. `post-merge-regression-report` runs when a build, measurement, or gate job
+   reports `failure` on `main` outside a pull request. This includes the case
+   where a failed measurement causes its downstream gate to be skipped. It is
+   the only job in either workflow with `issues: write`.
 3. It files an issue labelled `ci:perf-regression`, carrying the failing
    commit, the baseline, the run URL, the failing jobs, and a table of the
-   violated metrics.
-4. `perf-regression-hold` in `ci.yml` fails on every pull request while such an
-   issue is open.
+   violated metrics. A `push` failure with a measured budget violation also
+   receives `revert-candidate`.
+4. `perf-regression-hold` in `ci.yml` fails on every pull request while an
+   issue carrying **both** labels is open.
 
 ## Deliberate decisions
 
@@ -29,16 +31,20 @@ a `<!-- post-merge-performance-regression:<sha> -->` marker. Re-running the same
 commit comments on the existing issue instead of opening a second one, and the
 marker keeps working after a human edits the title.
 
-**A failure with no budget violation is not called a regression.** If the gate
-job failed but reported zero violations, the cause is infrastructure, artifacts,
-or the measurement step — not the product. The issue is still filed, but it is
-worded accordingly and the `revert-candidate` label is withheld. Labelling an
-infrastructure failure as a revert candidate would send a human to revert code
-that measured clean.
+**A failure with no budget violation is not called a product regression.** It
+may be infrastructure or an artifact error, but it may also be a product crash
+before a report existed. The issue is still filed for triage, but the available
+evidence cannot attribute it to the merge, so `revert-candidate` is withheld and
+it does not hold unrelated merges. Labelling an unattributed failure as a
+revert candidate would send a human to revert code without evidence.
 
 **A scheduled failure is not attributed to one merge.** The weekly run measures
 whatever is on `main`, so no single commit is implicated and `revert-candidate`
-is withheld there too.
+is withheld there too. It is recorded but does not hold unrelated merges.
+
+**A manual run from a feature branch cannot file a main regression.** The
+reporter is restricted to `refs/heads/main`; `workflow_dispatch` on another ref
+may measure that ref, but it cannot put the protected branch on hold.
 
 **The issue is filed even when the reports cannot be read.** A missing or
 corrupt artifact degrades the issue to "detail unavailable, see the run"; it
@@ -60,8 +66,9 @@ because that would block the branch trying to fix the regression.
 ## Clearing a hold
 
 Either fix the regression, or record why it is not one and then close the issue
-or remove the `ci:perf-regression` label. Both are deliberate, attributable
-human acts; there is no automatic expiry.
+or remove the `revert-candidate` label. Both are deliberate, attributable human
+acts; there is no automatic expiry. The broader `ci:perf-regression` label can
+remain when the investigation should stay visible without holding merges.
 
 Note that `changeControl.performanceFailureRerun` stays
 `preserve-original-failure`. Re-running a failed performance job to get green is

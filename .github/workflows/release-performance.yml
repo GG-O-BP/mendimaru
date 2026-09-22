@@ -1015,14 +1015,23 @@ jobs:
   post-merge-regression-report:
     name: Post-merge performance regression report
     needs:
+      - release-webview-build
+      - release-webview-measure
       - release-webview-gate
+      - installed-bundle-build
+      - installed-bundle-measure
       - installed-bundle-gate
     # A pull request never reaches here: the deferred phases do not run there,
     # and a pull request already fails visibly on its own checks.
     if: >-
       always()
       && github.event_name != 'pull_request'
-      && (needs.release-webview-gate.result == 'failure'
+      && github.ref == 'refs/heads/main'
+      && (needs.release-webview-build.result == 'failure'
+      || needs.release-webview-measure.result == 'failure'
+      || needs.release-webview-gate.result == 'failure'
+      || needs.installed-bundle-build.result == 'failure'
+      || needs.installed-bundle-measure.result == 'failure'
       || needs.installed-bundle-gate.result == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1059,7 +1068,11 @@ jobs:
         shell: bash
         env:
           GATE_JOB_RESULTS: >-
-            {"release-webview-gate":"${{ needs.release-webview-gate.result }}",
+            {"release-webview-build":"${{ needs.release-webview-build.result }}",
+            "release-webview-measure":"${{ needs.release-webview-measure.result }}",
+            "release-webview-gate":"${{ needs.release-webview-gate.result }}",
+            "installed-bundle-build":"${{ needs.installed-bundle-build.result }}",
+            "installed-bundle-measure":"${{ needs.installed-bundle-measure.result }}",
             "installed-bundle-gate":"${{ needs.installed-bundle-gate.result }}"}
           REGRESSION_COMMIT: ${{ steps.revisions.outputs.candidate }}
           REGRESSION_BASELINE: ${{ steps.revisions.outputs.baseline }}
@@ -1086,12 +1099,15 @@ jobs:
           gh issue list \
             --label "ci:perf-regression" \
             --state open \
-            --limit 100 \
+            --limit 1000 \
             --json number,title,body,state > open-issues.json
           existing="$(node scripts/ci/regression-issue.mjs --select-existing)"
           node -p 'JSON.parse(require("fs").readFileSync("decision.json","utf8")).body' > issue-body.md
           if [[ -n "$existing" ]]; then
             node -p 'JSON.parse(require("fs").readFileSync("decision.json","utf8")).comment' > issue-comment.md
+            while IFS= read -r label; do
+              gh issue edit "$existing" --add-label "$label"
+            done < <(node -p 'JSON.parse(require("fs").readFileSync("decision.json","utf8")).labels.join("\n")')
             gh issue comment "$existing" --body-file issue-comment.md
             echo "Updated existing regression issue #$existing"
           else

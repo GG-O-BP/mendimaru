@@ -22,23 +22,27 @@ export function evaluateHold(issues) {
     .filter((issue) => !issue.pull_request && !issue.isPullRequest)
     .filter((issue) => String(issue.state ?? "OPEN").toLowerCase() === "open")
     .filter((issue) => labelNames(issue).includes(regressionLabel))
+    // The policy approved in issue #176 blocks on a commit that has been
+    // identified as a revert candidate. Infrastructure-only and scheduled
+    // failures are still recorded, but they must not stop unrelated merges.
+    .filter((issue) => labelNames(issue).includes(revertCandidateLabel))
     .map((issue) => ({
       number: Number(issue.number),
       title: String(issue.title ?? ""),
       url: String(issue.url ?? issue.html_url ?? ""),
-      revertCandidate: labelNames(issue).includes(revertCandidateLabel),
+      revertCandidate: true,
     }))
-    .filter((issue) => Number.isInteger(issue.number))
+    .filter((issue) => Number.isSafeInteger(issue.number) && issue.number > 0)
     .sort((left, right) => left.number - right.number);
   return { held: blocking.length > 0, issues: blocking };
 }
 
 export function renderHold(decision) {
   if (!decision.held) {
-    return `Post-merge performance hold: clear (no open \`${regressionLabel}\` issue).`;
+    return `Post-merge performance hold: clear (no open \`${revertCandidateLabel}\` performance issue).`;
   }
   const lines = [
-    `Post-merge performance hold: ACTIVE — ${decision.issues.length} open \`${regressionLabel}\` issue(s).`,
+    `Post-merge performance hold: ACTIVE — ${decision.issues.length} open \`${revertCandidateLabel}\` performance issue(s).`,
     "",
   ];
   for (const issue of decision.issues) {

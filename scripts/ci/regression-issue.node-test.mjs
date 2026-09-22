@@ -133,6 +133,22 @@ test("a structurally unusable report is rejected rather than half-read", () => {
   assert.throws(() => summarizeEvaluatedReport(null), /not an object/);
   assert.throws(() => summarizeEvaluatedReport("nope"), /not an object/);
   assert.throws(() => summarizeEvaluatedReport({}), /no benchmark block/);
+  assert.throws(
+    () =>
+      summarizeEvaluatedReport(
+        evaluatedReport({ gate: { status: "neutral", violations: [] } }),
+      ),
+    /unsupported gate status/,
+  );
+  assert.throws(
+    () =>
+      summarizeEvaluatedReport(
+        evaluatedReport({
+          gate: { status: "passed", violations: [{ metric: "impossible" }] },
+        }),
+      ),
+    /passed report contains gate violations/,
+  );
 });
 
 test("a violating push issue names a revert candidate", () => {
@@ -170,6 +186,7 @@ test("a failure with no budget violation is not called a regression", () => {
   assert.deepEqual(issue.labels, [regressionLabel]);
   assert.ok(!issue.labels.includes(revertCandidateLabel));
   assert.ok(issue.body.includes("예산 위반은 보고되지 않았다"));
+  assert.ok(issue.body.includes("후속 병합을 보류하지 않는다"));
 });
 
 test("a scheduled failure is not attributed to one merge", () => {
@@ -182,6 +199,7 @@ test("a scheduled failure is not attributed to one merge", () => {
   });
   assert.deepEqual(issue.labels, [regressionLabel]);
   assert.ok(issue.body.includes("`schedule`"));
+  assert.ok(issue.body.includes("후속 병합을 보류하지 않는다"));
 });
 
 test("the issue is still filed when no report could be read", () => {
@@ -265,6 +283,16 @@ test("a re-run finds the open issue for the same commit", () => {
   assert.equal(selectExistingIssue(issues, marker).number, 11);
 });
 
+test("a malformed matching issue cannot absorb the rerun", () => {
+  const marker = regressionMarker(commit);
+  for (const number of [undefined, null, 0, -1, "abc"]) {
+    assert.equal(
+      selectExistingIssue([{ number, state: "open", body: marker }], marker),
+      null,
+    );
+  }
+});
+
 test("a closed issue never suppresses a fresh report", () => {
   const marker = regressionMarker(commit);
   assert.equal(
@@ -297,6 +325,8 @@ test("the re-run comment stays short and states the violation count", () => {
   });
   assert.ok(comment.includes("https://example.test/run/2"));
   assert.ok(comment.includes("1"));
+  assert.ok(comment.includes("idleCpuPercent"));
+  assert.ok(comment.includes(revertCandidateLabel));
 });
 
 test("a missing report directory is a problem, never a crash", () => {
@@ -333,6 +363,19 @@ test("a malformed report is skipped without discarding the good ones", () => {
   );
 });
 
+test("a report for another commit is never attributed to this merge", () => {
+  const directory = scratch();
+  writeFileSync(
+    path.join(directory, "stale.json"),
+    JSON.stringify(evaluatedReport()),
+  );
+  const expected = "abcdef1234567890abcdef1234567890abcdef12";
+  const result = readEvaluatedReports(directory, expected);
+  assert.deepEqual(result.summaries, []);
+  assert.equal(result.problems.length, 1);
+  assert.ok(result.problems[0].includes("does not match"));
+});
+
 test("release-performance.yml actually wires this safety net up", () => {
   const workflow = readFileSync(
     path.join(repository, ".github", "workflows", "release-performance.yml"),
@@ -346,7 +389,22 @@ test("release-performance.yml actually wires this safety net up", () => {
   assert.equal(workflow.match(/issues: write/g).length, 1);
   // Must survive a failed dependency, otherwise it can never observe a failure.
   assert.ok(workflow.includes("always()"));
+  assert.ok(workflow.includes("github.ref == 'refs/heads/main'"));
+  for (const job of [
+    "release-webview-build",
+    "release-webview-measure",
+    "release-webview-gate",
+    "installed-bundle-build",
+    "installed-bundle-measure",
+    "installed-bundle-gate",
+  ]) {
+    assert.ok(workflow.includes(`needs.${job}.result == 'failure'`));
+  }
   assert.ok(workflow.includes(`--label "${regressionLabel}"`));
+  assert.ok(
+    workflow.includes('gh issue edit "$existing" --add-label "$label"'),
+  );
+  assert.ok(workflow.includes("--limit 1000"));
 });
 
 test("the gates publish the evaluated reports the report job reads", () => {

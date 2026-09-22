@@ -48,9 +48,12 @@ export function shouldFileRegressionIssue(jobResults) {
 // wrote its own verdict into each report, so this reports that verdict rather
 // than re-deriving it from the budgets. Re-deriving would let the issue and the
 // gate disagree after a budget change.
-export function readEvaluatedReports(directory) {
+export function readEvaluatedReports(directory, expectedCommit = "") {
   const summaries = [];
   const problems = [];
+  const normalizedExpectedCommit = expectedCommit
+    ? requireCommit(expectedCommit)
+    : "";
   let entries;
   try {
     entries = collectJsonFiles(directory);
@@ -69,7 +72,17 @@ export function readEvaluatedReports(directory) {
       continue;
     }
     try {
-      summaries.push(summarizeEvaluatedReport(parsed, path.basename(file)));
+      const summary = summarizeEvaluatedReport(parsed, path.basename(file));
+      if (
+        normalizedExpectedCommit &&
+        summary.commit.toLowerCase() !== normalizedExpectedCommit
+      ) {
+        problems.push(
+          `${path.basename(file)}: commit ${JSON.stringify(summary.commit)} does not match ${normalizedExpectedCommit}`,
+        );
+        continue;
+      }
+      summaries.push(summary);
     } catch (error) {
       problems.push(`${path.basename(file)}: unusable (${message(error)})`);
     }
@@ -92,6 +105,14 @@ export function summarizeEvaluatedReport(report, name = "report.json") {
   const gate =
     report.gate && typeof report.gate === "object" ? report.gate : null;
   const violations = Array.isArray(gate?.violations) ? gate.violations : [];
+  if (gate && !["passed", "failed"].includes(String(gate.status))) {
+    throw new Error(
+      `report has unsupported gate status ${JSON.stringify(gate.status)}`,
+    );
+  }
+  if (gate?.status === "passed" && violations.length > 0) {
+    throw new Error("passed report contains gate violations");
+  }
   return {
     name,
     platform: String(benchmark.platform ?? "unknown"),
@@ -143,10 +164,12 @@ export function buildRegressionIssue(input) {
       `\`${short}\` 에서 병합 후 성능 게이트가 **${violations}건의 예산 위반**으로 실패했다.`,
     );
   } else {
-    // Saying "regression" here when no budget was violated would send a human
-    // to revert product code over an infrastructure failure.
+    // Saying "budget regression" here without an evaluated violation would
+    // send a human to revert product code without evidence. The failure may be
+    // infrastructure, or it may be a product crash before a report existed;
+    // the issue records it for triage without choosing between those causes.
     lines.push(
-      `\`${short}\` 의 병합 후 성능 런이 실패했지만 **예산 위반은 보고되지 않았다.** 게이트 로직 자체가 아니라 인프라·아티팩트·측정 단계의 실패일 가능성이 높다. revert 후보로 표시하지 않았다.`,
+      `\`${short}\` 의 병합 후 성능 런이 실패했지만 **예산 위반은 보고되지 않았다.** 인프라·아티팩트 오류인지, 리포트 생성 전 제품 실행 실패인지 현재 증거만으로 귀속할 수 없어 revert 후보로 표시하지 않았다.`,
     );
   }
   lines.push("");
@@ -165,13 +188,7 @@ export function buildRegressionIssue(input) {
     lines.push("");
     lines.push("| 리포트 | 지표 | 통계 | 종류 | 실측 | 한계 | 기준 | 변화 |");
     lines.push("|---|---|---|---|---:|---:|---:|---:|");
-    for (const summary of summaries) {
-      for (const violation of summary.violations) {
-        lines.push(
-          `| ${summary.platform}/${summary.suite} | \`${violation.metric}\` | ${violation.statistic} | ${violation.kind} | ${format(violation.actual)} | ${format(violation.limit)} | ${format(violation.baseline)} | ${formatPercent(violation.relativeChangePercent)} |`,
-        );
-      }
-    }
+    appendViolationRows(lines, summaries);
     lines.push("");
   }
 
@@ -191,11 +208,19 @@ export function buildRegressionIssue(input) {
     lines.push("");
   }
 
-  lines.push("## 이 이슈가 막고 있는 것");
-  lines.push("");
-  lines.push(
-    `이 이슈가 \`${regressionLabel}\` 라벨을 달고 열려 있는 동안 \`Post-merge performance hold\` 체크가 실패한다. 해제하려면 회귀를 고치거나, 오탐으로 판단한 근거를 남기고 이슈를 닫거나 라벨을 제거한다.`,
-  );
+  if (attributable) {
+    lines.push("## 이 이슈가 막고 있는 것");
+    lines.push("");
+    lines.push(
+      `이 이슈가 \`${regressionLabel}\` 와 \`${revertCandidateLabel}\` 라벨을 달고 열려 있는 동안 \`Post-merge performance hold\` 체크가 실패한다. 해제하려면 회귀를 고치거나, 오탐으로 판단한 근거를 남기고 이슈를 닫거나 \`${revertCandidateLabel}\` 라벨을 제거한다.`,
+    );
+  } else {
+    lines.push("## 병합 보류 여부");
+    lines.push("");
+    lines.push(
+      `이 실패는 특정 병합 커밋의 예산 회귀로 귀속되지 않아 \`${revertCandidateLabel}\` 라벨을 붙이지 않았고, 후속 병합을 보류하지 않는다.`,
+    );
+  }
 
   return {
     title,
@@ -213,7 +238,12 @@ export function selectExistingIssue(issues, marker) {
   const open = issues.filter(
     (issue) => issue && String(issue.state ?? "open").toLowerCase() === "open",
   );
-  const match = open.find((issue) => String(issue.body ?? "").includes(marker));
+  const match = open.find(
+    (issue) =>
+      Number.isSafeInteger(Number(issue.number)) &&
+      Number(issue.number) > 0 &&
+      String(issue.body ?? "").includes(marker),
+  );
   return match ?? null;
 }
 
@@ -224,8 +254,19 @@ export function buildRerunComment(input) {
     `- 이벤트: \`${String(input.eventName ?? "push")}\``,
   ];
   if (input.runUrl) lines.push(`- 런: ${input.runUrl}`);
-  const violations = violationCount(input.summaries ?? []);
+  const summaries = input.summaries ?? [];
+  const violations = violationCount(summaries);
   lines.push(`- 위반 지표 수: ${violations}`);
+  if (violations > 0) {
+    lines.push("");
+    lines.push("| 리포트 | 지표 | 통계 | 종류 | 실측 | 한계 | 기준 | 변화 |");
+    lines.push("|---|---|---|---|---:|---:|---:|---:|");
+    appendViolationRows(lines, summaries);
+    lines.push("");
+    lines.push(
+      `이번 재실행은 예산 위반을 보고했으므로 기존 이슈에도 \`${revertCandidateLabel}\` 라벨을 보장한다.`,
+    );
+  }
   return truncate(lines.join("\n"));
 }
 
@@ -305,6 +346,7 @@ if (invokedDirectly) {
     } else {
       const { summaries, problems } = readEvaluatedReports(
         process.env.REPORT_DIRECTORY ?? "reports",
+        process.env.REGRESSION_COMMIT,
       );
       const issue = buildRegressionIssue({
         commit: process.env.REGRESSION_COMMIT,
@@ -334,4 +376,14 @@ function requireEnv(name) {
   const value = process.env[name];
   if (!value) throw new Error(`${name} must be set`);
   return value;
+}
+
+function appendViolationRows(lines, summaries) {
+  for (const summary of summaries) {
+    for (const violation of summary.violations) {
+      lines.push(
+        `| ${summary.platform}/${summary.suite} | \`${violation.metric}\` | ${violation.statistic} | ${violation.kind} | ${format(violation.actual)} | ${format(violation.limit)} | ${format(violation.baseline)} | ${formatPercent(violation.relativeChangePercent)} |`,
+      );
+    }
+  }
 }

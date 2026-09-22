@@ -19,7 +19,7 @@ function issue(overrides = {}) {
     title: "idle gate 오탐",
     url: "https://example.test/issues/181",
     state: "OPEN",
-    labels: [{ name: regressionLabel }],
+    labels: [{ name: regressionLabel }, { name: revertCandidateLabel }],
     ...overrides,
   };
 }
@@ -30,7 +30,7 @@ test("no open regression issue means no hold", () => {
   assert.match(renderHold(decision), /clear/);
 });
 
-test("one open labelled issue holds merges", () => {
+test("one open revert-candidate performance issue holds merges", () => {
   const decision = evaluateHold([issue()]);
   assert.equal(decision.held, true);
   assert.equal(decision.issues[0].number, 181);
@@ -41,12 +41,15 @@ test("one open labelled issue holds merges", () => {
 });
 
 test("a revert candidate is called out in the hold message", () => {
-  const decision = evaluateHold([
-    issue({
-      labels: [{ name: regressionLabel }, { name: revertCandidateLabel }],
-    }),
-  ]);
+  const decision = evaluateHold([issue()]);
   assert.ok(renderHold(decision).includes("[revert candidate]"));
+});
+
+test("an infrastructure-only performance issue does not hold merges", () => {
+  assert.equal(
+    evaluateHold([issue({ labels: [{ name: regressionLabel }] })]).held,
+    false,
+  );
 });
 
 test("a closed issue releases the hold", () => {
@@ -61,6 +64,10 @@ test("removing the label releases the hold", () => {
     evaluateHold([issue({ labels: [{ name: "bug" }] })]).held,
     false,
   );
+  assert.equal(
+    evaluateHold([issue({ labels: [{ name: revertCandidateLabel }] })]).held,
+    false,
+  );
 });
 
 test("a pull request can never hold merges", () => {
@@ -70,7 +77,11 @@ test("a pull request can never hold merges", () => {
 });
 
 test("plain string labels are understood too", () => {
-  assert.equal(evaluateHold([issue({ labels: [regressionLabel] })]).held, true);
+  assert.equal(
+    evaluateHold([issue({ labels: [regressionLabel, revertCandidateLabel] })])
+      .held,
+    true,
+  );
 });
 
 test("a malformed query result fails closed", () => {
@@ -90,6 +101,12 @@ test("junk entries are discarded without breaking the decision", () => {
 test("an entry without a usable number cannot hold merges", () => {
   assert.equal(evaluateHold([issue({ number: undefined })]).held, false);
   assert.equal(evaluateHold([issue({ number: "abc" })]).held, false);
+  assert.equal(evaluateHold([issue({ number: 0 })]).held, false);
+  assert.equal(evaluateHold([issue({ number: -1 })]).held, false);
+  assert.equal(
+    evaluateHold([issue({ number: Number.MAX_SAFE_INTEGER + 1 })]).held,
+    false,
+  );
 });
 
 test("multiple holds are listed in issue order", () => {
@@ -113,6 +130,8 @@ test("ci.yml runs the hold as its own reported check", () => {
   assert.ok(workflow.includes("Post-merge performance hold"));
   assert.ok(workflow.includes("scripts/ci/regression-hold.mjs"));
   assert.ok(workflow.includes(`--label "${regressionLabel}"`));
+  assert.ok(workflow.includes(`--label "${revertCandidateLabel}"`));
+  assert.ok(workflow.includes("--limit 1000"));
   // Must not depend on the relevance classifier: a hold that a path filter can
   // skip is not a hold.
   const job = workflow.slice(workflow.indexOf("  perf-regression-hold:"));

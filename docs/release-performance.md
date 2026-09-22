@@ -82,8 +82,9 @@ by a re-run.
 
 That discipline is enforced rather than merely documented. A failing
 post-merge gate files a labelled, deduplicated issue, and an open issue with
-that label turns the `Post-merge performance hold` check red on subsequent
-pull requests. See [ci-post-merge-safety-net.md](ci-post-merge-safety-net.md).
+both the `ci:perf-regression` and `revert-candidate` labels turns the
+`Post-merge performance hold` check red on subsequent pull requests. See
+[ci-post-merge-safety-net.md](ci-post-merge-safety-net.md).
 
 Both measured binaries are cached on a fingerprint of the inputs that can
 change them, not on a commit sha. The fingerprint covers `src`, `src-tauri`,
