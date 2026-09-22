@@ -73,16 +73,16 @@ key per platform would let whichever variant finished first publish a target
 directory the other cannot use, converting its next restore into a full
 dependency rebuild.
 
-On an exact hit that cache also makes the crates.io index refresh redundant:
-the registry was saved by a build of the same lockfile on the same platform,
-so the refresh can only return what is already on disk. Run 35718372051 timed
-it at 31.4 s on the Windows WebView leg, which is the workflow's longest
-chain, and 4.0 s on Linux, so the measured builds now run with
-`CARGO_NET_OFFLINE` set for that case. Only the action's exact-match output
-enables it: a partial restore may predate the lockfile and still goes online,
-and a lockfile change misses the key outright. A build needs only host-target
-crates, which is what the restored registry holds; resolving every platform's
-dependencies offline would fail, but no build does that.
+Those builds still refresh the crates.io index, measured at 31.4 s on the
+Windows WebView leg and 4.0 s on Linux in run 35718372051. Skipping it with
+`CARGO_NET_OFFLINE` on an exact dependency-cache hit looks safe and is not:
+run 35720574481 failed the Linux baseline build with `no matching package
+named aho-corasick found`. The dependency cache prunes the registry index
+before saving, keeping the `.crate` files but not the index metadata that
+cargo needs to rebuild its resolve graph, so an offline build cannot resolve
+even though every crate it would download is already present. A developer
+machine keeps a complete index and so cannot reproduce this; only the pruned
+CI registry shows it. The refresh stays.
 
 Baseline and candidate measurements run as parallel matrix jobs and a separate
 gate job compares the two reports, so the previous strictly sequential

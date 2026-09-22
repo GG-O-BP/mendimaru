@@ -186,7 +186,6 @@ jobs:
 
       - name: Cache the Rust release build
         if: steps.relevance.outputs.relevant == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
-        id: rust-cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
@@ -209,13 +208,6 @@ jobs:
         if: steps.relevance.outputs.relevant == 'true' && steps.binary-cache.outputs.cache-hit != 'true'
         working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
         shell: bash
-        env:
-          # An exact dependency-cache hit means the restored registry already
-          # satisfies this Cargo.lock, so refreshing the index can only return
-          # what is already on disk. Skipping it removes a measured 31 s from
-          # the Windows critical path. Only an exact hit qualifies: a partial
-          # restore may predate the lockfile, so that path stays online.
-          CARGO_NET_OFFLINE: ${{ steps.rust-cache.outputs.cache-hit == 'true' }}
         run: npm run tauri -- ${{ matrix.build-recipe }}
 
       - name: Stage the binary for caching and artifact upload
@@ -664,7 +656,6 @@ jobs:
 
       - name: Cache the Rust bundle build
         if: steps.relevance.outputs.relevant == 'true' && steps.installer-cache.outputs.cache-hit != 'true'
-        id: rust-cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ${{ matrix.variant == 'baseline' && 'baseline-source/src-tauri' || 'src-tauri' }}
@@ -682,8 +673,6 @@ jobs:
         if: steps.relevance.outputs.relevant == 'true' && steps.installer-cache.outputs.cache-hit != 'true'
         working-directory: ${{ matrix.variant == 'baseline' && 'baseline-source' || '.' }}
         shell: bash
-        env:
-          CARGO_NET_OFFLINE: ${{ steps.rust-cache.outputs.cache-hit == 'true' }}
         run: npm run tauri -- ${{ env.BUNDLE_BUILD_RECIPE }}
 
       - name: Stage the built installers
