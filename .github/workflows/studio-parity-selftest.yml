@@ -1,0 +1,38 @@
+name: Studio F5 parity gate self-test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runner-environment:
+    name: Verify winboat-studio runner prerequisites
+    runs-on: [self-hosted, linux, winboat-studio]
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+
+      - name: Verify toolchain, Docker, and the parity suite
+        env:
+          STUDIO_F5_PARITY_SUITE: ${{ vars.STUDIO_F5_PARITY_SUITE }}
+        run: |
+          test -x /usr/bin/cargo
+          cargo --version
+          docker ps --format '{{.Names}}'
+          test -n "$STUDIO_F5_PARITY_SUITE"
+          test -f "$STUDIO_F5_PARITY_SUITE"
+          SUITE="$STUDIO_F5_PARITY_SUITE" node --input-type=module -e '
+            import { readFile } from "node:fs/promises";
+            import { validateSuiteShape } from "./scripts/e2e/studio-f5-parity-gate.mjs";
+            const suite = JSON.parse(await readFile(process.env.SUITE, "utf8"));
+            validateSuiteShape(suite, process.env.SUITE);
+            console.log("parity suite validation: OK");
+          '
