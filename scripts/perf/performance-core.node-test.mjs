@@ -25,6 +25,20 @@ const policy = validatePerformancePolicy(
     await readFile(new URL("../../performance/budgets.json", import.meta.url)),
   ),
 );
+const idlePolicy = validatePerformancePolicy(
+  JSON.parse(
+    await readFile(
+      new URL("../../performance/budgets.idle.json", import.meta.url),
+    ),
+  ),
+);
+const latencyPolicy = validatePerformancePolicy(
+  JSON.parse(
+    await readFile(
+      new URL("../../performance/budgets.latency.json", import.meta.url),
+    ),
+  ),
+);
 const baselineCommit = "1".repeat(40);
 const candidateCommit = "2".repeat(40);
 
@@ -297,6 +311,109 @@ test("a metric-specific noise floor overrides its suite unit floor", () => {
   assert.equal(comparison.relativeLimit, 130);
 });
 
+// #181: the Linux idle CPU-percentage relative gate failed on commits whose
+// product source was byte-identical. Twelve product-unchanged runs moved the
+// candidate-versus-baseline p95 by up to 3.41 percentage points, which the
+// shared 1-point floor read as a 60-113 percent regression.
+test("the Linux idle CPU floor absorbs the measured cross-VM runner spread", () => {
+  // Run 35734525535, the failure quoted in #181: 2.297 -> 3.697 percent.
+  const baseline = makeIdleReport({
+    commit: baselineCommit,
+    cpuPercent: 2.297,
+  });
+  const candidate = makeIdleReport({
+    commit: candidateCommit,
+    cpuPercent: 3.697,
+  });
+  const gate = evaluatePerformance(candidate, baseline, idlePolicy);
+
+  assert.equal(gate.status, "passed");
+  for (const metric of ["idleCpuPercent", "backgroundPollingCpuPercent"]) {
+    const comparison = gate.comparisons.find((item) => item.metric === metric);
+    assert.equal(comparison.relativeNoiseFloor, 2);
+    // 2.297 + max(2.297 * 20%, 2) = 4.297, above the observed 3.697.
+    assert.equal(comparison.relativeLimit, 4.297);
+    assert.equal(comparison.passed, true);
+  }
+});
+
+test("the Linux idle CPU floor fails one step past its boundary", () => {
+  const baseline = makeIdleReport({ commit: baselineCommit, cpuPercent: 2 });
+  // 2 + max(0.4, 2) = 4 exactly.
+  const atLimit = makeIdleReport({ commit: candidateCommit, cpuPercent: 4 });
+  assert.equal(
+    evaluatePerformance(atLimit, baseline, idlePolicy).status,
+    "passed",
+  );
+
+  const pastLimit = makeIdleReport({
+    commit: candidateCommit,
+    cpuPercent: 4.001,
+  });
+  const gate = evaluatePerformance(pastLimit, baseline, idlePolicy);
+  assert.equal(gate.status, "failed");
+  assert(
+    gate.violations.every(
+      (violation) =>
+        violation.kind === "relative" &&
+        violation.limit === 4 &&
+        violation.actual === 4.001,
+    ),
+  );
+});
+
+// The floor must not become a way to smuggle a real regression past the gate.
+test("the 8 percent absolute idle rail still fires above the relative floor", () => {
+  // 7 + max(1.4, 2) = 9, so the relative gate is satisfied and only the
+  // absolute rail can reject this candidate.
+  const baseline = makeIdleReport({ commit: baselineCommit, cpuPercent: 7 });
+  const candidate = makeIdleReport({
+    commit: candidateCommit,
+    cpuPercent: 8.5,
+  });
+  const gate = evaluatePerformance(candidate, baseline, idlePolicy);
+
+  assert.equal(gate.status, "failed");
+  const cpuViolations = gate.violations.filter((violation) =>
+    violation.metric.endsWith("CpuPercent"),
+  );
+  assert.equal(cpuViolations.length, 2);
+  assert(
+    cpuViolations.every(
+      (violation) => violation.kind === "absolute" && violation.limit === 8,
+    ),
+  );
+});
+
+// Thirteen Windows runs moved by at most 0.315 percentage points, so the
+// Windows floors stay where they are.
+test("Windows idle keeps the shared one point floor", () => {
+  const metrics =
+    idlePolicy.platforms.windows.suites["release-webview"].metrics;
+  for (const metric of ["idleCpuPercent", "backgroundPollingCpuPercent"]) {
+    assert.equal(metrics[metric].relativeNoiseFloor, undefined);
+  }
+
+  const baseline = makeIdleReport({
+    commit: baselineCommit,
+    cpuPercent: 2.3,
+    platform: "windows",
+  });
+  const candidate = makeIdleReport({
+    commit: candidateCommit,
+    cpuPercent: 3.7,
+    platform: "windows",
+  });
+  const gate = evaluatePerformance(candidate, baseline, idlePolicy);
+
+  assert.equal(gate.status, "failed");
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === "idleCpuPercent",
+  );
+  assert.equal(comparison.relativeNoiseFloor, 1);
+  assert.equal(comparison.relativeLimit, 3.3);
+});
+
 test("child, memory, and sustained CPU leak fixtures fail their budgets", () => {
   const baseline = makeReport({
     commit: baselineCommit,
@@ -406,6 +523,85 @@ function defaultMetricValue(name, sampleValue) {
     : sampleValue;
 }
 
+// Only the CPU-percentage metrics vary in the idle fixtures below; every other
+// metric is pinned well inside its budget so a failing gate is unambiguous.
+function idleMetricDefault(name, cpuPercent) {
+  if (metricUnit(name) === "percent") return cpuPercent;
+  if (name === "processCount") return 5;
+  return defaultMetricValue(name, 100);
+}
+
+// Release-webview idle reports, which is where the CPU-percentage relative
+// gate produced the #181 false positives. Unlike the latency phase, the idle
+// phase measures one variant per job, so a baseline and a candidate report
+// come from two different runner VMs.
+function makeIdleReport({
+  commit,
+  cpuPercent,
+  platform = "linux",
+  metricValues = {},
+}) {
+  // A release-webview report always carries the full metric set; each phase's
+  // budget file only gates the subset it measured.
+  const metricNames = [
+    ...new Set([
+      ...Object.keys(
+        latencyPolicy.platforms[platform].suites["release-webview"].metrics,
+      ),
+      ...Object.keys(
+        idlePolicy.platforms[platform].suites["release-webview"].metrics,
+      ),
+    ]),
+  ];
+  const isLinux = platform === "linux";
+  return createPerformanceReport({
+    benchmark: {
+      suite: "release-webview",
+      platform,
+      buildProfile: "release",
+      packageKind: isLinux ? "appimage" : "release-executable",
+      commit,
+      baselineCommit,
+      startedAt: "2026-09-22T00:00:00.000Z",
+      finishedAt: "2026-09-22T00:05:00.000Z",
+      runId: "unit-test-idle",
+    },
+    host: {
+      os: platform,
+      osVersion: isLinux ? "Linux test" : "Windows 11 test",
+      arch: "x64",
+      runnerImage: isLinux ? "ubuntu24-test" : "windows-test",
+      cpuModel: "test CPU",
+      logicalCores: 4,
+      memoryBytes: 16 * 1024 ** 3,
+      memoryClassBytes: 16 * 1024 ** 3,
+      webviewVersion: isLinux ? "2.52.6" : "151.0.0.0",
+    },
+    fixture: {
+      workspaceTiers: {
+        small: { projectCount: 1, totalBytes: 1103 },
+        large: { projectCount: 250, totalBytes: 65555750 },
+      },
+      catalogModes: ["cached", "isolated-refresh"],
+      environmentModes: ["normal", "slow", "timeout-recovery"],
+    },
+    sampling: samplingPolicy({ idleWindowSeconds: 300, idleSampleSeconds: 5 }),
+    metricSamples: Object.fromEntries(
+      metricNames.map((name) => [
+        name,
+        {
+          unit: metricUnit(name),
+          samples: Array(metricSampleCount(name)).fill(
+            metricValues[name] ?? idleMetricDefault(name, cpuPercent),
+          ),
+        },
+      ]),
+    ),
+    resources: resourceSummary(snapshot(), snapshot(), snapshot()),
+    assertions: ["unit fixture"],
+  });
+}
+
 function growthResources(delta) {
   const before = snapshot();
   const after = snapshot({
@@ -424,6 +620,10 @@ function metricSampleCount(name) {
     name === "uninstallMs"
   ) {
     return 1;
+  }
+  // Mirrors expectedSampleCount: the polling metric is capped at 12 samples.
+  if (name === "backgroundPollingCpuPercent") {
+    return 12;
   }
   if (
     [
