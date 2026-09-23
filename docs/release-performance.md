@@ -296,6 +296,28 @@ exists to expose; the largest value ever measured on it is 143 ms.
 at most 1.6 ms across the same thirty-two sets - and so is Windows, where no
 such failure has been observed.
 
+`catalogRefreshMs` uses metric-specific additive floors for a fourth reason:
+the browser-refresh noise is measured in milliseconds, but a percentage-only
+allowance shrinks whenever the baseline happens to be low. Seventeen
+product-unchanged comparisons put Linux p50 between 706 and 1331 ms and the
+same-run absolute p50 delta between 29 and 362 ms. The one failure was a
+226 ms delta against a low 944 ms baseline, where 20 percent allowed only
+189 ms. Linux therefore uses a reviewed 400 ms floor. This is paired with a
+quality increase rather than a rail relaxation: the Linux absolute p50 ceiling
+is tightened from 15000 to 4000 ms, three times the largest observed p50.
+
+Windows has a different failure mode. Across the same seventeen comparisons,
+all 102 samples split into a fast 1410-4919 ms mode and a slow 6492-21997 ms
+mode. The baseline runs first on the shared hosted runner and its first sample
+was slow in all seventeen runs, while only two of fifty-one candidate samples
+were slow. With three samples nearest-rank p95 is the maximum, so the relative
+gate is comparing which side paid the one-time browser/fixture bootstrap rather
+than product latency. A reviewed 4500 ms floor covers the observed same-code
+mode mismatch; the 20000 ms absolute p95 rail is unchanged. This is an
+explicitly bounded workaround, not evidence that the slow mode is acceptable:
+the measurement should eventually prime that exact refresh path before
+sampling, after which the Windows floor can be recalibrated downward.
+
 `environmentSlowMs` shows a superficially similar relative false positive and
 is deliberately _not_ given a `relativeStatistic`, because the data shows the
 remedy does not work there. Its maximum falls on the **first** sample in

@@ -427,6 +427,14 @@ const latencyRecovery = "environmentTimeoutRecoveryMs";
 // a single sample of the most expensive route.
 const latencyNavigation = "navigationMs";
 const latencySlow = "environmentSlowMs";
+// #205: catalogRefreshMs has a fourth, platform-specific pathology. Linux p50
+// has additive run-to-run jitter, so a percentage-only allowance shrinks below
+// the observed same-code delta whenever the baseline happens to be low.
+// Windows is bimodal: the baseline always runs first and its first refresh pays
+// a one-time browser/fixture bootstrap, while candidate samples usually inherit
+// that state warm. At n=3 nearest-rank p95 is the maximum, so the relative gate
+// compares which bootstrap mode each side happened to sample.
+const latencyCatalogRefresh = "catalogRefreshMs";
 // #202: the same mechanism again, for a third pathology. largeWorkspaceScanMs
 // repeats one workload three times, so neither the recovery blip nor the
 // navigation route argument applies - the maximum lands at index 0, 1, or 2 in
@@ -831,6 +839,232 @@ test("the small-scan gate keeps a single statistic", () => {
   const metrics =
     latencyPolicy.platforms.linux.suites["release-webview"].metrics;
   assert.equal(metrics.smallWorkspaceScanMs.relativeStatistic, undefined);
+});
+
+// Run 35811338284, pull request #199: documentation, npm test discovery, and CI
+// tests only. No product source changed, so the 226.112 ms p50 delta is a direct
+// observation of the additive Linux measurement noise rather than a regression.
+test("the Linux catalog-refresh floor passes the run 35811338284 false positive", () => {
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: {
+      [latencyCatalogRefresh]: [1328.98, 943.696, 745.079],
+    },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: {
+      [latencyCatalogRefresh]: [926.142, 1186.889, 1169.808],
+    },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "passed");
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === latencyCatalogRefresh,
+  );
+  assert.equal(comparison.statistic, "p50");
+  assert.equal(comparison.actual, 1169.808);
+  assert.equal(comparison.absoluteLimit, 4000);
+  assert.equal(comparison.relativeNoiseFloor, 400);
+  assert.equal(comparison.relativeBaseline, 943.696);
+  assert.equal(comparison.relativeLimit, 1343.696);
+});
+
+test("the same Linux catalog-refresh run fails without its metric floor", () => {
+  const testPolicy = structuredClone(latencyPolicy);
+  delete testPolicy.platforms.linux.suites["release-webview"].metrics[
+    latencyCatalogRefresh
+  ].relativeNoiseFloor;
+
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: {
+      [latencyCatalogRefresh]: [1328.98, 943.696, 745.079],
+    },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: {
+      [latencyCatalogRefresh]: [926.142, 1186.889, 1169.808],
+    },
+  });
+  const gate = evaluatePerformance(candidate, baseline, testPolicy);
+
+  assert.equal(gate.status, "failed");
+  assert.deepEqual(
+    gate.violations.map(({ metric, kind, statistic }) => ({
+      metric,
+      kind,
+      statistic,
+    })),
+    [{ metric: latencyCatalogRefresh, kind: "relative", statistic: "p50" }],
+  );
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === latencyCatalogRefresh,
+  );
+  assert.equal(comparison.relativeNoiseFloor, 50);
+  assert.equal(comparison.relativeLimit, 1132.435);
+});
+
+test("a sustained Linux catalog-refresh regression still fails above the floor", () => {
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: {
+      [latencyCatalogRefresh]: [1328.98, 943.696, 745.079],
+    },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyCatalogRefresh]: [1500, 1550, 1600] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "failed");
+  assert.deepEqual(
+    gate.violations.map(({ metric, kind, statistic }) => ({
+      metric,
+      kind,
+      statistic,
+    })),
+    [{ metric: latencyCatalogRefresh, kind: "relative", statistic: "p50" }],
+  );
+});
+
+test("the tightened Linux catalog-refresh rail still rejects an absolute breach", () => {
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: { [latencyCatalogRefresh]: [3990, 3995, 3999] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyCatalogRefresh]: [4001, 4002, 4003] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "failed");
+  assert.deepEqual(
+    gate.violations.map(({ metric, kind, statistic, actual, limit }) => ({
+      metric,
+      kind,
+      statistic,
+      actual,
+      limit,
+    })),
+    [
+      {
+        metric: latencyCatalogRefresh,
+        kind: "absolute",
+        statistic: "p50",
+        actual: 4002,
+        limit: 4000,
+      },
+    ],
+  );
+});
+
+test("the Windows catalog-refresh floor passes the run 35811338284 bootstrap mismatch", () => {
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    platform: "windows",
+    sampleLists: {
+      [latencyCatalogRefresh]: [6793.732, 1679.591, 1849.864],
+    },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    platform: "windows",
+    sampleLists: {
+      [latencyCatalogRefresh]: [1644.067, 1719.628, 10669.546],
+    },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "passed");
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === latencyCatalogRefresh,
+  );
+  assert.equal(comparison.statistic, "p95");
+  assert.equal(comparison.actual, 10669.546);
+  assert.equal(comparison.absoluteLimit, 20000);
+  assert.equal(comparison.relativeNoiseFloor, 4500);
+  assert.equal(comparison.relativeBaseline, 6793.732);
+  assert.equal(comparison.relativeLimit, 11293.732);
+});
+
+test("the same Windows catalog-refresh run fails without its metric floor", () => {
+  const testPolicy = structuredClone(latencyPolicy);
+  delete testPolicy.platforms.windows.suites["release-webview"].metrics[
+    latencyCatalogRefresh
+  ].relativeNoiseFloor;
+
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    platform: "windows",
+    sampleLists: {
+      [latencyCatalogRefresh]: [6793.732, 1679.591, 1849.864],
+    },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    platform: "windows",
+    sampleLists: {
+      [latencyCatalogRefresh]: [1644.067, 1719.628, 10669.546],
+    },
+  });
+  const gate = evaluatePerformance(candidate, baseline, testPolicy);
+
+  assert.equal(gate.status, "failed");
+  assert.deepEqual(
+    gate.violations.map(({ metric, kind, statistic }) => ({
+      metric,
+      kind,
+      statistic,
+    })),
+    [{ metric: latencyCatalogRefresh, kind: "relative", statistic: "p95" }],
+  );
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === latencyCatalogRefresh,
+  );
+  assert.equal(comparison.relativeNoiseFloor, 75);
+  assert.equal(comparison.relativeLimit, 8152.478);
+});
+
+test("a sustained Windows catalog-refresh regression still fails above the floor", () => {
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    platform: "windows",
+    sampleLists: { [latencyCatalogRefresh]: [1700, 1750, 1800] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    platform: "windows",
+    sampleLists: { [latencyCatalogRefresh]: [6500, 6600, 6700] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "failed");
+  assert.deepEqual(
+    gate.violations.map(({ metric, kind, statistic }) => ({
+      metric,
+      kind,
+      statistic,
+    })),
+    [{ metric: latencyCatalogRefresh, kind: "relative", statistic: "p95" }],
+  );
+});
+
+// The policy change is metric- and platform-specific. Cached reads keep their
+// existing Linux floor, Windows cached reads keep the suite floor, and the
+// Windows catalog absolute rail is not relaxed.
+test("catalog noise floors do not spill into cached reads or weaken the Windows rail", () => {
+  const linux = latencyPolicy.platforms.linux.suites["release-webview"].metrics;
+  const windows =
+    latencyPolicy.platforms.windows.suites["release-webview"].metrics;
+
+  assert.equal(linux.catalogCachedMs.relativeNoiseFloor, 75);
+  assert.equal(windows.catalogCachedMs.relativeNoiseFloor, undefined);
+  assert.equal(windows[latencyCatalogRefresh].absoluteMax, 20000);
 });
 
 test("child, memory, and sustained CPU leak fixtures fail their budgets", () => {
