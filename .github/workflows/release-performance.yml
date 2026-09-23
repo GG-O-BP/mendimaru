@@ -466,6 +466,21 @@ jobs:
             }
           }
 
+      # Issue #191. A measurement job that dies inside the WebDriver harness is
+      # not a budget verdict, but at check level it looked exactly like one.
+      # The harness writes a classified failure report; this step lifts the
+      # classification, the failing stage and the failing WebDriver command
+      # into an annotation and the job summary so a runner-side stall can be
+      # told apart from a measured regression without downloading artifacts.
+      # It is diagnostic only: it never retries and never changes the outcome,
+      # so `preserve-original-failure` is untouched and the job stays red.
+      - name: Classify the measurement failure
+        if: failure() && steps.phase.outputs.run == 'true'
+        shell: bash
+        run: |
+          node scripts/perf/measurement-failure.mjs \
+            artifacts/e2e/release-performance
+
       - name: Record skipped measurement
         if: steps.phase.outputs.run != 'true'
         shell: bash

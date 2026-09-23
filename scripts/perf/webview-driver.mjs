@@ -17,6 +17,28 @@ import {
 const ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
 const REQUEST_TIMEOUT_MS = 30_000;
 
+// Issue #191. WebKitWebDriver and the in-app Windows WebDriver bridge both
+// open a session with an *undeclared* script deadline that happens to be
+// 30000 ms, which is why a stalled `execute/async` surfaced as an unexplained
+// "script timed out after 30000ms" that matched no value in this repository.
+// The harness now declares the deadline itself. The number is deliberately the
+// same as the inherited one - this is a pinning change, not a relaxation - but
+// it is now identical on both platforms, recorded in the report sampling
+// policy, and the single value every script HTTP deadline is checked against.
+export const SCRIPT_TIMEOUT_MS = 30_000;
+
+// An `execute/async` HTTP deadline must stay strictly above the declared
+// script deadline so the *server* is the component that ends a stalled script.
+// A shorter HTTP deadline only aborts the local fetch: WebDriver has no
+// command-cancel, so the script keeps running as an orphan and the next
+// WebDriver command silently queues behind it until the script deadline
+// expires. That is the mechanism behind the intermittent 30 s stall.
+const SCRIPT_REQUEST_MARGIN_MS = 5_000;
+
+export function scriptRequestTimeoutMs(scriptTimeoutMs = SCRIPT_TIMEOUT_MS) {
+  return scriptTimeoutMs + SCRIPT_REQUEST_MARGIN_MS;
+}
+
 export async function createWebviewDriver({ application, env, root }) {
   if (process.platform === "linux") {
     return LinuxWebviewDriver.create({ application, env, root });
@@ -256,28 +278,98 @@ export class WebDriverClient {
   constructor(baseUrl) {
     this.baseUrl = baseUrl;
     this.sessionId = undefined;
+    // Declared script deadline for this session, or undefined while the
+    // session has not declared one. Every script request deadline is checked
+    // against it so the orphan configuration cannot be reintroduced silently.
+    this.scriptTimeoutMs = undefined;
+    // Last WebDriver command this client started. Retained even after it
+    // fails so a harness failure can name the exact stalled endpoint.
+    this.lastCommand = undefined;
   }
 
   async request(method, endpoint, body, timeoutMs = REQUEST_TIMEOUT_MS) {
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+    const started = performance.now();
+    const command = {
       method,
-      headers:
-        body === undefined ? undefined : { "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    const text = await response.text();
-    const envelope = text ? JSON.parse(text) : {};
+      endpoint,
+      requestTimeoutMs: timeoutMs,
+      scriptTimeoutMs: this.scriptTimeoutMs,
+      startedAt: new Date().toISOString(),
+      outcome: "pending",
+      elapsedMs: undefined,
+    };
+    this.lastCommand = command;
+    let response;
+    let text;
+    try {
+      response = await fetch(`${this.baseUrl}${endpoint}`, {
+        method,
+        headers:
+          body === undefined
+            ? undefined
+            : { "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      text = await response.text();
+    } catch (error) {
+      command.elapsedMs = rounded(performance.now() - started);
+      command.outcome =
+        error?.name === "TimeoutError" ? "request-deadline" : "transport-error";
+      throw annotateWebDriverFailure(error, command);
+    }
+    command.elapsedMs = rounded(performance.now() - started);
+    const envelope = parseWebDriverEnvelope(text, command);
     const webdriverError =
       envelope.value?.error &&
       envelope.value?.ok === undefined &&
       typeof envelope.value?.message === "string";
     if (!response.ok || webdriverError) {
-      throw new Error(
-        `WebDriver ${method} ${endpoint} failed (${response.status}): ${text}`,
+      const code =
+        typeof envelope.value?.error === "string"
+          ? envelope.value.error
+          : undefined;
+      command.outcome = "webdriver-error";
+      command.webdriverError = code ?? `http-${response.status}`;
+      const failure = new Error(
+        `WebDriver ${method} ${endpoint} failed (${response.status}) after ${command.elapsedMs} ms: ${text}`,
       );
+      // A server-side script deadline is a distinct, expected outcome: the
+      // deliberate timeout probe relies on it and the diagnosis in #191
+      // depends on telling it apart from a client abort.
+      failure.name =
+        code === "script timeout" ? "ScriptTimeoutError" : "WebDriverError";
+      throw annotateWebDriverFailure(failure, command);
     }
+    command.outcome = "ok";
     return Object.hasOwn(envelope, "value") ? envelope.value : envelope;
+  }
+
+  // Declares the session script deadline through the W3C timeouts endpoint.
+  // Returns false, without throwing, when a WebDriver implementation does not
+  // support the endpoint; callers then keep the inherited behaviour rather
+  // than failing a measurement for a diagnostic-only capability.
+  async declareScriptTimeout(milliseconds = SCRIPT_TIMEOUT_MS) {
+    assert.ok(
+      Number.isInteger(milliseconds) && milliseconds > 0,
+      "the declared script timeout must be a positive integer",
+    );
+    assert.ok(this.sessionId, "no WebDriver session is open");
+    try {
+      await this.request("POST", `/session/${this.sessionId}/timeouts`, {
+        script: milliseconds,
+      });
+    } catch (error) {
+      this.scriptTimeoutMs = undefined;
+      process.stdout.write(
+        `release WebDriver script timeout could not be declared (${
+          error instanceof Error ? error.message : String(error)
+        }); the inherited server default stays in effect\n`,
+      );
+      return false;
+    }
+    this.scriptTimeoutMs = milliseconds;
+    return true;
   }
 
   async createLinuxSession(application) {
@@ -296,6 +388,7 @@ export class WebDriverClient {
     );
     this.sessionId = created.sessionId;
     assert.ok(this.sessionId, "tauri-driver did not return a session");
+    await this.declareScriptTimeout();
   }
 
   async createWindowsSession() {
@@ -309,22 +402,55 @@ export class WebDriverClient {
     });
     this.sessionId = created.sessionId;
     assert.ok(this.sessionId, "WebDriver did not return a session");
+    await this.declareScriptTimeout();
   }
 
   async deleteSession() {
     if (!this.sessionId) return;
     await this.request("DELETE", `/session/${this.sessionId}`);
     this.sessionId = undefined;
+    this.scriptTimeoutMs = undefined;
   }
 
-  executeSync(script, args = []) {
-    return this.request("POST", `/session/${this.sessionId}/execute/sync`, {
-      script,
-      args,
-    });
+  // Guards the orphan configuration described above. Without this a caller can
+  // reintroduce #191 by passing a short HTTP deadline, and the symptom would
+  // then appear one command later, inside unrelated code.
+  assertScriptRequestDeadline(timeoutMs) {
+    if (this.scriptTimeoutMs === undefined) return;
+    if (timeoutMs <= this.scriptTimeoutMs) {
+      throw new Error(
+        `the ${timeoutMs} ms script request deadline must exceed the declared ${this.scriptTimeoutMs} ms script timeout; a shorter request deadline abandons the script as an orphan that blocks the next WebDriver command`,
+      );
+    }
+    // The opposite mismatch is just as dangerous and is what actually broke
+    // the first revision of this change. A caller that passes a deadline
+    // derived from some *other* script timeout believes a deadline is in
+    // force that the server is not enforcing: the server ends the script at
+    // its own, much shorter, declared value and the caller reports an
+    // unexplained script timeout. Requiring the HTTP deadline to be derived
+    // from the currently declared script deadline turns that from an
+    // intermittent, sample-dependent failure into a deterministic one at the
+    // first offending command.
+    const expected = scriptRequestTimeoutMs(this.scriptTimeoutMs);
+    if (timeoutMs !== expected) {
+      throw new Error(
+        `the ${timeoutMs} ms script request deadline does not match the declared ${this.scriptTimeoutMs} ms script timeout; script requests must use scriptRequestTimeoutMs(${this.scriptTimeoutMs}) === ${expected} ms so the server deadline the caller relies on is the one actually in force`,
+      );
+    }
   }
 
-  executeAsync(script, args = [], timeoutMs = 130_000) {
+  executeSync(script, args = [], timeoutMs = scriptRequestTimeoutMs()) {
+    this.assertScriptRequestDeadline(timeoutMs);
+    return this.request(
+      "POST",
+      `/session/${this.sessionId}/execute/sync`,
+      { script, args },
+      timeoutMs,
+    );
+  }
+
+  executeAsync(script, args = [], timeoutMs = scriptRequestTimeoutMs()) {
+    this.assertScriptRequestDeadline(timeoutMs);
     return this.request(
       "POST",
       `/session/${this.sessionId}/execute/async`,
@@ -333,7 +459,11 @@ export class WebDriverClient {
     );
   }
 
-  async invokeResult(command, payload = {}, timeoutMs = 130_000) {
+  async invokeResult(
+    command,
+    payload = {},
+    timeoutMs = scriptRequestTimeoutMs(),
+  ) {
     return this.executeAsync(
       `
         const done = arguments[arguments.length - 1];
@@ -350,7 +480,7 @@ export class WebDriverClient {
     );
   }
 
-  async invoke(command, payload = {}, timeoutMs = 130_000) {
+  async invoke(command, payload = {}, timeoutMs = scriptRequestTimeoutMs()) {
     const result = await this.invokeResult(command, payload, timeoutMs);
     if (!result.ok) throw new Error(`${command} failed: ${result.error}`);
     return result.value;
@@ -641,9 +771,16 @@ async function waitFor(action, timeoutMs, description) {
     }
     await delay(100);
   }
-  throw new Error(
+  const failure = new Error(
     `timed out waiting for ${description}${lastError ? `: ${lastError.message}` : ""}`,
   );
+  // Keep the underlying WebDriver command visible: a wait that expires because
+  // every poll hit the same stalled endpoint must not lose that endpoint.
+  if (lastError?.webdriverCommand) {
+    failure.webdriverCommand = lastError.webdriverCommand;
+  }
+  failure.cause = lastError;
+  throw failure;
 }
 
 function startProcess(command, args, options) {
@@ -765,4 +902,55 @@ function powershell(script) {
 
 function rounded(value) {
   return Math.round(value * 1000) / 1000;
+}
+
+// Parses a WebDriver response body without losing the command context. An
+// unparseable body used to surface as a bare `SyntaxError` with no indication
+// of which endpoint produced it.
+function parseWebDriverEnvelope(text, command) {
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    command.outcome = "unparseable-response";
+    const failure = new Error(
+      `WebDriver ${command.method} ${command.endpoint} returned an unparseable body after ${command.elapsedMs} ms: ${text.slice(0, 500)}`,
+    );
+    failure.name = "WebDriverError";
+    failure.cause = error;
+    throw annotateWebDriverFailure(failure, command);
+  }
+}
+
+// Attaches the failing command to the error so the harness can name the exact
+// endpoint, deadline and elapsed time from logs and from the failure report,
+// instead of only reporting the stack frame that happened to await it.
+function annotateWebDriverFailure(error, command) {
+  if (error && typeof error === "object") {
+    try {
+      error.webdriverCommand = command;
+    } catch {
+      // Frozen or exotic errors keep their original shape; the stdout line
+      // below still records the command.
+    }
+  }
+  // Only stall-shaped outcomes are logged here. Ordinary WebDriver errors are
+  // expected inside polling loops such as `waitFor`, which retries every
+  // 100 ms, so logging those would bury the signal this issue needs.
+  if (stallShapedOutcomes.has(command.outcome) || isScriptTimeout(error)) {
+    process.stdout.write(
+      `release WebDriver command stalled: ${command.method} ${command.endpoint} outcome=${command.outcome} elapsed=${command.elapsedMs}ms requestDeadline=${command.requestTimeoutMs}ms scriptDeadline=${command.scriptTimeoutMs ?? "inherited"}\n`,
+    );
+  }
+  return error;
+}
+
+const stallShapedOutcomes = new Set(["request-deadline", "transport-error"]);
+
+export function isScriptTimeout(error) {
+  return error?.name === "ScriptTimeoutError";
+}
+
+export function webdriverCommandOf(error) {
+  return error?.webdriverCommand;
 }
