@@ -151,6 +151,94 @@ baseline-then-candidate schedule no longer doubles the wall time. On the
 push-to-`main` and scheduled runs that carry the two 300-second idle windows,
 this parallelism is what keeps the exhaustive run inside its own budget.
 
+## Measured post-merge envelopes
+
+The pull-request target is met. Whether the push-to-`main` target is met is
+decided by **two** caches, not one, and separating them is what makes the
+numbers legible. "Envelope" means first job start to last job completion
+across both the `Release performance` and `CI` workflows; overlapping job
+durations are never summed.
+
+| Commit    | `bundle-installers` | Rust dependency cache | Installer build | Envelope           |
+| --------- | ------------------- | --------------------- | --------------- | ------------------ |
+| `0377ee6` | hit                 | not reached           | 24 s            | 504 s (8.40 min)   |
+| `e89a263` | **miss**            | **hit**               | 324 s           | 798 s (13.30 min)  |
+| `1be34f4` | miss                | miss                  | 660 s           | 1051 s (17.52 min) |
+| `018b5ec` | miss                | miss                  | 859 s           | 1244 s (20.73 min) |
+
+The `e89a263` row is the important one. It is a **full cold installer
+rebuild** - its `bundle-installers` key missed and `Build MSI and NSIS` really
+ran - and it still finished in 13.30 minutes, inside the target. `Build MSI
+and NSIS` took 245 s there against 566 s on `1be34f4`, and 245 s is
+essentially the 250.7 s final-crate-and-link window measured below. So a cold
+installer build is not what breaks the target; a cold _dependency_ cache is.
+
+The critical path on `1be34f4` was strictly serial through `needs:`:
+`Build installers (candidate)` for 660 s, then the four `Measure installed
+bundle` legs, then `Installed Windows bundle performance` for 16 s. The four
+measure legs already run concurrently and all four start within three seconds
+of the build finishing, so giving each leg a per-variant `needs:` would let
+only the two baseline legs move earlier and would shorten the envelope by
+roughly ten seconds. The idle legs finish at t≈980, before the bundle chain
+ends at t≈1051, so they are not on the critical path and shortening the idle
+window would not help. Once the installer build is fast the ordering inverts:
+on `e89a263` the bundle chain ended at t=728 and the last idle leg at t=757,
+so the idle legs become the tail. They are still not worth shortening - that
+would be a coverage reduction - but the critical path is no longer a single
+chain and further installer-build savings return less than they do today.
+
+### Two independent causes put a merge on the slow path
+
+Both were measured on `1be34f4`, and neither is the one-off first-run effect
+it can look like.
+
+**The fingerprint over-triggers on `package.json`.** `package.json` is a
+fingerprint input, so any edit to it invalidates
+`bundle-installers-<fingerprint>`. On `1be34f4` the fingerprint _salt_ was
+byte-identical to the preceding cache-hit run - same `rustc`, same `ImageOS`,
+same native tools, same recipe - and `package.json` was the only differing
+fingerprint input. Its only differing hunk was one line in the `scripts` block
+adding a test file to `test:ci:gates`, which cannot affect a built installer.
+That line cost a 566 s rebuild. The npm test scripts therefore no longer
+enumerate test files: `scripts/ci/node-test-suite.mjs` discovers
+`*.node-test.mjs` per directory. It refuses to run when a directory
+contributes no file, because `node --test` reports zero tests and exits 0 on a
+pattern that matches nothing, which would turn a renamed convention into a
+silently passing suite. A runner-image or toolchain roll would change the salt
+and remains a separate, legitimate cause; it is not what happened here.
+
+**The Actions cache is over its cap and evicts what the next run needs.** The
+ceiling described above is no longer merely approached: the repository held
+11.27 GB across 27 entries against GitHub's 10 GB per-repository cap, so
+entries are evicted least-recently-used. The dependency cache for the
+installer build, `v0-rust-release-performance-windows-bundles-candidate-*`,
+reported `No cache found` at 01:17 and was re-saved, 612 MB, at 01:52 within
+the same hour. With it missing the build compiled all 395 crates instead of
+only the workspace crate and the link step.
+
+The second cause is the one that decides the target. Both the 17.52 and the
+20.73 minute figures were measured while the dependency cache was thrashing. A
+log-gap analysis of the 739 s build in run 35734525535 shows a single
+unparallelisable 250.7 s window for the final crate and the link, with
+bundling adding only 17.2 s for the MSI and 19.5 s for the NSIS installer and
+the remainder spread across many 8-25 s dependency compiles - exactly what a
+dependency-cache hit removes. `e89a263` then measured that directly: with the
+dependency cache restored, the same cold rebuild spent 245 s and the run
+finished in 13.30 minutes.
+
+**The 15-minute target should therefore not be renegotiated.** It is
+reachable on a genuine cold installer rebuild. What is missing is not build
+capacity but cache capacity, and the remaining work is to bring the
+repository's Actions cache back inside its 10 GB cap so the dependency cache
+stops being evicted between consecutive runs.
+
+Sharing one compile between `release-webview-build (windows)` and
+`installed-bundle-build` stays unproven and is not assumed here. They run
+different recipes - `build --no-bundle --features e2e --config
+src-tauri/tauri.e2e.conf.json` against `build --bundles msi,nsis` - so their
+outputs are not interchangeable, and they already run concurrently, so sharing
+alone would not shorten the critical path.
+
 ## Fixtures and measurements
 
 Every full release-WebView run excludes one warm-up launch and records seven
