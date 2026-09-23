@@ -421,6 +421,12 @@ test("Windows idle keeps the shared one point floor", () => {
 // one reproducible blip. It now compares medians while the absolute rail keeps
 // reading p95.
 const latencyRecovery = "environmentTimeoutRecoveryMs";
+// #193: the same dual-statistic mechanism, applied to a different pathology.
+// navigationMs walks a three-route list once each, so sample index selects the
+// route rather than repeating one workload, and nearest-rank p95 at n=3 reads
+// a single sample of the most expensive route.
+const latencyNavigation = "navigationMs";
+const latencySlow = "environmentSlowMs";
 
 test("a budget without relativeStatistic compares on its absolute statistic", () => {
   const baseline = makeLatencyReport({ commit: baselineCommit });
@@ -430,6 +436,7 @@ test("a budget without relativeStatistic compares on its absolute statistic", ()
   assert.equal(gate.status, "passed");
   for (const comparison of gate.comparisons) {
     if (comparison.metric === latencyRecovery) continue;
+    if (comparison.metric === latencyNavigation) continue;
     assert.equal(comparison.relativeStatistic, comparison.statistic);
     assert.equal(comparison.relativeActual, comparison.actual);
     assert.equal(comparison.relativeBaseline, comparison.baseline);
@@ -596,6 +603,134 @@ test("an unsupported relative statistic is rejected", () => {
   assert.throws(
     () => validatePerformancePolicy(testPolicy),
     /relativeStatistic must be equal to one of the allowed values/,
+  );
+});
+
+test("the Linux navigation gate passes the run 35703788546 false positive", () => {
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: { [latencyNavigation]: [116.839, 132.868, 59.273] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyNavigation]: [76.459, 266.632, 67.722] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "passed");
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === latencyNavigation,
+  );
+  // The absolute rail still reads p95 and still sees the 266.632 ms sample.
+  assert.equal(comparison.statistic, "p95");
+  assert.equal(comparison.actual, 266.632);
+  assert.equal(comparison.absoluteLimit, 1500);
+  // The relative comparison reads p50, where the candidate is faster: the
+  // median route went from 116.839 ms to 76.459 ms while a single Settings
+  // sample spiked.
+  assert.equal(comparison.relativeStatistic, "p50");
+  assert.equal(comparison.relativeActual, 76.459);
+  assert.equal(comparison.relativeBaseline, 116.839);
+  assert(comparison.relativeChangePercent < 0);
+});
+
+test("the same navigation run still fails when the relative gate reads p95", () => {
+  const testPolicy = structuredClone(latencyPolicy);
+  delete testPolicy.platforms.linux.suites["release-webview"].metrics[
+    latencyNavigation
+  ].relativeStatistic;
+
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: { [latencyNavigation]: [116.839, 132.868, 59.273] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyNavigation]: [76.459, 266.632, 67.722] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, testPolicy);
+
+  assert.equal(gate.status, "failed");
+  assert.deepEqual(
+    gate.violations.map(({ metric, kind, statistic }) => ({
+      metric,
+      kind,
+      statistic,
+    })),
+    [{ metric: latencyNavigation, kind: "relative", statistic: "p95" }],
+  );
+});
+
+// The coverage that p50 gives up must stay explicit. A regression confined to
+// the most expensive route no longer moves the relative gate, so the 1500 ms
+// rail is the only thing left holding it.
+test("a navigation regression confined to the slowest route reaches only the rail", () => {
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: { [latencyNavigation]: [116.839, 132.868, 59.273] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyNavigation]: [116.9, 1400, 59.3] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "passed");
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === latencyNavigation,
+  );
+  assert.equal(comparison.actual, 1400);
+  assert.equal(comparison.relativeActual, 116.9);
+
+  // Past the rail it does fail, and it fails on the absolute statistic.
+  const overRail = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyNavigation]: [116.9, 1600, 59.3] },
+  });
+  const railed = evaluatePerformance(overRail, baseline, latencyPolicy);
+  assert.equal(railed.status, "failed");
+  assert.deepEqual(
+    railed.violations.map(({ metric, kind, statistic }) => ({
+      metric,
+      kind,
+      statistic,
+    })),
+    [{ metric: latencyNavigation, kind: "absolute", statistic: "p95" }],
+  );
+});
+
+// #193: environmentSlowMs looks like the same bug and is not. Its maximum
+// falls on the *first* sample in thirty of thirty-eight Linux sample sets,
+// which is a missing warm-up rather than a tail artifact, and the data shows
+// that swapping the relative statistic does not fix it. The harness gained a
+// discarded warm-up probe instead; this test pins the budget so the
+// ineffective remedy is not applied later by analogy with navigationMs.
+test("the slow-environment gate keeps a single statistic and is not fixed by p50", () => {
+  const metrics =
+    latencyPolicy.platforms.linux.suites["release-webview"].metrics;
+  assert.equal(metrics[latencySlow].relativeStatistic, undefined);
+
+  // Run 35715515352, the residual failure that the warm-up does not remove.
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: { [latencySlow]: [1151.738, 944.159, 828.244] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencySlow]: [1360.191, 1632.43, 884.534] },
+  });
+  assert.equal(
+    evaluatePerformance(candidate, baseline, latencyPolicy).status,
+    "failed",
+  );
+
+  const p50Policy = structuredClone(latencyPolicy);
+  p50Policy.platforms.linux.suites["release-webview"].metrics[
+    latencySlow
+  ].relativeStatistic = "p50";
+  assert.equal(
+    evaluatePerformance(candidate, baseline, p50Policy).status,
+    "failed",
   );
 });
 
