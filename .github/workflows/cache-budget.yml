@@ -1,0 +1,166 @@
+# Issue #182, cause (2). The post-merge envelope is decided by whether the
+# installer job's Rust dependency cache survives to the next run. It did not:
+# the repository sat over GitHub's 10 GiB cap, so GitHub evicted
+# least-recently-used entries and a 612 MB dependency cache disappeared
+# between two runs 35 minutes apart, turning a 245 s installer rebuild into a
+# 566 s one.
+#
+# GitHub's eviction cannot tell a superseded generation from the entry the next
+# run needs. This job can, so it deletes the dead entries itself and leaves
+# headroom under the cap.
+#
+# Deliberately outside every pull-request and push gate: it must not add a
+# second to the wall clock the #176 split SLA protects, and a prune that raced
+# the run that is measuring would be its own source of noise.
+name: Actions cache budget
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - Release performance
+    types:
+      - completed
+  schedule:
+    - cron: "27 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Plan the deletions without performing them
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Two prunes at once would each plan against a listing the other is changing.
+# Queued rather than cancelled: the later run is the one with the fresher
+# listing, but dropping the earlier one silently is not worth the saved minute.
+concurrency:
+  group: actions-cache-budget
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Prune superseded Actions caches
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Scoped to this job. Everything else in this repository's workflows that
+      # touches caches only reads them.
+      actions: write
+      pull-requests: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+
+      # Fails closed. An unreadable listing must stop the job rather than plan
+      # an empty prune that reads as "nothing to reclaim".
+      - name: Plan the deletions
+        id: plan
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh cache list \
+            --limit 1000 \
+            --json id,key,ref,sizeInBytes,createdAt,lastAccessedAt > caches.json
+          # A pull request's cache scope dies with the pull request. If this
+          # query fails the script is told nothing rather than an empty list,
+          # so "unknown" can never be read as "every pull request is closed".
+          if gh pr list --state open --limit 1000 --json number > open-prs.json; then
+            open_prs=(--open-pull-requests=open-prs.json)
+          else
+            echo "::warning::could not list open pull requests; pruning without dead-scope detection"
+            open_prs=()
+          fi
+          node scripts/ci/cache-budget.mjs \
+            --plan-file=cache-plan.json \
+            "${open_prs[@]}" \
+            < caches.json > /dev/null 2> plan-report.txt
+          cat plan-report.txt
+          {
+            echo '## Actions cache budget'
+            echo '```'
+            cat plan-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete the planned caches
+        if: github.event_name != 'workflow_dispatch' || inputs['dry-run'] != true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          node -e '
+            const plan = JSON.parse(require("fs").readFileSync("cache-plan.json", "utf8"));
+            for (const deletion of plan.deletions) console.log(deletion.id);
+          ' > delete-ids.txt
+          failures=0
+          while read -r id; do
+            [[ -z "$id" ]] && continue
+            # A cache GitHub evicted between the plan and now is already gone,
+            # which is the outcome this job wanted. Any other API failure must
+            # fail the job: a green prune that reclaimed nothing would leave
+            # the next installer run exposed to the same LRU eviction.
+            if output=$(gh api \
+              --include \
+              --silent \
+              --method DELETE \
+              "repos/${GH_REPO}/actions/caches/${id}" 2>&1); then
+              echo "deleted cache $id"
+              continue
+            fi
+            status=$(
+              printf '%s\n' "$output" |
+                awk '/^HTTP\// { code=$2 } END { print code }'
+            )
+            if [[ "$status" == "404" ]]; then
+              echo "cache $id was already absent"
+            else
+              echo "::warning::could not delete cache $id (HTTP ${status:-unknown})"
+              printf '%s\n' "$output"
+              failures=$((failures + 1))
+            fi
+          done < delete-ids.txt
+          echo "resolved $(($(wc -l < delete-ids.txt) - failures)) cache entries, $failures failed"
+          if (( failures > 0 )); then
+            exit 1
+          fi
+
+      # Fails on GitHub's real cap, warns on the headroom target. The ten
+      # `v0-rust-*` dependency families already hold one generation each and
+      # cannot be pruned without giving up a cache hit, so the repository sits
+      # legitimately between the two numbers. Failing on the target would make
+      # this job permanently red and worthless as a signal.
+      - name: Enforce the cap and report the headroom target
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e '
+            const plan = JSON.parse(require("fs").readFileSync("cache-plan.json", "utf8"));
+            if (plan.overCap) {
+              const kind = plan.structurallyOverCap
+                ? "retained default-branch caches alone exceed the GitHub cap"
+                : "caches still exceed the GitHub cap after pruning";
+              console.error(`::error::${kind}: ${plan.remainingBytes} > ${plan.capBytes} bytes. The next run can still lose a dependency cache to eviction.`);
+              process.exit(1);
+            }
+            if (plan.overBudget) {
+              const kind = plan.structurallyOverBudget
+                ? "retained default-branch caches exceed the headroom target"
+                : "recent or retained caches exceed the headroom target";
+              console.log(`::warning::${kind}: ${plan.remainingBytes} > ${plan.budgetBytes} bytes, but within the ${plan.capBytes} byte cap.`);
+            }
+          '

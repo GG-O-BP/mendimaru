@@ -39,6 +39,7 @@ test("an empty directory list is refused", () => {
 // hand-written lists cannot quietly drop or add a suite.
 test("the real suite directories expand to the files the npm scripts listed", () => {
   assert.deepEqual(collectTestFiles(["scripts/ci"], readdirSync), [
+    "scripts/ci/cache-budget.node-test.mjs",
     "scripts/ci/gate-relevance.node-test.mjs",
     "scripts/ci/gate-reports.node-test.mjs",
     "scripts/ci/node-test-suite.node-test.mjs",
