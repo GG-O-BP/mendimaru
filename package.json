@@ -23,7 +23,7 @@
     "test:e2e:windows": "npm run test:e2e:windows:build && node scripts/e2e/windows-native.mjs",
     "test:e2e:windows:build": "cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --features e2e",
     "test:perf": "node --test scripts/perf/performance-core.node-test.mjs scripts/perf/release-relevance.node-test.mjs scripts/perf/build-fingerprint.node-test.mjs",
-    "test:ci:gates": "node --test scripts/ci/gate-relevance.node-test.mjs scripts/ci/regression-issue.node-test.mjs scripts/ci/regression-hold.node-test.mjs",
+    "test:ci:gates": "node --test scripts/ci/gate-relevance.node-test.mjs scripts/ci/gate-reports.node-test.mjs scripts/ci/regression-issue.node-test.mjs scripts/ci/regression-hold.node-test.mjs",
     "test:perf:release:build": "npm run tauri -- build --no-bundle --features e2e --config src-tauri/tauri.e2e.conf.json",
     "test:winboat-smoke": "node scripts/test-winboat-e2e.mjs --smoke",
     "test:winboat-e2e": "node scripts/test-winboat-e2e.mjs --lifecycle",
