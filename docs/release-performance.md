@@ -153,17 +153,25 @@ this parallelism is what keeps the exhaustive run inside its own budget.
 
 ## Measured post-merge envelopes
 
-The pull-request target is met. The push-to-`main` target is not, and which
-side of it a merge lands on is decided by whether the Windows installer build
-is served from cache. "Envelope" means first job start to last job completion
+The pull-request target is met. Whether the push-to-`main` target is met is
+decided by **two** caches, not one, and separating them is what makes the
+numbers legible. "Envelope" means first job start to last job completion
 across both the `Release performance` and `CI` workflows; overlapping job
 durations are never summed.
 
-| Path                                  | Commit    | Envelope           |
-| ------------------------------------- | --------- | ------------------ |
-| Installer cache hit on both variants  | `0377ee6` | 504 s (8.40 min)   |
-| Installer cache miss on the candidate | `1be34f4` | 1051 s (17.52 min) |
-| Installer cache miss, worst observed  | `018b5ec` | 1244 s (20.73 min) |
+| Commit    | `bundle-installers` | Rust dependency cache | Installer build | Envelope           |
+| --------- | ------------------- | --------------------- | --------------- | ------------------ |
+| `0377ee6` | hit                 | not reached           | 24 s            | 504 s (8.40 min)   |
+| `e89a263` | **miss**            | **hit**               | 324 s           | 798 s (13.30 min)  |
+| `1be34f4` | miss                | miss                  | 660 s           | 1051 s (17.52 min) |
+| `018b5ec` | miss                | miss                  | 859 s           | 1244 s (20.73 min) |
+
+The `e89a263` row is the important one. It is a **full cold installer
+rebuild** - its `bundle-installers` key missed and `Build MSI and NSIS` really
+ran - and it still finished in 13.30 minutes, inside the target. `Build MSI
+and NSIS` took 245 s there against 566 s on `1be34f4`, and 245 s is
+essentially the 250.7 s final-crate-and-link window measured below. So a cold
+installer build is not what breaks the target; a cold _dependency_ cache is.
 
 The critical path on `1be34f4` was strictly serial through `needs:`:
 `Build installers (candidate)` for 660 s, then the four `Measure installed
@@ -173,7 +181,11 @@ of the build finishing, so giving each leg a per-variant `needs:` would let
 only the two baseline legs move earlier and would shorten the envelope by
 roughly ten seconds. The idle legs finish at t≈980, before the bundle chain
 ends at t≈1051, so they are not on the critical path and shortening the idle
-window would not help.
+window would not help. Once the installer build is fast the ordering inverts:
+on `e89a263` the bundle chain ended at t=728 and the last idle leg at t=757,
+so the idle legs become the tail. They are still not worth shortening - that
+would be a coverage reduction - but the critical path is no longer a single
+chain and further installer-build savings return less than they do today.
 
 ### Two independent causes put a merge on the slow path
 
@@ -204,16 +216,21 @@ reported `No cache found` at 01:17 and was re-saved, 612 MB, at 01:52 within
 the same hour. With it missing the build compiled all 395 crates instead of
 only the workspace crate and the link step.
 
-The second cause bears directly on the target. Both the 17.52 and the 20.73
-minute figures were measured while the dependency cache was thrashing, so they
-bound a cold build from above rather than establishing an irreducible floor,
-and the 15-minute target should not be renegotiated on them. A log-gap
-analysis of the 739 s build in run 35734525535 shows a single unparallelisable
-250.7 s window for the final crate and the link, with bundling adding only
-17.2 s for the MSI and 19.5 s for the NSIS installer and the remainder spread
-across many 8-25 s dependency compiles. Those dependency compiles are exactly
-what a cache hit removes, so the reachable figure for a genuine product-code
-merge cannot be stated until the cache fits inside its cap.
+The second cause is the one that decides the target. Both the 17.52 and the
+20.73 minute figures were measured while the dependency cache was thrashing. A
+log-gap analysis of the 739 s build in run 35734525535 shows a single
+unparallelisable 250.7 s window for the final crate and the link, with
+bundling adding only 17.2 s for the MSI and 19.5 s for the NSIS installer and
+the remainder spread across many 8-25 s dependency compiles - exactly what a
+dependency-cache hit removes. `e89a263` then measured that directly: with the
+dependency cache restored, the same cold rebuild spent 245 s and the run
+finished in 13.30 minutes.
+
+**The 15-minute target should therefore not be renegotiated.** It is
+reachable on a genuine cold installer rebuild. What is missing is not build
+capacity but cache capacity, and the remaining work is to bring the
+repository's Actions cache back inside its 10 GB cap so the dependency cache
+stops being evicted between consecutive runs.
 
 Sharing one compile between `release-webview-build (windows)` and
 `installed-bundle-build` stays unproven and is not assumed here. They run
