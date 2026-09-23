@@ -427,6 +427,14 @@ const latencyRecovery = "environmentTimeoutRecoveryMs";
 // a single sample of the most expensive route.
 const latencyNavigation = "navigationMs";
 const latencySlow = "environmentSlowMs";
+// #202: the same mechanism again, for a third pathology. largeWorkspaceScanMs
+// repeats one workload three times, so neither the recovery blip nor the
+// navigation route argument applies - the maximum lands at index 0, 1, or 2 in
+// five, sixteen, and eleven of thirty-two Linux sample sets. What it does show
+// is a sporadic single sample at three to four times the median, and at n=3
+// nearest-rank p95 is that sample, so the relative gate subtracted two
+// independent draws of it.
+const latencyLargeScan = "largeWorkspaceScanMs";
 
 test("a budget without relativeStatistic compares on its absolute statistic", () => {
   const baseline = makeLatencyReport({ commit: baselineCommit });
@@ -437,6 +445,7 @@ test("a budget without relativeStatistic compares on its absolute statistic", ()
   for (const comparison of gate.comparisons) {
     if (comparison.metric === latencyRecovery) continue;
     if (comparison.metric === latencyNavigation) continue;
+    if (comparison.metric === latencyLargeScan) continue;
     assert.equal(comparison.relativeStatistic, comparison.statistic);
     assert.equal(comparison.relativeActual, comparison.actual);
     assert.equal(comparison.relativeBaseline, comparison.baseline);
@@ -732,6 +741,96 @@ test("the slow-environment gate keeps a single statistic and is not fixed by p50
     evaluatePerformance(candidate, baseline, p50Policy).status,
     "failed",
   );
+});
+
+// Run 35809019817, pull request #199: documentation, npm scripts, and one CI
+// script. Nothing it changed can reach a workspace scan.
+test("the Linux large-scan gate passes the run 35809019817 false positive", () => {
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: { [latencyLargeScan]: [24.961, 68.824, 31.674] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyLargeScan]: [26.903, 34.154, 142.984] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "passed");
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === latencyLargeScan,
+  );
+  // The blip is still reported and still measured against the rail.
+  assert.equal(comparison.statistic, "p95");
+  assert.equal(comparison.actual, 142.984);
+  assert.equal(comparison.absoluteLimit, 12000);
+  // The medians are 2.5 ms apart, which is what the change compares.
+  assert.equal(comparison.relativeStatistic, "p50");
+  assert.equal(comparison.relativeActual, 34.154);
+  assert.equal(comparison.relativeBaseline, 31.674);
+  assert.equal(comparison.relativeLimit, 81.674);
+});
+
+test("the same large-scan run still fails when the relative gate reads p95", () => {
+  const testPolicy = structuredClone(latencyPolicy);
+  delete testPolicy.platforms.linux.suites["release-webview"].metrics[
+    latencyLargeScan
+  ].relativeStatistic;
+
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: { [latencyLargeScan]: [24.961, 68.824, 31.674] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyLargeScan]: [26.903, 34.154, 142.984] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, testPolicy);
+
+  assert.equal(gate.status, "failed");
+  assert.deepEqual(
+    gate.violations.map(({ metric, kind, statistic }) => ({
+      metric,
+      kind,
+      statistic,
+    })),
+    [{ metric: latencyLargeScan, kind: "relative", statistic: "p95" }],
+  );
+});
+
+// What the change gives up is bounded, and this pins the boundary: a scan that
+// is genuinely slower on every sample still fails, because the 50 ms floor is
+// larger than the 14.2 ms median gap ever observed between two runs but far
+// smaller than a real linear-scan regression.
+test("a sustained large-scan regression still fails on medians", () => {
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: { [latencyLargeScan]: [24.961, 68.824, 31.674] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyLargeScan]: [88.0, 92.0, 95.0] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "failed");
+  assert.deepEqual(
+    gate.violations.map(({ metric, kind, statistic }) => ({
+      metric,
+      kind,
+      statistic,
+    })),
+    [{ metric: latencyLargeScan, kind: "relative", statistic: "p50" }],
+  );
+});
+
+// smallWorkspaceScanMs is deliberately left on a single statistic: across the
+// same thirty-two sample sets its p95 and p50 differ by at most 1.6 ms, so
+// there is no blip to separate and no evidence to justify the change.
+test("the small-scan gate keeps a single statistic", () => {
+  const metrics =
+    latencyPolicy.platforms.linux.suites["release-webview"].metrics;
+  assert.equal(metrics.smallWorkspaceScanMs.relativeStatistic, undefined);
 });
 
 test("child, memory, and sustained CPU leak fixtures fail their budgets", () => {

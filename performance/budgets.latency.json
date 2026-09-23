@@ -121,9 +121,10 @@
             },
             "largeWorkspaceScanMs": {
               "statistic": "p95",
+              "relativeStatistic": "p50",
               "absoluteMax": 12000,
               "relativeMaxPercent": 20,
-              "rationale": "The realistic tier intentionally carries enough projects and bytes to expose linear scan regressions."
+              "rationale": "The realistic tier carries enough projects and bytes to expose linear scan regressions, and the 12000 ms rail still reads p95 for that. The relative comparison reads p50 because this metric's p95 at n=3 is one sporadic blip, not a tail. Across thirty-two Linux sample sets p50 stayed within 18.0 to 44.4 ms and the candidate-to-baseline p50 gap never exceeded 14.2 ms, while p95 ranged from 21.0 to 143.0 ms and reached three to four times the median in six of them. The maximum lands at index 0, 1, or 2 in five, sixteen, and eleven sets, so unlike environmentTimeoutRecoveryMs and navigationMs this blip is not positional; the relative gate was subtracting two independent draws of it and read -57.89 to +107.75 percent on product-unchanged runs, failing one of sixteen. Medians failed none, the 50 ms floor still catches a sustained 35 ms shift against the observed 14.2 ms gap, and the largest value ever seen on the rail is 143 ms."
             },
             "navigationMs": {
               "statistic": "p95",
