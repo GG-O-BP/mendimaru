@@ -123,9 +123,10 @@ The build recipe lives in one place per platform and is fed both to the build
 command and to the fingerprint salt, so changed build flags cannot silently
 reuse a binary produced by the old ones. Release builds keep an ordinary
 dependency cache for the genuine rebuild path; workspace-crate caching is
-deliberately not enabled, because the repository's Actions cache is already at
-its 10 GB ceiling and those entries would evict the far smaller binary caches
-that remove much more critical-path work per byte.
+deliberately not enabled. The repository has exceeded its 10 GB Actions-cache
+ceiling before, and adding another large workspace-target family would consume
+the headroom reserved for the dependency and binary caches that remove much
+more critical-path work per byte.
 
 That dependency cache stays keyed per variant on purpose. Both variants
 compile the same crate graph, but they compile it in different directories,
@@ -228,9 +229,54 @@ finished in 13.30 minutes.
 
 **The 15-minute target should therefore not be renegotiated.** It is
 reachable on a genuine cold installer rebuild. What is missing is not build
-capacity but cache capacity, and the remaining work is to bring the
-repository's Actions cache back inside its 10 GB cap so the dependency cache
-stops being evicted between consecutive runs.
+capacity but cache capacity.
+
+The repository now manages that capacity with
+`.github/workflows/cache-budget.yml`, deliberately outside every pull-request
+and push gate. It runs after the CI and Release performance workflows finish,
+on a six-hour schedule, and on manual dispatch with a dry-run option, so
+pruning adds no time to the envelopes it protects. It groups volatile hash and
+run-id generations by stable cache family and computes supersession per ref: a
+pull request's private entry can never supersede the shared `main` entry it
+shadows.
+
+The planner tracks two numbers that are deliberately not the same thing.
+GitHub's 10 GiB cap is the hard limit, and exceeding it after a prune is an
+error, because that is the state in which GitHub evicts a cache the next run
+needs. The 9 GiB working budget is a headroom target that leaves room for the
+largest single in-flight save (~1.1 GiB), and exceeding it while staying under
+the cap is only a warning. The distinction is not cosmetic: on the
+2026-09-23 listing the ten `v0-rust-*` dependency families are 7.49 GiB and
+each already holds exactly one generation, so no prune can shrink them without
+giving up a cache hit. With `aur-sccache`, Playwright and the small fixed
+entries the irreducible floor is 9.06 GiB. Treating the unreachable 9 GiB
+target as a failure would have made the job red on its first run and trained
+everyone to ignore the one message that means something is actually wrong.
+
+Retention follows restore semantics rather than size. Prefix-restored Rust and
+AUR compiler families keep one generation; exact-fingerprint WebView binaries
+and installer artifacts keep four, because baseline and candidate can both
+need an older repeated fingerprint. Unknown families keep two rather than
+being silently collapsed to one. Closed pull-request scopes are reclaimed
+first, followed by superseded generations and then idle private pull-request
+entries if the repository is still over budget. Retained default-branch
+entries are never evicted by the budget pass.
+
+A cache accessed within fifteen minutes is deferred so the pruner cannot
+delete an entry while another run is restoring it. Missing or malformed cache
+metadata, an unknown open-pull-request listing, duplicate IDs, deletion API
+failures, a working budget set above the cap, and a plan that remains over the
+cap all fail closed or skip the unsafe inference rather than reporting a false
+success. On the live 2026-09-23T04:10Z listing a dry run planned 11.90 GiB —
+over the cap — down to 9.06 GiB, by removing the merged pull request 199 scope
+and three superseded `aur-sccache-v1` generations, without touching a single
+retained default-branch dependency cache. That is the transition this workflow
+exists to make: from a repository GitHub will evict from to one it will not.
+
+The remaining 9.06 GiB is a real finding rather than a solved problem. It
+leaves under 1 GiB of headroom against a 1.1 GiB largest save, so a badly
+timed save can still momentarily cross the cap. Closing that gap needs a
+change to what is cached — not more pruning — and is tracked separately.
 
 Sharing one compile between `release-webview-build (windows)` and
 `installed-bundle-build` stays unproven and is not assumed here. They run
