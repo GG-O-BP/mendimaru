@@ -19,6 +19,7 @@ import {
   summarizeEvaluatedReport,
   violationCount,
 } from "./regression-issue.mjs";
+import { reconcileGateInputs } from "./gate-reports.mjs";
 
 const repository = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -394,35 +395,44 @@ test("a missing report directory is a problem, never a crash", () => {
 test("a malformed report is skipped without discarding the good ones", () => {
   const directory = scratch();
   writeFileSync(
-    path.join(directory, "good.json"),
+    path.join(directory, "linux-candidate-latency.json"),
     JSON.stringify(evaluatedReport()),
   );
-  writeFileSync(path.join(directory, "broken.json"), "{ not json");
   writeFileSync(
-    path.join(directory, "shapeless.json"),
+    path.join(directory, "linux-candidate-idle.json"),
+    "{ not json",
+  );
+  writeFileSync(
+    path.join(directory, "windows-candidate-latency.json"),
     JSON.stringify({ a: 1 }),
   );
   writeFileSync(path.join(directory, "ignored.txt"), "not a report");
   const nested = path.join(directory, "nested");
   mkdirSync(nested);
   writeFileSync(
-    path.join(nested, "also-good.json"),
+    path.join(nested, "windows-candidate-idle.json"),
     JSON.stringify(evaluatedReport()),
   );
 
   const result = readEvaluatedReports(directory);
   assert.equal(result.summaries.length, 2);
   assert.equal(result.problems.length, 2);
-  assert.ok(result.problems.some((problem) => problem.includes("broken.json")));
   assert.ok(
-    result.problems.some((problem) => problem.includes("shapeless.json")),
+    result.problems.some((problem) =>
+      problem.includes("linux-candidate-idle.json"),
+    ),
+  );
+  assert.ok(
+    result.problems.some((problem) =>
+      problem.includes("windows-candidate-latency.json"),
+    ),
   );
 });
 
 test("a report for another commit is never attributed to this merge", () => {
   const directory = scratch();
   writeFileSync(
-    path.join(directory, "stale.json"),
+    path.join(directory, "linux-candidate-latency.json"),
     JSON.stringify(evaluatedReport()),
   );
   const expected = "abcdef1234567890abcdef1234567890abcdef12";
@@ -437,7 +447,7 @@ test("an unusable commit filter degrades instead of losing the report", () => {
   // the filter is dropped and the reports are still reported.
   const directory = scratch();
   writeFileSync(
-    path.join(directory, "good.json"),
+    path.join(directory, "linux-candidate-latency.json"),
     JSON.stringify(evaluatedReport()),
   );
   const result = readEvaluatedReports(directory, "not-a-sha");
@@ -488,4 +498,173 @@ test("the gates publish the evaluated reports the report job reads", () => {
   assert.ok(workflow.includes("webview-gate-report-"));
   assert.ok(workflow.includes("installed-bundle-gate-report"));
   assert.ok(workflow.includes('pattern: "*gate-report*"'));
+});
+
+// Issue #192, reproduced from the real `504c28f` run 35743578471. The safety
+// net reported `candidate-msi.raw.json` and `candidate-nsis.raw.json` as
+// "unusable" while saying nothing about the WebView verdicts that did not
+// exist at all, so a reader of #186 came away worried about two harmless raw
+// dumps and unaware that the gate had never run.
+function bundleReport() {
+  return {
+    benchmark: {
+      platform: "windows",
+      suite: "installed-bundle",
+      commit,
+      baselineCommit,
+    },
+    gate: { status: "passed", violations: [] },
+  };
+}
+
+function rawDump(kind) {
+  // Shape of what `release-performance.yml` copies to `<variant>-<kind>.raw.json`.
+  // No benchmark block, because it is a raw smoke dump and never was a report.
+  return { kind, samples: { coldStartupMs: [1, 2, 3] } };
+}
+
+function write504c28fFixture() {
+  const directory = scratch();
+  for (const kind of ["msi", "nsis"]) {
+    writeFileSync(
+      path.join(directory, `candidate-${kind}.json`),
+      JSON.stringify(bundleReport()),
+    );
+    writeFileSync(
+      path.join(directory, `candidate-${kind}.raw.json`),
+      JSON.stringify(rawDump(kind)),
+    );
+  }
+  writeFileSync(
+    path.join(directory, "gate-manifest-installed-bundle.json"),
+    JSON.stringify(
+      reconcileGateInputs({
+        scope: "installed-bundle",
+        eventName: "push",
+        relevant: true,
+        found: [
+          "baseline-msi.json",
+          "candidate-msi.json",
+          "baseline-nsis.json",
+          "candidate-nsis.json",
+        ],
+      }),
+    ),
+  );
+  // No webview gate manifests and no webview candidate reports: the fan-in was
+  // skipped, so neither platform published anything.
+  return directory;
+}
+
+test("504c28f fixture: raw dumps are not false alarms any more", () => {
+  const result = readEvaluatedReports(write504c28fFixture(), commit);
+  assert.deepEqual(result.problems, []);
+  assert.equal(result.summaries.length, 2);
+  assert.ok(
+    result.summaries.every((summary) => !summary.name.includes(".raw.")),
+    "a raw measurement dump must never be read as a gate verdict",
+  );
+});
+
+test("504c28f fixture: the absent WebView verdicts are reported as missing", () => {
+  const result = readEvaluatedReports(write504c28fFixture(), commit);
+  const scopes = result.missing.map((entry) => entry.scope).sort();
+  assert.deepEqual(scopes, ["linux", "windows"]);
+  assert.ok(
+    result.missing.every((entry) => entry.kind === "no-verdict"),
+    "a gate that never ran leaves no manifest, which is the strongest signal",
+  );
+});
+
+test("504c28f fixture: the issue body leads with the missing verdicts", () => {
+  const { summaries, problems, missing } = readEvaluatedReports(
+    write504c28fFixture(),
+    commit,
+  );
+  const issue = buildRegressionIssue({
+    commit,
+    baselineCommit,
+    eventName: "push",
+    failedJobs: ["release-webview-measure"],
+    summaries,
+    problems,
+    missing,
+  });
+  assert.ok(issue.body.includes("판정 결손"));
+  // Missing verdicts must outrank the report-reading problems section, which
+  // is where the two false alarms used to be the only thing a reader saw.
+  const missingAt = issue.body.indexOf("판정 결손");
+  const problemsAt = issue.body.indexOf("리포트 읽기 문제");
+  assert.ok(missingAt > 0);
+  assert.ok(problemsAt === -1 || missingAt < problemsAt);
+  assert.ok(!issue.body.includes("raw.json"));
+});
+
+test("an intentional relevance skip is never reported as a missing verdict", () => {
+  const directory = scratch();
+  for (const scope of ["linux", "windows", "installed-bundle"]) {
+    writeFileSync(
+      path.join(directory, `gate-manifest-${scope}.json`),
+      JSON.stringify(
+        reconcileGateInputs({
+          scope,
+          eventName: "pull_request",
+          relevant: false,
+          reason: "no measured-artifact paths changed",
+          found: [],
+        }),
+      ),
+    );
+  }
+  const result = readEvaluatedReports(directory, commit);
+  assert.deepEqual(result.missing, []);
+  assert.deepEqual(result.problems, []);
+});
+
+test("a gate that ran but lost one report reports that report as missing", () => {
+  const directory = scratch();
+  writeFileSync(
+    path.join(directory, "linux-candidate-latency.json"),
+    JSON.stringify(evaluatedReport()),
+  );
+  for (const scope of ["linux", "windows", "installed-bundle"]) {
+    writeFileSync(
+      path.join(directory, `gate-manifest-${scope}.json`),
+      JSON.stringify(
+        reconcileGateInputs({
+          scope,
+          eventName: "pull_request",
+          relevant: scope === "linux",
+          found: scope === "linux" ? ["linux-candidate-latency.json"] : [],
+        }),
+      ),
+    );
+  }
+  const result = readEvaluatedReports(directory, commit);
+  // The linux baseline latency input never arrived, so the gate could not
+  // compare anything even though a candidate report exists.
+  assert.ok(
+    result.missing.some(
+      (entry) =>
+        entry.kind === "missing-input" &&
+        entry.detail.includes("linux-baseline-latency.json"),
+    ),
+  );
+});
+
+test("the re-run comment also carries the missing verdicts", () => {
+  const comment = buildRerunComment({
+    eventName: "push",
+    runUrl: "https://example.test/run/3",
+    summaries: [],
+    missing: [
+      {
+        scope: "linux",
+        kind: "no-verdict",
+        detail: "게이트가 판정을 남기지 않았다",
+      },
+    ],
+  });
+  assert.ok(comment.includes("판정 결손"));
+  assert.ok(comment.includes("linux"));
 });

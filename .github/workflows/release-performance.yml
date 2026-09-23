@@ -490,6 +490,13 @@ jobs:
   release-webview-gate:
     name: Release WebView (${{ matrix.platform }})
     needs: release-webview-measure
+    # Matrix fan-in. Without this the whole gate is skipped as soon as one
+    # upstream measurement leg fails, and the job name stays unexpanded, so
+    # both platform verdicts disappear at once (issue #190). `504c28f` reached
+    # main that way: one dead Linux baseline idle leg erased the Windows
+    # verdict too, and nothing said so. `cancelled()` is still honoured, so a
+    # run superseded by the concurrency group does not publish a verdict.
+    if: always() && !cancelled()
     strategy:
       fail-fast: false
       matrix:
@@ -537,8 +544,11 @@ jobs:
             --head HEAD \
             --github-output "$GITHUB_OUTPUT"
 
+      # Unconditional. The missing-report check below has to run even when the
+      # measurement legs died, and it needs the pinned Node. This adds a few
+      # seconds to a gate job that is not on the critical path; it buys the
+      # ability to fail closed instead of passing on no evidence.
       - name: Set up Node.js
-        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
@@ -548,13 +558,39 @@ jobs:
         if: steps.relevance.outputs.relevant == 'true'
         run: npm ci
 
+      # Best effort on purpose. A download that matches nothing is exactly the
+      # condition the next step is here to diagnose, so it must produce the
+      # explicit "expected report missing" verdict rather than an opaque
+      # artifact-download failure.
       - name: Download measurement reports
         if: steps.relevance.outputs.relevant == 'true'
+        continue-on-error: true
         uses: actions/download-artifact@v7
         with:
           pattern: webview-report-${{ matrix.platform }}-*
           merge-multiple: true
           path: reports
+
+      # Fail closed (issue #190). `if: always()` on the job makes the matrix
+      # expand; on its own it would only convert a skip into a silent pass,
+      # because a gate with no inputs has nothing to complain about. This step
+      # enumerates the reports the gate was supposed to receive and fails when
+      # one is absent. It writes the manifest before failing so the evidence is
+      # still published, and it records which reports the verdict rests on.
+      - name: Record and verify the gate inputs
+        if: always()
+        shell: bash
+        env:
+          GATE_SCOPE: ${{ matrix.platform }}
+          GATE_RELEVANT: ${{ steps.relevance.outputs.relevant }}
+          GATE_REASON: >-
+            ${{ steps.relevance.outputs.relevant == 'true'
+            && 'measured inputs can change'
+            || 'no measured-artifact paths changed' }}
+          REPORT_DIRECTORY: reports
+        run: |
+          mkdir -p reports
+          node scripts/ci/gate-reports.mjs
 
       - name: Gate the latency phase against current main
         if: steps.relevance.outputs.relevant == 'true'
@@ -593,12 +629,20 @@ jobs:
       # re-deriving one from the budgets, which would let the filed issue and the
       # gate disagree after any budget change.
       - name: Upload the evaluated gate reports
-        if: always() && steps.relevance.outputs.relevant == 'true'
+        # Uploaded unconditionally now. The manifest is the record of what this
+        # gate was asked to check, so an intentional relevance skip has to be
+        # published too -- otherwise the post-merge safety net cannot tell a
+        # legitimate skip apart from a gate that never ran (issues #190, #192).
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: webview-gate-report-${{ matrix.platform }}
-          path: reports/${{ matrix.platform }}-candidate-*.json
-          if-no-files-found: ignore
+          path: |
+            reports/${{ matrix.platform }}-candidate-*.json
+            reports/gate-manifest-${{ matrix.platform }}.json
+          # The manifest is always written, so nothing found means the gate
+          # itself malfunctioned. `ignore` used to hide exactly that.
+          if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 30 || 90 }}
 
   installed-bundle-build:
@@ -918,6 +962,11 @@ jobs:
   installed-bundle-gate:
     name: Installed Windows bundle performance
     needs: installed-bundle-measure
+    # Same fan-in defect as the WebView gate (issue #190): one dead
+    # `installed-bundle-measure` leg used to erase the MSI *and* NSIS verdicts
+    # together. Fixing only the WebView side would have left an identical hole
+    # one job away.
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -955,8 +1004,10 @@ jobs:
           echo "relevant=true" >> "$GITHUB_OUTPUT"
           echo "Installed-bundle suite: runs (non-pull-request run)"
 
+      # Unconditional for the same reason as the WebView gate: the
+      # missing-report check must be able to run when the measurement legs did
+      # not.
       - name: Set up Node.js
-        if: steps.relevance.outputs.relevant == 'true'
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
@@ -968,11 +1019,27 @@ jobs:
 
       - name: Download measurement reports
         if: steps.relevance.outputs.relevant == 'true'
+        continue-on-error: true
         uses: actions/download-artifact@v7
         with:
           pattern: installed-bundle-report-*
           merge-multiple: true
           path: reports
+
+      - name: Record and verify the gate inputs
+        if: always()
+        shell: bash
+        env:
+          GATE_SCOPE: installed-bundle
+          GATE_RELEVANT: ${{ steps.relevance.outputs.relevant }}
+          GATE_REASON: >-
+            ${{ steps.relevance.outputs.relevant == 'true'
+            && 'installed-bundle suite runs after merge'
+            || 'deferred to push-to-main and the weekly schedule (issue #176 split SLA)' }}
+          REPORT_DIRECTORY: reports
+        run: |
+          mkdir -p reports
+          node scripts/ci/gate-reports.mjs
 
       - name: Gate MSI against current main
         if: steps.relevance.outputs.relevant == 'true'
@@ -999,12 +1066,21 @@ jobs:
           schedule; window, sampling, and budgets are unchanged."
 
       - name: Upload the evaluated gate reports
-        if: always() && steps.relevance.outputs.relevant == 'true'
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: installed-bundle-gate-report
-          path: reports/candidate-*.json
-          if-no-files-found: ignore
+          # Named explicitly instead of `candidate-*.json` (issue #192). That
+          # glob also matched `candidate-msi.raw.json` and
+          # `candidate-nsis.raw.json`, the raw measurement dumps written at the
+          # `Measure the installed bundle` step, so raw dumps travelled inside
+          # a "gate report" artifact and the safety net then parsed them as
+          # verdicts and reported two false alarms.
+          path: |
+            reports/candidate-msi.json
+            reports/candidate-nsis.json
+            reports/gate-manifest-installed-bundle.json
+          if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 30 || 90 }}
 
   # Closes the gap that the issue #176 split SLA opened. Moving idle and

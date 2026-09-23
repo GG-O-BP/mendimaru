@@ -2,6 +2,13 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+import {
+  isGateReportName,
+  missingGateVerdicts,
+  readDirectoryNames,
+  readGateManifests,
+} from "./gate-reports.mjs";
+
 // Detection for the idle phase and the installed-bundle suite now happens
 // after the merge (issue #176 split SLA). Deferred detection is only
 // defensible if the failure it finds cannot be ignored, so a post-merge gate
@@ -55,6 +62,13 @@ export function shouldFileRegressionIssue(jobResults) {
 // wrote its own verdict into each report, so this reports that verdict rather
 // than re-deriving it from the budgets. Re-deriving would let the issue and the
 // gate disagree after a budget change.
+//
+// Issue #192: this used to read every `*.json` under the directory and to say
+// nothing about reports that were absent. Both halves were wrong at once, and
+// they were wrong in opposite directions -- raw measurement dumps were shouted
+// about while a gate verdict that never existed was silent. Reads are now
+// restricted to the closed gate-report whitelist, and the gate manifests are
+// reconciled so an absent verdict becomes an explicit, higher-severity finding.
 export function readEvaluatedReports(directory, expectedCommit = "") {
   const summaries = [];
   const problems = [];
@@ -71,13 +85,28 @@ export function readEvaluatedReports(directory, expectedCommit = "") {
   }
   let entries;
   try {
-    entries = collectJsonFiles(directory);
+    entries = collectGateReportFiles(directory);
   } catch (error) {
     return {
       summaries,
       problems: [`unreadable report directory: ${message(error)}`],
+      missing: [
+        {
+          scope: "all",
+          kind: "no-verdict",
+          detail:
+            "게이트 리포트 디렉터리를 읽지 못해 어떤 판정이 존재하는지 확인할 수 없다",
+        },
+      ],
     };
   }
+  const { manifests, problems: manifestProblems } =
+    readGateManifests(directory);
+  problems.push(...manifestProblems);
+  const missing = missingGateVerdicts({
+    manifests,
+    presentFiles: readDirectoryNames(directory),
+  });
   for (const file of entries) {
     let parsed;
     try {
@@ -104,7 +133,7 @@ export function readEvaluatedReports(directory, expectedCommit = "") {
   }
   summaries.sort((left, right) => left.name.localeCompare(right.name));
   problems.sort();
-  return { summaries, problems };
+  return { summaries, problems, missing };
 }
 
 export function summarizeEvaluatedReport(report, name = "report.json") {
@@ -161,6 +190,7 @@ export function buildRegressionIssue(input) {
   const commit = requireCommit(input.commit);
   const summaries = input.summaries ?? [];
   const problems = input.problems ?? [];
+  const missing = input.missing ?? [];
   const failedJobs = input.failedJobs ?? [];
   const eventName = String(input.eventName ?? "push");
   const violations = violationCount(summaries);
@@ -187,7 +217,9 @@ export function buildRegressionIssue(input) {
     // infrastructure, or it may be a product crash before a report existed;
     // the issue records it for triage without choosing between those causes.
     lines.push(
-      `\`${short}\` 의 병합 후 성능 런이 실패했지만 **예산 위반은 보고되지 않았다.** 인프라·아티팩트 오류인지, 리포트 생성 전 제품 실행 실패인지 현재 증거만으로 귀속할 수 없어 revert 후보로 표시하지 않았다.`,
+      missing.length > 0
+        ? `\`${short}\` 의 병합 후 성능 런이 실패했고 **예산 위반은 보고되지 않았다.** 다만 아래 범위는 **애초에 판정이 없다** — 위반 0건은 "회귀 없음"이 아니라 "확인되지 않음"이다. 특정 병합 커밋의 예산 회귀로 귀속할 근거가 없어 revert 후보로는 표시하지 않았다.`
+        : `\`${short}\` 의 병합 후 성능 런이 실패했지만 **예산 위반은 보고되지 않았다.** 인프라·아티팩트 오류인지, 리포트 생성 전 제품 실행 실패인지 현재 증거만으로 귀속할 수 없어 revert 후보로 표시하지 않았다.`,
     );
   }
   lines.push("");
@@ -200,6 +232,24 @@ export function buildRegressionIssue(input) {
     `- 실패한 job: ${failedJobs.length > 0 ? failedJobs.map((job) => `\`${job}\``).join(", ") : "(보고되지 않음)"}`,
   );
   lines.push("");
+
+  // Deliberately above the violation table. A verdict that failed is a known
+  // quantity; a verdict that does not exist is worse, because nothing about
+  // that scope has been checked at all. Issue #192 was filed precisely because
+  // a reader of #186 saw two harmless file-format complaints and never learned
+  // that both WebView verdicts were missing.
+  if (missing.length > 0) {
+    lines.push("## ⚠️ 판정 결손 — 확인되지 않은 범위가 있다");
+    lines.push("");
+    lines.push(
+      "아래 범위는 **게이트 판정이 존재하지 않는다.** 통과한 것이 아니라 확인되지 않은 것이므로, 위반 목록이 비어 있다는 사실을 회귀 없음의 근거로 쓸 수 없다.",
+    );
+    lines.push("");
+    for (const entry of missing) {
+      lines.push(`- \`${entry.scope}\`: ${entry.detail}`);
+    }
+    lines.push("");
+  }
 
   if (violations > 0) {
     lines.push("## 위반 지표");
@@ -273,8 +323,19 @@ export function buildRerunComment(input) {
   ];
   if (input.runUrl) lines.push(`- 런: ${input.runUrl}`);
   const summaries = input.summaries ?? [];
+  const missing = input.missing ?? [];
   const violations = violationCount(summaries);
   lines.push(`- 위반 지표 수: ${violations}`);
+  // The same reasoning as the issue body: a re-run that silently drops the
+  // missing-verdict list would let a reader conclude "no violations" from a
+  // run where nothing was actually checked.
+  if (missing.length > 0) {
+    lines.push("");
+    lines.push("**판정 결손 (위반 0건을 회귀 없음으로 읽으면 안 되는 이유):**");
+    for (const entry of missing) {
+      lines.push(`- \`${entry.scope}\`: ${entry.detail}`);
+    }
+  }
   if (violations > 0) {
     lines.push("");
     lines.push("| 리포트 | 지표 | 통계 | 종류 | 실측 | 한계 | 기준 | 변화 |");
@@ -288,7 +349,10 @@ export function buildRerunComment(input) {
   return truncate(lines.join("\n"));
 }
 
-function collectJsonFiles(directory) {
+// Whitelist, not blacklist. `candidate-msi.raw.json` is excluded because it is
+// not a gate report, not because `.raw.json` is special-cased; the next raw
+// dump with a different suffix is excluded for the same reason.
+function collectGateReportFiles(directory) {
   if (!directory) throw new Error("no report directory given");
   const stats = statSync(directory);
   if (!stats.isDirectory()) throw new Error(`${directory} is not a directory`);
@@ -297,7 +361,7 @@ function collectJsonFiles(directory) {
     for (const entry of readdirSync(current, { withFileTypes: true })) {
       const full = path.join(current, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.isFile() && entry.name.endsWith(".json")) found.push(full);
+      else if (entry.isFile() && isGateReportName(entry.name)) found.push(full);
     }
   };
   walk(directory);
@@ -362,7 +426,7 @@ if (invokedDirectly) {
         JSON.stringify({ file: false, reason: "no failed gate job" }),
       );
     } else {
-      const { summaries, problems } = readEvaluatedReports(
+      const { summaries, problems, missing } = readEvaluatedReports(
         process.env.REPORT_DIRECTORY ?? "reports",
         process.env.REGRESSION_COMMIT,
       );
@@ -374,6 +438,7 @@ if (invokedDirectly) {
         failedJobs,
         summaries,
         problems,
+        missing,
       });
       process.stdout.write(
         JSON.stringify({
@@ -383,6 +448,7 @@ if (invokedDirectly) {
             eventName: process.env.GITHUB_EVENT_NAME,
             runUrl: process.env.REGRESSION_RUN_URL,
             summaries,
+            missing,
           }),
         }),
       );
