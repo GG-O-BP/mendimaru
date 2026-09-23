@@ -126,6 +126,23 @@ try {
 
   beginStage("environment-slow-samples");
   await fixture.setEnvironmentMode("slow");
+  // Issue #193. This loop is the first IPC after the final `driver.launch()`,
+  // so without a warm-up its first sample also pays the one-time cost of
+  // opening the IPC path on a fresh session. `samplingPolicy()` declares
+  // `warmupCount: 1` and the cold/warm startup, first-IPC, and both workspace
+  // scan loops all honour it; this loop was the one that did not. The effect
+  // is measurable and platform-asymmetric: across thirty-eight Linux sample
+  // sets the per-index means were 1148.3, 992.0, and 958.8 ms and the maximum
+  // fell on the first sample in thirty of them, while Windows - whose first
+  // IPC costs tens of milliseconds rather than hundreds - showed no such
+  // skew. The warm-up runs in the same slow mode as the measured samples so
+  // it discards one sample of the identical workload, which is what the
+  // declared policy means everywhere else in this script.
+  const warmedEnvironment = await client.invoke("get_environment_status");
+  assert.equal(warmedEnvironment.ready, true);
+  assertions.push(
+    `${sampling.warmupCount} slow-mode environment probe was discarded before the measured samples`,
+  );
   for (let sample = 0; sample < sampling.sampleCount; sample += 1) {
     trackSample(sample, sampling.sampleCount);
     environmentSlowMs.push(

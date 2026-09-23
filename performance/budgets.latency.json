@@ -127,10 +127,11 @@
             },
             "navigationMs": {
               "statistic": "p95",
+              "relativeStatistic": "p50",
               "absoluteMax": 1500,
               "relativeMaxPercent": 20,
               "relativeNoiseFloor": 100,
-              "rationale": "Observed debug navigation was 111 to 248 ms. Hosted Linux release comparisons can jitter by tens of milliseconds on unrelated changes, so navigation uses a reviewed 100 ms floor while retaining its 20 percent and 1.5 second gates."
+              "rationale": "Observed debug navigation was 111 to 248 ms. Hosted Linux release comparisons can jitter by tens of milliseconds on unrelated changes, so navigation uses a reviewed 100 ms floor while retaining its 20 percent and 1.5 second gates. The rail still reads p95, but the relative comparison reads p50 because the three samples are three different routes rather than three draws of one workload: the harness walks Projects, Settings, and Studio Pro once each. Across thirty-eight Linux sample sets the per-index means were 100.8, 145.7, and 42.0 ms and the maximum fell on Settings in thirty-five, so nearest-rank p95 at n=3 compared a single sample of the most expensive route. The one relative failure in nineteen product-unchanged runs read 117/133/59 against 76/267/68, where the median improved from 117 to 76 ms; p50 failed none. Relative coverage stays at one route and moves from Settings to the middle route, so a Settings-only regression now reaches only the rail."
             }
           }
         },
