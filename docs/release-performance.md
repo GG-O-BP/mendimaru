@@ -256,7 +256,10 @@ The common metric meanings are:
 - `firstIpcMs`: the first normal `get_environment_status` IPC after each cold
   shell launch.
 - `environmentSlowMs`: an environment IPC with the tracked 400 ms test-only
-  backend delay.
+  backend delay. The loop discards one warm-up probe in the same slow mode
+  before its measured samples, because it is the first IPC after the final
+  launch and would otherwise fold the one-time cost of opening the IPC path on
+  a fresh session into its first sample.
 - `environmentTimeoutRecoveryMs`: time from a tracked 750 ms client deadline
   against a two-second delayed probe until the next normal environment IPC
   succeeds. The application is not restarted.
@@ -266,7 +269,9 @@ The common metric meanings are:
 - `smallWorkspaceScanMs` and `largeWorkspaceScanMs`: repeated project discovery
   for the declared project counts and total byte sizes.
 - `navigationMs`: WebDriver interaction through the Projects, Settings, and
-  Studio Pro routes, ending when the target heading is visible.
+  Studio Pro routes, ending when the target heading is visible. Sample index
+  selects the route, so the three samples are three different workloads rather
+  than three draws of one.
 - `backgroundPollingCpuPercent`: the first twelve five-second CPU samples from
   the long-idle window, kept separate to expose periodic polling.
 - `idleCpuPercent`, `privateMemoryBytes`, `workingSetBytes`, and `processCount`:
@@ -341,6 +346,56 @@ whose candidate median was faster than the baseline median. Comparing medians
 failed one of thirteen, and the 6000 ms absolute rail still reads p95, where
 the largest observed value was 3165.51 ms. Reports print both statistics on a
 split row so the comparison cannot be misread.
+
+The Linux `navigationMs` gate splits the same way for a different reason. Its
+three samples are not three draws of one workload: the harness walks the
+Projects, Settings, and Studio Pro routes once each, so sample index selects
+the route. Across thirty-eight Linux sample sets the per-index means were
+100.8, 145.7, and 42.0 ms and the maximum fell on Settings in thirty-five of
+them, which makes nearest-rank p95 at n=3 a single sample of the most
+expensive route rather than a tail. The one relative failure in nineteen
+product-unchanged runs read 116.84/132.87/59.27 against 76.46/266.63/67.72:
+the median improved from 116.84 ms to 76.46 ms and a lone 266.63 ms Settings
+sample failed the gate. Comparing medians failed none of the nineteen. What
+this gives up is stated rather than hidden: relative coverage was one route
+before the change and is one route after it, but it moves from the slowest
+route to the middle one, so a regression confined to Settings now reaches only
+the 1500 ms rail. Sample counts and absolute rails are unchanged.
+
+The Linux `largeWorkspaceScanMs` gate splits for a third reason, and the
+difference matters because it decides which remedy works. Its blip is not
+positional. Across thirty-two Linux sample sets - sixteen runs, baseline and
+candidate - the maximum fell on index 0, 1, and 2 in five, sixteen, and eleven
+of them, so nothing about warm-up or route ordering explains it. What the data
+does show is that a single sample out of three occasionally reads three to
+four times the median: p50 stayed between 18.0 and 44.4 ms while p95 ranged
+from 21.0 to 143.0 ms, and the largest candidate set was 26.9/34.2/143.0 ms
+with a 7.25 ms median absolute deviation against a 116.08 ms IQR. At n=3
+nearest-rank p95 is the maximum, so the relative gate was subtracting two
+independent draws of that blip and read anywhere from -57.89 to +107.75
+percent on runs that changed no product code. One of sixteen failed that way,
+on a pull request that touched documentation, npm scripts, and a CI script.
+Comparing medians failed none of the sixteen, and the candidate-to-baseline
+p50 gap never exceeded 14.2 ms against the existing 50 ms floor, so a
+sustained shift of roughly 35 ms is still caught. The 12000 ms rail still
+reads p95, which is what bounds the linear scan regression this fixture
+exists to expose; the largest value ever measured on it is 143 ms.
+`smallWorkspaceScanMs` is deliberately left alone - its p95 and p50 differ by
+at most 1.6 ms across the same thirty-two sets - and so is Windows, where no
+such failure has been observed.
+
+`environmentSlowMs` shows a superficially similar relative false positive and
+is deliberately _not_ given a `relativeStatistic`, because the data shows the
+remedy does not work there. Its maximum falls on the **first** sample in
+thirty of thirty-eight Linux sample sets, not on a later one, and the residual
+failure in run `35715515352` fails on p50 as well as p95. That pattern is a
+missing warm-up rather than a tail artifact, and Windows - whose first IPC
+costs tens of milliseconds rather than hundreds - shows no such skew. The fix
+is the discarded warm-up probe described above. Simulating it over nineteen
+runs by removing the first sample takes the relative failures from two to one;
+that simulation compares two retained samples where the shipped harness keeps
+three, so it bounds the direction of the effect rather than its exact size.
+The remaining failure in `35715515352` is retained and not chased.
 
 A performance failure is not cleared by repeating until a favorable sample is
 found. One rerun is permitted only for an identified infrastructure failure,

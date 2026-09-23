@@ -121,16 +121,18 @@
             },
             "largeWorkspaceScanMs": {
               "statistic": "p95",
+              "relativeStatistic": "p50",
               "absoluteMax": 12000,
               "relativeMaxPercent": 20,
-              "rationale": "The realistic tier intentionally carries enough projects and bytes to expose linear scan regressions."
+              "rationale": "The realistic tier carries enough projects and bytes to expose linear scan regressions, and the 12000 ms rail still reads p95 for that. The relative comparison reads p50 because this metric's p95 at n=3 is one sporadic blip, not a tail. Across thirty-two Linux sample sets p50 stayed within 18.0 to 44.4 ms and the candidate-to-baseline p50 gap never exceeded 14.2 ms, while p95 ranged from 21.0 to 143.0 ms and reached three to four times the median in six of them. The maximum lands at index 0, 1, or 2 in five, sixteen, and eleven sets, so unlike environmentTimeoutRecoveryMs and navigationMs this blip is not positional; the relative gate was subtracting two independent draws of it and read -57.89 to +107.75 percent on product-unchanged runs, failing one of sixteen. Medians failed none, the 50 ms floor still catches a sustained 35 ms shift against the observed 14.2 ms gap, and the largest value ever seen on the rail is 143 ms."
             },
             "navigationMs": {
               "statistic": "p95",
+              "relativeStatistic": "p50",
               "absoluteMax": 1500,
               "relativeMaxPercent": 20,
               "relativeNoiseFloor": 100,
-              "rationale": "Observed debug navigation was 111 to 248 ms. Hosted Linux release comparisons can jitter by tens of milliseconds on unrelated changes, so navigation uses a reviewed 100 ms floor while retaining its 20 percent and 1.5 second gates."
+              "rationale": "Observed debug navigation was 111 to 248 ms. Hosted Linux release comparisons can jitter by tens of milliseconds on unrelated changes, so navigation uses a reviewed 100 ms floor while retaining its 20 percent and 1.5 second gates. The rail still reads p95, but the relative comparison reads p50 because the three samples are three different routes rather than three draws of one workload: the harness walks Projects, Settings, and Studio Pro once each. Across thirty-eight Linux sample sets the per-index means were 100.8, 145.7, and 42.0 ms and the maximum fell on Settings in thirty-five, so nearest-rank p95 at n=3 compared a single sample of the most expensive route. The one relative failure in nineteen product-unchanged runs read 117/133/59 against 76/267/68, where the median improved from 117 to 76 ms; p50 failed none. Relative coverage stays at one route and moves from Settings to the middle route, so a Settings-only regression now reaches only the rail."
             }
           }
         },
