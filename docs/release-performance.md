@@ -151,6 +151,77 @@ baseline-then-candidate schedule no longer doubles the wall time. On the
 push-to-`main` and scheduled runs that carry the two 300-second idle windows,
 this parallelism is what keeps the exhaustive run inside its own budget.
 
+## Measured post-merge envelopes
+
+The pull-request target is met. The push-to-`main` target is not, and which
+side of it a merge lands on is decided by whether the Windows installer build
+is served from cache. "Envelope" means first job start to last job completion
+across both the `Release performance` and `CI` workflows; overlapping job
+durations are never summed.
+
+| Path                                  | Commit    | Envelope           |
+| ------------------------------------- | --------- | ------------------ |
+| Installer cache hit on both variants  | `0377ee6` | 504 s (8.40 min)   |
+| Installer cache miss on the candidate | `1be34f4` | 1051 s (17.52 min) |
+| Installer cache miss, worst observed  | `018b5ec` | 1244 s (20.73 min) |
+
+The critical path on `1be34f4` was strictly serial through `needs:`:
+`Build installers (candidate)` for 660 s, then the four `Measure installed
+bundle` legs, then `Installed Windows bundle performance` for 16 s. The four
+measure legs already run concurrently and all four start within three seconds
+of the build finishing, so giving each leg a per-variant `needs:` would let
+only the two baseline legs move earlier and would shorten the envelope by
+roughly ten seconds. The idle legs finish at t≈980, before the bundle chain
+ends at t≈1051, so they are not on the critical path and shortening the idle
+window would not help.
+
+### Two independent causes put a merge on the slow path
+
+Both were measured on `1be34f4`, and neither is the one-off first-run effect
+it can look like.
+
+**The fingerprint over-triggers on `package.json`.** `package.json` is a
+fingerprint input, so any edit to it invalidates
+`bundle-installers-<fingerprint>`. On `1be34f4` the fingerprint _salt_ was
+byte-identical to the preceding cache-hit run - same `rustc`, same `ImageOS`,
+same native tools, same recipe - and `package.json` was the only differing
+fingerprint input. Its only differing hunk was one line in the `scripts` block
+adding a test file to `test:ci:gates`, which cannot affect a built installer.
+That line cost a 566 s rebuild. The npm test scripts therefore no longer
+enumerate test files: `scripts/ci/node-test-suite.mjs` discovers
+`*.node-test.mjs` per directory. It refuses to run when a directory
+contributes no file, because `node --test` reports zero tests and exits 0 on a
+pattern that matches nothing, which would turn a renamed convention into a
+silently passing suite. A runner-image or toolchain roll would change the salt
+and remains a separate, legitimate cause; it is not what happened here.
+
+**The Actions cache is over its cap and evicts what the next run needs.** The
+ceiling described above is no longer merely approached: the repository held
+11.27 GB across 27 entries against GitHub's 10 GB per-repository cap, so
+entries are evicted least-recently-used. The dependency cache for the
+installer build, `v0-rust-release-performance-windows-bundles-candidate-*`,
+reported `No cache found` at 01:17 and was re-saved, 612 MB, at 01:52 within
+the same hour. With it missing the build compiled all 395 crates instead of
+only the workspace crate and the link step.
+
+The second cause bears directly on the target. Both the 17.52 and the 20.73
+minute figures were measured while the dependency cache was thrashing, so they
+bound a cold build from above rather than establishing an irreducible floor,
+and the 15-minute target should not be renegotiated on them. A log-gap
+analysis of the 739 s build in run 35734525535 shows a single unparallelisable
+250.7 s window for the final crate and the link, with bundling adding only
+17.2 s for the MSI and 19.5 s for the NSIS installer and the remainder spread
+across many 8-25 s dependency compiles. Those dependency compiles are exactly
+what a cache hit removes, so the reachable figure for a genuine product-code
+merge cannot be stated until the cache fits inside its cap.
+
+Sharing one compile between `release-webview-build (windows)` and
+`installed-bundle-build` stays unproven and is not assumed here. They run
+different recipes - `build --no-bundle --features e2e --config
+src-tauri/tauri.e2e.conf.json` against `build --bundles msi,nsis` - so their
+outputs are not interchangeable, and they already run concurrently, so sharing
+alone would not shorten the critical path.
+
 ## Fixtures and measurements
 
 Every full release-WebView run excludes one warm-up launch and records seven
