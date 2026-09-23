@@ -149,9 +149,7 @@ try {
   // with an unexplained "script timed out after 30000ms". The deadline is now
   // declared on the server for the probe itself, so the probe ends the script
   // instead of abandoning it and the recovery probe starts from a clean queue.
-  const serverEnforcedProbe =
-    declaredScriptTimeoutMs !== undefined &&
-    (await client.declareScriptTimeout(sampling.environmentClientTimeoutMs));
+  const serverEnforcedProbe = declaredScriptTimeoutMs !== undefined;
   assertions.push(
     serverEnforcedProbe
       ? "the deliberate environment deadline was enforced by the WebDriver script timeout, leaving no orphaned script"
@@ -162,24 +160,45 @@ try {
       trackSample(sample, sampling.sampleCount);
       await fixture.setEnvironmentMode("timeout");
       const recoveryStarted = performance.now();
-      await assert.rejects(
-        serverEnforcedProbe
-          ? client.invoke(
-              "get_environment_status",
-              {},
-              scriptRequestTimeoutMs(sampling.environmentClientTimeoutMs),
-            )
-          : client.invoke(
-              "get_environment_status",
-              {},
-              sampling.environmentClientTimeoutMs,
-            ),
-        (error) =>
-          serverEnforcedProbe
-            ? error?.name === "ScriptTimeoutError"
-            : error?.name === "TimeoutError",
-        "the delayed environment probe must exceed the declared deadline",
-      );
+      // The deliberate deadline is declared immediately before the probe and
+      // restored immediately after it, within the same sample. The first
+      // revision of this change declared it once around the whole loop, which
+      // left every command after the probe - `setEnvironmentMode("normal")`
+      // and the recovery probe that this metric exists to measure - running
+      // against the 750 ms probe deadline instead of the 30 s session
+      // deadline. A recovery slower than 750 ms then killed the measurement
+      // with a server script timeout, which is the same class of failure this
+      // issue set out to remove.
+      let probeEnforced = false;
+      try {
+        probeEnforced =
+          serverEnforcedProbe &&
+          (await client.declareScriptTimeout(
+            sampling.environmentClientTimeoutMs,
+          ));
+        await assert.rejects(
+          probeEnforced
+            ? client.invoke(
+                "get_environment_status",
+                {},
+                scriptRequestTimeoutMs(sampling.environmentClientTimeoutMs),
+              )
+            : client.invoke(
+                "get_environment_status",
+                {},
+                sampling.environmentClientTimeoutMs,
+              ),
+          (error) =>
+            probeEnforced
+              ? error?.name === "ScriptTimeoutError"
+              : error?.name === "TimeoutError",
+          "the delayed environment probe must exceed the declared deadline",
+        );
+      } finally {
+        if (serverEnforcedProbe) {
+          await client.declareScriptTimeout(SCRIPT_TIMEOUT_MS);
+        }
+      }
       await fixture.setEnvironmentMode("normal");
       const recovered = await client.invoke("get_environment_status");
       assert.equal(recovered.ready, true);
@@ -188,11 +207,6 @@ try {
       );
     }
   } finally {
-    if (serverEnforcedProbe) {
-      await client
-        .declareScriptTimeout(SCRIPT_TIMEOUT_MS)
-        .catch(() => undefined);
-    }
     await fixture.setEnvironmentMode("normal").catch(() => undefined);
   }
   assertions.push(

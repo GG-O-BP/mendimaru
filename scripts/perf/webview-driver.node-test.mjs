@@ -177,6 +177,32 @@ test("a script request deadline shorter than the script timeout is refused", asy
   );
 });
 
+test("a script request deadline that outlives a tightened script timeout is refused", async (t) => {
+  const driver = await startStubDriver();
+  t.after(() => driver.close());
+  await driver.client.createLinuxSession("/tmp/app.AppImage");
+  await driver.client.declareScriptTimeout(750);
+
+  // The inverse mismatch, and the one that actually reached CI: the caller
+  // asks for the 35 s deadline that belongs to the session default while the
+  // server is still enforcing the 750 ms probe deadline. Left unguarded the
+  // server ends the script at 750 ms and the failure surfaces as an
+  // unexplained script timeout in whichever sample happens to be slow.
+  await assert.rejects(
+    driver.client.invoke("get_environment_status"),
+    /does not match the declared 750 ms script timeout/,
+  );
+
+  await driver.client.declareScriptTimeout(SCRIPT_TIMEOUT_MS);
+  const value = await driver.client.invoke("get_environment_status");
+  assert.deepEqual(value, { ready: true });
+  assert.deepEqual(driver.state.declaredScriptTimeouts, [
+    SCRIPT_TIMEOUT_MS,
+    750,
+    SCRIPT_TIMEOUT_MS,
+  ]);
+});
+
 test("a driver without the timeouts endpoint keeps working on the inherited default", async (t) => {
   const driver = await startStubDriver({ supportsTimeouts: false });
   t.after(() => driver.close());

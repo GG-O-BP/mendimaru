@@ -416,12 +416,25 @@ export class WebDriverClient {
   // reintroduce #191 by passing a short HTTP deadline, and the symptom would
   // then appear one command later, inside unrelated code.
   assertScriptRequestDeadline(timeoutMs) {
-    if (
-      this.scriptTimeoutMs !== undefined &&
-      timeoutMs <= this.scriptTimeoutMs
-    ) {
+    if (this.scriptTimeoutMs === undefined) return;
+    if (timeoutMs <= this.scriptTimeoutMs) {
       throw new Error(
         `the ${timeoutMs} ms script request deadline must exceed the declared ${this.scriptTimeoutMs} ms script timeout; a shorter request deadline abandons the script as an orphan that blocks the next WebDriver command`,
+      );
+    }
+    // The opposite mismatch is just as dangerous and is what actually broke
+    // the first revision of this change. A caller that passes a deadline
+    // derived from some *other* script timeout believes a deadline is in
+    // force that the server is not enforcing: the server ends the script at
+    // its own, much shorter, declared value and the caller reports an
+    // unexplained script timeout. Requiring the HTTP deadline to be derived
+    // from the currently declared script deadline turns that from an
+    // intermittent, sample-dependent failure into a deterministic one at the
+    // first offending command.
+    const expected = scriptRequestTimeoutMs(this.scriptTimeoutMs);
+    if (timeoutMs !== expected) {
+      throw new Error(
+        `the ${timeoutMs} ms script request deadline does not match the declared ${this.scriptTimeoutMs} ms script timeout; script requests must use scriptRequestTimeoutMs(${this.scriptTimeoutMs}) === ${expected} ms so the server deadline the caller relies on is the one actually in force`,
       );
     }
   }
