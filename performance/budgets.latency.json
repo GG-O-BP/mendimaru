@@ -109,9 +109,10 @@
             },
             "catalogRefreshMs": {
               "statistic": "p50",
-              "absoluteMax": 15000,
+              "absoluteMax": 4000,
               "relativeMaxPercent": 20,
-              "rationale": "The isolated catalog fixture is bounded separately from external Marketplace availability. Three same-host comparisons kept p50 within 785.39-813.42 ms while one-time browser bootstrap made seven-sample p95 range from 873.86-1727.80 ms; p95 and outliers remain reported, but the relative gate uses the stable p50."
+              "relativeNoiseFloor": 400,
+              "rationale": "The isolated loopback catalog fixture remains independent of external Marketplace health and gates p50 because browser bootstrap makes p95 unstable. Seventeen product-unchanged comparisons put p50 between 706 and 1331 ms and the same-run absolute delta between 29 and 362 ms; the 20 percent allowance failed once when a low 944 ms baseline reduced it below the observed additive noise. A reviewed 400 ms floor covers that corpus with 38 ms headroom. To compensate rather than relax quality, the absolute p50 rail is tightened from 15000 to 4000 ms, still 3.0 times the largest observed p50."
             },
             "smallWorkspaceScanMs": {
               "statistic": "p95",
@@ -253,7 +254,8 @@
               "statistic": "p95",
               "absoluteMax": 20000,
               "relativeMaxPercent": 20,
-              "rationale": "The isolated browser fixture has its own ceiling and never depends on live Marketplace health."
+              "relativeNoiseFloor": 4500,
+              "rationale": "The isolated browser fixture has its own ceiling and never depends on live Marketplace health. Across seventeen product-unchanged comparisons the Windows samples were bimodal: fast 1410-4919 ms and slow 6492-21997 ms, with the baseline first sample in the slow mode in every run but only two of fifty-one candidate samples slow. At three samples nearest-rank p95 is the maximum, so the relative gate compares bootstrap modes rather than product latency. A reviewed 4500 ms floor covers all seventeen same-code comparisons while the unchanged 20000 ms absolute p95 rail still bounds the measured tail."
             },
             "smallWorkspaceScanMs": {
               "statistic": "p95",
