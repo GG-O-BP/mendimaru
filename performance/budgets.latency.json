@@ -95,9 +95,10 @@
             },
             "environmentTimeoutRecoveryMs": {
               "statistic": "p95",
+              "relativeStatistic": "p50",
               "absoluteMax": 6000,
               "relativeMaxPercent": 20,
-              "rationale": "A client deadline against a two-second probe must recover on the next normal environment request."
+              "rationale": "A client deadline against a two-second probe must recover on the next normal environment request. The 6000 ms absolute rail still reads p95, but the relative comparison reads p50 because the p95 of this metric is not a distribution tail. Across twenty-six Linux sample sets the second of the three post-warm-up samples was the maximum in twenty-two of them, so nearest-rank p95 at n=3 re-measures one reproducible blip whose size swings between 1.05 and 2.36 times the median. Comparing two draws of that blip failed three of thirteen product-unchanged runs; comparing medians failed one."
             },
             "catalogCachedMs": {
               "statistic": "p95",

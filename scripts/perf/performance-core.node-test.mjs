@@ -414,6 +414,191 @@ test("Windows idle keeps the shared one point floor", () => {
   assert.equal(comparison.relativeLimit, 3.3);
 });
 
+// #185: nearest-rank p95 at n=3 is the slowest of three samples. For
+// environmentTimeoutRecoveryMs the slowest sample is not a distribution tail:
+// across twenty-six Linux sample sets the second post-warm-up sample was the
+// maximum twenty-two times. The relative gate therefore compared two draws of
+// one reproducible blip. It now compares medians while the absolute rail keeps
+// reading p95.
+const latencyRecovery = "environmentTimeoutRecoveryMs";
+
+test("a budget without relativeStatistic compares on its absolute statistic", () => {
+  const baseline = makeLatencyReport({ commit: baselineCommit });
+  const candidate = makeLatencyReport({ commit: candidateCommit });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "passed");
+  for (const comparison of gate.comparisons) {
+    if (comparison.metric === latencyRecovery) continue;
+    assert.equal(comparison.relativeStatistic, comparison.statistic);
+    assert.equal(comparison.relativeActual, comparison.actual);
+    assert.equal(comparison.relativeBaseline, comparison.baseline);
+  }
+});
+
+test("the Linux recovery gate passes the run 35739384785 false positive", () => {
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: { [latencyRecovery]: [1398.505, 1653.319, 1427.885] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyRecovery]: [1342.319, 3165.508, 1314.503] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "passed");
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === latencyRecovery,
+  );
+  // The absolute rail still reads p95 and still has room.
+  assert.equal(comparison.statistic, "p95");
+  assert.equal(comparison.actual, 3165.508);
+  assert.equal(comparison.absoluteLimit, 6000);
+  // The relative comparison reads p50, where the candidate is faster.
+  assert.equal(comparison.relativeStatistic, "p50");
+  assert.equal(comparison.relativeActual, 1342.319);
+  assert.equal(comparison.relativeBaseline, 1427.885);
+  assert.equal(comparison.relativeLimit, 1713.462);
+  assert(comparison.relativeChangePercent < 0);
+});
+
+test("the same run still fails when the relative gate reads p95", () => {
+  const testPolicy = structuredClone(latencyPolicy);
+  delete testPolicy.platforms.linux.suites["release-webview"].metrics[
+    latencyRecovery
+  ].relativeStatistic;
+
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: { [latencyRecovery]: [1398.505, 1653.319, 1427.885] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyRecovery]: [1342.319, 3165.508, 1314.503] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, testPolicy);
+
+  assert.equal(gate.status, "failed");
+  assert.deepEqual(
+    gate.violations.map(({ metric, kind, statistic }) => ({
+      metric,
+      kind,
+      statistic,
+    })),
+    [{ metric: latencyRecovery, kind: "relative", statistic: "p95" }],
+  );
+});
+
+// The dual statistic must not become a way to hide a tail regression.
+test("the p95 absolute rail still fires while the relative gate reads p50", () => {
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: { [latencyRecovery]: [1398.505, 1653.319, 1427.885] },
+  });
+  // p50 is 100 ms and passes the relative gate; p95 is 6500 ms and cannot pass
+  // the 6000 ms rail.
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyRecovery]: [100, 6500, 100] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "failed");
+  assert.deepEqual(
+    gate.violations.map(({ metric, kind, statistic, actual, limit }) => ({
+      metric,
+      kind,
+      statistic,
+      actual,
+      limit,
+    })),
+    [
+      {
+        metric: latencyRecovery,
+        kind: "absolute",
+        statistic: "p95",
+        actual: 6500,
+        limit: 6000,
+      },
+    ],
+  );
+});
+
+test("a relative violation reports the statistic its gate actually used", () => {
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    sampleLists: { [latencyRecovery]: [1398.505, 1653.319, 1427.885] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    sampleLists: { [latencyRecovery]: [1900, 2000, 2100] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+
+  assert.equal(gate.status, "failed");
+  const violation = gate.violations.find(
+    ({ metric }) => metric === latencyRecovery,
+  );
+  assert.equal(violation.kind, "relative");
+  assert.equal(violation.statistic, "p50");
+  assert.equal(violation.actual, 2000);
+  assert.equal(violation.baseline, 1427.885);
+  assert.equal(violation.limit, 1713.462);
+
+  const markdown = renderPerformanceMarkdown(candidate);
+  assert.match(markdown, /abs p95: 2100\.00 ms; rel p50: 2000\.00 ms/);
+  assert.match(markdown, /abs 1653\.32 ms; rel 1427\.88 ms/);
+  assert.match(markdown, new RegExp(`${latencyRecovery} p50: relative`));
+});
+
+test("Windows recovery keeps a single statistic for both gates", () => {
+  const metrics =
+    latencyPolicy.platforms.windows.suites["release-webview"].metrics;
+  assert.equal(metrics[latencyRecovery].relativeStatistic, undefined);
+
+  const baseline = makeLatencyReport({
+    commit: baselineCommit,
+    platform: "windows",
+    sampleLists: { [latencyRecovery]: [760, 770, 780] },
+  });
+  const candidate = makeLatencyReport({
+    commit: candidateCommit,
+    platform: "windows",
+    sampleLists: { [latencyRecovery]: [900, 1000, 1100] },
+  });
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === latencyRecovery,
+  );
+
+  assert.equal(comparison.statistic, "p95");
+  assert.equal(comparison.relativeStatistic, "p95");
+  assert.equal(comparison.actual, 1100);
+  assert.equal(comparison.relativeActual, 1100);
+  assert.equal(gate.status, "failed");
+});
+
+test("an unsupported relative statistic is rejected", () => {
+  const testPolicy = structuredClone(latencyPolicy);
+  testPolicy.platforms.linux.suites["release-webview"].metrics[
+    latencyRecovery
+  ].relativeStatistic = "mean";
+
+  const baseline = makeLatencyReport({ commit: baselineCommit });
+  const candidate = makeLatencyReport({ commit: candidateCommit });
+  // The budget schema rejects it first; the engine guard behind it mirrors the
+  // existing guard on `statistic` and stays as defence in depth.
+  assert.throws(
+    () => evaluatePerformance(candidate, baseline, testPolicy),
+    /relativeStatistic must be equal to one of the allowed values/,
+  );
+  assert.throws(
+    () => validatePerformancePolicy(testPolicy),
+    /relativeStatistic must be equal to one of the allowed values/,
+  );
+});
+
 test("child, memory, and sustained CPU leak fixtures fail their budgets", () => {
   const baseline = makeReport({
     commit: baselineCommit,
@@ -541,6 +726,42 @@ function makeIdleReport({
   platform = "linux",
   metricValues = {},
 }) {
+  return makeReleaseWebviewReport({
+    commit,
+    platform,
+    defaultValue: (name) => idleMetricDefault(name, cpuPercent),
+    metricValues,
+  });
+}
+
+// A latency-phase release-webview report. `sampleLists` supplies the raw
+// samples for a metric so a test can reproduce a real run's distribution
+// instead of a flat fill.
+function makeLatencyReport({
+  commit,
+  platform = "linux",
+  sampleCount = 3,
+  sampleLists = {},
+  metricValues = {},
+}) {
+  return makeReleaseWebviewReport({
+    commit,
+    platform,
+    sampleCount,
+    sampleLists,
+    defaultValue: (name) => idleMetricDefault(name, 1),
+    metricValues,
+  });
+}
+
+function makeReleaseWebviewReport({
+  commit,
+  platform = "linux",
+  sampleCount = 7,
+  sampleLists = {},
+  defaultValue,
+  metricValues = {},
+}) {
   // A release-webview report always carries the full metric set; each phase's
   // budget file only gates the subset it measured.
   const metricNames = [
@@ -564,7 +785,7 @@ function makeIdleReport({
       baselineCommit,
       startedAt: "2026-09-22T00:00:00.000Z",
       finishedAt: "2026-09-22T00:05:00.000Z",
-      runId: "unit-test-idle",
+      runId: "unit-test-release-webview",
     },
     host: {
       os: platform,
@@ -585,15 +806,21 @@ function makeIdleReport({
       catalogModes: ["cached", "isolated-refresh"],
       environmentModes: ["normal", "slow", "timeout-recovery"],
     },
-    sampling: samplingPolicy({ idleWindowSeconds: 300, idleSampleSeconds: 5 }),
+    sampling: samplingPolicy({
+      sampleCount,
+      idleWindowSeconds: 300,
+      idleSampleSeconds: 5,
+    }),
     metricSamples: Object.fromEntries(
       metricNames.map((name) => [
         name,
         {
           unit: metricUnit(name),
-          samples: Array(metricSampleCount(name)).fill(
-            metricValues[name] ?? idleMetricDefault(name, cpuPercent),
-          ),
+          samples:
+            sampleLists[name] ??
+            Array(metricSampleCount(name, sampleCount)).fill(
+              metricValues[name] ?? defaultValue(name),
+            ),
         },
       ]),
     ),
@@ -612,7 +839,7 @@ function growthResources(delta) {
   return resourceSummary(before, after, after);
 }
 
-function metricSampleCount(name) {
+function metricSampleCount(name, sampleCount = 7) {
   if (
     name.endsWith("GrowthBytes") ||
     name === "processCountGrowth" ||
@@ -635,7 +862,7 @@ function metricSampleCount(name) {
   ) {
     return 60;
   }
-  return 7;
+  return sampleCount;
 }
 
 function metricUnit(name) {

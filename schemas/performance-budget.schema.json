@@ -108,6 +108,9 @@
         "statistic": {
           "enum": ["p50", "p95", "max"]
         },
+        "relativeStatistic": {
+          "enum": ["p50", "p95", "max"]
+        },
         "absoluteMax": {
           "type": "number",
           "exclusiveMinimum": 0
