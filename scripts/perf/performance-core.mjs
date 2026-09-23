@@ -564,6 +564,11 @@ export function samplingPolicy(overrides = {}) {
     idleSampleSeconds: 5,
     environmentSlowDelayMs: 400,
     environmentClientTimeoutMs: 750,
+    // Issue #191. The WebDriver script deadline the harness declares for every
+    // session. It pins the value both WebDriver implementations previously
+    // inherited without announcing it, so a script timeout can be traced to a
+    // declared policy instead of an unexplained server default.
+    scriptTimeoutMs: 30000,
     cpuNormalization:
       "process-tree-cpu-seconds/(wall-seconds*logical-cores)*100",
     processTreeScope: "root-and-live-descendants-at-each-sample",

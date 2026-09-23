@@ -15,7 +15,11 @@ import {
   samplingPolicy,
 } from "./performance-core.mjs";
 import { createReleaseFixture } from "./release-fixture.mjs";
-import { createWebviewDriver } from "./webview-driver.mjs";
+import {
+  createWebviewDriver,
+  scriptRequestTimeoutMs,
+  SCRIPT_TIMEOUT_MS,
+} from "./webview-driver.mjs";
 
 const repository = path.resolve(import.meta.dirname, "..", "..");
 const platform = process.platform === "win32" ? "windows" : process.platform;
@@ -39,6 +43,13 @@ const reportPath = path.resolve(
 const screenshotPath = reportPath.replace(/\.json$/i, ".png");
 const failurePath = reportPath.replace(/\.json$/i, ".failure.json");
 const startedAt = new Date().toISOString();
+const processStarted = performance.now();
+// Issue #191. A WebDriver stall used to surface only as a stack frame, so the
+// failing run could not be attributed to a measurement phase from the logs.
+// Every phase now announces itself and the timeline is persisted with the
+// failure so the stall point is identifiable without re-running anything.
+const stageTimeline = [];
+let activeStage;
 const coldStartupMs = [];
 const warmStartupMs = [];
 const firstIpcMs = [];
@@ -58,6 +69,7 @@ let fixture;
 let driver;
 
 try {
+  beginStage("fixture-setup");
   await mkdir(path.dirname(reportPath), { recursive: true });
   fixture = await createReleaseFixture(process.platform);
   const env = {
@@ -71,19 +83,23 @@ try {
     WEBKIT_DISABLE_DMABUF_RENDERER:
       process.env.WEBKIT_DISABLE_DMABUF_RENDERER ?? "1",
   };
+  beginStage("driver-create");
   driver = await createWebviewDriver({
     application: options.application,
     env,
     root: fixture.root,
   });
 
+  beginStage("warmup-launch");
   await fixture.clearWebviewCache();
   await driver.launch();
   await driver.firstIpc();
   await driver.stop();
   assertions.push("one cold launch and first IPC warm-up were excluded");
 
+  beginStage("startup-samples");
   for (let sample = 0; sample < sampling.sampleCount; sample += 1) {
+    trackSample(sample, sampling.sampleCount);
     await fixture.clearWebviewCache();
     coldStartupMs.push(await driver.launch());
     firstIpcMs.push(await driver.firstIpc());
@@ -96,13 +112,22 @@ try {
     `${sampling.sampleCount} cold and warm release process launches completed`,
   );
 
+  beginStage("measurement-session-open");
   await driver.launch();
   const webviewVersion = driver.webviewVersion();
   const client = driver.client;
   assert.ok(client, "release WebDriver client is unavailable");
+  const declaredScriptTimeoutMs = client.scriptTimeoutMs;
+  assertions.push(
+    declaredScriptTimeoutMs === undefined
+      ? "the WebDriver session inherited an undeclared script deadline"
+      : `the WebDriver session declared a ${declaredScriptTimeoutMs} ms script deadline`,
+  );
 
+  beginStage("environment-slow-samples");
   await fixture.setEnvironmentMode("slow");
   for (let sample = 0; sample < sampling.sampleCount; sample += 1) {
+    trackSample(sample, sampling.sampleCount);
     environmentSlowMs.push(
       await elapsed(async () => {
         const environment = await client.invoke("get_environment_status");
@@ -115,30 +140,68 @@ try {
     `${sampling.sampleCount} environment probes included the tracked ${sampling.environmentSlowDelayMs} ms slow-backend delay`,
   );
 
-  for (let sample = 0; sample < sampling.sampleCount; sample += 1) {
-    await fixture.setEnvironmentMode("timeout");
-    const recoveryStarted = performance.now();
-    await assert.rejects(
-      client.invoke(
-        "get_environment_status",
-        {},
-        sampling.environmentClientTimeoutMs,
-      ),
-      (error) => error?.name === "TimeoutError",
-      "the delayed environment probe must exceed the client deadline",
-    );
-    await fixture.setEnvironmentMode("normal");
-    const recovered = await client.invoke("get_environment_status");
-    assert.equal(recovered.ready, true);
-    environmentTimeoutRecoveryMs.push(
-      rounded(performance.now() - recoveryStarted),
-    );
+  beginStage("environment-timeout-recovery-samples");
+  // Issue #191. The deliberate deadline used to be a client-side fetch abort
+  // while the server script deadline stayed at its inherited 30 s. WebDriver
+  // has no command-cancel, so the abandoned script kept running and the next
+  // command queued behind it; when the orphan outlived its injected delay the
+  // following command hit the server deadline and the whole measurement died
+  // with an unexplained "script timed out after 30000ms". The deadline is now
+  // declared on the server for the probe itself, so the probe ends the script
+  // instead of abandoning it and the recovery probe starts from a clean queue.
+  const serverEnforcedProbe =
+    declaredScriptTimeoutMs !== undefined &&
+    (await client.declareScriptTimeout(sampling.environmentClientTimeoutMs));
+  assertions.push(
+    serverEnforcedProbe
+      ? "the deliberate environment deadline was enforced by the WebDriver script timeout, leaving no orphaned script"
+      : "the deliberate environment deadline fell back to a client request abort because the script timeout could not be declared",
+  );
+  try {
+    for (let sample = 0; sample < sampling.sampleCount; sample += 1) {
+      trackSample(sample, sampling.sampleCount);
+      await fixture.setEnvironmentMode("timeout");
+      const recoveryStarted = performance.now();
+      await assert.rejects(
+        serverEnforcedProbe
+          ? client.invoke(
+              "get_environment_status",
+              {},
+              scriptRequestTimeoutMs(sampling.environmentClientTimeoutMs),
+            )
+          : client.invoke(
+              "get_environment_status",
+              {},
+              sampling.environmentClientTimeoutMs,
+            ),
+        (error) =>
+          serverEnforcedProbe
+            ? error?.name === "ScriptTimeoutError"
+            : error?.name === "TimeoutError",
+        "the delayed environment probe must exceed the declared deadline",
+      );
+      await fixture.setEnvironmentMode("normal");
+      const recovered = await client.invoke("get_environment_status");
+      assert.equal(recovered.ready, true);
+      environmentTimeoutRecoveryMs.push(
+        rounded(performance.now() - recoveryStarted),
+      );
+    }
+  } finally {
+    if (serverEnforcedProbe) {
+      await client
+        .declareScriptTimeout(SCRIPT_TIMEOUT_MS)
+        .catch(() => undefined);
+    }
+    await fixture.setEnvironmentMode("normal").catch(() => undefined);
   }
   assertions.push(
     `${sampling.sampleCount} client timeouts recovered through the next environment probe`,
   );
 
+  beginStage("catalog-cached-samples");
   for (let sample = 0; sample < sampling.sampleCount; sample += 1) {
+    trackSample(sample, sampling.sampleCount);
     catalogCachedMs.push(
       await elapsed(async () => {
         const catalog = await client.invoke("get_downloadable_versions_cache");
@@ -150,7 +213,9 @@ try {
     "cached catalog reads stayed separate from browser refreshes",
   );
 
+  beginStage("catalog-refresh-samples");
   for (let sample = 0; sample < sampling.sampleCount; sample += 1) {
+    trackSample(sample, sampling.sampleCount);
     catalogRefreshMs.push(
       await elapsed(async () => {
         const catalog = await client.invoke("fetch_downloadable_versions", {
@@ -166,9 +231,11 @@ try {
     "isolated loopback Marketplace refresh used a real sandboxed browser",
   );
 
+  beginStage("small-workspace-scan-samples");
   await fixture.setWorkspace(fixture.smallWorkspace);
   await scanProjectsAfterWorkspaceChange(client);
   for (let sample = 0; sample < sampling.sampleCount; sample += 1) {
+    trackSample(sample, sampling.sampleCount);
     smallWorkspaceScanMs.push(
       await elapsed(async () => {
         const projects = await scanProjectsAfterWorkspaceChange(client);
@@ -179,9 +246,11 @@ try {
       }),
     );
   }
+  beginStage("large-workspace-scan-samples");
   await fixture.setWorkspace(fixture.largeWorkspace);
   await scanProjectsAfterWorkspaceChange(client);
   for (let sample = 0; sample < sampling.sampleCount; sample += 1) {
+    trackSample(sample, sampling.sampleCount);
     largeWorkspaceScanMs.push(
       await elapsed(async () => {
         const projects = await scanProjectsAfterWorkspaceChange(client);
@@ -202,7 +271,9 @@ try {
     ["[data-testid=nav-settings]", "Settings"],
     ["[data-testid=nav-studio]", "Studio Pro"],
   ];
+  beginStage("navigation-samples");
   for (let sample = 0; sample < sampling.sampleCount; sample += 1) {
+    trackSample(sample, sampling.sampleCount);
     const [selector, heading] = routes[sample % routes.length];
     navigationMs.push(
       await elapsed(async () => {
@@ -222,12 +293,14 @@ try {
     "release WebView route navigation completed through WebDriver",
   );
 
+  beginStage("idle-settle");
   await delay(sampling.idleSampleSeconds * 1000);
   if (driver.applicationPid) {
     process.stdout.write(
       `release performance root PID ${driver.applicationPid}\n`,
     );
   }
+  beginStage("idle-sampling");
   const before = await driver.snapshot();
   let previous = before;
   let peak = { ...before };
@@ -238,6 +311,7 @@ try {
     sampling.idleWindowSeconds / sampling.idleSampleSeconds,
   );
   for (let sample = 0; sample < idleSamples; sample += 1) {
+    trackSample(sample, idleSamples);
     await delayUntil(
       idleSamplingStarted + (sample + 1) * idleSampleMilliseconds,
     );
@@ -271,6 +345,7 @@ try {
   );
 
   await driver.screenshot(screenshotPath);
+  beginStage("report-write");
   const report = createPerformanceReport({
     benchmark: {
       suite: "release-webview",
@@ -336,15 +411,40 @@ try {
   });
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
   process.stdout.write(`release performance report: ${reportPath}\n`);
+  closeActiveStage();
 } catch (error) {
+  closeActiveStage("failed");
+  const diagnosis = classifyFailure(error);
+  // Issue #191. A failure here is not a budget verdict: the gate never ran.
+  // The classification, the failing stage and the failing WebDriver command
+  // are written to stdout and to the failure report so a harness stall can be
+  // told apart from a measured regression at check level, without re-running
+  // the job and without weakening `preserve-original-failure`.
+  process.stdout.write(
+    `release performance failed: classification=${diagnosis.classification} reason=${diagnosis.reason} stage=${activeStage?.name ?? "none"} sample=${activeStage?.sample ?? "n/a"}\n`,
+  );
+  const failingCommand = error?.webdriverCommand;
+  if (failingCommand) {
+    process.stdout.write(
+      `release performance failing WebDriver command: ${failingCommand.method} ${failingCommand.endpoint} elapsed=${failingCommand.elapsedMs}ms requestDeadline=${failingCommand.requestTimeoutMs}ms scriptDeadline=${failingCommand.scriptTimeoutMs ?? "inherited"}\n`,
+    );
+  }
   await writeFile(
     failurePath,
     `${JSON.stringify(
       {
         status: "failed",
+        classification: diagnosis.classification,
+        reason: diagnosis.reason,
         startedAt,
         finishedAt: new Date().toISOString(),
         application: options.application,
+        platform,
+        stage: activeStage?.name,
+        stageSample: activeStage?.sample,
+        stages: stageTimeline,
+        webdriverCommand: failingCommand,
+        collectedSampleCounts: collectedSampleCounts(),
         error: error instanceof Error ? error.stack : String(error),
       },
       null,
@@ -355,6 +455,71 @@ try {
 } finally {
   await driver?.close().catch(() => undefined);
   await fixture?.close().catch(() => undefined);
+}
+
+function beginStage(name) {
+  closeActiveStage();
+  activeStage = {
+    name,
+    startedAtMs: rounded(performance.now() - processStarted),
+    elapsedMs: undefined,
+    sample: undefined,
+    status: "running",
+  };
+  stageTimeline.push(activeStage);
+  process.stdout.write(
+    `release performance stage start: ${name} (t+${(activeStage.startedAtMs / 1000).toFixed(1)}s)\n`,
+  );
+}
+
+function closeActiveStage(status = "completed") {
+  if (!activeStage || activeStage.status !== "running") return;
+  activeStage.elapsedMs = rounded(
+    performance.now() - processStarted - activeStage.startedAtMs,
+  );
+  activeStage.status = status;
+}
+
+function trackSample(index, total) {
+  if (activeStage) activeStage.sample = `${index + 1}/${total}`;
+}
+
+// Harness failures and measured-contract failures reach the same catch block,
+// so the distinction has to be made from the error itself. WebDriver transport
+// and deadline errors carry the command that produced them; assertions carry
+// Node's ERR_ASSERTION code.
+function classifyFailure(error) {
+  if (error?.name === "ScriptTimeoutError") {
+    return { classification: "harness", reason: "webdriver-script-timeout" };
+  }
+  if (error?.name === "TimeoutError") {
+    return { classification: "harness", reason: "webdriver-request-deadline" };
+  }
+  if (error?.name === "WebDriverError" || error?.webdriverCommand) {
+    return { classification: "harness", reason: "webdriver-command-failed" };
+  }
+  if (error?.code === "ERR_ASSERTION") {
+    return { classification: "measurement", reason: "assertion-failed" };
+  }
+  return { classification: "unknown", reason: error?.name ?? "error" };
+}
+
+function collectedSampleCounts() {
+  return Object.fromEntries(
+    Object.entries({
+      coldStartupMs,
+      warmStartupMs,
+      firstIpcMs,
+      environmentSlowMs,
+      environmentTimeoutRecoveryMs,
+      catalogCachedMs,
+      catalogRefreshMs,
+      smallWorkspaceScanMs,
+      largeWorkspaceScanMs,
+      navigationMs,
+      idleCpuPercent,
+    }).map(([name, samples]) => [name, samples.length]),
+  );
 }
 
 function parseArguments(arguments_) {

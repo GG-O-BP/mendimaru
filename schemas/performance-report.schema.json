@@ -300,6 +300,12 @@
         "environmentClientTimeoutMs": {
           "const": 750
         },
+        "scriptTimeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000,
+          "description": "WebDriver script deadline the harness declares for every session (issue #191). Optional so reports captured before the harness declared it stay valid; when present it must match between the compared variants because sampling is a compatibility field."
+        },
         "cpuNormalization": {
           "const": "process-tree-cpu-seconds/(wall-seconds*logical-cores)*100"
         },
