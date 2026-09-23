@@ -274,6 +274,28 @@ before the change and is one route after it, but it moves from the slowest
 route to the middle one, so a regression confined to Settings now reaches only
 the 1500 ms rail. Sample counts and absolute rails are unchanged.
 
+The Linux `largeWorkspaceScanMs` gate splits for a third reason, and the
+difference matters because it decides which remedy works. Its blip is not
+positional. Across thirty-two Linux sample sets - sixteen runs, baseline and
+candidate - the maximum fell on index 0, 1, and 2 in five, sixteen, and eleven
+of them, so nothing about warm-up or route ordering explains it. What the data
+does show is that a single sample out of three occasionally reads three to
+four times the median: p50 stayed between 18.0 and 44.4 ms while p95 ranged
+from 21.0 to 143.0 ms, and the largest candidate set was 26.9/34.2/143.0 ms
+with a 7.25 ms median absolute deviation against a 116.08 ms IQR. At n=3
+nearest-rank p95 is the maximum, so the relative gate was subtracting two
+independent draws of that blip and read anywhere from -57.89 to +107.75
+percent on runs that changed no product code. One of sixteen failed that way,
+on a pull request that touched documentation, npm scripts, and a CI script.
+Comparing medians failed none of the sixteen, and the candidate-to-baseline
+p50 gap never exceeded 14.2 ms against the existing 50 ms floor, so a
+sustained shift of roughly 35 ms is still caught. The 12000 ms rail still
+reads p95, which is what bounds the linear scan regression this fixture
+exists to expose; the largest value ever measured on it is 143 ms.
+`smallWorkspaceScanMs` is deliberately left alone - its p95 and p50 differ by
+at most 1.6 ms across the same thirty-two sets - and so is Windows, where no
+such failure has been observed.
+
 `environmentSlowMs` shows a superficially similar relative false positive and
 is deliberately _not_ given a `relativeStatistic`, because the data shows the
 remedy does not work there. Its maximum falls on the **first** sample in
