@@ -116,3 +116,65 @@ environment reports in its evidence. It never starts, stops, or finalizes that
 borrowed Runtime, even after a failed assertion; the owner handles cleanup.
 Its existing suite requirement for a state change and a value assertion still
 applies. Omitting the setting retains the original standalone gate flow.
+
+## Stateful operator fixture
+
+The companion [IronCalc driver](../scripts/spikes/issue149-workbook-live.py)
+exercises actual cell input, calculation, committed workbook-state restoration,
+download, file-chooser import, and invalid-import preservation. It uses the
+installed package's Playwright and ordinary sandboxed Chromium. It reserves
+shared VM use plus exclusive app-data use for the complete scenario, including
+inherited kernel descriptors in the browser driver. It does not start or stop
+Studio/Runtime and requires a new private evidence directory.
+
+```bash
+# Use the same installed binary, config, cache and verified snapshot as above.
+MENDIMARU_E2E_ALLOW_MUTATION=1 \
+MENDIMARU_E2E_DISPOSABLE_SNAPSHOT=verified-restorable-snapshot-id \
+MENDIMARU_CONFIG_DIR=/absolute/lab/config \
+MENDIMARU_CACHE_DIR=/absolute/lab/cache \
+MENDIMARU_E2E_BINARY=/absolute/installed/usr/bin/mendimaru \
+MENDIMARU_E2E_SHARED_SESSION_ID=shared_<id> \
+MENDIMARU_E2E_WORKBOOK_EVIDENCE=/absolute/new-evidence-directory \
+  python3 scripts/spikes/issue149-workbook-live.py
+```
+
+This is an operator fixture for the existing `IronCalcSpreadUIShowcase` app,
+not a new file-upload command in the declarative browser-suite API. Inputs use
+browser keyboard/form controls. The canvas calculation assertion only reads the
+mounted IronCalc model; it does not set model values or invoke calculations.
+The saved workbook is loaded again through a fresh page before being exported
+and imported into the empty-workbook example.
+
+**Write-back boundary:** Mendix documents `ListAttributeValue.get()` values as
+[always read-only](https://docs.mendix.com/apidocs-mxsdk/apidocs/pluggable-widgets-client-apis-list-values/).
+The fixture therefore verifies the supported `WorkbookState` attribute commit
+and read-back: edited quantities/prices/formulas survive a fresh page. Its
+individual datasource row attributes remain unchanged, and the driver asserts
+that boundary. It does not claim per-row list-attribute write-back. Resetting
+the fixture is followed by a fresh page to fetch the current row mapping.
+
+## Recorded verification
+
+The [2026-09-24 evidence](issue-149-live-evidence.json) separates ordinary
+Rust/CLI/Chromium fixtures from the installed, real Studio F5 checks. The live
+lab used a cold-copy snapshot verified against both its source and restored
+copy, an isolated `Mendimaru149` VM, Studio 11.12.4, and Chromium
+151.0.7922.34. The original user VM and projects were preserved.
+
+The shared gate passed two processes with two read lanes each, conflicting
+stop/write/UI refusal, artifact commit/retention/export, worker failure and
+signals, finalizer crash/retry, and owner-only final cleanup. The stateful
+fixture passed UI edits `D2=3`, `E2=7`, real calculated `F2=21`, persisted
+workbook restoration, export/import, and invalid-import preservation. Ordinary
+and assisted runs report their correction policy and fixed preparation
+separately; an assisted result is never ordinary-browser evidence.
+
+Fixture setup used the documented generated-asset normalizer and the disposable
+UNC Gradle `org.gradle.vfs.watch=false` workaround. The IronCalc copy was
+converted with the official 11.12.4 `mx convert --in-place` tool before Studio
+launch. These are explicit fixture conditions, not additional product fixes.
+Failed launches, initial cold-app assertion timeouts and fixture calibration
+failures are retained in the private archive. Published evidence contains only
+safe summaries and hashes; it excludes credentials, raw VM/config records and
+workbook contents.

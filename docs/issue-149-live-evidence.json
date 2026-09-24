@@ -1,0 +1,335 @@
+{
+  "issue": 149,
+  "dateUtc": "2026-09-24",
+  "scope": "Linux host + WinBoat guest; native Windows Studio remains deferred",
+  "candidateVersion": "0.6.0",
+  "productSourceCommit": "dcf63809ba38fa9dce83d35f873e66c7183eaa80",
+  "installedBinarySha256": "5934e24d0bbdec7984341b9009b37ad85fa7c0e0de09582caf4a306b093f4266",
+  "snapshot": {
+    "snapshotId": "mendimaru-149-20260924-cold-copy",
+    "originalStopped": true,
+    "threeCopiesMatch": true,
+    "verifiedFiles": 8,
+    "restoredGuestBootVerified": true
+  },
+  "installation": {
+    "recipe": "aur/PKGBUILD package()",
+    "method": "makepkg archive installed by pacman into an isolated root with host dependencies",
+    "sourceRunnerOverride": false,
+    "nodeOverride": false,
+    "studioVersion": "11.12.4",
+    "chromiumVersion": "151.0.7922.34",
+    "playwrightVersion": "1.62.1",
+    "browserSandbox": true
+  },
+  "sharedGate": {
+    "outcome": "passed",
+    "startedAt": "2026-09-24T09:19:28.376Z",
+    "finishedAt": "2026-09-24T09:23:15.048Z",
+    "preparationId": "preparation_2637df9cfad201808bf03e82e5182e72",
+    "suiteSha256": "fbd8752b32e0c9467fb2e6c44c0ef3fe589c8a8192d50dd37a32e74e2e9b3500",
+    "steps": [
+      {
+        "name": "two-processes-two-lanes",
+        "passed": [2, 2],
+        "preparationIds": [
+          "preparation_2637df9cfad201808bf03e82e5182e72",
+          "preparation_2637df9cfad201808bf03e82e5182e72"
+        ],
+        "peakParticipants": 2,
+        "lifecycleRefused": true,
+        "conflictingWriterRefused": true,
+        "uiMutationRefused": true
+      },
+      {
+        "name": "concurrent-commit-prune-and-read",
+        "retainedRuns": 2
+      },
+      {
+        "name": "concurrent-readers",
+        "preserved": true
+      },
+      {
+        "name": "isolated-failure",
+        "preserved": true
+      },
+      {
+        "name": "isolated-SIGTERM",
+        "preserved": true
+      },
+      {
+        "name": "isolated-SIGKILL",
+        "preserved": true
+      },
+      {
+        "name": "finalizer-crash-and-late-attach-refusal",
+        "preserved": true
+      },
+      {
+        "name": "owner-cleanup-after-last-participant",
+        "cleanup": "runtime-stopped",
+        "duplicateNoRecreation": true
+      }
+    ],
+    "rawEvidenceSha256": "43511e43cf9286cd9a721becefdded8572a6cccb7f0c1e5ed5ace151b1cccd5b",
+    "driverSha256": "ca32fa9e044308087c9e42dae1c41613fab81fefd30a3e983b9138c07f9da29e"
+  },
+  "statefulFixture": {
+    "outcome": "passed",
+    "startedAt": "2026-09-24T09:44:48.407Z",
+    "interception": false,
+    "coordination": "shared VM lease plus exclusive app-data lease; no other participants",
+    "steps": [
+      {
+        "name": "cell-input-and-real-engine-calculation",
+        "selected": [0, 3, 5],
+        "quantity": "3",
+        "price": "7",
+        "formula": "=D2*E2",
+        "amount": "21"
+      },
+      {
+        "name": "workbook-state-writeback",
+        "explicitSaves": 1,
+        "readonlyListAttributesUnchanged": true,
+        "limitation": "Mendix ListAttributeValue is readonly; edited cells are saved in the bound WorkbookState attribute, not individual row attributes."
+      },
+      {
+        "name": "new-page-restores-committed-workbook-state",
+        "selected": [0, 3, 5],
+        "quantity": "3",
+        "price": "7",
+        "formula": "=D2*E2",
+        "amount": "21"
+      },
+      {
+        "name": "download-workbook",
+        "bytes": 1098,
+        "sha256": "84acce344086c1c21fb4776545795a45b05a562e4d1957d6caf281152b6f431f"
+      },
+      {
+        "name": "file-chooser-import-roundtrip",
+        "selected": [0, 3, 5],
+        "quantity": "3",
+        "price": "7",
+        "formula": "=D2*E2",
+        "amount": "21"
+      },
+      {
+        "name": "invalid-import-preserves-workbook",
+        "amount": "21"
+      }
+    ],
+    "errors": [],
+    "buildMarkerSha256": "fe658d06dddd8628f00fc4c4108bb8459afc3e2b3e076ea1a8d57d55218fca13",
+    "browserVersion": "151.0.7922.34",
+    "finishedAt": "2026-09-24T09:44:57.741Z",
+    "driverSha256": "658c853f7586073169c5e8b9488288b3751ad7d26791869c014ba485a8f1f5b4",
+    "supervisorSha256": "34fd6fa6552c79104c114b52961202c537ced3f1954194fac7cfe59c9122c203"
+  },
+  "sameBuildParity": [
+    {
+      "generation": 1,
+      "preparationId": "preparation_abdbdde4f0552879cc41ba0618cad9f0",
+      "runs": {
+        "unmodified": {
+          "outcome": "passed",
+          "passed": 2,
+          "failed": 0,
+          "browserParity": "unmodified",
+          "corrections": [
+            {
+              "applied": false,
+              "interceptedRequests": 0,
+              "kind": "host-lan-asset-mirror"
+            }
+          ],
+          "concurrency": {
+            "effectiveWorkers": 1,
+            "groups": [
+              {
+                "mode": "serial",
+                "resource": "data-write",
+                "tests": 2
+              }
+            ],
+            "limitedBy": "request",
+            "maxObservedParallel": 1,
+            "requestedWorkers": 1,
+            "sessionRole": "participant"
+          },
+          "comparable": true,
+          "preparationId": "preparation_abdbdde4f0552879cc41ba0618cad9f0"
+        },
+        "assisted": {
+          "outcome": "passed",
+          "passed": 2,
+          "failed": 0,
+          "browserParity": "assisted",
+          "corrections": [
+            {
+              "applied": true,
+              "interceptedRequests": 0,
+              "kind": "host-lan-asset-mirror"
+            }
+          ],
+          "concurrency": {
+            "effectiveWorkers": 1,
+            "groups": [
+              {
+                "mode": "serial",
+                "resource": "data-write",
+                "tests": 2
+              }
+            ],
+            "limitedBy": "request",
+            "maxObservedParallel": 1,
+            "requestedWorkers": 1,
+            "sessionRole": "participant"
+          },
+          "comparable": true,
+          "preparationId": "preparation_abdbdde4f0552879cc41ba0618cad9f0"
+        }
+      },
+      "rawEvidenceSha256": "5c77934b191e5756d1b002108a7c0936b6df754a141f97cd39ad6a00e7f50617"
+    },
+    {
+      "generation": 2,
+      "preparationId": "preparation_40684a4dbe1d5fdb37a49fa10514fddd",
+      "runs": {
+        "unmodified": {
+          "outcome": "passed",
+          "passed": 2,
+          "failed": 0,
+          "browserParity": "unmodified",
+          "corrections": [
+            {
+              "applied": false,
+              "interceptedRequests": 0,
+              "kind": "host-lan-asset-mirror"
+            }
+          ],
+          "concurrency": {
+            "effectiveWorkers": 1,
+            "groups": [
+              {
+                "mode": "serial",
+                "resource": "data-write",
+                "tests": 2
+              }
+            ],
+            "limitedBy": "request",
+            "maxObservedParallel": 1,
+            "requestedWorkers": 1,
+            "sessionRole": "participant"
+          },
+          "comparable": true,
+          "preparationId": "preparation_40684a4dbe1d5fdb37a49fa10514fddd"
+        },
+        "assisted": {
+          "outcome": "passed",
+          "passed": 2,
+          "failed": 0,
+          "browserParity": "assisted",
+          "corrections": [
+            {
+              "applied": true,
+              "interceptedRequests": 0,
+              "kind": "host-lan-asset-mirror"
+            }
+          ],
+          "concurrency": {
+            "effectiveWorkers": 1,
+            "groups": [
+              {
+                "mode": "serial",
+                "resource": "data-write",
+                "tests": 2
+              }
+            ],
+            "limitedBy": "request",
+            "maxObservedParallel": 1,
+            "requestedWorkers": 1,
+            "sessionRole": "participant"
+          },
+          "comparable": true,
+          "preparationId": "preparation_40684a4dbe1d5fdb37a49fa10514fddd"
+        }
+      },
+      "rawEvidenceSha256": "a561efa5fb8a831a81bf93f81e34c541a09f1b5b250c26a7792f69e988a92e3d"
+    }
+  ],
+  "actualRebuild": {
+    "nativeStopAndF5": true,
+    "firstRspackCompletionUtc": "2026-09-24T09:32:49.349Z",
+    "secondRspackCompletionUtc": "2026-09-24T09:49:06.782Z",
+    "servedNewCssProbeVerified": true,
+    "stalePreparationOutcome": "failed",
+    "stalePreparationComparable": false,
+    "oldTestsPassed": 0,
+    "oldTestsFailed": 0,
+    "invalidations": [
+      {
+        "component": "managed-vm",
+        "classification": "environment-changed"
+      },
+      {
+        "component": "build",
+        "classification": "build-changed"
+      }
+    ],
+    "freshPreparationId": "preparation_40684a4dbe1d5fdb37a49fa10514fddd"
+  },
+  "artifactRace": {
+    "outcome": "passed",
+    "anchor": "session_1db57c608acd662d16139043f56faf59",
+    "successfulReadsDuringWriter": 69,
+    "expiredReads": 1,
+    "preparationId": "preparation_40684a4dbe1d5fdb37a49fa10514fddd",
+    "writer": "session_cad6f78226c3f0bdf1a810e97f0f5a4b",
+    "writerPassed": 2,
+    "retainedRuns": 1,
+    "postPruneExplicitRefusal": true
+  },
+  "uiConcurrency": {
+    "simultaneousKeeperTrees": 2,
+    "bothObservedRunning": true,
+    "mutationDuringParticipants": "bounded retryable refusal"
+  },
+  "fixtureConditions": [
+    "Disposable copies; originals preserved.",
+    "IronCalc model converted by official 11.12.4 mx convert; copied Studio settings assembly versions aligned after conversion.",
+    "Generated UNC asset normalizer active; disposable Gradle VFS watching disabled.",
+    "ListAttributeValue is read-only. Write-back assertions cover committed WorkbookState and new-page restoration, not individual datasource row writes.",
+    "Fixture is reset then reopened before edits to fetch current row mapping."
+  ],
+  "preservedFailures": [
+    "Two initial Studio launch timeouts under host memory pressure; later launch succeeded.",
+    "Initial cold-app 5-second assertion timeout; final bounded 30-second app assertions passed.",
+    "First shared gate expected a narrower UI error message; actual retryable VM-use refusal was correct.",
+    "Stateful harness normalized the actual Int32Array selection and reopened reset data.",
+    "Individual list-attribute write attempt was skipped by the real platform; that unsupported behavior is explicitly not claimed as passing.",
+    "First second-project F5 target lost foreground; observed native menu target succeeded."
+  ],
+  "automatedValidation": {
+    "rustPassed": 458,
+    "rustIgnoredLiveOrExternal": 20,
+    "frontendPassed": 111,
+    "frontendFiles": 23,
+    "rustClippy": "passed",
+    "frontendBuild": "passed",
+    "browserE2eAndFrontendHealth": "passed",
+    "helperTests": "passed",
+    "ciRuns": [
+      "https://github.com/GG-O-BP/mendimaru/actions/runs/35978990593",
+      "https://github.com/GG-O-BP/mendimaru/actions/runs/35981495665"
+    ]
+  },
+  "privateArchive": {
+    "archive": "evidence-v1.tar.zst",
+    "sha256": "fea9cfcdb0fcba08b669ac46358346cf2f5ae2ce798627208ccd627c95e2d57a",
+    "bytes": 1375995,
+    "filesVerified": 172,
+    "restoredFilesMatch": true
+  }
+}
