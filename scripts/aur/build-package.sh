@@ -30,7 +30,9 @@ if [[ -d /sccache ]]; then
   build_environment+=(
     RUSTC_WRAPPER=/usr/bin/sccache
     SCCACHE_DIR=/sccache
-    SCCACHE_CACHE_SIZE=3G
+    # #209: bound this archive so one compiler-cache generation cannot consume
+    # the repository reserve. sccache applies its LRU limit on restored files.
+    SCCACHE_CACHE_SIZE=1G
     SCCACHE_IDLE_TIMEOUT=0
   )
 fi

@@ -62,3 +62,25 @@ leaves the reader cold until a successful writer finishes. Changes to either
 job's features, target, environment or workspace require rechecking the subset
 assumption. Existing warm hits and the unchanged installer rebuild cache must
 be checked in CI, not inferred solely from the layout.
+
+## Bound the AUR archive after convergence measurement
+
+The first post-merge run, [35955439579](https://github.com/GG-O-BP/mendimaru/actions/runs/35955439579),
+restored the shared Rust dependency key in both jobs and completed the full CI/
+performance envelope in about 14.25 minutes. Its AUR builder, however, wrote a
+1.327 GiB sccache generation, up from 0.885 GiB. The retained floor became
+8.69 GiB and the larger single-save reserve lowered the target to 8.67 GiB.
+The new warning correctly exposed another capacity problem.
+
+The disposable AUR builder now sets `SCCACHE_CACHE_SIZE=1G` instead of `3G`.
+[sccache's local storage](https://github.com/mozilla/sccache/blob/v0.17.0/docs/Local.md)
+supports this bound; its [LRU initialization](https://github.com/mozilla/sccache/blob/v0.17.0/src/lru_disk_cache/mod.rs)
+applies capacity while loading restored entries in modification-time order.
+This bounds what is archived, including previous generations inside that
+archive. It does not change compiler flags, package contents or cache keys.
+
+This can evict a useful entry if the active working set exceeds 1 GiB. The
+actual PR AUR hit rate, package verification and post-merge cache size must be
+recorded on #209 before treating it as accepted. The previous 3 GiB run had
+579 Rust misses, so a successful outer Actions restore alone is insufficient
+evidence of compiler reuse.
