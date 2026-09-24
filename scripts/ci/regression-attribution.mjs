@@ -1,5 +1,16 @@
 import { execFileSync } from "node:child_process";
-import { tauriResourceInputs } from "../perf/release-relevance.mjs";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repository = fileURLToPath(new URL("../../", import.meta.url));
+const readConfig = () =>
+  JSON.parse(
+    readFileSync(
+      new URL("../../src-tauri/tauri.conf.json", import.meta.url),
+      "utf8",
+    ),
+  );
 
 // This is deliberately a closed list, independent of the PR skip classifier.
 // Unknown paths, unreadable diffs and unknown suites retain the revert signal.
@@ -8,7 +19,16 @@ const installedBundleOnlyExclusions = new Set([
   "performance/budgets.latency.json",
 ]);
 
-function excludedPath(file, suite) {
+// Neither the functional-CI workflow nor the AUR compiler-cache recipe feeds
+// the standalone Release performance workflow. Do not generalize to all
+// workflows or shell scripts: build/measurement recipe changes must implicate
+// their failing suite. These exact paths were audited for issue #219.
+const unrelatedAutomation = new Set([
+  ".github/workflows/ci.yml",
+  "scripts/aur/build-package.sh",
+]);
+
+function excludedPath(file, suite, resources) {
   if (
     typeof file !== "string" ||
     file.split("/").some((part) => part === ".." || part === "." || !part)
@@ -17,20 +37,26 @@ function excludedPath(file, suite) {
   // Config changes are never excluded. Protect files already packaged by the
   // current config as well, even if they happen to live in a documentation tree.
   if (
-    tauriResourceInputs().some(
-      (resource) => file === resource || file.startsWith(`${resource}/`),
+    resources.some(
+      (resource) =>
+        resource === "" ||
+        resource === ".." ||
+        resource.startsWith("../") ||
+        file === resource ||
+        file.startsWith(`${resource}/`),
     )
   )
     return false;
   return (
     /^docs\/[\w/-]+\.md$/.test(file) ||
     /^scripts\/(?:ci|perf)\/[^/]+\.node-test\.mjs$/.test(file) ||
-    /^scripts\/perf\/fixtures\/[^/]+\.json$/.test(file) ||
+    /^scripts\/(?:ci|perf)\/fixtures\/[^/]+\.json$/.test(file) ||
+    unrelatedAutomation.has(file) ||
     (suite === "installed-bundle" && installedBundleOnlyExclusions.has(file))
   );
 }
 
-export function unchangedViolationInputs(input) {
+export function unchangedViolationInputs(input, configReader = readConfig) {
   const { changedPaths, summaries = [], problems = [], missing = [] } = input;
   if (
     !Array.isArray(changedPaths) ||
@@ -39,15 +65,54 @@ export function unchangedViolationInputs(input) {
     missing.length > 0
   )
     return false;
+  let resources;
+  try {
+    const config = configReader();
+    if (!config || typeof config !== "object" || Array.isArray(config))
+      return false;
+    if (
+      config.bundle !== undefined &&
+      (!config.bundle ||
+        typeof config.bundle !== "object" ||
+        Array.isArray(config.bundle))
+    )
+      return false;
+    const declarations =
+      config.bundle?.resources === undefined ? {} : config.bundle.resources;
+    if (!declarations || typeof declarations !== "object") return false;
+    const inputs = Array.isArray(declarations)
+      ? declarations
+      : Object.keys(declarations);
+    // Glob declarations need expansion to prove a file is not packaged. Until
+    // that is implemented, keep the signal rather than guessing a safe prefix.
+    if (
+      inputs.some((item) => typeof item !== "string" || /[*?[\]{}]/.test(item))
+    )
+      return false;
+    resources = inputs.map((item) =>
+      path
+        .relative(
+          repository,
+          path.resolve(repository, "src-tauri", item.replaceAll("\\", "/")),
+        )
+        .replaceAll(path.sep, "/"),
+    );
+  } catch {
+    // Config corruption may be the very reason the build failed. Never let a
+    // module-level read prevent the failure reporter from filing its issue.
+    return false;
+  }
   const failed = summaries.filter((summary) => summary.violations.length > 0);
   return (
     failed.length > 0 &&
     failed.every(
       (summary) =>
-        summary.suite === "installed-bundle" &&
+        ["installed-bundle", "release-webview"].includes(summary.suite) &&
         summary.commit === input.commit &&
         summary.baselineCommit === input.baselineCommit &&
-        changedPaths.every((file) => excludedPath(file, summary.suite)),
+        changedPaths.every((file) =>
+          excludedPath(file, summary.suite, resources),
+        ),
     )
   );
 }

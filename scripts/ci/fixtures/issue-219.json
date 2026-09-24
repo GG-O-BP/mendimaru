@@ -1,0 +1,537 @@
+{
+  "issue": 219,
+  "runUrl": "https://github.com/GG-O-BP/mendimaru/actions/runs/35964497507",
+  "commit": "0508e935f1df300c9e97504eabe917c9808e0e9b",
+  "baselineCommit": "1d3ccd449cc8e71715c65cfa0c618051b7111603",
+  "changedPaths": [
+    ".github/workflows/ci.yml",
+    "docs/actions-cache-budget.md",
+    "scripts/aur/build-package.sh",
+    "scripts/ci/cache-budget.node-test.mjs",
+    "scripts/ci/fixtures/issue-209-recent-caches.json"
+  ],
+  "report": {
+    "schemaVersion": "1.0.0",
+    "status": "failed",
+    "benchmark": {
+      "suite": "release-webview",
+      "platform": "linux",
+      "buildProfile": "release",
+      "packageKind": "appimage",
+      "commit": "0508e935f1df300c9e97504eabe917c9808e0e9b",
+      "baselineCommit": "1d3ccd449cc8e71715c65cfa0c618051b7111603",
+      "startedAt": "2026-09-24T06:28:52.026Z",
+      "finishedAt": "2026-09-24T06:29:28.815Z",
+      "runId": "35964497507-candidate-latency"
+    },
+    "host": {
+      "cpuModel": "AMD EPYC 9V45 96-Core Processor",
+      "logicalCores": 4,
+      "memoryBytes": 16766414848,
+      "memoryClassBytes": 17179869184,
+      "os": "linux",
+      "osVersion": "Linux 6.17.0-1022-azure #22-Ubuntu SMP Mon Jul 27 17:24:03 UTC 2026",
+      "arch": "x64",
+      "runnerImage": "ubuntu24-20260920.314.1",
+      "webviewVersion": "2.52.6"
+    },
+    "fixture": {
+      "workspaceTiers": {
+        "small": {
+          "projectCount": 1,
+          "totalBytes": 1103
+        },
+        "large": {
+          "projectCount": 250,
+          "totalBytes": 65555750
+        }
+      },
+      "catalogModes": ["cached", "isolated-refresh"],
+      "environmentModes": ["normal", "slow", "timeout-recovery"]
+    },
+    "sampling": {
+      "warmupCount": 1,
+      "sampleCount": 3,
+      "percentileMethod": "nearest-rank",
+      "dispersion": "median-absolute-deviation-and-iqr",
+      "outlierPolicy": "tukey-iqr-report-only-never-discarded",
+      "rerunPolicy": "one-infrastructure-rerun-performance-failure-preserved",
+      "idleWindowSeconds": 5,
+      "idleSampleSeconds": 5,
+      "environmentSlowDelayMs": 400,
+      "environmentClientTimeoutMs": 750,
+      "scriptTimeoutMs": 30000,
+      "leakWindowSamples": 5,
+      "cpuNormalization": "process-tree-cpu-seconds/(wall-seconds*logical-cores)*100",
+      "processTreeScope": "root-and-live-descendants-at-each-sample",
+      "firstIpcTransport": "sync-poll-v1"
+    },
+    "metrics": {
+      "coldStartupMs": {
+        "unit": "ms",
+        "samples": [1197.97, 1196.473, 658.224],
+        "sampleCount": 3,
+        "min": 658.224,
+        "max": 1197.97,
+        "p50": 1196.473,
+        "p95": 1197.97,
+        "medianAbsoluteDeviation": 1.497,
+        "iqr": 539.746,
+        "outlierIndices": []
+      },
+      "warmStartupMs": {
+        "unit": "ms",
+        "samples": [1144.011, 1132.637, 680.017],
+        "sampleCount": 3,
+        "min": 680.017,
+        "max": 1144.011,
+        "p50": 1132.637,
+        "p95": 1144.011,
+        "medianAbsoluteDeviation": 11.374,
+        "iqr": 463.994,
+        "outlierIndices": []
+      },
+      "firstIpcMs": {
+        "unit": "ms",
+        "samples": [647.723, 762.551, 935.33],
+        "sampleCount": 3,
+        "min": 647.723,
+        "max": 935.33,
+        "p50": 762.551,
+        "p95": 935.33,
+        "medianAbsoluteDeviation": 114.828,
+        "iqr": 287.607,
+        "outlierIndices": []
+      },
+      "environmentSlowMs": {
+        "unit": "ms",
+        "samples": [829.382, 996.823, 846.997],
+        "sampleCount": 3,
+        "min": 829.382,
+        "max": 996.823,
+        "p50": 846.997,
+        "p95": 996.823,
+        "medianAbsoluteDeviation": 17.615,
+        "iqr": 167.441,
+        "outlierIndices": []
+      },
+      "environmentTimeoutRecoveryMs": {
+        "unit": "ms",
+        "samples": [1168.847, 1409.678, 1566.357],
+        "sampleCount": 3,
+        "min": 1168.847,
+        "max": 1566.357,
+        "p50": 1409.678,
+        "p95": 1566.357,
+        "medianAbsoluteDeviation": 156.679,
+        "iqr": 397.51,
+        "outlierIndices": []
+      },
+      "catalogCachedMs": {
+        "unit": "ms",
+        "samples": [43.199, 3.229, 42.708],
+        "sampleCount": 3,
+        "min": 3.229,
+        "max": 43.199,
+        "p50": 42.708,
+        "p95": 43.199,
+        "medianAbsoluteDeviation": 0.491,
+        "iqr": 39.97,
+        "outlierIndices": []
+      },
+      "catalogRefreshMs": {
+        "unit": "ms",
+        "samples": [1057.657, 655.366, 586.735],
+        "sampleCount": 3,
+        "min": 586.735,
+        "max": 1057.657,
+        "p50": 655.366,
+        "p95": 1057.657,
+        "medianAbsoluteDeviation": 68.631,
+        "iqr": 470.922,
+        "outlierIndices": []
+      },
+      "smallWorkspaceScanMs": {
+        "unit": "ms",
+        "samples": [42.649, 3.108, 42.759],
+        "sampleCount": 3,
+        "min": 3.108,
+        "max": 42.759,
+        "p50": 42.649,
+        "p95": 42.759,
+        "medianAbsoluteDeviation": 0.11,
+        "iqr": 39.651,
+        "outlierIndices": []
+      },
+      "largeWorkspaceScanMs": {
+        "unit": "ms",
+        "samples": [22.391, 24.31, 21.164],
+        "sampleCount": 3,
+        "min": 21.164,
+        "max": 24.31,
+        "p50": 22.391,
+        "p95": 24.31,
+        "medianAbsoluteDeviation": 1.227,
+        "iqr": 3.146,
+        "outlierIndices": []
+      },
+      "navigationMs": {
+        "unit": "ms",
+        "samples": [142.447, 119.421, 25.679],
+        "sampleCount": 3,
+        "min": 25.679,
+        "max": 142.447,
+        "p50": 119.421,
+        "p95": 142.447,
+        "medianAbsoluteDeviation": 23.026,
+        "iqr": 116.768,
+        "outlierIndices": []
+      },
+      "backgroundPollingCpuPercent": {
+        "unit": "percent",
+        "samples": [1.338],
+        "sampleCount": 1,
+        "min": 1.338,
+        "max": 1.338,
+        "p50": 1.338,
+        "p95": 1.338,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      },
+      "idleCpuPercent": {
+        "unit": "percent",
+        "samples": [1.338],
+        "sampleCount": 1,
+        "min": 1.338,
+        "max": 1.338,
+        "p50": 1.338,
+        "p95": 1.338,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      },
+      "privateMemoryBytes": {
+        "unit": "bytes",
+        "samples": [269877248],
+        "sampleCount": 1,
+        "min": 269877248,
+        "max": 269877248,
+        "p50": 269877248,
+        "p95": 269877248,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      },
+      "workingSetBytes": {
+        "unit": "bytes",
+        "samples": [525463552],
+        "sampleCount": 1,
+        "min": 525463552,
+        "max": 525463552,
+        "p50": 525463552,
+        "p95": 525463552,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      },
+      "processCount": {
+        "unit": "count",
+        "samples": [3],
+        "sampleCount": 1,
+        "min": 3,
+        "max": 3,
+        "p50": 3,
+        "p95": 3,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      },
+      "privateMemoryGrowthBytes": {
+        "unit": "bytes",
+        "samples": [0],
+        "sampleCount": 1,
+        "min": 0,
+        "max": 0,
+        "p50": 0,
+        "p95": 0,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      },
+      "workingSetGrowthBytes": {
+        "unit": "bytes",
+        "samples": [0],
+        "sampleCount": 1,
+        "min": 0,
+        "max": 0,
+        "p50": 0,
+        "p95": 0,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      },
+      "processCountGrowth": {
+        "unit": "count",
+        "samples": [0],
+        "sampleCount": 1,
+        "min": 0,
+        "max": 0,
+        "p50": 0,
+        "p95": 0,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      }
+    },
+    "resources": {
+      "before": {
+        "processCount": 3,
+        "privateMemoryBytes": 270069760,
+        "workingSetBytes": 525656064,
+        "cpuSeconds": 0
+      },
+      "after": {
+        "processCount": 3,
+        "privateMemoryBytes": 269877248,
+        "workingSetBytes": 525463552,
+        "cpuSeconds": 0.27
+      },
+      "peak": {
+        "processCount": 3,
+        "privateMemoryBytes": 270069760,
+        "workingSetBytes": 525656064,
+        "cpuSeconds": 0.27
+      },
+      "delta": {
+        "processCount": 0,
+        "privateMemoryBytes": -192512,
+        "workingSetBytes": -192512
+      }
+    },
+    "gate": {
+      "status": "failed",
+      "baselineCompatible": true,
+      "baselineCommit": "1d3ccd449cc8e71715c65cfa0c618051b7111603",
+      "violations": [
+        {
+          "metric": "environmentSlowMs",
+          "statistic": "p95",
+          "kind": "relative",
+          "actual": 996.823,
+          "limit": 985.943,
+          "baseline": 821.619,
+          "relativeChangePercent": 21.324
+        }
+      ],
+      "comparisons": [
+        {
+          "metric": "coldStartupMs",
+          "statistic": "p95",
+          "actual": 1197.97,
+          "baseline": 1144.299,
+          "relativeStatistic": "p95",
+          "relativeActual": 1197.97,
+          "relativeBaseline": 1144.299,
+          "relativeChangePercent": 4.69,
+          "absoluteLimit": 40000,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 50,
+          "relativeLimit": 1373.159,
+          "passed": true
+        },
+        {
+          "metric": "warmStartupMs",
+          "statistic": "p95",
+          "actual": 1144.011,
+          "baseline": 1193.037,
+          "relativeStatistic": "p95",
+          "relativeActual": 1144.011,
+          "relativeBaseline": 1193.037,
+          "relativeChangePercent": -4.109,
+          "absoluteLimit": 40000,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 50,
+          "relativeLimit": 1431.644,
+          "passed": true
+        },
+        {
+          "metric": "firstIpcMs",
+          "statistic": "p95",
+          "actual": 935.33,
+          "baseline": 1341.218,
+          "relativeStatistic": "p95",
+          "relativeActual": 935.33,
+          "relativeBaseline": 1341.218,
+          "relativeChangePercent": -30.263,
+          "absoluteLimit": 3000,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 50,
+          "relativeLimit": 1609.462,
+          "passed": true
+        },
+        {
+          "metric": "environmentSlowMs",
+          "statistic": "p95",
+          "actual": 996.823,
+          "baseline": 821.619,
+          "relativeStatistic": "p95",
+          "relativeActual": 996.823,
+          "relativeBaseline": 821.619,
+          "relativeChangePercent": 21.324,
+          "absoluteLimit": 5000,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 50,
+          "relativeLimit": 985.943,
+          "passed": false
+        },
+        {
+          "metric": "environmentTimeoutRecoveryMs",
+          "statistic": "p95",
+          "actual": 1566.357,
+          "baseline": 1968.341,
+          "relativeStatistic": "p50",
+          "relativeActual": 1409.678,
+          "relativeBaseline": 1457.343,
+          "relativeChangePercent": -3.271,
+          "absoluteLimit": 6000,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 50,
+          "relativeLimit": 1748.812,
+          "passed": true
+        },
+        {
+          "metric": "catalogCachedMs",
+          "statistic": "p95",
+          "actual": 43.199,
+          "baseline": 43.279,
+          "relativeStatistic": "p95",
+          "relativeActual": 43.199,
+          "relativeBaseline": 43.279,
+          "relativeChangePercent": -0.185,
+          "absoluteLimit": 750,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 75,
+          "relativeLimit": 118.279,
+          "passed": true
+        },
+        {
+          "metric": "catalogRefreshMs",
+          "statistic": "p50",
+          "actual": 655.366,
+          "baseline": 589.918,
+          "relativeStatistic": "p50",
+          "relativeActual": 655.366,
+          "relativeBaseline": 589.918,
+          "relativeChangePercent": 11.094,
+          "absoluteLimit": 4000,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 400,
+          "relativeLimit": 989.918,
+          "passed": true
+        },
+        {
+          "metric": "smallWorkspaceScanMs",
+          "statistic": "p95",
+          "actual": 42.759,
+          "baseline": 42.04,
+          "relativeStatistic": "p95",
+          "relativeActual": 42.759,
+          "relativeBaseline": 42.04,
+          "relativeChangePercent": 1.71,
+          "absoluteLimit": 3000,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 50,
+          "relativeLimit": 92.04,
+          "passed": true
+        },
+        {
+          "metric": "largeWorkspaceScanMs",
+          "statistic": "p95",
+          "actual": 24.31,
+          "baseline": 22.793,
+          "relativeStatistic": "p50",
+          "relativeActual": 22.391,
+          "relativeBaseline": 21.686,
+          "relativeChangePercent": 3.251,
+          "absoluteLimit": 12000,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 50,
+          "relativeLimit": 71.686,
+          "passed": true
+        },
+        {
+          "metric": "navigationMs",
+          "statistic": "p95",
+          "actual": 142.447,
+          "baseline": 152.289,
+          "relativeStatistic": "p50",
+          "relativeActual": 119.421,
+          "relativeBaseline": 108.956,
+          "relativeChangePercent": 9.605,
+          "absoluteLimit": 1500,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 100,
+          "relativeLimit": 208.956,
+          "passed": true
+        }
+      ]
+    },
+    "assertions": [
+      "one cold launch and first IPC warm-up were excluded",
+      "3 cold and warm release process launches completed",
+      "the WebDriver session declared a 30000 ms script deadline",
+      "1 slow-mode environment probe was discarded before the measured samples",
+      "3 environment probes included the tracked 400 ms slow-backend delay",
+      "the deliberate environment deadline was enforced by the WebDriver script timeout, leaving no orphaned script",
+      "3 client timeouts recovered through the next environment probe",
+      "cached catalog reads stayed separate from browser refreshes",
+      "isolated loopback Marketplace refresh used a real sandboxed browser",
+      "workspace tiers scanned 1 and 250 projects",
+      "release WebView route navigation completed through WebDriver",
+      "process-tree CPU and memory were sampled for 5 seconds"
+    ],
+    "error": "performance gate failed with 1 violation(s)"
+  },
+  "appImageSha256": {
+    "baseline": "901d965ec7f46b3293a9fd75d30cd5a0f770d50050e28603f58c1279771971cb",
+    "candidate": "c28cb115ab07f7067049a3bc7779752016668741712b423bce62b35b1eb299b6"
+  },
+  "baselineSlowSamples": [821.619, 777.302, 803.068],
+  "nativeToolDifference": {
+    "baseline": "ldd (Ubuntu GLIBC 2.39-0ubuntu8.9) 2.39",
+    "candidate": "ldd (Ubuntu GLIBC 2.39-0ubuntu8.8) 2.39"
+  },
+  "payloadDifferences": [
+    {
+      "path": "usr/bin/mendimaru",
+      "baseline": "080572e4d832f2ea7e93318d2a77f0d605988afc3f58d6405c36f2bf290fc905",
+      "candidate": "6e5f3f68b7077894feb9208dda42f6e7354ada10406f26d14d2e991c6f20bb54"
+    },
+    {
+      "path": "usr/lib/libgssapi_krb5.so.2",
+      "baseline": "3a687a0d34f330c2a3b7c04a5eba3d61cb2db4189012dc91583fa00a1deec98a",
+      "candidate": "02ad5545c0e5f22cec8f826a64c3fed945f786c16cfd9241306dce01cebb35ce"
+    },
+    {
+      "path": "usr/lib/libk5crypto.so.3",
+      "baseline": "6a71bc98e2ce02a9dce0e7c2c9a59a7747bfad389e5e2c660d30f623e4b8a9c9",
+      "candidate": "b7b31c84908d1460f89260126d4bd3e6a46bd9f8876236e61f89a70ebf31e7b5"
+    },
+    {
+      "path": "usr/lib/libkrb5.so.3",
+      "baseline": "57f0ac48397c768a1d095060aba22900982de5698288628247181a8a3e30a522",
+      "candidate": "d9b54be0f904e7c5d3429c436df590998a08a2f134b51276fcfb9ade3b640d20"
+    },
+    {
+      "path": "usr/lib/libkrb5support.so.0",
+      "baseline": "04641f4e34eaf3f7e03f4effcc17947b10a8dcf4a52db3ce2b4c147c9223a721",
+      "candidate": "080a19ad6fe47469592b4c5288d936962fe34ab53c8c215b5c57f2f33c6abf67"
+    },
+    {
+      "path": "usr/lib/libsqlite3.so.0",
+      "baseline": "ff943dea73d1aff876f5050ea92bb31c557407fe37e22102e3d525c430ddc140",
+      "candidate": "4d373cce1ca722c2c99f2ce161af6e73651ef66fe9e78ed974a2e792919e95b9"
+    }
+  ]
+}
