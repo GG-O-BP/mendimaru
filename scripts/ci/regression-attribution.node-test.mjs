@@ -88,6 +88,29 @@ test("a changed suite that passed does not implicate an unchanged failing suite"
   );
 });
 
+test("packaged documentation, directories and globs cannot be exempted", () => {
+  for (const resources of [
+    ["../docs/actions-cache-budget.md"],
+    { "../docs/": "manual/" },
+    ["../docs/*.md"],
+    [null],
+    "invalid",
+  ])
+    assert.equal(
+      unchangedViolationInputs(slowInput, () => ({ bundle: { resources } })),
+      false,
+    );
+});
+
+test("unreadable config keeps attribution conservative without crashing the reporter", () => {
+  assert.equal(
+    unchangedViolationInputs(slowInput, () => {
+      throw new Error("invalid config");
+    }),
+    false,
+  );
+});
+
 test("#214 preserves the failed CPU verdict without blaming an unrelated latency policy", () => {
   assert.equal(fixture.report.gate.status, "failed");
   assert.deepEqual(

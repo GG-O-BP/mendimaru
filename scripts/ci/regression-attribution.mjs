@@ -1,5 +1,16 @@
 import { execFileSync } from "node:child_process";
-import { tauriResourceInputs } from "../perf/release-relevance.mjs";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const repository = fileURLToPath(new URL("../../", import.meta.url));
+const readConfig = () =>
+  JSON.parse(
+    readFileSync(
+      new URL("../../src-tauri/tauri.conf.json", import.meta.url),
+      "utf8",
+    ),
+  );
 
 // This is deliberately a closed list, independent of the PR skip classifier.
 // Unknown paths, unreadable diffs and unknown suites retain the revert signal.
@@ -17,7 +28,7 @@ const unrelatedAutomation = new Set([
   "scripts/aur/build-package.sh",
 ]);
 
-function excludedPath(file, suite) {
+function excludedPath(file, suite, resources) {
   if (
     typeof file !== "string" ||
     file.split("/").some((part) => part === ".." || part === "." || !part)
@@ -26,7 +37,7 @@ function excludedPath(file, suite) {
   // Config changes are never excluded. Protect files already packaged by the
   // current config as well, even if they happen to live in a documentation tree.
   if (
-    tauriResourceInputs().some(
+    resources.some(
       (resource) => file === resource || file.startsWith(`${resource}/`),
     )
   )
@@ -40,7 +51,7 @@ function excludedPath(file, suite) {
   );
 }
 
-export function unchangedViolationInputs(input) {
+export function unchangedViolationInputs(input, configReader = readConfig) {
   const { changedPaths, summaries = [], problems = [], missing = [] } = input;
   if (
     !Array.isArray(changedPaths) ||
@@ -49,6 +60,29 @@ export function unchangedViolationInputs(input) {
     missing.length > 0
   )
     return false;
+  let resources;
+  try {
+    const declarations = configReader().bundle?.resources ?? {};
+    if (!declarations || typeof declarations !== "object") return false;
+    const inputs = Array.isArray(declarations)
+      ? declarations
+      : Object.keys(declarations);
+    // Glob declarations need expansion to prove a file is not packaged. Until
+    // that is implemented, keep the signal rather than guessing a safe prefix.
+    if (
+      inputs.some((item) => typeof item !== "string" || /[*?[\]{}]/.test(item))
+    )
+      return false;
+    resources = inputs.map((item) =>
+      path
+        .relative(repository, path.resolve(repository, "src-tauri", item))
+        .replaceAll(path.sep, "/"),
+    );
+  } catch {
+    // Config corruption may be the very reason the build failed. Never let a
+    // module-level read prevent the failure reporter from filing its issue.
+    return false;
+  }
   const failed = summaries.filter((summary) => summary.violations.length > 0);
   return (
     failed.length > 0 &&
@@ -57,7 +91,9 @@ export function unchangedViolationInputs(input) {
         ["installed-bundle", "release-webview"].includes(summary.suite) &&
         summary.commit === input.commit &&
         summary.baselineCommit === input.baselineCommit &&
-        changedPaths.every((file) => excludedPath(file, summary.suite)),
+        changedPaths.every((file) =>
+          excludedPath(file, summary.suite, resources),
+        ),
     )
   );
 }
