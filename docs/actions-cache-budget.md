@@ -47,9 +47,10 @@ Read-only replay of the live 2026-09-24 listing gives:
 | Remaining headroom                        | 1.75 |
 | Largest observed save                     | 1.12 |
 
-The plan has no headroom warning. This is a dry-run result: actual deletion and
-post-merge convergence must be verified in `Actions cache budget`. PR and
-post-merge run links and cache-hit/envelope observations are recorded on #209.
+The initial replay had no headroom warning. Actual retirement in [run
+35955450343](https://github.com/GG-O-BP/mendimaru/actions/runs/35955450343)
+confirmed 9.06 to 8.25 GiB. Subsequent AUR growth and recently used generations
+required the additional bound below; the initial replay alone is not acceptance.
 
 ## Limits
 
@@ -96,3 +97,47 @@ and consecutive-main headroom must be recorded on #209 before acceptance.
 A successful outer Actions restore alone is insufficient evidence of compiler
 reuse. More simultaneous saves or future cache growth can still exceed this
 measured bound; the planner continues to report those conditions.
+
+## Recorded validation
+
+The measurements distinguish an Actions archive hit from actual compiler reuse:
+
+| Path                           | Evidence                                                                                               | Result                                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Shared Linux dependency cache  | [Main CI 35955439579](https://github.com/GG-O-BP/mendimaru/actions/runs/35955439579)                   | Reader and writer restored the same `v0-rust-rust-ubuntu-Linux-x64-6ff13d87-aea8b408` full match  |
+| AUR with a 700 MiB bound       | [AUR job 107513164144](https://github.com/GG-O-BP/mendimaru/actions/runs/35962251877/job/107513164144) | 609 hits, including 579 Rust; zero misses; 700 MiB cache; installed package verification passed   |
+| Completed installer cache miss | [Verification 35961402546](https://github.com/GG-O-BP/mendimaru/actions/runs/35961402546)              | Rust dependency full match; only the workspace crate compiled; both installers built and measured |
+
+The cold installer verification used main `1d3ccd4` plus a diagnostic suffix on
+only the candidate's completed-installer cache key. The dependency key, source,
+build recipe and measurement parameters stayed unchanged. Its dependency hit
+was `v0-rust-release-performance-windows-bundles-candidate-Windows_NT-x64-2113753f-aea8b408`.
+Compilation took 2m21s; the complete candidate installer job took 4m08s; all
+WebView and installed-bundle gates finished successfully in **10m44s**. The
+25,345,112-byte diagnostic cache was removed after measurement, and the key
+change was never merged into main.
+
+The main CI/performance envelope immediately before that controlled cold run
+was **8m16s** ([CI](https://github.com/GG-O-BP/mendimaru/actions/runs/35960762373),
+[performance](https://github.com/GG-O-BP/mendimaru/actions/runs/35960762164)).
+All functional, security, packaging and performance gates passed; the unrelated
+advisory performance hold remained active. This run used the earlier 1 GiB AUR
+bound; the 700 MiB follow-up changes only AUR storage and the CI browser setup,
+not the installer build or performance measurement path.
+
+The first 700 MiB PR also recorded two Windows native-E2E failures while waiting
+for the live catalog. The second attempt's screenshot identified a browser
+CDP startup timeout, before navigation to Marketplace, while Ubuntu's separate
+response timeout passed on its one infrastructure retry. CI now selects the
+lockfile-pinned Playwright Chromium through the existing `MENDIMARU_CHROME_PATH`
+override, as Linux does. The application still uses WebView2 and the catalog is
+still live; neither timeouts nor sandbox policy were relaxed. Installing this
+browser per job adds no Actions cache family. Original failure attempts remain
+available and are not reported as successful measurements. The changed browser
+environment passed [Windows native E2E job 107517976507](https://github.com/GG-O-BP/mendimaru/actions/runs/35963835991/job/107517976507),
+including ten live catalog versions and all 32 assertions.
+
+Final archive sizes, the listing with two protected 700 MiB generations, and the
+post-merge pruning result are tracked on [#209](https://github.com/GG-O-BP/mendimaru/issues/209).
+The fixed listing test reserves additional archive overhead, but actual cache
+hit and capacity evidence is required alongside that model.
