@@ -9,6 +9,13 @@
 # run needs. This job can, so it deletes the dead entries itself and leaves
 # headroom under the cap.
 #
+# Issue #209 then fixed how much headroom "headroom" means. Pruning alone left
+# an irreducible 9.06 GiB floor with 0.94 GiB of room under the cap against a
+# 1.12 GiB largest save, so the eviction above was still reachable. The floor
+# came down to 8.25 GiB by consolidating two Linux CI jobs onto one dependency
+# cache key, and this job now reserves the measured largest save under the cap
+# rather than aiming at a flat number. See docs/actions-cache-budget.md.
+#
 # Deliberately outside every pull-request and push gate: it must not add a
 # second to the wall clock the #176 split SLA protects, and a prune that raced
 # the run that is measuring would be its own source of noise.
@@ -139,11 +146,22 @@ jobs:
             exit 1
           fi
 
-      # Fails on GitHub's real cap, warns on the headroom target. The ten
-      # `v0-rust-*` dependency families already hold one generation each and
-      # cannot be pruned without giving up a cache hit, so the repository sits
-      # legitimately between the two numbers. Failing on the target would make
-      # this job permanently red and worthless as a signal.
+      # Fails on GitHub's real cap, warns on the headroom target.
+      #
+      # Issue #209 changed what that target is. It used to be a flat 9 GiB,
+      # and a flat number cannot express the condition that actually loses a
+      # cache: the repository sat at 9.06 GiB, under the cap, with 0.94 GiB of
+      # headroom against a 1.12 GiB largest save, so a badly timed save still
+      # crossed the cap and GitHub still evicted. The planner now reserves the
+      # measured largest single save under the cap and reports whichever of
+      # that reservation and the 9 GiB policy budget binds. The reservation can
+      # only tighten the target, never loosen it.
+      #
+      # Still a warning rather than an error: the remaining `v0-rust-*`
+      # dependency families hold one generation each and cannot be pruned
+      # without giving up a cache hit, so only a change to what is cached can
+      # move this number. Failing on it would make the job permanently red and
+      # worthless as a signal.
       - name: Enforce the cap and report the headroom target
         shell: bash
         run: |
@@ -157,10 +175,21 @@ jobs:
               console.error(`::error::${kind}: ${plan.remainingBytes} > ${plan.capBytes} bytes. The next run can still lose a dependency cache to eviction.`);
               process.exit(1);
             }
+            if (plan.reserveExceedsCap) {
+              console.error(`::error::one save alone needs ${plan.reserveBytes} bytes against a ${plan.capBytes} byte cap. No prune can make that save safe; the cached paths have to change.`);
+              process.exit(1);
+            }
             if (plan.overBudget) {
               const kind = plan.structurallyOverBudget
                 ? "retained default-branch caches exceed the headroom target"
                 : "recent or retained caches exceed the headroom target";
-              console.log(`::warning::${kind}: ${plan.remainingBytes} > ${plan.budgetBytes} bytes, but within the ${plan.capBytes} byte cap.`);
+              const why = plan.budgetBinding === "reserve"
+                ? `the target is the cap minus the ${plan.reserveBytes} byte largest single save`
+                : `the target is the ${plan.policyBudgetBytes} byte policy budget`;
+              console.log(`::warning::${kind}: ${plan.remainingBytes} > ${plan.budgetBytes} bytes, but within the ${plan.capBytes} byte cap (${why}).`);
             }
+            // Reported even when the plan is inside the target, because this
+            // is the pair #209 is about and it is the one number a reader
+            // cannot reconstruct from the total alone.
+            console.log(`Largest single save ${plan.largestSaveBytes} bytes against ${plan.saveHeadroomBytes} bytes of headroom under the ${plan.capBytes} byte cap; fits: ${plan.fitsReserve}.`);
           '
