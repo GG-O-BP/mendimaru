@@ -502,6 +502,22 @@ jobs:
         if: needs.changes.outputs.windows_e2e == 'true'
         run: npm ci
 
+      # The hosted image's default browser failed to publish its CDP endpoint
+      # in attempt 2 of run 35962251877. Use the lockfile-pinned Chromium for
+      # the external catalog, as Linux does, while the app still uses WebView2.
+      # Do not add an Actions cache family: this browser is installed per job.
+      - name: Install pinned Marketplace Chromium
+        if: needs.changes.outputs.windows_e2e == 'true'
+        shell: pwsh
+        run: |
+          npx playwright install chromium
+          if ($LASTEXITCODE -ne 0) { throw "Pinned Chromium installation failed." }
+          $chromePath = node --input-type=module -e "import { chromium } from '@playwright/test'; console.log(chromium.executablePath());"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $chromePath -PathType Leaf)) {
+            throw "Pinned Chromium executable was not found."
+          }
+          "MENDIMARU_CHROME_PATH=$chromePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Run actual Tauri, WebView2, IPC, Windows, and performance E2E
         if: needs.changes.outputs.windows_e2e == 'true'
         run: npm run test:e2e:windows
