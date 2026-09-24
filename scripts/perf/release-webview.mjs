@@ -29,6 +29,7 @@ if (!["linux", "windows"].includes(platform)) {
 }
 const options = parseArguments(process.argv.slice(2));
 const sampling = samplingPolicy({
+  firstIpcTransport: platform === "linux" ? "sync-poll-v1" : "execute-async",
   sampleCount: options.sampleCount,
   idleWindowSeconds: options.idleWindowSeconds,
 });
@@ -530,6 +531,9 @@ function trackSample(index, total) {
 // and deadline errors carry the command that produced them; assertions carry
 // Node's ERR_ASSERTION code.
 function classifyFailure(error) {
+  if (error?.name === "IpcTimeoutError") {
+    return { classification: "measurement", reason: "first-ipc-timeout" };
+  }
   if (error?.name === "ScriptTimeoutError") {
     return { classification: "harness", reason: "webdriver-script-timeout" };
   }
