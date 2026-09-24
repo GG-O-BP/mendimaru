@@ -107,3 +107,12 @@ Raw private environment files are never publication artifacts. The safe report
 records binary and suite hashes and scenario outcomes; failed runs retain their
 failure outcome. Ordinary process/Chromium fixtures and gate-helper tests remain
 separate from this live acceptance evidence.
+
+The release parity gate can also borrow a prepared session. Set
+`MENDIMARU_STUDIO_PARITY_SHARED_SESSION_ID=shared_<id>` in the self-hosted
+runner's environment alongside its owner config/cache. It verifies ordinary
+and assisted runs against the same comparable preparation and includes both
+environment reports in its evidence. It never starts, stops, or finalizes that
+borrowed Runtime, even after a failed assertion; the owner handles cleanup.
+Its existing suite requirement for a state change and a value assertion still
+applies. Omitting the setting retains the original standalone gate flow.

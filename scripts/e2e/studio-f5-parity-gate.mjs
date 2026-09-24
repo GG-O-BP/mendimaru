@@ -122,10 +122,12 @@ function runEvidence(summary) {
     browserParity: summary.browserParity,
     corrections: summary.corrections,
     sessionId: summary.sessionId,
+    environment: summary.environment,
+    concurrency: summary.concurrency,
   };
 }
 
-export async function runParityGate() {
+export async function runParityGate({ run = cli } = {}) {
   assert.equal(
     process.platform,
     "linux",
@@ -133,6 +135,8 @@ export async function runParityGate() {
   );
   const binary = required("MENDIMARU_STUDIO_PARITY_BINARY");
   const suitePath = required("MENDIMARU_STUDIO_PARITY_SUITE");
+  const sharedSessionId = process.env.MENDIMARU_STUDIO_PARITY_SHARED_SESSION_ID;
+  if (sharedSessionId) assert.match(sharedSessionId, /^shared_[a-f0-9]{32}$/);
   const evidencePath =
     process.env.MENDIMARU_STUDIO_PARITY_EVIDENCE ??
     "artifacts/e2e/studio-f5-parity.json";
@@ -151,30 +155,57 @@ export async function runParityGate() {
 
   const startedAt = new Date().toISOString();
   let runtimeSessionId = null;
+  let preparationId = null;
   const runs = {};
   let failure;
   try {
-    const start = await cli(
-      binary,
-      [
-        "runtime",
-        "start",
-        "--mode",
-        "studio-run-locally",
-        "--json",
-        "--timeout-seconds",
-        String(runtimeTimeoutSeconds),
-      ],
-      runtimeTimeoutSeconds * 1000 + 30_000,
-    );
-    if (start.exitCode !== 0) throw new Error("runtime start failed");
-    runtimeSessionId =
-      start.envelope.runtimeSessionId ??
-      start.envelope.data?.runtime?.sessionId ??
-      null;
+    if (sharedSessionId) {
+      const shared = await run(
+        binary,
+        [
+          "browser",
+          "session",
+          "status",
+          "--shared-session-id",
+          sharedSessionId,
+          "--json",
+        ],
+        30_000,
+      );
+      const prepared = shared.envelope.data;
+      assert.equal(shared.exitCode, 0);
+      assert.equal(prepared?.state, "ready");
+      assert.equal(prepared.identity?.runtimeMode, "studio-run-locally");
+      assert(
+        prepared.identity.studioSessionId,
+        "keeper-linked Studio F5 required",
+      );
+      assert.equal(prepared.preparation?.comparable, true);
+      preparationId = prepared.preparation.preparationId;
+      runtimeSessionId = prepared.runtimeSessionId;
+    } else {
+      const start = await run(
+        binary,
+        [
+          "runtime",
+          "start",
+          "--mode",
+          "studio-run-locally",
+          "--json",
+          "--timeout-seconds",
+          String(runtimeTimeoutSeconds),
+        ],
+        runtimeTimeoutSeconds * 1000 + 30_000,
+      );
+      if (start.exitCode !== 0) throw new Error("runtime start failed");
+      runtimeSessionId =
+        start.envelope.runtimeSessionId ??
+        start.envelope.data?.runtime?.sessionId ??
+        null;
+    }
     assert.match(runtimeSessionId ?? "", /^runtime_[a-f0-9]{32}$/);
 
-    const wait = await cli(
+    const wait = await run(
       binary,
       [
         "runtime",
@@ -194,13 +225,15 @@ export async function runParityGate() {
     }
 
     // Parity run: the gate's decision. The browser must stay unmodified.
-    const unmodified = await cli(
+    const target = sharedSessionId
+      ? ["--shared-session-id", sharedSessionId]
+      : ["--runtime-session-id", runtimeSessionId];
+    const unmodified = await run(
       binary,
       [
         "browser",
         "test",
-        "--runtime-session-id",
-        runtimeSessionId,
+        ...target,
         "--suite-path",
         suitePath,
         "--asset-mirror",
@@ -226,15 +259,18 @@ export async function runParityGate() {
       "the unmodified-browser Studio F5 path failed; an assisted pass is not ordinary-Chrome parity (#141)",
     );
     assert(unmodifiedSummary.passed > 0 && unmodifiedSummary.failed === 0);
+    if (sharedSessionId) {
+      assert.equal(unmodifiedSummary.environment?.comparable, true);
+      assert.equal(unmodifiedSummary.environment.preparationId, preparationId);
+    }
 
     // Comparison evidence only: the assisted run can never satisfy this gate.
-    const assisted = await cli(
+    const assisted = await run(
       binary,
       [
         "browser",
         "test",
-        "--runtime-session-id",
-        runtimeSessionId,
+        ...target,
         "--suite-path",
         suitePath,
         "--asset-mirror",
@@ -248,11 +284,18 @@ export async function runParityGate() {
     runs.assisted = runEvidence(assisted.envelope.data);
     assert.equal(assisted.envelope.data.browserParity, "assisted");
     assert.equal(correctionReport(assisted.envelope.data).applied, true);
+    if (sharedSessionId) {
+      assert.equal(assisted.envelope.data.environment?.comparable, true);
+      assert.equal(
+        assisted.envelope.data.environment.preparationId,
+        preparationId,
+      );
+    }
   } catch (error) {
     failure = error;
   } finally {
-    if (runtimeSessionId) {
-      await cli(
+    if (runtimeSessionId && !sharedSessionId) {
+      await run(
         binary,
         ["runtime", "stop", "--session-id", runtimeSessionId, "--json"],
         120_000,
@@ -267,6 +310,8 @@ export async function runParityGate() {
     finishedAt: new Date().toISOString(),
     suiteSha256: digest(suiteBytes),
     runtimeSessionId,
+    sharedSessionId,
+    preparationId,
     runs,
   };
   await fs.mkdir(path.dirname(evidencePath), { recursive: true });
