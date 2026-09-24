@@ -649,3 +649,9 @@ identity for the comparison to mean anything.
 - Fixture and Portable regressions do not substitute for the real Linux+WinBoat
   gates, which keep their existing opt-in and disposable-snapshot conditions.
   See the [#155 regressions](winboat-regression-matrix.md#bounded-parallel-test-execution-155).
+
+## Shared-session integration (#149)
+
+See [shared Linux + WinBoat tests](shared-winboat-testing.md) for fixed preparation
+identity, cross-process data exclusion, supported combinations, upgrade behavior,
+and the installed-package real Studio F5 integration gate.

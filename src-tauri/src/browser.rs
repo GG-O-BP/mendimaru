@@ -542,6 +542,36 @@ pub(crate) async fn test(
             false,
         )
     })?;
+    // The JS scheduler coordinates lanes in this runner. Kernel ownership
+    // coordinates other cooperating CLI processes, including separate caches.
+    // Lock ordering: VM lifecycle use -> app data -> artifact store.
+    #[cfg(target_os = "linux")]
+    let _app_use = if let Some((vm_key, _)) =
+        crate::winboat::vm_use::observation().and_then(|observation| observation.snapshot())
+    {
+        Some(
+            crate::winboat::test_session::acquire_app_use(
+                &vm_key,
+                declared
+                    .iter()
+                    .all(|plan| plan.resource == BrowserResourceKind::AppRead),
+            )
+            .await
+            .map_err(|message| {
+                let mut error = browser_error(
+                    backend,
+                    CapabilityId::BrowserTest,
+                    BackendErrorCode::PreconditionFailed,
+                    true,
+                );
+                error.message = message.to_string();
+                error.retryable = message == crate::winboat::test_session::APP_BUSY;
+                error
+            })?,
+        )
+    } else {
+        None
+    };
     let secrets = secret_values(&suite).map_err(|_| {
         browser_error(
             backend,

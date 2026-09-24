@@ -33,8 +33,12 @@ pub(crate) const WRONG_VM: &str = "the shared browser session belongs to a diffe
 pub(crate) const FINALIZE_BUSY: &str = "shared browser session finalize is already in progress";
 pub(crate) const DRAINED_TIMEOUT: &str =
     "shared browser session participants are still active; retry finalize after they exit";
+pub(crate) const PREPARATION_REQUIRED: &str =
+    "the shared browser session has no verified environment; prepare a new session in the Runtime owner's cache";
+pub(crate) const APP_BUSY: &str =
+    "WinBoat app data is busy with another browser suite; retry after that suite finishes";
 
-const MAX_RECORD_BYTES: u64 = 8 * 1024;
+const MAX_RECORD_BYTES: u64 = 512 * 1024;
 const MAX_URL_LENGTH: usize = 4096;
 const MAX_MARKER_LENGTH: usize = 255;
 const FINALIZE_WAIT: Duration = Duration::from_secs(3);
@@ -99,6 +103,8 @@ pub(crate) struct Descriptor {
     pub(crate) prepared_at: chrono::DateTime<chrono::Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) identity: Option<Identity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) preparation: Option<crate::browser::environment::Report>,
 }
 
 pub(crate) struct NewSession {
@@ -268,6 +274,10 @@ fn validate_descriptor(descriptor: &Descriptor) -> Result<(), &'static str> {
             .is_some_and(|marker| marker.is_empty() || marker.len() > MAX_MARKER_LENGTH)
         || matches!(&descriptor.identity, Some(identity) if identity.base_url.len() > MAX_URL_LENGTH)
         || (descriptor.state == State::Ready && descriptor.identity.is_none())
+        || descriptor
+            .preparation
+            .as_ref()
+            .is_some_and(|report| !report.valid() || report.interrupted())
     {
         return Err(UNTRUSTED);
     }
@@ -333,6 +343,7 @@ pub(crate) fn create(session: &NewSession) -> Result<String, &'static str> {
         runtime_origin: session.runtime_origin,
         prepared_at: chrono::Utc::now(),
         identity: None,
+        preparation: None,
     };
     write_record(&directory, &descriptor)?;
     Ok(session_id)
@@ -377,6 +388,46 @@ pub(crate) fn load(session_id: &str) -> Result<Descriptor, &'static str> {
         return Err(UNKNOWN);
     }
     read_record(&directory()?, &record_name(session_id))
+}
+
+pub(crate) fn save_preparation(
+    session_id: &str,
+    preparation: crate::browser::environment::Report,
+) -> Result<Descriptor, &'static str> {
+    let mut descriptor = load(session_id)?;
+    if descriptor.state != State::Ready || !preparation.valid() || preparation.interrupted() {
+        return Err(UNTRUSTED);
+    }
+    descriptor.preparation = Some(preparation);
+    write_record(&directory()?, &descriptor)?;
+    Ok(descriptor)
+}
+
+/// VM-wide application data coordination also covers separate CLI/cache
+/// processes. Only wholly read-only suites share it; writes conservatively
+/// reserve the whole suite. This is separate from the lifecycle lease.
+pub(crate) async fn acquire_app_use(vm_key: &str, read_only: bool) -> Result<File, &'static str> {
+    if vm_key.len() != 64 || !vm_key.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(UNTRUSTED);
+    }
+    let file = open_lock(&directory()?, &format!("app-{vm_key}.lock"))?;
+    let deadline = tokio::time::Instant::now() + FINALIZE_WAIT;
+    loop {
+        let result = if read_only {
+            fs2::FileExt::try_lock_shared(&file)
+        } else {
+            fs2::FileExt::try_lock_exclusive(&file)
+        };
+        match result {
+            Ok(()) => return Ok(file),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(_) => return Err(UNTRUSTED),
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(APP_BUSY);
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
 }
 
 fn attach_refusal(state: State) -> &'static str {

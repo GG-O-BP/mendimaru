@@ -212,7 +212,7 @@ impl Report {
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub(crate) use linux::start;
+pub(crate) use linux::{start, start_prepared};
 
 #[cfg(not(target_os = "linux"))]
 pub(crate) struct Observer;

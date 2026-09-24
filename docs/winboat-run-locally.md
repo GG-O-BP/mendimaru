@@ -114,14 +114,15 @@ existing records, but current readiness checks do not emit them.
 
 ## Stop and exposure boundary
 
-`runtime stop` restores the exact original Compose file and recreates WinBoat,
-which terminates the guest Runtime and any active Studio process. It verifies
-the `/storage` identity and verifies that the Studio Runtime-port mapping is
-actually absent before recording `stopped`. This disruptive
-boundary is intentional because Studio Pro does not expose a safe unattended
-Run Locally stop API yet. The managed Compose digest must still match; a
-concurrent user edit is preserved and stop returns
-`runtime_compose_recovery_failed` instead of overwriting it.
+`runtime stop` uses VM-wide port ownership. While another Runtime is active,
+it stops only the selected record and defers forwarding removal, preserving the
+other app's Compose mappings and VM. The last stopping session removes owned
+mappings and restores their prior forwarding; unchanged single-owner Compose can
+be restored byte-for-byte. Otherwise scoped, revision-checked edits preserve
+unrelated external changes. Cleanup that requires recreation is disruptive to
+Studio and needs exclusive VM use. See the
+[multi-project ownership contract](winboat-multi-runtime.md) for deferred cleanup,
+conflicts, and compatibility limits.
 
 The keeper automatically cleans up a linked Runtime only after an authenticated
 report confirms Studio exited, or after an explicit successful Studio stop.
@@ -163,3 +164,9 @@ WinBoat browser runs now record bounded environment observations and interrupt o
 changes. See [environment generations](browser-environment-observation.md) for
 `--build-marker`, JSON comparability, preparation boundaries, observation limits,
 and the separate external-change fixture and disposable-VM gates.
+
+## Shared-session integration (#149)
+
+See [shared Linux + WinBoat tests](shared-winboat-testing.md) for fixed preparation
+identity, cross-process data exclusion, supported combinations, upgrade behavior,
+and the installed-package real Studio F5 integration gate.
