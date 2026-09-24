@@ -1115,6 +1115,118 @@ test("child, memory, and sustained CPU leak fixtures fail their budgets", () => 
   }
 });
 
+// #204: all original samples, including the sustained run-level offset.
+const issue204Baseline = [1466.821, 1418.416, 1475.815];
+const issue204Candidate = [2093.205, 1982.813, 2111.658];
+function coldWindowsReport(commit, samples) {
+  return makeLatencyReport({
+    commit,
+    platform: "windows",
+    sampleLists: { coldStartupMs: samples },
+  });
+}
+
+test("#204 Windows cold startup compares the measured center and preserves p95", () => {
+  const baseline = coldWindowsReport(baselineCommit, issue204Baseline);
+  const candidate = coldWindowsReport(candidateCommit, issue204Candidate);
+  const gate = evaluatePerformance(candidate, baseline, latencyPolicy);
+  assert.equal(gate.status, "passed");
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === "coldStartupMs",
+  );
+  assert.equal(comparison.actual, 2111.658);
+  assert.equal(comparison.absoluteLimit, 20000);
+  assert.equal(comparison.relativeActual, 2093.205);
+  assert.equal(comparison.relativeBaseline, 1466.821);
+  const oldPolicy = structuredClone(latencyPolicy);
+  const budget =
+    oldPolicy.platforms.windows.suites["release-webview"].metrics.coldStartupMs;
+  delete budget.relativeStatistic;
+  budget.relativeNoiseFloor = 600;
+  assert.equal(
+    evaluatePerformance(candidate, baseline, oldPolicy).status,
+    "failed",
+  );
+  // A statistic change alone cannot explain away this failure.
+  budget.relativeStatistic = "p50";
+  assert.equal(
+    evaluatePerformance(candidate, baseline, oldPolicy).status,
+    "failed",
+  );
+});
+
+test("#204 startup regression above the floor and absolute tail still fail", () => {
+  const baseline = coldWindowsReport(baselineCommit, issue204Baseline);
+  const slower = coldWindowsReport(
+    candidateCommit,
+    issue204Baseline.map((x) => x + 701),
+  );
+  assert(
+    evaluatePerformance(slower, baseline, latencyPolicy).violations.some(
+      (v) => v.metric === "coldStartupMs" && v.kind === "relative",
+    ),
+  );
+  const tail = coldWindowsReport(candidateCommit, [1466, 1500, 20001]);
+  assert(
+    evaluatePerformance(tail, baseline, latencyPolicy).violations.some(
+      (v) =>
+        v.metric === "coldStartupMs" &&
+        v.kind === "absolute" &&
+        v.statistic === "p95",
+    ),
+  );
+  assert.equal(
+    latencyPolicy.platforms.linux.suites["release-webview"].metrics
+      .coldStartupMs.relativeStatistic,
+    undefined,
+  );
+  assert.equal(
+    latencyPolicy.platforms.windows.suites["installed-bundle"].metrics
+      .coldStartupMs.relativeStatistic,
+    undefined,
+  );
+});
+
+test("#204 unchanged-product corpus retains every sample and passes", async () => {
+  const pairs = JSON.parse(
+    await readFile(new URL("./fixtures/issue-204.json", import.meta.url)),
+  );
+  assert.equal(pairs.length, 40);
+  for (const pair of pairs) {
+    const baseline = coldWindowsReport(baselineCommit, pair.baseline);
+    const candidate = coldWindowsReport(candidateCommit, pair.candidate);
+    assert.equal(
+      evaluatePerformance(candidate, baseline, latencyPolicy).status,
+      "passed",
+      pair.run,
+    );
+  }
+});
+
+test("#204 independent PR #211 failure also passes without further calibration", () => {
+  const baseline = coldWindowsReport(
+    baselineCommit,
+    [1508.084, 1474.057, 1509.117],
+  );
+  const candidate = coldWindowsReport(
+    candidateCommit,
+    [1542.322, 2143.699, 2148.045],
+  );
+  assert.equal(
+    evaluatePerformance(candidate, baseline, latencyPolicy).status,
+    "passed",
+  );
+  const oldPolicy = structuredClone(latencyPolicy);
+  const metric =
+    oldPolicy.platforms.windows.suites["release-webview"].metrics.coldStartupMs;
+  delete metric.relativeStatistic;
+  metric.relativeNoiseFloor = 600;
+  assert.equal(
+    evaluatePerformance(candidate, baseline, oldPolicy).status,
+    "failed",
+  );
+});
+
 function makeReport({
   commit,
   sampleValue = 100,
