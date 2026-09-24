@@ -123,6 +123,72 @@ test("a summary quotes the gate's own violations", () => {
   assert.equal(violationCount([summary]), 1);
 });
 
+test("#220 preserves both NSIS violations and identifies the installer", () => {
+  const fixture = JSON.parse(
+    readFileSync(new URL("./fixtures/issue-220.json", import.meta.url)),
+  );
+  const summary = summarizeEvaluatedReport(
+    fixture.report,
+    "candidate-nsis.json",
+  );
+  assert.equal(summary.packageKind, "nsis");
+  assert.equal(summary.violations.length, 2);
+  assert.equal(summary.status, "failed");
+  const input = {
+    commit: fixture.commit,
+    baselineCommit: fixture.baselineCommit,
+    changedPaths: fixture.changedPaths,
+    eventName: "push",
+    summaries: [summary],
+  };
+  const issue = buildRegressionIssue(input);
+  assert.deepEqual(issue.labels, [regressionLabel]);
+  for (const body of [issue.body, buildRerunComment(input)]) {
+    assert.match(body, /windows\/installed-bundle\/nsis/);
+    assert.match(body, /workingSetBytes/);
+    assert.match(body, /processCount/);
+    assert.doesNotMatch(body, /installed-bundle\/msi/);
+  }
+  assert.deepEqual(
+    fixture.installerSha256.baseline,
+    fixture.installerSha256.candidate,
+  );
+  const both = buildRegressionIssue({
+    ...input,
+    summaries: [summary, { ...summary, packageKind: "msi" }],
+  });
+  assert.match(both.body, /installed-bundle\/msi/);
+  assert.match(both.body, /installed-bundle\/nsis/);
+  assert.equal(
+    summarizeEvaluatedReport(evaluatedReport()).packageKind,
+    "unknown",
+  );
+});
+
+test("both installer gates run after input validation even when the other gate fails", () => {
+  const workflow = readFileSync(
+    path.join(repository, ".github/workflows/release-performance.yml"),
+    "utf8",
+  );
+  const job = workflow
+    .split("\n  installed-bundle-gate:")[1]
+    .split("\n  post-merge-regression-report:")[0];
+  assert.match(job, /id: bundle-inputs/);
+  for (const kind of ["MSI", "NSIS"]) {
+    const step = job
+      .split(`- name: Gate ${kind} against current main`)[1]
+      .split("\n      - name:")[0];
+    assert.match(step, /!cancelled\(\)/);
+    assert.match(step, /steps\.relevance\.outputs\.relevant == 'true'/);
+    assert.match(step, /steps\.bundle-inputs\.outcome == 'success'/);
+    assert.doesNotMatch(step, /continue-on-error|\|\| true/);
+    assert.match(
+      step,
+      new RegExp(`reports/candidate-${kind.toLowerCase()}\\.json`),
+    );
+  }
+});
+
 test("a report the gate never evaluated is marked, not invented", () => {
   const summary = summarizeEvaluatedReport(
     evaluatedReport({ gate: undefined }),
