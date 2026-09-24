@@ -51,6 +51,10 @@
       {
         "source": "Issue #200, run 35808020735: original twelve-sample Linux polling CPU p95 is 6.933 vs 3.246, p50 is 2.302 vs 2.101. Across 25 downloaded comparisons with unchanged product sources and dependency inputs (npm scripts excluded), the largest positive p50 movement is 1.559 percentage points, within the existing 2-point floor. Raw samples and absolute p95 are retained.",
         "recordedAt": "2026-09-24T00:00:00Z"
+      },
+      {
+        "source": "Issue #201, run 35809104298: Linux candidate processCount is 3 in 57 of 60 samples, with isolated values 11, 10 and 11 at indices 0, 28 and 59. The original pre-window snapshot is 3; the final instantaneous sample therefore reports +8 although the last five samples have median 3. A five-sample median at both endpoints reports sustained growth; raw endpoints, peaks and all sixty samples remain available. Both compared variants declare the same sampling.leakWindowSamples contract.",
+        "recordedAt": "2026-09-24T00:00:00Z"
       }
     ]
   },
@@ -118,19 +122,19 @@
               "statistic": "max",
               "absoluteMax": 67108864,
               "relativeMaxPercent": 20,
-              "rationale": "Five-minute positive private-memory growth above 64 MiB is treated as a leak signal."
+              "rationale": "Five-minute positive private-memory growth above 64 MiB is treated as a leak signal. The endpoints are the median of the first and the last five samples, not two instantaneous snapshots: a single sample can carry a whole poll burst, and an endpoint difference reads that burst as a leak. The burst itself stays visible in resources.peak and in the raw samples."
             },
             "workingSetGrowthBytes": {
               "statistic": "max",
               "absoluteMax": 134217728,
               "relativeMaxPercent": 20,
-              "rationale": "Working-set growth receives extra shared-page headroom but remains bounded."
+              "rationale": "Working-set growth receives extra shared-page headroom but remains bounded. The endpoints are the median of the first and the last five samples, not two instantaneous snapshots: a single sample can carry a whole poll burst, and an endpoint difference reads that burst as a leak. The burst itself stays visible in resources.peak and in the raw samples."
             },
             "processCountGrowth": {
               "statistic": "max",
               "absoluteMax": 2,
               "relativeMaxPercent": 20,
-              "rationale": "At most two transient descendants may remain at the final sample; larger growth fails."
+              "rationale": "At most two descendants may remain at the end of the idle window; larger sustained growth fails. The endpoints are the median of the first and the last five samples, not two instantaneous snapshots: a single sample can carry a whole poll burst, and an endpoint difference reads that burst as a leak. The burst itself stays visible in resources.peak and in the raw samples."
             }
           }
         },
@@ -182,19 +186,19 @@
               "statistic": "max",
               "absoluteMax": 67108864,
               "relativeMaxPercent": 20,
-              "rationale": "Installed package private-memory growth is bounded across the five-minute window."
+              "rationale": "Installed package private-memory growth is bounded across the five-minute window. The endpoints are the median of the first and the last five samples, not two instantaneous snapshots: a single sample can carry a whole poll burst, and an endpoint difference reads that burst as a leak. The burst itself stays visible in resources.peak and in the raw samples."
             },
             "workingSetGrowthBytes": {
               "statistic": "max",
               "absoluteMax": 134217728,
               "relativeMaxPercent": 20,
-              "rationale": "Installed package working-set growth is tracked separately from private bytes."
+              "rationale": "Installed package working-set growth is tracked separately from private bytes. The endpoints are the median of the first and the last five samples, not two instantaneous snapshots: a single sample can carry a whole poll burst, and an endpoint difference reads that burst as a leak. The burst itself stays visible in resources.peak and in the raw samples."
             },
             "processCountGrowth": {
               "statistic": "max",
               "absoluteMax": 2,
               "relativeMaxPercent": 20,
-              "rationale": "Installed package child-process growth is checked across the full idle window."
+              "rationale": "Installed package child-process growth is checked across the full idle window. The endpoints are the median of the first and the last five samples, not two instantaneous snapshots: a single sample can carry a whole poll burst, and an endpoint difference reads that burst as a leak. The burst itself stays visible in resources.peak and in the raw samples."
             }
           }
         }
@@ -244,19 +248,19 @@
               "statistic": "max",
               "absoluteMax": 100663296,
               "relativeMaxPercent": 20,
-              "rationale": "Five-minute positive private-memory growth above 96 MiB is a leak signal."
+              "rationale": "Five-minute positive private-memory growth above 96 MiB is a leak signal. The endpoints are the median of the first and the last five samples, not two instantaneous snapshots: a single sample can carry a whole poll burst, and an endpoint difference reads that burst as a leak. The burst itself stays visible in resources.peak and in the raw samples."
             },
             "workingSetGrowthBytes": {
               "statistic": "max",
               "absoluteMax": 167772160,
               "relativeMaxPercent": 20,
-              "rationale": "WebView2 working-set growth is bounded separately from private bytes."
+              "rationale": "WebView2 working-set growth is bounded separately from private bytes. The endpoints are the median of the first and the last five samples, not two instantaneous snapshots: a single sample can carry a whole poll burst, and an endpoint difference reads that burst as a leak. The burst itself stays visible in resources.peak and in the raw samples."
             },
             "processCountGrowth": {
               "statistic": "max",
               "absoluteMax": 2,
               "relativeMaxPercent": 20,
-              "rationale": "Long-idle child count may not accumulate beyond two transient processes."
+              "rationale": "Long-idle child count may not accumulate beyond two transient processes. The endpoints are the median of the first and the last five samples, not two instantaneous snapshots: a single sample can carry a whole poll burst, and an endpoint difference reads that burst as a leak. The burst itself stays visible in resources.peak and in the raw samples."
             }
           }
         },
@@ -308,19 +312,19 @@
               "statistic": "max",
               "absoluteMax": 100663296,
               "relativeMaxPercent": 20,
-              "rationale": "Installed bundle private-memory growth is bounded across the five-minute window."
+              "rationale": "Installed bundle private-memory growth is bounded across the five-minute window. The endpoints are the median of the first and the last five samples, not two instantaneous snapshots: a single sample can carry a whole poll burst, and an endpoint difference reads that burst as a leak. The burst itself stays visible in resources.peak and in the raw samples."
             },
             "workingSetGrowthBytes": {
               "statistic": "max",
               "absoluteMax": 167772160,
               "relativeMaxPercent": 20,
-              "rationale": "Installed bundle working-set growth is tracked separately from private bytes."
+              "rationale": "Installed bundle working-set growth is tracked separately from private bytes. The endpoints are the median of the first and the last five samples, not two instantaneous snapshots: a single sample can carry a whole poll burst, and an endpoint difference reads that burst as a leak. The burst itself stays visible in resources.peak and in the raw samples."
             },
             "processCountGrowth": {
               "statistic": "max",
               "absoluteMax": 2,
               "relativeMaxPercent": 20,
-              "rationale": "The installed process tree may not leak descendants during five minutes idle."
+              "rationale": "The installed process tree may not leak descendants during five minutes idle. The endpoints are the median of the first and the last five samples, not two instantaneous snapshots: a single sample can carry a whole poll burst, and an endpoint difference reads that burst as a leak. The burst itself stays visible in resources.peak and in the raw samples."
             }
           }
         }

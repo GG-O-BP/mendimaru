@@ -306,6 +306,12 @@
           "maximum": 120000,
           "description": "WebDriver script deadline the harness declares for every session (issue #191). Optional so reports captured before the harness declared it stay valid; when present it must match between the compared variants because sampling is a compatibility field."
         },
+        "leakWindowSamples": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 29,
+          "description": "Number of idle samples at each end of the window whose median defines the leak endpoints (issue #201). Optional so reports captured before the harness declared it stay valid; when present it must match between the compared variants because sampling is a compatibility field, and the growth metrics are then recomputable from the published samples."
+        },
         "cpuNormalization": {
           "const": "process-tree-cpu-seconds/(wall-seconds*logical-cores)*100"
         },

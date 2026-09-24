@@ -323,9 +323,11 @@ The common metric meanings are:
 - `idleCpuPercent`, `privateMemoryBytes`, `workingSetBytes`, and `processCount`:
   sixty five-second samples covering at least 300 seconds.
 - `privateMemoryGrowthBytes`, `workingSetGrowthBytes`, and
-  `processCountGrowth`: positive end-minus-start leak signals from that same
-  window. Negative deltas are retained in `resources.delta` but become zero for
-  the upper-bound leak metric.
+  `processCountGrowth`: positive differences between the medians of the first
+  and last five samples in that same window. The declared
+  `sampling.leakWindowSamples: 5` versions this definition for both variants.
+  Instantaneous deltas remain in `resources.delta`; negative sustained growth
+  becomes zero for the upper-bound leak metric.
 
 Idle samples use fixed five-second deadlines. Snapshot collection time is part
 of each CPU interval and is subtracted from the next sleep instead of being
@@ -561,3 +563,21 @@ An isolated burst below 8 percent no longer fails the relative gate. It remains
 in the raw samples and absolute p95. Sustained increases above the 2-point floor
 still fail. Windows polling, the full-window idle CPU statistic and the
 300-second leak window are unchanged. The original failed run is preserved.
+
+## Sustained leak endpoints (#201)
+
+Run 35809104298 reported process growth of eight because the final snapshot
+caught a periodic probe's children. Of sixty samples, 57 contained three
+processes; only indices 0, 28 and 59 contained 11, 10 and 11. The median of each
+five-sample endpoint is three. CPU, memory and process peaks remain visible.
+
+Release WebView and installed MSI/NSIS use the same endpoint function for
+process, private-memory and working-set growth. Their 300-second window and
+absolute growth rails are unchanged. A rise present in at least three of the
+last five samples still contributes to the leak gate. A newly persistent leak
+starting in the final two intervals may wait for the next run to be detected;
+short peaks are observed by the raw and absolute resource metrics.
+
+Reports without the declaration retain the historical instantaneous endpoint
+validation. Reports with it are checked against their full published sample
+series. Mixing the two sampling contracts in a comparison is rejected.

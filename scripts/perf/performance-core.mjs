@@ -57,6 +57,18 @@ const validatePolicySchema = ajv.compile(policySchema);
 
 export const performanceReportSchemaVersion = REPORT_SCHEMA_VERSION;
 
+// Issue #201. A leak endpoint is the median of this many samples at each end
+// of the idle window instead of one instantaneous snapshot. The Linux idle
+// window is not burst-free: the 15-second environment poll spawns about seven
+// short-lived children, and the 5-second sampler catches them whenever the two
+// timers drift into phase, so one sample can carry +13 processes and +1 GB of
+// working set. A single-point end-minus-start difference reads such a burst as
+// a leak. Five is odd on purpose: the median of an odd window is an observed
+// sample, so the reported growth stays a difference of two real measurements,
+// and it tolerates two burst samples inside one window, which is one more than
+// the densest burst train measured (every 15 s).
+export const LEAK_WINDOW_SAMPLES = 5;
+
 export function nearestRank(samples, percentile) {
   const values = checkedSamples(samples);
   if (!Number.isFinite(percentile) || percentile <= 0 || percentile > 100) {
@@ -64,6 +76,30 @@ export function nearestRank(samples, percentile) {
   }
   const sorted = values.toSorted((left, right) => left - right);
   return sorted[Math.ceil((percentile / 100) * sorted.length) - 1];
+}
+
+// The window actually used at each end. It never overlaps itself in the middle
+// of a short series, and it stays odd so the median is an observed sample.
+export function leakWindowSize(sampleCount, requested = LEAK_WINDOW_SAMPLES) {
+  if (!Number.isInteger(sampleCount) || sampleCount < 1) {
+    throw new Error("leak window needs at least one sample");
+  }
+  if (!Number.isInteger(requested) || requested < 1) {
+    throw new Error("requested leak window must be a positive integer");
+  }
+  const bounded = Math.min(requested, Math.max(1, Math.floor(sampleCount / 2)));
+  return bounded % 2 === 0 ? bounded - 1 : bounded;
+}
+
+// Positive sustained growth across the idle window. Negative movement stays
+// zero for the upper-bound leak metric, exactly as the endpoint difference did.
+export function sustainedGrowth(samples, requested = LEAK_WINDOW_SAMPLES) {
+  const values = checkedSamples(samples);
+  const size = leakWindowSize(values.length, requested);
+  return Math.max(
+    0,
+    rounded(median(values.slice(-size)) - median(values.slice(0, size))),
+  );
 }
 
 export function median(samples) {
@@ -361,10 +397,22 @@ export function validatePerformanceReport(report) {
     privateMemoryGrowthBytes: "privateMemoryBytes",
     workingSetGrowthBytes: "workingSetBytes",
   })) {
-    const expectedGrowth = Math.max(0, report.resources.delta[resource]);
+    // Issue #201. A report that declares a leak window is cross-checked
+    // against its own published samples, which is a stronger invariant than
+    // the one it replaces: `resources.delta` is two numbers nothing else in
+    // the report can verify, while sustained growth is recomputable from the
+    // series the report already carries. A report without the declaration
+    // keeps the endpoint-difference invariant so archived reports stay valid.
+    const declaredWindow = report.sampling.leakWindowSamples;
+    const expectedGrowth =
+      declaredWindow === undefined
+        ? Math.max(0, report.resources.delta[resource])
+        : sustainedGrowth(report.metrics[resource].samples, declaredWindow);
     if (report.metrics[metric].samples[0] !== expectedGrowth) {
       throw new Error(
-        `metric ${metric} does not match resources.delta.${resource}`,
+        declaredWindow === undefined
+          ? `metric ${metric} does not match resources.delta.${resource}`
+          : `metric ${metric} does not match the sustained growth of ${resource}`,
       );
     }
   }
@@ -569,6 +617,13 @@ export function samplingPolicy(overrides = {}) {
     // inherited without announcing it, so a script timeout can be traced to a
     // declared policy instead of an unexplained server default.
     scriptTimeoutMs: 30000,
+    // Issue #201. The leak endpoints are the median of this many samples at
+    // each end of the idle window rather than one instantaneous snapshot, so a
+    // periodic spawn burst caught by the final sample is no longer read as a
+    // leak. Declared in the report because it decides what the growth metrics
+    // mean, and because `sampling` is a compatibility field, so two compared
+    // variants cannot silently use different definitions.
+    leakWindowSamples: LEAK_WINDOW_SAMPLES,
     cpuNormalization:
       "process-tree-cpu-seconds/(wall-seconds*logical-cores)*100",
     processTreeScope: "root-and-live-descendants-at-each-sample",
