@@ -92,8 +92,12 @@ test("packaged documentation, directories and globs cannot be exempted", () => {
   for (const resources of [
     ["../docs/actions-cache-budget.md"],
     { "../docs/": "manual/" },
+    ["..\\docs\\"],
+    ["../"],
+    ["../../"],
     ["../docs/*.md"],
     [null],
+    null,
     "invalid",
   ])
     assert.equal(
@@ -109,6 +113,19 @@ test("unreadable config keeps attribution conservative without crashing the repo
     }),
     false,
   );
+  for (const config of [
+    null,
+    123,
+    "invalid",
+    [],
+    { bundle: [] },
+    { bundle: null },
+  ]) {
+    assert.equal(
+      unchangedViolationInputs(slowInput, () => config),
+      false,
+    );
+  }
 });
 
 test("#214 preserves the failed CPU verdict without blaming an unrelated latency policy", () => {

@@ -38,7 +38,12 @@ function excludedPath(file, suite, resources) {
   // current config as well, even if they happen to live in a documentation tree.
   if (
     resources.some(
-      (resource) => file === resource || file.startsWith(`${resource}/`),
+      (resource) =>
+        resource === "" ||
+        resource === ".." ||
+        resource.startsWith("../") ||
+        file === resource ||
+        file.startsWith(`${resource}/`),
     )
   )
     return false;
@@ -62,7 +67,18 @@ export function unchangedViolationInputs(input, configReader = readConfig) {
     return false;
   let resources;
   try {
-    const declarations = configReader().bundle?.resources ?? {};
+    const config = configReader();
+    if (!config || typeof config !== "object" || Array.isArray(config))
+      return false;
+    if (
+      config.bundle !== undefined &&
+      (!config.bundle ||
+        typeof config.bundle !== "object" ||
+        Array.isArray(config.bundle))
+    )
+      return false;
+    const declarations =
+      config.bundle?.resources === undefined ? {} : config.bundle.resources;
     if (!declarations || typeof declarations !== "object") return false;
     const inputs = Array.isArray(declarations)
       ? declarations
@@ -75,7 +91,10 @@ export function unchangedViolationInputs(input, configReader = readConfig) {
       return false;
     resources = inputs.map((item) =>
       path
-        .relative(repository, path.resolve(repository, "src-tauri", item))
+        .relative(
+          repository,
+          path.resolve(repository, "src-tauri", item.replaceAll("\\", "/")),
+        )
         .replaceAll(path.sep, "/"),
     );
   } catch {
