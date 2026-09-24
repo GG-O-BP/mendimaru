@@ -154,6 +154,15 @@ class LinuxWebviewDriver extends WebviewDriverBase {
     return rounded(performance.now() - started);
   }
 
+  async firstIpc() {
+    const started = performance.now();
+    const environment = await this.client.invokePolled(
+      "get_environment_status",
+    );
+    assert.equal(environment.ready, true, "release backend must be ready");
+    return rounded(performance.now() - started);
+  }
+
   snapshot() {
     assert.ok(this.applicationPid, "the release application is not running");
     return linuxProcessSnapshot(this.applicationPid, this.cpuTracker);
@@ -285,6 +294,7 @@ export class WebDriverClient {
     // Last WebDriver command this client started. Retained even after it
     // fails so a harness failure can name the exact stalled endpoint.
     this.lastCommand = undefined;
+    this.invocationSequence = 0;
   }
 
   async request(method, endpoint, body, timeoutMs = REQUEST_TIMEOUT_MS) {
@@ -484,6 +494,95 @@ export class WebDriverClient {
     const result = await this.invokeResult(command, payload, timeoutMs);
     if (!result.ok) throw new Error(`${command} failed: ${result.error}`);
     return result.value;
+  }
+
+  // #207: dispatch once, then observe the promise with synchronous commands.
+  // This avoids tying the first IPC to WebKit's long-lived async-script
+  // callback. It never retries the IPC or replaces a failed timing sample.
+  async invokePolled(
+    command,
+    payload = {},
+    { timeoutMs = SCRIPT_TIMEOUT_MS, pollMs = 25 } = {},
+  ) {
+    assert.ok(
+      Number.isFinite(timeoutMs) &&
+        timeoutMs > 0 &&
+        timeoutMs <= SCRIPT_TIMEOUT_MS,
+    );
+    assert.ok(Number.isFinite(pollMs) && pollMs > 0);
+    assert.ok(!this.pendingInvocation, "a polled IPC is already in flight");
+    const token = `${this.sessionId}:${++this.invocationSequence}`;
+    this.pendingInvocation = token;
+    const deadline = performance.now() + timeoutMs;
+    const execute = (script, args) =>
+      this.request(
+        "POST",
+        `/session/${this.sessionId}/execute/sync`,
+        { script, args },
+        Math.max(1, Math.ceil(deadline - performance.now())),
+      );
+    try {
+      await execute(
+        `
+        const [token, command, payload] = arguments;
+        const state = { token, result: null };
+        window.__mendimaruFirstIpc = state;
+        const finish = result => {
+          if (window.__mendimaruFirstIpc === state) state.result = result;
+        };
+        try {
+          Promise.resolve(window.__TAURI__.core.invoke(command, payload)).then(
+            value => finish({ ok: true, value }),
+            error => finish({ ok: false, error: String(error) }),
+          );
+        } catch (error) {
+          finish({ ok: false, error: String(error) });
+        }
+        return true;
+      `,
+        [token, command, payload],
+      );
+      while (performance.now() < deadline) {
+        const state = await execute(
+          `
+          const state = window.__mendimaruFirstIpc;
+          if (!state || state.token !== arguments[0]) return { missing: true };
+          return { result: state.result };
+        `,
+          [token],
+        );
+        if (state?.missing)
+          throw new Error(
+            "first IPC observation was lost (session or page changed)",
+          );
+        if (state?.result) {
+          if (!state.result.ok)
+            throw new Error(`${command} failed: ${state.result.error}`);
+          return state.result.value;
+        }
+        await delay(
+          Math.min(pollMs, Math.max(0, deadline - performance.now())),
+        );
+      }
+      const error = new Error(
+        `first IPC ${command} did not settle within ${timeoutMs} ms`,
+      );
+      error.name = "IpcTimeoutError";
+      throw error;
+    } finally {
+      this.pendingInvocation = undefined;
+      // Invalidate the token even on failure. A late promise cannot publish
+      // into the next measurement or leave a retained result in the page.
+      await this.request(
+        "POST",
+        `/session/${this.sessionId}/execute/sync`,
+        {
+          script: `if (window.__mendimaruFirstIpc?.token === arguments[0]) delete window.__mendimaruFirstIpc; return true;`,
+          args: [token],
+        },
+        1000,
+      ).catch(() => undefined);
+    }
   }
 
   async find(selector) {

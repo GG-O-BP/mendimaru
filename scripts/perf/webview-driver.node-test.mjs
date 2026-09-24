@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import test from "node:test";
+import vm from "node:vm";
 
 import {
   SCRIPT_TIMEOUT_MS,
@@ -282,4 +283,100 @@ test("declaring a non-positive script timeout is rejected", async (t) => {
     driver.client.declareScriptTimeout(1.5),
     /positive integer/,
   );
+});
+
+// Execute the actual injected scripts in a page-like realm. Async WebDriver
+// callbacks are deliberately unavailable: only bounded sync commands work.
+function polledPage(invoke) {
+  const client = new WebDriverClient("http://unused");
+  client.sessionId = "page";
+  const context = vm.createContext({
+    window: { __TAURI__: { core: { invoke } } },
+  });
+  const requests = [];
+  client.request = async (method, endpoint, body, timeoutMs) => {
+    assert.equal(method, "POST");
+    assert(endpoint.endsWith("/execute/sync"));
+    assert(Number.isInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 30000);
+    requests.push({ endpoint, body });
+    context.args = body.args;
+    return vm.runInContext(
+      `(function() { ${body.script} }).apply(null, args)`,
+      context,
+    );
+  };
+  return { client, context, requests };
+}
+
+test("#207 first IPC completes without an async WebDriver callback and runs once", async () => {
+  let invocations = 0;
+  const page = polledPage(async (command, payload) => {
+    invocations++;
+    assert.equal(command, "get_environment_status");
+    assert.equal(payload.probe, 1);
+    return { ready: true };
+  });
+  assert.deepEqual(
+    await page.client.invokePolled("get_environment_status", { probe: 1 }),
+    { ready: true },
+  );
+  assert.equal(invocations, 1);
+  assert.equal(page.context.window.__mendimaruFirstIpc, undefined);
+  assert.equal(page.client.pendingInvocation, undefined);
+});
+
+test("#207 rejected and synchronously thrown IPC failures survive cleanup", async () => {
+  for (const invoke of [
+    () => Promise.reject(new Error("backend failed")),
+    () => {
+      throw new Error("backend failed");
+    },
+  ]) {
+    const page = polledPage(invoke);
+    await assert.rejects(
+      page.client.invokePolled("get_environment_status"),
+      /backend failed/,
+    );
+    assert.equal(page.context.window.__mendimaruFirstIpc, undefined);
+  }
+});
+
+test("#207 a hung backend fails once at its deadline and rejects a late result", async () => {
+  let finish;
+  let invocations = 0;
+  const page = polledPage(() => {
+    invocations++;
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  });
+  await assert.rejects(
+    page.client.invokePolled(
+      "get_environment_status",
+      {},
+      { timeoutMs: 20, pollMs: 1 },
+    ),
+    { name: "IpcTimeoutError" },
+  );
+  assert.equal(invocations, 1);
+  assert.equal(page.context.window.__mendimaruFirstIpc, undefined);
+  finish({ ready: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(page.context.window.__mendimaruFirstIpc, undefined);
+});
+
+test("#207 a page replacement and an overlapping measurement fail closed", async () => {
+  const page = polledPage(() => new Promise(() => {}));
+  const pending = page.client.invokePolled(
+    "get_environment_status",
+    {},
+    { timeoutMs: 100, pollMs: 1 },
+  );
+  await assert.rejects(
+    page.client.invokePolled("get_environment_status"),
+    /already in flight/,
+  );
+  delete page.context.window.__mendimaruFirstIpc;
+  await assert.rejects(pending, /observation was lost/);
+  assert.equal(page.client.pendingInvocation, undefined);
 });

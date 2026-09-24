@@ -317,6 +317,10 @@
         },
         "processTreeScope": {
           "const": "root-and-live-descendants-at-each-sample"
+        },
+        "firstIpcTransport": {
+          "enum": ["execute-async", "sync-poll-v1"],
+          "description": "First IPC transport. Optional for archived reports; sampling compatibility rejects mixing transport contracts (#207)."
         }
       }
     },

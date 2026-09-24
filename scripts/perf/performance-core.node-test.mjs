@@ -1776,3 +1776,24 @@ function snapshot(overrides = {}) {
     ...overrides,
   };
 }
+
+test("#207 first IPC transport must match between compared variants", () => {
+  const candidate = makeLatencyReport({ commit: candidateCommit });
+  const baseline = makeLatencyReport({ commit: baselineCommit });
+  candidate.sampling.firstIpcTransport = "sync-poll-v1";
+  baseline.sampling.firstIpcTransport = "sync-poll-v1";
+  assert.equal(
+    assertCompatibleReports(candidate, baseline, latencyPolicy),
+    true,
+  );
+  delete baseline.sampling.firstIpcTransport;
+  assert.throws(
+    () => assertCompatibleReports(candidate, baseline, latencyPolicy),
+    /sampling/,
+  );
+  baseline.sampling.firstIpcTransport = "execute-async";
+  assert.throws(
+    () => assertCompatibleReports(candidate, baseline, latencyPolicy),
+    /sampling/,
+  );
+});
