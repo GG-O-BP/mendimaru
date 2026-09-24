@@ -749,7 +749,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: staged-installers
-          key: bundle-installers-${{ steps.fingerprint.outputs.fingerprint }}
+          key: bundle-installers-${{ steps.fingerprint.outputs.fingerprint }}${{ matrix.variant == 'candidate' && '-issue209-coldcheck-20260924' || '' }}
 
       - name: Check out current-main baseline
         if: matrix.variant == 'baseline' && steps.relevance.outputs.relevant == 'true' && steps.installer-cache.outputs.cache-hit != 'true'
