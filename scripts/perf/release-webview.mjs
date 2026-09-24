@@ -13,6 +13,7 @@ import {
   normalizedCpuPercent,
   resourceSummary,
   samplingPolicy,
+  sustainedGrowth,
 } from "./performance-core.mjs";
 import { createReleaseFixture } from "./release-fixture.mjs";
 import {
@@ -424,17 +425,26 @@ try {
       privateMemoryBytes: { unit: "bytes", samples: privateMemoryBytes },
       workingSetBytes: { unit: "bytes", samples: workingSetBytes },
       processCount: { unit: "count", samples: processCount },
+      // Issue #201. The leak signals compare the median of the first and the
+      // last `leakWindowSamples` samples instead of the two endpoint
+      // snapshots, which stay in `resources` for diagnosis. The idle window is
+      // not burst-free: the 15-second environment poll spawns short-lived
+      // children, and whichever sample catches them carries their processes
+      // and their memory. `resources.peak` still exposes that excursion, so
+      // nothing is hidden - it just no longer decides a leak verdict.
       privateMemoryGrowthBytes: {
         unit: "bytes",
-        samples: [Math.max(0, resources.delta.privateMemoryBytes)],
+        samples: [
+          sustainedGrowth(privateMemoryBytes, sampling.leakWindowSamples),
+        ],
       },
       workingSetGrowthBytes: {
         unit: "bytes",
-        samples: [Math.max(0, resources.delta.workingSetBytes)],
+        samples: [sustainedGrowth(workingSetBytes, sampling.leakWindowSamples)],
       },
       processCountGrowth: {
         unit: "count",
-        samples: [Math.max(0, resources.delta.processCount)],
+        samples: [sustainedGrowth(processCount, sampling.leakWindowSamples)],
       },
     },
     resources,

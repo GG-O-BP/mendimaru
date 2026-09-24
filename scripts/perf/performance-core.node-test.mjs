@@ -7,6 +7,7 @@ import {
   createPerformanceReport,
   createProcessCpuTracker,
   evaluatePerformance,
+  leakWindowSize,
   median,
   nearestRank,
   normalizedCpuPercent,
@@ -14,6 +15,7 @@ import {
   resourceSummary,
   samplingPolicy,
   summarizeSamples,
+  sustainedGrowth,
   trackProcessCpuSeconds,
   validatePerformancePolicy,
   validatePerformanceReport,
@@ -1318,6 +1320,188 @@ test("#200 unchanged-product corpus retains every sample and passes", async () =
   }
 });
 
+// Issue #201. Run 35809104298 read an eight-process leak from run
+// `90629a35f3b7`, whose only harness change was a warm-up probe in the latency
+// phase. Its idle process series is flat at three except for three single
+// samples, and the last of the sixty landed on one of them.
+const burstProcessSeries = [
+  11,
+  ...Array(27).fill(3),
+  10,
+  ...Array(30).fill(3),
+  11,
+];
+
+test("a poll burst on the final idle sample is not a process leak", () => {
+  assert.equal(burstProcessSeries.length, 60);
+  // What the endpoint difference read: eleven minus the three of the
+  // pre-window snapshot, four times the two-process rail.
+  assert.equal(burstProcessSeries.at(-1) - 3, 8);
+  assert.equal(sustainedGrowth(burstProcessSeries), 0);
+
+  const baseline = makeIdleReport({ commit: baselineCommit, cpuPercent: 2 });
+  const candidate = makeIdleReport({
+    commit: candidateCommit,
+    cpuPercent: 2,
+    sampleLists: { processCount: burstProcessSeries },
+  });
+  const gate = evaluatePerformance(candidate, baseline, idlePolicy);
+
+  assert.equal(gate.status, "passed");
+  assert.equal(candidate.metrics.processCountGrowth.samples[0], 0);
+  // The excursion is not hidden; it is still the maximum of the series.
+  assert.equal(candidate.metrics.processCount.max, 11);
+});
+
+test("a sustained child leak still fails its rail", () => {
+  // Three descendants that arrive halfway through the window and stay.
+  const leaking = [...Array(30).fill(3), ...Array(30).fill(6)];
+  assert.equal(sustainedGrowth(leaking), 3);
+
+  const baseline = makeIdleReport({ commit: baselineCommit, cpuPercent: 2 });
+  const candidate = makeIdleReport({
+    commit: candidateCommit,
+    cpuPercent: 2,
+    sampleLists: { processCount: leaking },
+  });
+  const gate = evaluatePerformance(candidate, baseline, idlePolicy);
+
+  assert.equal(gate.status, "failed");
+  assert(
+    gate.violations.some(
+      (violation) =>
+        violation.metric === "processCountGrowth" &&
+        violation.kind === "absolute" &&
+        violation.actual === 3,
+    ),
+  );
+});
+
+test("a working-set burst at the end of the window is not a memory leak", () => {
+  // Run 35715515352 measured 1543892992 bytes in the sample that caught the
+  // poll, against a 503365632-byte quiet level: a 993 MB excursion, eight
+  // times the 128 MiB working-set growth rail, from a tree that did not grow.
+  const quiet = 503365632;
+  const burst = 1543892992;
+  const series = [...Array(59).fill(quiet), burst];
+  assert(burst - quiet > 134217728);
+  assert.equal(sustainedGrowth(series), 0);
+
+  const baseline = makeIdleReport({
+    commit: baselineCommit,
+    cpuPercent: 2,
+    sampleLists: { workingSetBytes: Array(60).fill(quiet) },
+  });
+  const candidate = makeIdleReport({
+    commit: candidateCommit,
+    cpuPercent: 2,
+    sampleLists: { workingSetBytes: series },
+  });
+  assert.equal(
+    evaluatePerformance(candidate, baseline, idlePolicy).status,
+    "passed",
+  );
+  assert.equal(candidate.metrics.workingSetGrowthBytes.samples[0], 0);
+});
+
+test("a sustained working-set leak still fails its rail", () => {
+  const quiet = 503365632;
+  const series = [
+    ...Array(30).fill(quiet),
+    ...Array(30).fill(quiet + 200 * 1024 ** 2),
+  ];
+  const baseline = makeIdleReport({
+    commit: baselineCommit,
+    cpuPercent: 2,
+    sampleLists: { workingSetBytes: Array(60).fill(quiet) },
+  });
+  const candidate = makeIdleReport({
+    commit: candidateCommit,
+    cpuPercent: 2,
+    sampleLists: { workingSetBytes: series },
+  });
+  const gate = evaluatePerformance(candidate, baseline, idlePolicy);
+
+  assert.equal(gate.status, "failed");
+  assert(
+    gate.violations.some(
+      (violation) =>
+        violation.metric === "workingSetGrowthBytes" &&
+        violation.kind === "absolute",
+    ),
+  );
+});
+
+test("leak windows stay odd, bounded, and reject impossible inputs", () => {
+  assert.equal(leakWindowSize(60), 5);
+  assert.equal(leakWindowSize(11), 5);
+  // Never overlapping in the middle of a short series, and never even, so the
+  // median is always an observed sample rather than an average of two.
+  assert.equal(leakWindowSize(10), 5);
+  assert.equal(leakWindowSize(8), 3);
+  assert.equal(leakWindowSize(6), 3);
+  assert.equal(leakWindowSize(4), 1);
+  assert.equal(leakWindowSize(2), 1);
+  assert.equal(leakWindowSize(1), 1);
+  assert.equal(leakWindowSize(60, 7), 7);
+  assert.equal(leakWindowSize(60, 8), 7);
+  for (const invalid of [0, -1, 1.5, "60", undefined]) {
+    assert.throws(() => leakWindowSize(invalid), /at least one sample/);
+  }
+  for (const invalid of [0, -1, 1.5, "5", null]) {
+    assert.throws(() => leakWindowSize(60, invalid), /positive integer/);
+  }
+  // A single-sample series, which is what the latency phase files for the
+  // idle metrics it does not measure, can never report a leak.
+  assert.equal(sustainedGrowth([4]), 0);
+  assert.equal(sustainedGrowth([4, 9]), 5);
+  assert.throws(() => sustainedGrowth([]), /non-empty/);
+  assert.throws(() => sustainedGrowth([1, -1]), /non-negative/);
+  // Negative movement is an improvement, not a negative leak.
+  assert.equal(
+    sustainedGrowth([...Array(30).fill(9), ...Array(30).fill(4)]),
+    0,
+  );
+});
+
+test("a declared leak window makes growth recomputable from the report", () => {
+  const report = makeIdleReport({
+    commit: candidateCommit,
+    cpuPercent: 2,
+    sampleLists: { processCount: burstProcessSeries },
+  });
+  assert.equal(report.sampling.leakWindowSamples, 5);
+
+  const forged = structuredClone(report);
+  forged.metrics.processCountGrowth = summarizeSamples([8], "count");
+  assert.throws(
+    () => validatePerformanceReport(forged),
+    /processCountGrowth does not match the sustained growth of processCount/,
+  );
+
+  // A report that predates the declaration keeps the endpoint invariant, so
+  // archived reports stay valid and still cannot invent a growth number.
+  const legacy = structuredClone(report);
+  delete legacy.sampling.leakWindowSamples;
+  validatePerformanceReport(legacy);
+  legacy.metrics.processCountGrowth = summarizeSamples([8], "count");
+  assert.throws(
+    () => validatePerformanceReport(legacy),
+    /processCountGrowth does not match resources\.delta\.processCount/,
+  );
+});
+
+test("#201 legacy and sustained endpoint contracts cannot be compared", () => {
+  const current = makeIdleReport({ commit: candidateCommit, cpuPercent: 2 });
+  const legacy = makeIdleReport({ commit: baselineCommit, cpuPercent: 2 });
+  delete legacy.sampling.leakWindowSamples;
+  validatePerformanceReport(legacy);
+  assert.throws(
+    () => evaluatePerformance(current, legacy, idlePolicy),
+    /sampling/,
+  );
+});
+
 function makeReport({
   commit,
   sampleValue = 100,
@@ -1357,16 +1541,18 @@ function makeReport({
       environmentModes: [],
     },
     sampling: samplingPolicy(),
-    metricSamples: Object.fromEntries(
-      metricNames.map((name) => [
-        name,
-        {
-          unit: metricUnit(name),
-          samples: Array(metricSampleCount(name)).fill(
-            metricValues[name] ?? defaultMetricValue(name, sampleValue),
-          ),
-        },
-      ]),
+    metricSamples: withGrowthSeries(
+      Object.fromEntries(
+        metricNames.map((name) => [
+          name,
+          {
+            unit: metricUnit(name),
+            samples: Array(metricSampleCount(name)).fill(
+              metricValues[name] ?? defaultMetricValue(name, sampleValue),
+            ),
+          },
+        ]),
+      ),
     ),
     resources,
     assertions: ["unit fixture"],
@@ -1396,10 +1582,12 @@ function makeIdleReport({
   cpuPercent,
   platform = "linux",
   metricValues = {},
+  sampleLists = {},
 }) {
   return makeReleaseWebviewReport({
     commit,
     platform,
+    sampleLists,
     defaultValue: (name) => idleMetricDefault(name, cpuPercent),
     metricValues,
   });
@@ -1482,18 +1670,20 @@ function makeReleaseWebviewReport({
       idleWindowSeconds: 300,
       idleSampleSeconds: 5,
     }),
-    metricSamples: Object.fromEntries(
-      metricNames.map((name) => [
-        name,
-        {
-          unit: metricUnit(name),
-          samples:
-            sampleLists[name] ??
-            Array(metricSampleCount(name, sampleCount)).fill(
-              metricValues[name] ?? defaultValue(name),
-            ),
-        },
-      ]),
+    metricSamples: withGrowthSeries(
+      Object.fromEntries(
+        metricNames.map((name) => [
+          name,
+          {
+            unit: metricUnit(name),
+            samples:
+              sampleLists[name] ??
+              Array(metricSampleCount(name, sampleCount)).fill(
+                metricValues[name] ?? defaultValue(name),
+              ),
+          },
+        ]),
+      ),
     ),
     resources: resourceSummary(snapshot(), snapshot(), snapshot()),
     assertions: ["unit fixture"],
@@ -1510,6 +1700,39 @@ function growthResources(delta) {
   return resourceSummary(before, after, after);
 }
 
+// Issue #201. A fixture that asks for a leak now has to produce one: the
+// requested growth is written into the second half of the matching resource
+// series, because the report is validated against the sustained growth of its
+// own samples instead of against an unverifiable `resources.delta`.
+function withGrowthSeries(metricSamples) {
+  for (const [growth, resource] of Object.entries({
+    processCountGrowth: "processCount",
+    privateMemoryGrowthBytes: "privateMemoryBytes",
+    workingSetGrowthBytes: "workingSetBytes",
+  })) {
+    if (!metricSamples[growth] || !metricSamples[resource]) continue;
+    const requested = metricSamples[growth].samples[0];
+    if (requested) {
+      const series = metricSamples[resource].samples;
+      const half = Math.floor(series.length / 2);
+      metricSamples[resource] = {
+        unit: metricSamples[resource].unit,
+        samples: series.map((value, index) =>
+          index < half ? value : value + requested,
+        ),
+      };
+    }
+    // A fixture that supplies its own resource series gets the growth the
+    // harness would have derived from it, so no fixture can assert a leak
+    // number its own samples do not show.
+    metricSamples[growth] = {
+      unit: metricSamples[growth].unit,
+      samples: [sustainedGrowth(metricSamples[resource].samples)],
+    };
+  }
+  return metricSamples;
+}
+
 function metricSampleCount(name, sampleCount = 7) {
   if (
     name.endsWith("GrowthBytes") ||
@@ -1519,7 +1742,8 @@ function metricSampleCount(name, sampleCount = 7) {
   ) {
     return 1;
   }
-  // Mirrors expectedSampleCount: the polling metric is capped at 12 samples.
+  // Mirrors expectedSampleCount: the polling metric reads a fixed prefix of
+  // the idle window. Imported rather than repeated so the two cannot drift.
   if (name === "backgroundPollingCpuPercent") {
     return 12;
   }

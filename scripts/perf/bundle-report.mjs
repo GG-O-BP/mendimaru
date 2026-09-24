@@ -9,6 +9,7 @@ import {
   createPerformanceReport,
   resourceSummary,
   samplingPolicy,
+  sustainedGrowth,
 } from "./performance-core.mjs";
 
 if (process.platform !== "win32") {
@@ -89,17 +90,36 @@ const report = createPerformanceReport({
       samples: raw.measurements.workingSetBytes,
     },
     processCount: { unit: "count", samples: raw.measurements.processCount },
+    // Issue #201. The installed bundle uses the same sustained leak endpoints
+    // as the release-webview harness. The raw smoke report already carries the
+    // per-sample series, so this needs no change on the PowerShell side, and
+    // the two suites cannot drift into different definitions of a leak.
     privateMemoryGrowthBytes: {
       unit: "bytes",
-      samples: [Math.max(0, resources.delta.privateMemoryBytes)],
+      samples: [
+        sustainedGrowth(
+          raw.measurements.privateMemoryBytes,
+          expectedSampling.leakWindowSamples,
+        ),
+      ],
     },
     workingSetGrowthBytes: {
       unit: "bytes",
-      samples: [Math.max(0, resources.delta.workingSetBytes)],
+      samples: [
+        sustainedGrowth(
+          raw.measurements.workingSetBytes,
+          expectedSampling.leakWindowSamples,
+        ),
+      ],
     },
     processCountGrowth: {
       unit: "count",
-      samples: [Math.max(0, resources.delta.processCount)],
+      samples: [
+        sustainedGrowth(
+          raw.measurements.processCount,
+          expectedSampling.leakWindowSamples,
+        ),
+      ],
     },
     installMs: { unit: "ms", samples: [raw.measurements.installMs] },
     uninstallMs: { unit: "ms", samples: [raw.measurements.uninstallMs] },
