@@ -243,7 +243,7 @@ export function buildRegressionIssue(input) {
     lines.push("## 병합 커밋 귀속");
     lines.push("");
     lines.push(
-      "실패한 suite의 제품·하네스·예산 입력을 바꾸지 않은 변경이다. 원본 실패와 모든 예산 위반은 보존하지만 이 커밋을 되돌릴 근거로는 사용하지 않는다. 제품이 정상이라는 판정이나 측정 통과를 뜻하지 않는다.",
+      "실패한 suite의 저장소 내 제품·하네스·예산 입력을 바꾸지 않은 변경이다. 원본 실패와 모든 예산 위반은 보존하지만 이 커밋을 되돌릴 근거로는 사용하지 않는다. 빌드 환경이나 실행 환경의 동일성을 보장하지 않으며, 제품이 정상이라는 판정이나 측정 통과를 뜻하지 않는다.",
     );
     for (const file of input.changedPaths) lines.push(`- 변경: \`${file}\``);
     lines.push("");

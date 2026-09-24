@@ -22,6 +22,72 @@ const input = {
   summaries: [summarizeEvaluatedReport(fixture.report)],
 };
 
+const slowFixture = JSON.parse(
+  readFileSync(new URL("./fixtures/issue-219.json", import.meta.url)),
+);
+const slowInput = {
+  commit: slowFixture.commit,
+  baselineCommit: slowFixture.baselineCommit,
+  changedPaths: slowFixture.changedPaths,
+  eventName: "push",
+  summaries: [summarizeEvaluatedReport(slowFixture.report)],
+};
+
+test("#219 keeps the slow-probe failure but does not blame unrelated automation", () => {
+  assert.equal(slowFixture.report.gate.status, "failed");
+  assert.notEqual(
+    slowFixture.appImageSha256.baseline,
+    slowFixture.appImageSha256.candidate,
+  );
+  const issue = buildRegressionIssue(slowInput);
+  assert.deepEqual(issue.labels, ["ci:perf-regression"]);
+  assert.match(issue.body, /environmentSlowMs/);
+  assert.match(issue.body, /996\.82/);
+  assert.match(
+    issue.body,
+    /빌드 환경이나 실행 환경의 동일성을 보장하지 않으며/,
+  );
+  assert.doesNotMatch(buildRerunComment(slowInput), /라벨을 보장한다/);
+});
+
+test("WebView attribution keeps changes to its workflow, build, policy and packaged resources", () => {
+  for (const file of [
+    ".github/workflows/release-performance.yml",
+    "scripts/perf/build-fingerprint.mjs",
+    "scripts/perf/release-webview.mjs",
+    "scripts/perf/release-fixture.mjs",
+    "performance/budgets.latency.json",
+    "package-lock.json",
+    "scripts/browser-runner.mjs",
+    "src-tauri/tauri.conf.json",
+    "scripts/unknown.sh",
+  ]) {
+    const changed = {
+      ...slowInput,
+      changedPaths: [...slowInput.changedPaths, file],
+    };
+    assert.equal(unchangedViolationInputs(changed), false);
+    assert.ok(
+      buildRegressionIssue(changed).labels.includes("revert-candidate"),
+    );
+  }
+});
+
+test("a changed suite that passed does not implicate an unchanged failing suite", () => {
+  const passed = {
+    ...slowInput.summaries[0],
+    violations: [],
+    status: "passed",
+  };
+  assert.equal(
+    unchangedViolationInputs({
+      ...input,
+      summaries: [...input.summaries, passed],
+    }),
+    true,
+  );
+});
+
 test("#214 preserves the failed CPU verdict without blaming an unrelated latency policy", () => {
   assert.equal(fixture.report.gate.status, "failed");
   assert.deepEqual(

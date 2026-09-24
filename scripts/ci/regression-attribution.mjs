@@ -8,6 +8,15 @@ const installedBundleOnlyExclusions = new Set([
   "performance/budgets.latency.json",
 ]);
 
+// Neither the functional-CI workflow nor the AUR compiler-cache recipe feeds
+// the standalone Release performance workflow. Do not generalize to all
+// workflows or shell scripts: build/measurement recipe changes must implicate
+// their failing suite. These exact paths were audited for issue #219.
+const unrelatedAutomation = new Set([
+  ".github/workflows/ci.yml",
+  "scripts/aur/build-package.sh",
+]);
+
 function excludedPath(file, suite) {
   if (
     typeof file !== "string" ||
@@ -25,7 +34,8 @@ function excludedPath(file, suite) {
   return (
     /^docs\/[\w/-]+\.md$/.test(file) ||
     /^scripts\/(?:ci|perf)\/[^/]+\.node-test\.mjs$/.test(file) ||
-    /^scripts\/perf\/fixtures\/[^/]+\.json$/.test(file) ||
+    /^scripts\/(?:ci|perf)\/fixtures\/[^/]+\.json$/.test(file) ||
+    unrelatedAutomation.has(file) ||
     (suite === "installed-bundle" && installedBundleOnlyExclusions.has(file))
   );
 }
@@ -44,7 +54,7 @@ export function unchangedViolationInputs(input) {
     failed.length > 0 &&
     failed.every(
       (summary) =>
-        summary.suite === "installed-bundle" &&
+        ["installed-bundle", "release-webview"].includes(summary.suite) &&
         summary.commit === input.commit &&
         summary.baselineCommit === input.baselineCommit &&
         changedPaths.every((file) => excludedPath(file, summary.suite)),
