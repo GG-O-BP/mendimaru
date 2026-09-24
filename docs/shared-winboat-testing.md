@@ -97,7 +97,8 @@ MENDIMARU_E2E_DISPOSABLE_SNAPSHOT=verified-restorable-snapshot-id \
 ```
 
 The gate exercises two independent CLI processes with two scheduler lanes each,
-Runtime-stop exclusion, an intentionally failing worker, SIGTERM and SIGKILL,
+Runtime-stop, conflicting-writer and UI-mutation exclusion, artifact commit,
+two-run retention and concurrent export, an intentionally failing worker, SIGTERM and SIGKILL,
 finalizer crash/recovery, late-attach refusal, and owner cleanup after the last
 participant. It compares container/ports/Compose, Studio/keeper/FreeRDP identities
 between scenarios and requires unmodified Chromium, complete comparable

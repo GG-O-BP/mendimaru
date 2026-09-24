@@ -82,6 +82,7 @@ export async function runSharedGate() {
   validateReadSuite(suite);
   const evidence = required("MENDIMARU_E2E_SHARED_REPORT");
   const children = new Set();
+  const completions = new Map();
   const calls = [];
   const start = (...args) => {
     const child = spawn(
@@ -114,7 +115,11 @@ export async function runSharedGate() {
     }
     const timer = setTimeout(() => child.kill("SIGKILL"), 195_000);
     const done = new Promise((resolve, reject) => {
-      child.once("error", reject);
+      child.once("error", (error) => {
+        clearTimeout(timer);
+        children.delete(child);
+        reject(error);
+      });
       child.once("close", (code, signal) => {
         clearTimeout(timer);
         children.delete(child);
@@ -130,6 +135,7 @@ export async function runSharedGate() {
         resolve({ code, signal, ...(envelope ?? {}) });
       });
     });
+    completions.set(child, done);
     return { child, done };
   };
   const cli = async (...args) => start(...args).done;
@@ -201,6 +207,10 @@ export async function runSharedGate() {
       workers,
       "--fail-on-console-error",
       "--fail-on-network-failure",
+      "--assertion-timeout-ms",
+      "30000",
+      "--retention-runs",
+      "2",
       ...extra,
     );
   const temporary = await fs.mkdtemp(
@@ -229,6 +239,24 @@ export async function runSharedGate() {
     const busy = await cli("runtime", "stop", "--session-id", runtime);
     assert.equal(busy.error?.code, "precondition_failed");
     assert.equal(busy.error.retryable, true);
+    const writerSuite = path.join(temporary, "writer.browser.json");
+    const writer = structuredClone(suite);
+    writer.tests = [writer.tests[0]];
+    writer.tests[0].concurrency = { resource: "data-write" };
+    await fs.writeFile(writerSuite, JSON.stringify(writer));
+    const writeBusy = await run(writerSuite, "1").done;
+    assert.equal(writeBusy.error?.code, "precondition_failed");
+    assert.equal(writeBusy.error.retryable, true);
+    const uiBusy = await cli(
+      "ui",
+      "release",
+      "--session-id",
+      status.data.studioSessionId,
+      "--timeout-ms",
+      "1000",
+    );
+    assert.equal(uiBusy.error?.code, "precondition_failed");
+    assert.equal(uiBusy.error.retryable, true);
     const outcomes = await Promise.all([first.done, second.done]);
     outcomes.forEach((value) => {
       assertRun(value, { parallel: true });
@@ -240,7 +268,20 @@ export async function runSharedGate() {
       preparationIds: outcomes.map((r) => r.data.environment.preparationId),
       peakParticipants: 2,
       lifecycleRefused: true,
+      conflictingWriterRefused: true,
+      uiMutationRefused: true,
     });
+    const retained = await Promise.all(
+      outcomes.map((result) =>
+        cli("browser", "artifacts", "--session-id", result.data.sessionId),
+      ),
+    );
+    retained.forEach((result) => assert.equal(result.ok, true));
+    const retainedRuns = (
+      await fs.readdir(path.join(cache, "browser-tests", "runs"))
+    ).filter((name) => /^session_[a-f0-9]{32}$/.test(name));
+    assert.equal(retainedRuns.length, 2);
+    calls.push({ name: "concurrent-commit-prune-and-read", retainedRuns: 2 });
     await preserved("concurrent-readers");
 
     const failing = structuredClone(suite);
@@ -336,7 +377,15 @@ export async function runSharedGate() {
   } catch (error) {
     failure = error;
   } finally {
-    for (const child of children) child.kill("SIGTERM");
+    const remaining = [...children];
+    for (const child of remaining) child.kill("SIGTERM");
+    const killTimer = setTimeout(() => {
+      for (const child of remaining) {
+        if (children.has(child)) child.kill("SIGKILL");
+      }
+    }, 5000);
+    await Promise.allSettled(remaining.map((child) => completions.get(child)));
+    clearTimeout(killTimer);
     report.finishedAt = new Date().toISOString();
     await fs.writeFile(evidence, `${JSON.stringify(report, null, 2)}\n`);
     await fs.rm(temporary, { recursive: true, force: true });
