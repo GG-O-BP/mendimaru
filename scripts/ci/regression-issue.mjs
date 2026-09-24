@@ -1,6 +1,10 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import {
+  readAttributionPaths,
+  unchangedViolationInputs,
+} from "./regression-attribution.mjs";
 
 import {
   isGateReportName,
@@ -194,7 +198,9 @@ export function buildRegressionIssue(input) {
   const failedJobs = input.failedJobs ?? [];
   const eventName = String(input.eventName ?? "push");
   const violations = violationCount(summaries);
-  const attributable = eventName === "push" && violations > 0;
+  const unchangedInputs = unchangedViolationInputs(input);
+  const attributable =
+    eventName === "push" && violations > 0 && !unchangedInputs;
 
   const short = commit.slice(0, 12);
   const title =
@@ -232,6 +238,16 @@ export function buildRegressionIssue(input) {
     `- 실패한 job: ${failedJobs.length > 0 ? failedJobs.map((job) => `\`${job}\``).join(", ") : "(보고되지 않음)"}`,
   );
   lines.push("");
+
+  if (unchangedInputs) {
+    lines.push("## 병합 커밋 귀속");
+    lines.push("");
+    lines.push(
+      "실패한 suite의 제품·하네스·예산 입력을 바꾸지 않은 변경이다. 원본 실패와 모든 예산 위반은 보존하지만 이 커밋을 되돌릴 근거로는 사용하지 않는다. 제품이 정상이라는 판정이나 측정 통과를 뜻하지 않는다.",
+    );
+    for (const file of input.changedPaths) lines.push(`- 변경: \`${file}\``);
+    lines.push("");
+  }
 
   // Deliberately above the violation table. A verdict that failed is a known
   // quantity; a verdict that does not exist is worse, because nothing about
@@ -343,7 +359,11 @@ export function buildRerunComment(input) {
     appendViolationRows(lines, summaries);
     lines.push("");
     lines.push(
-      `이번 재실행은 예산 위반을 보고했으므로 기존 이슈에도 \`${revertCandidateLabel}\` 라벨을 보장한다.`,
+      input.eventName !== "schedule" &&
+        input.eventName !== "workflow_dispatch" &&
+        !unchangedViolationInputs(input)
+        ? `이번 재실행은 예산 위반을 보고했으므로 기존 이슈에도 \`${revertCandidateLabel}\` 라벨을 보장한다.`
+        : "원본 예산 위반은 보존한다. 이 실행을 특정 병합 커밋의 회귀로 귀속하지 않아 revert 후보 라벨을 새로 추가하지 않는다.",
     );
   }
   return truncate(lines.join("\n"));
@@ -430,7 +450,23 @@ if (invokedDirectly) {
         process.env.REPORT_DIRECTORY ?? "reports",
         process.env.REGRESSION_COMMIT,
       );
+      let changedPaths;
+      try {
+        changedPaths = readAttributionPaths(
+          process.env.REGRESSION_BASELINE,
+          process.env.REGRESSION_COMMIT,
+        );
+      } catch (error) {
+        problems.push(`attribution diff unavailable: ${message(error)}`);
+      }
+      const attribution = {
+        commit: process.env.REGRESSION_COMMIT,
+        baselineCommit: process.env.REGRESSION_BASELINE,
+        changedPaths,
+        problems,
+      };
       const issue = buildRegressionIssue({
+        ...attribution,
         commit: process.env.REGRESSION_COMMIT,
         baselineCommit: process.env.REGRESSION_BASELINE,
         eventName: process.env.GITHUB_EVENT_NAME,
@@ -445,6 +481,7 @@ if (invokedDirectly) {
           file: true,
           ...issue,
           comment: buildRerunComment({
+            ...attribution,
             eventName: process.env.GITHUB_EVENT_NAME,
             runUrl: process.env.REGRESSION_RUN_URL,
             summaries,

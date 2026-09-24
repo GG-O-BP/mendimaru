@@ -43,6 +43,7 @@ test("the real suite directories expand to the files the npm scripts listed", ()
     "scripts/ci/gate-relevance.node-test.mjs",
     "scripts/ci/gate-reports.node-test.mjs",
     "scripts/ci/node-test-suite.node-test.mjs",
+    "scripts/ci/regression-attribution.node-test.mjs",
     "scripts/ci/regression-hold.node-test.mjs",
     "scripts/ci/regression-issue.node-test.mjs",
   ]);
