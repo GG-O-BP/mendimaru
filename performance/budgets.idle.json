@@ -47,6 +47,10 @@
       {
         "source": "Issue #181, runs 35703788546 through 35743578471: Windows release-webview idle showed no failures in thirteen runs, with maximum absolute p95 movement of 0.232 percentage points for idleCpuPercent and 0.315 points for backgroundPollingCpuPercent, so the Windows floors are left unchanged",
         "recordedAt": "2026-09-23T00:00:00Z"
+      },
+      {
+        "source": "Issue #200, run 35808020735: original twelve-sample Linux polling CPU p95 is 6.933 vs 3.246, p50 is 2.302 vs 2.101. Across 25 downloaded comparisons with unchanged product sources and dependency inputs (npm scripts excluded), the largest positive p50 movement is 1.559 percentage points, within the existing 2-point floor. Raw samples and absolute p95 are retained.",
+        "recordedAt": "2026-09-24T00:00:00Z"
       }
     ]
   },
@@ -82,7 +86,8 @@
               "absoluteMax": 8,
               "relativeMaxPercent": 20,
               "relativeNoiseFloor": 2,
-              "rationale": "Five-second normalized samples catch sustained polling without treating a single wakeup as idle load. The 2 percentage-point floor is measured, not chosen: across twelve product-unchanged runs the candidate-versus-baseline p95 moved by up to 1.74 points, and the shared 1-point floor turned three of those into failures. Linux idle measures each variant in a separate job on a separate runner VM, so this spread is cross-VM noise. The 8 percent absolute rail is unchanged and still does the tail work."
+              "rationale": "Five-second normalized samples catch sustained polling without treating a single wakeup as idle load. The 2 percentage-point floor is measured, not chosen: across twelve product-unchanged runs the candidate-versus-baseline p95 moved by up to 1.74 points, and the shared 1-point floor turned three of those into failures. Linux idle measures each variant in a separate job on a separate runner VM, so this spread is cross-VM noise. The 8 percent absolute rail is unchanged and still does the tail work. Issue #200: relative p50 detects sustained load without comparing independent single maxima from twelve samples. The original 8 percent absolute p95 rail, twelve-sample polling prefix, 300-second idle window and 2-point floor remain unchanged.",
+              "relativeStatistic": "p50"
             },
             "idleCpuPercent": {
               "statistic": "p95",

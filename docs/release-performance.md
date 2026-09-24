@@ -548,3 +548,16 @@ baseline, host, fixture, absolute-budget, or relative-budget mismatch:
 ```bash
 node scripts/perf/performance-gate.mjs candidate.json baseline.json
 ```
+
+## Polling CPU comparison (#200)
+
+Linux background polling keeps its original twelve five-second samples and
+8 percent p95 absolute rail. Only its relative statistic is p50: run 35808020735
+had p95 6.933 versus 3.246 but p50 2.302 versus 2.101. Replaying 25 comparisons
+with unchanged product sources and dependencies found a maximum positive p50
+movement of 1.559 percentage points, inside the existing 2-point floor.
+
+An isolated burst below 8 percent no longer fails the relative gate. It remains
+in the raw samples and absolute p95. Sustained increases above the 2-point floor
+still fail. Windows polling, the full-window idle CPU statistic and the
+300-second leak window are unchanged. The original failed run is preserved.

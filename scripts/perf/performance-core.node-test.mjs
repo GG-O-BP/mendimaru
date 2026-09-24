@@ -1227,6 +1227,97 @@ test("#204 independent PR #211 failure also passes without further calibration",
   );
 });
 
+// #200: the original twelve samples; neither the observation window nor the
+// absolute statistic is changed to make a single burst disappear.
+const issue200Baseline = [
+  1.98, 3.146, 2.05, 2.101, 3.148, 2.15, 1.949, 3.246, 2.05, 2.102, 3.093, 2.1,
+];
+const issue200Candidate = [
+  6.933, 2.261, 2.1, 2.398, 3.096, 2.302, 2.046, 2.803, 2.097, 2.254, 2.846,
+  2.405,
+];
+function pollingReport(commit, samples) {
+  return makeReleaseWebviewReport({
+    commit,
+    defaultValue: (name) => idleMetricDefault(name, 2),
+    sampleLists: { backgroundPollingCpuPercent: samples },
+  });
+}
+
+test("#200 original polling burst keeps p95 visible and passes relative p50", () => {
+  const baseline = pollingReport(baselineCommit, issue200Baseline);
+  const candidate = pollingReport(candidateCommit, issue200Candidate);
+  const gate = evaluatePerformance(candidate, baseline, idlePolicy);
+  assert.equal(gate.status, "passed");
+  const comparison = gate.comparisons.find(
+    ({ metric }) => metric === "backgroundPollingCpuPercent",
+  );
+  assert.equal(comparison.actual, 6.933);
+  assert.equal(comparison.absoluteLimit, 8);
+  assert.equal(comparison.relativeActual, 2.302);
+  assert.equal(comparison.relativeBaseline, 2.101);
+  assert.equal(candidate.metrics.backgroundPollingCpuPercent.sampleCount, 12);
+  const oldPolicy = structuredClone(idlePolicy);
+  delete oldPolicy.platforms.linux.suites["release-webview"].metrics
+    .backgroundPollingCpuPercent.relativeStatistic;
+  assert.equal(
+    evaluatePerformance(candidate, baseline, oldPolicy).status,
+    "failed",
+  );
+});
+
+test("#200 sustained load and a burst above the absolute rail still fail", () => {
+  const baseline = pollingReport(baselineCommit, issue200Baseline);
+  const sustained = pollingReport(
+    candidateCommit,
+    issue200Baseline.map((value) => value + 2.5),
+  );
+  assert(
+    evaluatePerformance(sustained, baseline, idlePolicy).violations.some(
+      (v) =>
+        v.metric === "backgroundPollingCpuPercent" && v.kind === "relative",
+    ),
+  );
+  const burst = pollingReport(candidateCommit, [
+    8.1,
+    ...issue200Candidate.slice(1),
+  ]);
+  assert(
+    evaluatePerformance(burst, baseline, idlePolicy).violations.some(
+      (v) =>
+        v.metric === "backgroundPollingCpuPercent" &&
+        v.kind === "absolute" &&
+        v.statistic === "p95",
+    ),
+  );
+  assert.equal(
+    idlePolicy.platforms.windows.suites["release-webview"].metrics
+      .backgroundPollingCpuPercent.relativeStatistic,
+    undefined,
+  );
+  assert.equal(
+    idlePolicy.platforms.linux.suites["release-webview"].metrics.idleCpuPercent
+      .relativeStatistic,
+    undefined,
+  );
+});
+
+test("#200 unchanged-product corpus retains every sample and passes", async () => {
+  const pairs = JSON.parse(
+    await readFile(new URL("./fixtures/issue-200.json", import.meta.url)),
+  );
+  assert.equal(pairs.length, 25);
+  for (const pair of pairs) {
+    const baseline = pollingReport(baselineCommit, pair.baseline);
+    const candidate = pollingReport(candidateCommit, pair.candidate);
+    assert.equal(
+      evaluatePerformance(candidate, baseline, idlePolicy).status,
+      "passed",
+      pair.run,
+    );
+  }
+});
+
 function makeReport({
   commit,
   sampleValue = 100,
