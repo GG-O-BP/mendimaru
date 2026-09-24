@@ -191,10 +191,30 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Issue #209. This job used to keep its own 0.81 GiB dependency cache
+      # under the job-derived key `v0-rust-test-ubuntu-*`, which was a second
+      # copy of something `rust-ubuntu` already holds: run 35818611312 shows
+      # both jobs compiling in the same `src-tauri` directory on identically configured
+      # runners, resolving the same toolchain and lockfile hashes
+      # (`6ff13d87-aea8b408`), and producing the same `-C metadata` hashes for
+      # every target. `rust-ubuntu` builds `--all-targets`, so its entry is a
+      # strict superset of what this job needs, and pointing both at one key
+      # removes 0.81 GiB from the irreducible floor without costing a hit.
+      #
+      # The shared key is spelled with `rust-ubuntu`'s historical job name on
+      # purpose: an identical key means the consolidation costs nobody a cold
+      # generation on the merge that introduces it.
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          shared-key: rust-ubuntu
+          # Restore-only. With one key and two writers, whichever job finished
+          # first would decide the contents for the whole generation, and this
+          # job's narrower build would strand `rust-ubuntu` with a partial
+          # cache until the next toolchain roll. One designated writer, the
+          # one that builds the superset, keeps that deterministic.
+          save-if: false
 
       - name: Install frontend dependencies
         run: npm ci
@@ -381,10 +401,17 @@ jobs:
         with:
           components: clippy,rustfmt
 
+      # Issue #209. The single writer of the Linux default-feature dependency
+      # cache; `Test (ubuntu-latest)` restores this same entry read-only. The
+      # key is pinned rather than left to the job id so that renaming this job
+      # cannot silently split the family back in two and put 0.81 GiB back on
+      # the floor. `--all-targets` below is what makes this entry the superset
+      # the other job can live on.
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          shared-key: rust-ubuntu
 
       - name: Install frontend dependencies
         run: npm ci

@@ -20,9 +20,9 @@ import process from "node:process";
 
 export const GIB = 1024 ** 3;
 
-// GitHub's cap is 10 GiB. The largest single entry this repository saves is
-// ~1.2 GiB (`v0-rust-rust-ubuntu-*`), so a 1 GiB headroom keeps one in-flight
-// save from crossing the cap before the next prune runs.
+// Standing headroom policy. The effective target also reserves the largest
+// observed save under the cap: the previous 9.06 GiB retained floor left only
+// 0.94 GiB for a 1.12 GiB save (issue #209).
 export const DEFAULT_BUDGET_BYTES = 9 * GIB;
 
 // GitHub's hard per-repository limit. Crossing *this* is what makes GitHub
@@ -73,6 +73,30 @@ export const DEFAULT_RETENTION = [
 // accident, few enough that it still stops growing.
 export const DEFAULT_KEEP = 2;
 
+// Families no job writes any more. Issue #209 needed the irreducible floor
+// below 8.88 GiB, and the way it got there was to point two jobs that compile
+// the identical crate graph in the identical directory at one cache key. The
+// side effect of every such consolidation is an orphan: the retired family's
+// last generation is still in the listing, is still the only generation of its
+// family, and is therefore still "retained" - so the retention and budget
+// passes both protect bytes that nothing can ever restore. GitHub removes an
+// unused cache after seven days on its own, which would leave 0.81 GiB of the
+// headroom this change exists to create parked for a week.
+//
+// Naming the retirement reclaims it on the next prune instead. It is a list
+// rather than an inference because "no job writes this any more" is not
+// visible from the listing: a relevance-gated job that has not been triggered
+// for a while is indistinguishable from a family nobody writes, and guessing
+// wrong costs exactly the cold rebuild #182 measured.
+//
+//   - `v0-rust-test-ubuntu-`: retired 2026-09-23. `Test (ubuntu-latest)` now
+//     restores `Rust tests and clippy (ubuntu)`'s entry, which is a strict
+//     superset of it. Both jobs compiled the identical `-C metadata` hashes
+//     (`mendimaru_lib-eaf0963741e7e659`, `cli_contract-d17da48c1a8ad371`,
+//     `cli_e2e-d00026d4ea2f37cf`, `winboat_lifecycle_matrix-1793e6e1a0d5b69d`)
+//     in run 35818611312, so one entry serves both with no hit lost.
+export const DEFAULT_RETIRED_FAMILIES = ["v0-rust-test-ubuntu-"];
+
 export const DEFAULT_REF = "refs/heads/main";
 
 const HEX_SEGMENT = /^[0-9a-f]{8,}$/i;
@@ -106,6 +130,14 @@ export function retentionFor(
   return fallback;
 }
 
+// Retirement is matched the same way retention is, so a retired family covers
+// every platform and architecture variant of one consolidated key at once.
+export function isRetiredFamily(family, retired = DEFAULT_RETIRED_FAMILIES) {
+  return retired.some(
+    (prefix) => family === prefix || family.startsWith(prefix),
+  );
+}
+
 // A cache is readable by the run whose ref saved it and, for a pull request,
 // by the default branch's entries as a fallback - never the other way round.
 // So a pull-request entry can only ever be restored by that pull request, and
@@ -128,6 +160,13 @@ export function planCacheDeletions(entries, options = {}) {
     idleMinutes = DEFAULT_IDLE_MINUTES,
     retention = DEFAULT_RETENTION,
     keep = DEFAULT_KEEP,
+    retiredFamilies = DEFAULT_RETIRED_FAMILIES,
+    // How many bytes under the cap to keep free for one in-flight save.
+    // `null` measures it from the listing, which is the only honest default:
+    // the biggest save this repository can make is the biggest entry it
+    // already holds. `0` is the pre-#209 behaviour and exists so a test can
+    // isolate the budget rail from this reservation.
+    reserveBytes = null,
     defaultRef = DEFAULT_REF,
     // `null` means the caller could not determine which pull requests are
     // open. That must not read as "every pull request is closed", so the dead
@@ -149,6 +188,12 @@ export function planCacheDeletions(entries, options = {}) {
   if (!Number.isFinite(idleMinutes) || idleMinutes < 0) {
     throw new Error("idleMinutes must be zero or a positive number");
   }
+  if (
+    reserveBytes !== null &&
+    (!Number.isFinite(reserveBytes) || reserveBytes < 0)
+  ) {
+    throw new Error("reserveBytes must be null or zero or a positive number");
+  }
   if (!Number.isFinite(now)) {
     throw new Error("now must be a finite timestamp");
   }
@@ -160,6 +205,14 @@ export function planCacheDeletions(entries, options = {}) {
   }
   if (!Array.isArray(retention)) {
     throw new Error("retention must be an array");
+  }
+  if (!Array.isArray(retiredFamilies)) {
+    throw new Error("retiredFamilies must be an array");
+  }
+  for (const [index, prefix] of retiredFamilies.entries()) {
+    if (typeof prefix !== "string" || prefix.trim() === "") {
+      throw new Error(`retired family ${index} is not a usable prefix`);
+    }
   }
   if (!Number.isSafeInteger(keep) || keep < 1) {
     throw new Error("keep must be a positive integer");
@@ -192,6 +245,30 @@ export function planCacheDeletions(entries, options = {}) {
   const totalBytes = sum(normalised);
   const idleCutoff = now - idleMinutes * 60_000;
 
+  // #209's actual invariant. Staying under the cap is not enough; the cap has
+  // to be able to absorb one more save of the biggest thing this repository
+  // saves. On the 2026-09-23 listing it could not: 9.06 GiB remaining left
+  // 0.94 GiB of headroom against a 1.12 GiB save, so a badly timed save still
+  // crossed the cap and GitHub still evicted, which is #182 all over again.
+  //
+  // The size of that save is measurable rather than a guess: it is the
+  // largest entry in the listing. Taking the maximum over *every* entry and
+  // not only over the survivors is deliberate - a generation this pass is
+  // about to delete is one its job will save again, so sizing the reservation
+  // by it is the conservative reading.
+  const largestSaveBytes = normalised.reduce(
+    (largest, entry) => Math.max(largest, entry.sizeBytes),
+    0,
+  );
+  const effectiveReserveBytes =
+    reserveBytes === null ? largestSaveBytes : reserveBytes;
+  // The effective target is the stricter of the reservation and the standing
+  // policy budget. It can only ever tighten, never loosen, so adding it
+  // cannot turn an existing warning green.
+  const reserveBudgetBytes = Math.max(0, capBytes - effectiveReserveBytes);
+  const policyBudgetBytes = budgetBytes;
+  const effectiveBudgetBytes = Math.min(policyBudgetBytes, reserveBudgetBytes);
+
   const deletions = [];
   const deferred = [];
   const live = [];
@@ -215,12 +292,29 @@ export function planCacheDeletions(entries, options = {}) {
     }
   }
 
+  // Retired families next, for the same reason and with the same guard: they
+  // are bytes nothing can restore, so reclaiming them costs no cache hit, but
+  // a run that restored one seconds ago is still reading it. Running this
+  // before the supersession pass keeps a retired family's last generation out
+  // of the retained set, which is the set the budget pass refuses to touch.
+  const kept = [];
+  for (const entry of live) {
+    if (!isRetiredFamily(entry.family, retiredFamilies)) {
+      kept.push(entry);
+    } else if (entry.lastAccessedAt > idleCutoff) {
+      deferred.push({ ...entry, reason: "recently-used" });
+      kept.push(entry);
+    } else {
+      deletions.push({ ...entry, reason: "retired-family" });
+    }
+  }
+
   // Supersession is scoped per ref, because a pull-request entry never
   // supersedes the default branch's: the two are restored by different runs.
   // Grouping them together would delete the shared copy in favour of one pull
   // request's private copy.
   const families = new Map();
-  for (const entry of live) {
+  for (const entry of kept) {
     const scope = `${entry.ref}\u0000${entry.family}`;
     const bucket = families.get(scope);
     if (bucket) bucket.push(entry);
@@ -264,7 +358,7 @@ export function planCacheDeletions(entries, options = {}) {
       .sort(leastRecentlyUsedFirst),
   ];
   for (const entry of evictable) {
-    if (remainingBytes <= budgetBytes) break;
+    if (remainingBytes <= effectiveBudgetBytes) break;
     deletions.push({ ...entry, reason: "budget" });
     remainingBytes -= entry.sizeBytes;
   }
@@ -272,18 +366,48 @@ export function planCacheDeletions(entries, options = {}) {
   const sharedRetainedBytes = sum(
     survivors.filter((entry) => entry.retained && entry.shared),
   );
+  // What the cap can still absorb once this plan has been applied, against
+  // what one more save of the largest family costs. This is the pair #209 is
+  // about: a repository *under* the cap still loses a dependency cache to
+  // eviction when the first number is smaller than the second.
+  const saveHeadroomBytes = capBytes - remainingBytes;
+  const structuralSaveHeadroomBytes = capBytes - sharedRetainedBytes;
   return {
     totalBytes,
-    budgetBytes,
+    // The target everything below is judged against: the stricter of the
+    // standing policy budget and `cap - reservation`. Reported as
+    // `budgetBytes` so the workflow and the report keep speaking about one
+    // number, with the inputs alongside it for the log.
+    budgetBytes: effectiveBudgetBytes,
+    policyBudgetBytes,
+    reserveBudgetBytes,
+    reserveBytes: effectiveReserveBytes,
+    // Which of the two constraints is actually binding, so the report can say
+    // why the target is what it is instead of quoting a bare number.
+    budgetBinding:
+      reserveBudgetBytes < policyBudgetBytes ? "reserve" : "policy",
     capBytes,
+    largestSaveBytes,
+    saveHeadroomBytes,
+    structuralSaveHeadroomBytes,
+    // The #209 acceptance criterion, as a computed predicate rather than a
+    // number somebody has to re-derive: can the cap absorb one more save of
+    // the largest family on top of what this plan leaves behind?
+    fitsReserve: saveHeadroomBytes >= effectiveReserveBytes,
+    structurallyFitsReserve:
+      structuralSaveHeadroomBytes >= effectiveReserveBytes,
+    // A single entry at or above the cap can never be saved safely, whatever
+    // the rest of the listing does. Pruning cannot reach it, so it is an
+    // error about the cached paths, not about this plan.
+    reserveExceedsCap: effectiveReserveBytes >= capBytes,
     freedBytes: sum(deletions),
     remainingBytes,
     sharedRetainedBytes,
-    overBudget: remainingBytes > budgetBytes,
+    overBudget: remainingBytes > effectiveBudgetBytes,
     // Distinguishes "the prune still has work to do" from "retention itself
     // does not fit under the cap". The second is a policy problem no amount of
     // pruning fixes, and it is the one worth reporting loudly.
-    structurallyOverBudget: sharedRetainedBytes > budgetBytes,
+    structurallyOverBudget: sharedRetainedBytes > effectiveBudgetBytes,
     // The escalation of the same two questions against GitHub's real limit.
     // `overCap` means the prune failed at its actual job and the next run can
     // still lose a dependency cache to LRU eviction. `structurallyOverCap`
@@ -312,6 +436,15 @@ export function renderPlan(plan) {
     );
   }
   lines.push(`After pruning: ${gib(plan.remainingBytes)}.`);
+  // The two numbers #209 is about, always printed, because the failure it
+  // describes is invisible in the total alone: a repository can be under the
+  // cap and still lose a cache to the next save.
+  lines.push(
+    `Largest single save ${gib(plan.largestSaveBytes)} against ${gib(plan.saveHeadroomBytes)} of headroom under the ${gib(plan.capBytes)} cap` +
+      (plan.budgetBinding === "reserve"
+        ? `; the ${gib(plan.reserveBytes)} reservation sets the target, not the ${gib(plan.policyBudgetBytes)} policy budget.`
+        : `; the ${gib(plan.policyBudgetBytes)} policy budget sets the target.`),
+  );
   // Severity follows the cap, not the budget. Being over the budget but under
   // the cap is the expected steady state of this repository today and must not
   // read like a failure, or the one line that does mean failure gets ignored.
@@ -323,9 +456,13 @@ export function renderPlan(plan) {
     lines.push(
       `ERROR: still ${gib(plan.remainingBytes - plan.capBytes)} over GitHub's ${gib(plan.capBytes)} cap after pruning; the next run can still lose a dependency cache to eviction.`,
     );
+  } else if (plan.reserveExceedsCap) {
+    lines.push(
+      `ERROR: one save alone needs ${gib(plan.reserveBytes)}, at or over GitHub's ${gib(plan.capBytes)} cap. No prune can make that save safe; the cached paths have to change.`,
+    );
   } else if (plan.structurallyOverBudget) {
     lines.push(
-      `WARNING: the default branch's retained generations alone are ${gib(plan.sharedRetainedBytes)}, over the ${gib(plan.budgetBytes)} headroom target but within GitHub's ${gib(plan.capBytes)} cap. Pruning cannot reclaim these; only changing what is cached can.`,
+      `WARNING: the default branch's retained generations alone are ${gib(plan.sharedRetainedBytes)}, over the ${gib(plan.budgetBytes)} headroom target but within GitHub's ${gib(plan.capBytes)} cap. That leaves ${gib(plan.structuralSaveHeadroomBytes)} for a ${gib(plan.largestSaveBytes)} save. Pruning cannot reclaim these; only changing what is cached can.`,
     );
   } else if (plan.overBudget) {
     lines.push(
@@ -457,6 +594,12 @@ if (invokedDirectly) {
     else if (name === "--budget-bytes") options.budgetBytes = Number(value);
     else if (name === "--cap-gib") options.capBytes = Number(value) * GIB;
     else if (name === "--cap-bytes") options.capBytes = Number(value);
+    // The headroom kept free for one in-flight save. Omitted, it is measured
+    // from the listing; `--reserve-gib=0` asks what the plan looks like with
+    // no reservation at all, which is what this job did before #209.
+    else if (name === "--reserve-gib")
+      options.reserveBytes = Number(value) * GIB;
+    else if (name === "--reserve-bytes") options.reserveBytes = Number(value);
     else if (name === "--idle-minutes") options.idleMinutes = Number(value);
     else if (name === "--default-ref") options.defaultRef = value;
     else if (name === "--open-pull-requests") openPullRequestsFile = value;
