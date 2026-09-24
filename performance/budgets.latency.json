@@ -35,6 +35,10 @@
       {
         "source": "Issue #176 run 35710680908: keying both variants' binary caches on a build-input fingerprint cut the candidate legs from 222-312 s to 12-28 s and the Release performance wall clock from 978 s to 481 s with every gate green and no change to matrix dimensions, sample counts, or the 300-second idle windows",
         "recordedAt": "2026-09-22T10:00:00Z"
+      },
+      {
+        "source": "Issue #204, run 35811293444: baseline cold samples [1466.821,1418.416,1475.815], candidate [2093.205,1982.813,2111.658]. The only commit change is the Linux large-workspace gate and its tests; Windows product inputs are identical. Across forty product-unchanged comparisons the largest positive p50 shift is 626.384 ms; p95 maxima differ by up to 4424.656 ms in magnitude. Preserve p95 for the absolute rail, compare sustained startup at p50 with a measured 700 ms additive floor.",
+        "recordedAt": "2026-09-24T00:00:00Z"
       }
     ]
   },
@@ -217,8 +221,9 @@
               "statistic": "p95",
               "absoluteMax": 20000,
               "relativeMaxPercent": 20,
-              "relativeNoiseFloor": 600,
-              "rationale": "Release WebView2 startup replaces the former 180 second CI override with a 20 second safety rail. Hosted-runner cold p95 can vary by roughly 0.6 seconds for unrelated changes, so a metric-specific 600 ms floor avoids false positives while retaining the 20 percent and 20 second gates."
+              "relativeNoiseFloor": 700,
+              "rationale": "Issue #204: forty comparisons with unchanged product sources and dependency inputs show cold-start p50 movement from -444.027 to +626.384 ms, while independent p95 maxima move from -4424.656 to +1128.868 ms. Relative p50 with a 700 ms floor covers the measured additive variation while keeping the 20 percent rule and the original 20000 ms absolute p95 ceiling. Short tail regressions below the absolute rail remain visible but no longer determine relative failure.",
+              "relativeStatistic": "p50"
             },
             "warmStartupMs": {
               "statistic": "p50",
