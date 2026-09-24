@@ -1,0 +1,441 @@
+{
+  "issue": 220,
+  "runUrl": "https://github.com/GG-O-BP/mendimaru/actions/runs/35965392155",
+  "commit": "5a0aaa198c8a99f9873c6205f3e7e0d857556c12",
+  "baselineCommit": "0508e935f1df300c9e97504eabe917c9808e0e9b",
+  "changedPaths": ["docs/actions-cache-budget.md"],
+  "report": {
+    "schemaVersion": "1.0.0",
+    "status": "failed",
+    "benchmark": {
+      "suite": "installed-bundle",
+      "platform": "windows",
+      "buildProfile": "release",
+      "packageKind": "nsis",
+      "commit": "5a0aaa198c8a99f9873c6205f3e7e0d857556c12",
+      "baselineCommit": "0508e935f1df300c9e97504eabe917c9808e0e9b",
+      "startedAt": "2026-09-24T06:38:47.329Z",
+      "finishedAt": "2026-09-24T06:44:07.780Z",
+      "runId": "35965392155-candidate-nsis"
+    },
+    "host": {
+      "cpuModel": "AMD EPYC 9V74 80-Core Processor",
+      "logicalCores": 4,
+      "memoryBytes": 17174360064,
+      "memoryClassBytes": 17179869184,
+      "os": "windows",
+      "osVersion": "Microsoft Windows NT 10.0.26100.0 Microsoft Windows Server 2025 Datacenter",
+      "arch": "x64",
+      "runnerImage": "win25-vs2026-20260922.246.2",
+      "webviewVersion": "153.0.4234.48"
+    },
+    "fixture": {
+      "workspaceTiers": null,
+      "catalogModes": [],
+      "environmentModes": []
+    },
+    "sampling": {
+      "warmupCount": 1,
+      "sampleCount": 7,
+      "percentileMethod": "nearest-rank",
+      "dispersion": "median-absolute-deviation-and-iqr",
+      "outlierPolicy": "tukey-iqr-report-only-never-discarded",
+      "rerunPolicy": "one-infrastructure-rerun-performance-failure-preserved",
+      "idleWindowSeconds": 300,
+      "idleSampleSeconds": 5,
+      "environmentSlowDelayMs": 400,
+      "environmentClientTimeoutMs": 750,
+      "scriptTimeoutMs": 30000,
+      "leakWindowSamples": 5,
+      "cpuNormalization": "process-tree-cpu-seconds/(wall-seconds*logical-cores)*100",
+      "processTreeScope": "root-and-live-descendants-at-each-sample"
+    },
+    "metrics": {
+      "coldStartupMs": {
+        "unit": "ms",
+        "samples": [110, 110, 105, 117, 120, 123, 104],
+        "sampleCount": 7,
+        "min": 104,
+        "max": 123,
+        "p50": 110,
+        "p95": 123,
+        "medianAbsoluteDeviation": 6,
+        "iqr": 15,
+        "outlierIndices": []
+      },
+      "warmStartupMs": {
+        "unit": "ms",
+        "samples": [120, 103, 113, 105, 116, 104, 114],
+        "sampleCount": 7,
+        "min": 103,
+        "max": 120,
+        "p50": 113,
+        "p95": 120,
+        "medianAbsoluteDeviation": 7,
+        "iqr": 12,
+        "outlierIndices": []
+      },
+      "idleCpuPercent": {
+        "unit": "percent",
+        "samples": [
+          0.691, 0.548, 2.408, 0.157, 9.907, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        ],
+        "sampleCount": 60,
+        "min": 0,
+        "max": 9.907,
+        "p50": 0,
+        "p95": 0.548,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": [0, 1, 2, 3, 4]
+      },
+      "privateMemoryBytes": {
+        "unit": "bytes",
+        "samples": [
+          139120640, 185032704, 341106688, 384614400, 448712704, 139612160,
+          139362304, 139227136, 140218368, 140218368, 136531968, 132481024,
+          133210112, 132628480, 132255744, 132272128, 132452352, 132333568,
+          132247552, 132710400, 131788800, 131567616, 131751936, 131219456,
+          131735552, 130768896, 131551232, 130764800, 130732032, 130572288,
+          130682880, 130682880, 131309568, 131252224, 131063808, 133181440,
+          133181440, 133181440, 132009984, 131805184, 131710976, 131223552,
+          131223552, 131223552, 131461120, 131567616, 134426624, 135241728,
+          132612096, 132587520, 132706304, 132706304, 132468736, 132804608,
+          132792320, 132837376, 132947968, 132947968, 133435392, 133562368
+        ],
+        "sampleCount": 60,
+        "min": 130572288,
+        "max": 448712704,
+        "p50": 132481024,
+        "p95": 185032704,
+        "medianAbsoluteDeviation": 966656,
+        "iqr": 1658880,
+        "outlierIndices": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+      },
+      "workingSetBytes": {
+        "unit": "bytes",
+        "samples": [
+          399945728, 508809216, 836222976, 952119296, 1052504064, 403308544,
+          399179776, 396279808, 397062144, 396570624, 393392128, 391176192,
+          392015872, 385757184, 385384448, 385400832, 385556480, 385609728,
+          385527808, 386035712, 385286144, 383479808, 379678720, 369778688,
+          364187648, 361394176, 361893888, 354603008, 346525696, 333914112,
+          323551232, 314245120, 305602560, 296599552, 287727616, 279867392,
+          271777792, 264605696, 257880064, 250953728, 242982912, 234082304,
+          227004416, 218779648, 211132416, 204062720, 201564160, 195985408,
+          187891712, 182222848, 177303552, 173719552, 169943040, 167186432,
+          164712448, 162758656, 160083968, 157515776, 160747520, 159260672
+        ],
+        "sampleCount": 60,
+        "min": 157515776,
+        "max": 1052504064,
+        "p50": 323551232,
+        "p95": 508809216,
+        "medianAbsoluteDeviation": 68083712,
+        "iqr": 181547008,
+        "outlierIndices": [2, 3, 4]
+      },
+      "processCount": {
+        "unit": "count",
+        "samples": [
+          9, 12, 16, 17, 17, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+          7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+          7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
+        ],
+        "sampleCount": 60,
+        "min": 7,
+        "max": 17,
+        "p50": 7,
+        "p95": 12,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": [0, 1, 2, 3, 4]
+      },
+      "privateMemoryGrowthBytes": {
+        "unit": "bytes",
+        "samples": [0],
+        "sampleCount": 1,
+        "min": 0,
+        "max": 0,
+        "p50": 0,
+        "p95": 0,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      },
+      "workingSetGrowthBytes": {
+        "unit": "bytes",
+        "samples": [0],
+        "sampleCount": 1,
+        "min": 0,
+        "max": 0,
+        "p50": 0,
+        "p95": 0,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      },
+      "processCountGrowth": {
+        "unit": "count",
+        "samples": [0],
+        "sampleCount": 1,
+        "min": 0,
+        "max": 0,
+        "p50": 0,
+        "p95": 0,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      },
+      "installMs": {
+        "unit": "ms",
+        "samples": [2712],
+        "sampleCount": 1,
+        "min": 2712,
+        "max": 2712,
+        "p50": 2712,
+        "p95": 2712,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      },
+      "uninstallMs": {
+        "unit": "ms",
+        "samples": [59],
+        "sampleCount": 1,
+        "min": 59,
+        "max": 59,
+        "p50": 59,
+        "p95": 59,
+        "medianAbsoluteDeviation": 0,
+        "iqr": 0,
+        "outlierIndices": []
+      }
+    },
+    "resources": {
+      "before": {
+        "processCount": 9,
+        "privateMemoryBytes": 187019264,
+        "workingSetBytes": 445673472,
+        "cpuSeconds": 0
+      },
+      "after": {
+        "processCount": 7,
+        "privateMemoryBytes": 133562368,
+        "workingSetBytes": 159260672,
+        "cpuSeconds": 2.765625
+      },
+      "peak": {
+        "processCount": 17,
+        "privateMemoryBytes": 448712704,
+        "workingSetBytes": 1052504064,
+        "cpuSeconds": 2.765625
+      },
+      "delta": {
+        "processCount": -2,
+        "privateMemoryBytes": -53456896,
+        "workingSetBytes": -286412800
+      }
+    },
+    "gate": {
+      "status": "failed",
+      "baselineCompatible": true,
+      "baselineCommit": "0508e935f1df300c9e97504eabe917c9808e0e9b",
+      "violations": [
+        {
+          "metric": "workingSetBytes",
+          "statistic": "p95",
+          "kind": "relative",
+          "actual": 508809216,
+          "limit": 467755008,
+          "baseline": 389795840,
+          "relativeChangePercent": 30.532
+        },
+        {
+          "metric": "processCount",
+          "statistic": "p95",
+          "kind": "relative",
+          "actual": 12,
+          "limit": 10,
+          "baseline": 8,
+          "relativeChangePercent": 50
+        }
+      ],
+      "comparisons": [
+        {
+          "metric": "coldStartupMs",
+          "statistic": "p95",
+          "actual": 123,
+          "baseline": 125,
+          "relativeStatistic": "p95",
+          "relativeActual": 123,
+          "relativeBaseline": 125,
+          "relativeChangePercent": -1.6,
+          "absoluteLimit": 20000,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 75,
+          "relativeLimit": 200,
+          "passed": true
+        },
+        {
+          "metric": "warmStartupMs",
+          "statistic": "p95",
+          "actual": 120,
+          "baseline": 127,
+          "relativeStatistic": "p95",
+          "relativeActual": 120,
+          "relativeBaseline": 127,
+          "relativeChangePercent": -5.512,
+          "absoluteLimit": 12000,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 75,
+          "relativeLimit": 202,
+          "passed": true
+        },
+        {
+          "metric": "idleCpuPercent",
+          "statistic": "p95",
+          "actual": 0.548,
+          "baseline": 0.231,
+          "relativeStatistic": "p95",
+          "relativeActual": 0.548,
+          "relativeBaseline": 0.231,
+          "relativeChangePercent": 137.229,
+          "absoluteLimit": 8,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 1,
+          "relativeLimit": 1.231,
+          "passed": true
+        },
+        {
+          "metric": "privateMemoryBytes",
+          "statistic": "p95",
+          "actual": 185032704,
+          "baseline": 132603904,
+          "relativeStatistic": "p95",
+          "relativeActual": 185032704,
+          "relativeBaseline": 132603904,
+          "relativeChangePercent": 39.538,
+          "absoluteLimit": 805306368,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 67108864,
+          "relativeLimit": 199712768,
+          "passed": true
+        },
+        {
+          "metric": "workingSetBytes",
+          "statistic": "p95",
+          "actual": 508809216,
+          "baseline": 389795840,
+          "relativeStatistic": "p95",
+          "relativeActual": 508809216,
+          "relativeBaseline": 389795840,
+          "relativeChangePercent": 30.532,
+          "absoluteLimit": 1207959552,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 67108864,
+          "relativeLimit": 467755008,
+          "passed": false
+        },
+        {
+          "metric": "processCount",
+          "statistic": "p95",
+          "actual": 12,
+          "baseline": 8,
+          "relativeStatistic": "p95",
+          "relativeActual": 12,
+          "relativeBaseline": 8,
+          "relativeChangePercent": 50,
+          "absoluteLimit": 24,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 2,
+          "relativeLimit": 10,
+          "passed": false
+        },
+        {
+          "metric": "privateMemoryGrowthBytes",
+          "statistic": "max",
+          "actual": 0,
+          "baseline": 0,
+          "relativeStatistic": "max",
+          "relativeActual": 0,
+          "relativeBaseline": 0,
+          "relativeChangePercent": 0,
+          "absoluteLimit": 100663296,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 67108864,
+          "relativeLimit": 67108864,
+          "passed": true
+        },
+        {
+          "metric": "workingSetGrowthBytes",
+          "statistic": "max",
+          "actual": 0,
+          "baseline": 0,
+          "relativeStatistic": "max",
+          "relativeActual": 0,
+          "relativeBaseline": 0,
+          "relativeChangePercent": 0,
+          "absoluteLimit": 167772160,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 67108864,
+          "relativeLimit": 67108864,
+          "passed": true
+        },
+        {
+          "metric": "processCountGrowth",
+          "statistic": "max",
+          "actual": 0,
+          "baseline": 0,
+          "relativeStatistic": "max",
+          "relativeActual": 0,
+          "relativeBaseline": 0,
+          "relativeChangePercent": 0,
+          "absoluteLimit": 2,
+          "relativeLimitPercent": 20,
+          "relativeNoiseFloor": 2,
+          "relativeLimit": 2,
+          "passed": true
+        }
+      ]
+    },
+    "assertions": [
+      "nsis installed into an ephemeral VM",
+      "7 cold and warm native-window launches completed",
+      "the installed process tree was sampled for 300 seconds",
+      "nsis uninstalled without leaving its executable"
+    ],
+    "error": "performance gate failed with 2 violation(s)"
+  },
+  "installerSha256": {
+    "baseline": {
+      "mendimaru_0.5.0_x64-setup.exe": "8b39e25ffbd565c66101798b0025f7c273627067771630b405047931e4b517c6",
+      "mendimaru_0.5.0_x64_en-US.msi": "ee12ceb3f6c9c2d815049c1e8384f1148cd955a6d25a8edf16be6a18c27cab6a"
+    },
+    "candidate": {
+      "mendimaru_0.5.0_x64-setup.exe": "8b39e25ffbd565c66101798b0025f7c273627067771630b405047931e4b517c6",
+      "mendimaru_0.5.0_x64_en-US.msi": "ee12ceb3f6c9c2d815049c1e8384f1148cd955a6d25a8edf16be6a18c27cab6a"
+    }
+  },
+  "baselineResources": {
+    "workingSetBytes": [
+      389795840, 716288000, 1012289536, 388235264, 387035136, 384212992,
+      383832064, 384348160, 384356352, 384229376, 384446464, 385699840,
+      385601536, 379588608, 378941440, 378925056, 379224064, 379162624,
+      379129856, 379138048, 379600896, 379351040, 409927680, 372113408,
+      360620032, 352432128, 342474752, 331681792, 321318912, 313761792,
+      305704960, 296538112, 287985664, 278028288, 269996032, 264011776,
+      257126400, 250798080, 243187712, 234864640, 227545088, 220250112,
+      212209664, 204972032, 200663040, 193892352, 188162048, 181366784,
+      176840704, 172310528, 171446272, 169918464, 167370752, 166268928,
+      164401152, 162177024, 160378880, 158695424, 162160640, 162185216
+    ],
+    "processCount": [
+      9, 15, 17, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8, 7,
+      7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+      7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
+    ]
+  }
+}

@@ -1043,6 +1043,7 @@ jobs:
 
       - name: Record and verify the gate inputs
         if: always()
+        id: bundle-inputs
         shell: bash
         env:
           GATE_SCOPE: installed-bundle
@@ -1057,7 +1058,7 @@ jobs:
           node scripts/ci/gate-reports.mjs
 
       - name: Gate MSI against current main
-        if: steps.relevance.outputs.relevant == 'true'
+        if: ${{ !cancelled() && steps.relevance.outputs.relevant == 'true' && steps.bundle-inputs.outcome == 'success' }}
         shell: bash
         run: |
           node scripts/perf/performance-gate.mjs \
@@ -1066,7 +1067,9 @@ jobs:
             performance/budgets.bundle.json
 
       - name: Gate NSIS against current main
-        if: steps.relevance.outputs.relevant == 'true'
+        # A failed MSI budget must not hide the independently measured NSIS
+        # verdict. The job still fails; both original results get uploaded.
+        if: ${{ !cancelled() && steps.relevance.outputs.relevant == 'true' && steps.bundle-inputs.outcome == 'success' }}
         shell: bash
         run: |
           node scripts/perf/performance-gate.mjs \

@@ -168,6 +168,7 @@ export function summarizeEvaluatedReport(report, name = "report.json") {
     name,
     platform: String(benchmark.platform ?? "unknown"),
     suite: String(benchmark.suite ?? "unknown"),
+    packageKind: String(benchmark.packageKind ?? "unknown"),
     commit: String(benchmark.commit ?? ""),
     baselineCommit: String(benchmark.baselineCommit ?? ""),
     status: gate ? String(gate.status ?? "unknown") : "not-evaluated",
@@ -503,7 +504,7 @@ function appendViolationRows(lines, summaries) {
   for (const summary of summaries) {
     for (const violation of summary.violations) {
       lines.push(
-        `| ${summary.platform}/${summary.suite} | \`${violation.metric}\` | ${violation.statistic} | ${violation.kind} | ${format(violation.actual)} | ${format(violation.limit)} | ${format(violation.baseline)} | ${formatPercent(violation.relativeChangePercent)} |`,
+        `| ${summary.platform}/${summary.suite}/${summary.packageKind ?? "unknown"} | \`${violation.metric}\` | ${violation.statistic} | ${violation.kind} | ${format(violation.actual)} | ${format(violation.limit)} | ${format(violation.baseline)} | ${formatPercent(violation.relativeChangePercent)} |`,
       );
     }
   }
