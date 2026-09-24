@@ -20,7 +20,9 @@ quietly ignored. This is the machinery that makes it hard to ignore.
 3. It files an issue labelled `ci:perf-regression`, carrying the failing
    commit, the baseline, the run URL, the failing jobs, and a table of the
    violated metrics. A `push` failure with a measured budget violation also
-   receives `revert-candidate`.
+   receives `revert-candidate`, unless a conservative changed-path check proves
+   that none of the failing suites' tracked inputs changed. The failure issue,
+   violation table and original red gate remain visible in that case.
 4. `perf-regression-hold` in `ci.yml` fails on every pull request while an
    issue carrying **both** labels is open.
 
@@ -64,6 +66,12 @@ not meaningfully affect the pull-request wall clock the split SLA protects.
 because that would block the branch trying to fix the regression.
 
 ## Clearing a hold
+
+Issue [214](issue-214-resolution.md) established this attribution exception
+with byte-identical baseline/candidate installers. The reporter uses an explicit
+list of unrelated paths; unknown inputs or suites, unreadable diffs, mismatched
+report revisions and missing verdicts keep the revert-candidate behavior. It
+does not automatically remove existing labels or turn a failed gate green.
 
 Either fix the regression, or record why it is not one and then close the issue
 or remove the `revert-candidate` label. Both are deliberate, attributable human
