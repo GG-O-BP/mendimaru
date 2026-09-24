@@ -1849,6 +1849,51 @@ test("the enforce step fails on the cap and reports the reservation", () => {
   assert.doesNotMatch(workflow, /::error::.*budgetBytes/);
 });
 
+test("two protected AUR generations still leave room for the largest save", () => {
+  const observed = JSON.parse(
+    readFileSync(
+      new URL("./fixtures/issue-209-recent-caches.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const options = {
+    now: Date.parse("2026-09-24T05:46:40Z"),
+    openPullRequests: [],
+  };
+  const before = planCacheDeletions(observed, options);
+  assert.equal(before.overBudget, true);
+  assert.equal(before.fitsReserve, false);
+  assert.ok(before.remainingBytes > 9.4 * GIB);
+
+  const script = readFileSync(
+    new URL("../aur/build-package.sh", import.meta.url),
+    "utf8",
+  );
+  const [, amount, unit] = script.match(/SCCACHE_CACHE_SIZE=(\d+)([MG])/);
+  // Reserve 8 MiB per archive for packaging overhead beyond the disk bound.
+  // The real 1 GiB archives were smaller than the disk bound, not larger.
+  const archiveBound =
+    Number(amount) * (unit === "G" ? GIB : 1024 ** 2) + 8 * 1024 ** 2;
+  const aur = observed.filter((cache) => cache.key.startsWith("aur-sccache-"));
+  assert.equal(aur.length, 2);
+  const bounded = observed.map((cache) =>
+    cache.key.startsWith("aur-sccache-")
+      ? { ...cache, size_in_bytes: archiveBound }
+      : cache,
+  );
+  const after = planCacheDeletions(bounded, options);
+  assert.ok(
+    aur.every(
+      (cache) => !after.deletions.some((entry) => entry.id === cache.id),
+    ),
+  );
+  assert.equal(after.largestSaveBytes, before.largestSaveBytes);
+  assert.equal(after.fitsReserve, true);
+  assert.equal(after.overBudget, false);
+  assert.ok(after.remainingBytes <= 8.88 * GIB);
+  assert.doesNotMatch(renderPlan(after), /ERROR|WARNING/);
+});
+
 function sumFixture() {
   return OBSERVED.reduce((total, cache) => total + cache.sizeInBytes, 0);
 }

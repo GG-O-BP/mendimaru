@@ -32,7 +32,9 @@ if [[ -d /sccache ]]; then
     SCCACHE_DIR=/sccache
     # #209: bound this archive so one compiler-cache generation cannot consume
     # the repository reserve. sccache applies its LRU limit on restored files.
-    SCCACHE_CACHE_SIZE=1G
+    # Two recently restored generations coexist during the pruner's 15-minute
+    # guard. Their combined size must leave room for the largest Rust save.
+    SCCACHE_CACHE_SIZE=700M
     SCCACHE_IDLE_TIMEOUT=0
   )
 fi
