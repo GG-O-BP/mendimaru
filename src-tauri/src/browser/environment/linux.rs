@@ -20,9 +20,13 @@ const MAX_MARKER: u64 = 64 * 1024;
 
 pub(crate) struct Observer {
     url: String,
+    initial: Report,
     worker: tokio::task::JoinHandle<()>,
 }
 impl Observer {
+    pub(crate) fn initial(&self) -> &Report {
+        &self.initial
+    }
     pub(crate) fn url(&self) -> &str {
         &self.url
     }
@@ -268,6 +272,15 @@ pub(crate) async fn start(
     runtime: Option<&str>,
     marker: Option<&str>,
 ) -> Result<Option<Observer>, BackendError> {
+    start_prepared(config, runtime, marker, None).await
+}
+
+pub(crate) async fn start_prepared(
+    config: Option<&AppConfig>,
+    runtime: Option<&str>,
+    marker: Option<&str>,
+    preparation: Option<&Report>,
+) -> Result<Option<Observer>, BackendError> {
     let config = config.filter(|_| runtime.is_none_or(crate::winboat::runtime::session_exists));
     let Some(config) = config else {
         if marker.is_some() {
@@ -289,7 +302,7 @@ pub(crate) async fn start(
         build,
         build_requested: marker.is_some(),
     };
-    let baseline = source.snapshot().await;
+    let mut baseline = source.snapshot().await;
     let missing = [
         (Component::ManagedVm, baseline.managed_vm.is_none()),
         (Component::Container, baseline.container.is_none()),
@@ -317,6 +330,18 @@ pub(crate) async fn start(
         actor: "unknown".into(),
         interval_milliseconds: 1000,
     };
+    if let Some(prepared) = preparation {
+        if !prepared.valid() || prepared.interrupted() {
+            return Err(observer_error());
+        }
+        report.preparation_id.clone_from(&prepared.preparation_id);
+        report.baseline.clone_from(&prepared.baseline);
+        // Watch counters are local to each observer. File metadata/content
+        // identity detects changes between preparation and attachment; each
+        // participant's watcher detects later identical-content writes.
+        report.baseline.build_watch_generation = baseline.build_watch_generation;
+        baseline.observed_at = baseline.observed_at.max(report.baseline.observed_at);
+    }
     report.observe(
         baseline,
         runtime.is_some(),
@@ -329,6 +354,7 @@ pub(crate) async fn start(
     let address = listener.local_addr().map_err(|_| observer_error())?;
     let token = crate::contracts::secure_identifier("observation")?;
     let url = format!("http://{address}/{token}");
+    let initial = report.clone();
     let worker = tokio::spawn(async move {
         // Serialize requests: one bounded inspection at a time; no unbounded tasks.
         while let Ok((mut stream, _)) = listener.accept().await {
@@ -370,7 +396,11 @@ pub(crate) async fn start(
             .await;
         }
     });
-    Ok(Some(Observer { url, worker }))
+    Ok(Some(Observer {
+        url,
+        initial,
+        worker,
+    }))
 }
 fn observer_error() -> BackendError {
     BackendError::operation(

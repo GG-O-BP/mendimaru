@@ -833,7 +833,22 @@ async fn verify_and_publish_identity(
         host_port: status.host_port,
         guest_port: status.guest_port,
     };
-    test_session::mark_ready(session_id, identity).map_err(shared_session_error)
+    // Preserve preparation identity across commands, rather than silently
+    // adopting whatever VM/build happens to exist when a worker attaches.
+    let descriptor = test_session::load(session_id).map_err(shared_session_error)?;
+    let observer = crate::browser::environment::start(
+        Some(config),
+        Some(runtime_session_id),
+        descriptor.build_marker.as_deref(),
+    )
+    .await?
+    .ok_or_else(|| shared_session_error(test_session::PREPARATION_REQUIRED))?;
+    if observer.initial().interrupted() {
+        return Err(shared_session_error(test_session::PREPARATION_REQUIRED));
+    }
+    test_session::mark_ready(session_id, identity).map_err(shared_session_error)?;
+    test_session::save_preparation(session_id, observer.initial().clone())
+        .map_err(shared_session_error)
 }
 
 /// Reports the recorded descriptor plus live kernel-held participation.
@@ -887,6 +902,11 @@ pub(crate) async fn browser_session_finalize(
         use crate::contracts::CONTRACT_SCHEMA_VERSION;
         use crate::winboat::test_session::{self, State};
         let descriptor = test_session::load(shared_session_id).map_err(shared_session_error)?;
+        let vm_key = crate::winboat::vm_use::vm_key(config)
+            .map_err(|_| shared_session_error(test_session::UNTRUSTED))?;
+        if descriptor.vm_key != vm_key {
+            return Err(shared_session_error(test_session::WRONG_VM));
+        }
         if descriptor.state == State::Finalized {
             return Ok(serde_json::json!({
                 "schemaVersion": CONTRACT_SCHEMA_VERSION,
@@ -1038,12 +1058,18 @@ async fn run_shared_session_test(
         .clone()
         .ok_or_else(|| shared_session_error(test_session::UNTRUSTED))?;
     let manifest = crate::platform::capability_manifest(None).map_err(CommandError::from)?;
-    let observer = crate::browser::environment::start(
+    let preparation = descriptor
+        .preparation
+        .as_ref()
+        .ok_or_else(|| shared_session_error(test_session::PREPARATION_REQUIRED))?;
+    let observer = crate::browser::environment::start_prepared(
         Some(config),
         Some(&descriptor.runtime_session_id),
         descriptor.build_marker.as_deref(),
+        Some(preparation),
     )
-    .await?;
+    .await?
+    .ok_or_else(|| shared_session_error(test_session::PREPARATION_REQUIRED))?;
     let runtime_platform = match identity.runtime_mode {
         RuntimeMode::Portable => Some(manifest.host_platform),
         RuntimeMode::StudioRunLocally => Some(manifest.studio_platform),
@@ -1064,7 +1090,7 @@ async fn run_shared_session_test(
         session_id: crate::contracts::secure_identifier("session")?,
         base_url: identity.base_url.clone(),
         asset_mirror_url,
-        environment_observer_url: observer.as_ref().map(|observer| observer.url().to_owned()),
+        environment_observer_url: Some(observer.url().to_owned()),
         suite_path: suite_path.to_string(),
         runtime_context: BrowserRuntimeContext {
             host_platform: manifest.host_platform,

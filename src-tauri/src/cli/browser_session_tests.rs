@@ -252,7 +252,7 @@ esac
                 r#"{
             "schemaVersion":"1.0.0", "name":"Shared session participant",
             "beforeEach":[{"action":"goto","path":"/"}],
-            "tests":[{"name":"HTTP content", "steps":[{
+            "tests":[{"name":"HTTP content", "concurrency":{"resource":"app-read"}, "steps":[{
                 "action":"expectText", "locator":{"by":"text","value":"ok","exact":true}, "value":"ok"
             }]}]
         }"#,
@@ -262,7 +262,7 @@ esac
                 r#"{
             "schemaVersion":"1.0.0", "name":"Held participant",
             "beforeEach":[{"action":"goto","path":"/hold"}],
-            "tests":[{"name":"Held", "steps":[{
+            "tests":[{"name":"Held", "concurrency":{"resource":"app-read"}, "steps":[{
                 "action":"expectText", "locator":{"by":"text","value":"ok","exact":true}, "value":"ok"
             }]}]
         }"#,
@@ -406,6 +406,9 @@ fn shared_session_process() {
                 args.push("--owns-runtime".into());
                 args.push("--finalize-policy".into());
                 args.push("stop".into());
+            }
+            if root.join("build-marker").exists() {
+                args.extend(["--build-marker".into(), suite("build-marker")]);
             }
             let execution = run(args);
             output("session-prepare", &execution);
@@ -749,6 +752,19 @@ fn lifecycle_exclusion_blocks_participants_in_both_directions() {
     assert_eq!(blocked_output["error"]["retryable"], true);
     exclusive.kill();
 
+    // An exclusive owner changes the managed generation even if it crashes
+    // before Docker work. The old preparation must not silently adopt it.
+    fixture
+        .spawn_with("session-participant", Some(&shared_id))
+        .finish();
+    let stale = fixture.result("session-participant");
+    assert_eq!(stale["data"]["outcome"], "failed", "{stale}");
+    assert_eq!(
+        stale["data"]["environment"]["events"][0]["component"],
+        "managed-vm"
+    );
+    let (_, shared_id) = prepared_session(&fixture, &mut keeper);
+
     // A live participant keeps lifecycle mutations busy.
     let mut held = fixture.spawn_with("session-participant-hold", Some(&shared_id));
     until(|| fixture.path("browser-held").exists());
@@ -793,5 +809,116 @@ fn unready_runtime_fails_prepare_without_leaving_a_session() {
         .map(|entries| entries.flatten().count())
         .unwrap_or(0);
     assert_eq!(after, before);
+    keeper.kill();
+}
+
+#[test]
+fn prepared_generation_rejects_build_changes_and_legacy_descriptors() {
+    let fixture = Fixture::new();
+    fixture.prepare_browser();
+    fs::write(fixture.path("build-marker"), b"first").unwrap();
+    let mut keeper = fixture.spawn("keeper-observe");
+    until(|| fixture.path("keeper-ready").exists());
+    let (prepared, shared_id) = prepared_session(&fixture, &mut keeper);
+    assert_eq!(prepared["data"]["preparation"]["comparable"], true);
+    fs::write(fixture.path("replacement"), b"first").unwrap();
+    fs::rename(fixture.path("replacement"), fixture.path("build-marker")).unwrap();
+    fixture
+        .spawn_with("session-participant", Some(&shared_id))
+        .finish();
+    let changed = fixture.result("session-participant");
+    assert_eq!(changed["data"]["outcome"], "failed", "{changed}");
+    assert_eq!(
+        changed["data"]["environment"]["events"][0]["classification"],
+        "build-changed"
+    );
+    assert_eq!(
+        changed["data"]["environment"]["preparationId"],
+        prepared["data"]["preparation"]["preparationId"]
+    );
+    let (_, fresh) = prepared_session(&fixture, &mut keeper);
+    fixture
+        .spawn_with("session-participant", Some(&fresh))
+        .finish();
+    assert_eq!(
+        fixture.result("session-participant")["data"]["outcome"],
+        "passed"
+    );
+
+    // Exact prior private record shape: readable/status/finalize-compatible,
+    // but cannot attach without a newly verified preparation.
+    let record = PathBuf::from(format!(
+        "/tmp/mendimaru-test-sessions-{}/{fresh}.json",
+        unsafe { libc::geteuid() }
+    ));
+    let mut legacy: Value = serde_json::from_slice(&fs::read(&record).unwrap()).unwrap();
+    legacy.as_object_mut().unwrap().remove("preparation");
+    fs::write(&record, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    assert_eq!(status(&fixture, &fresh)["state"], "ready");
+    fixture
+        .spawn_with("session-participant", Some(&fresh))
+        .finish();
+    let refused = fixture.result("session-participant");
+    assert_eq!(
+        refused["error"]["message"],
+        crate::winboat::test_session::PREPARATION_REQUIRED
+    );
+    fixture
+        .spawn_with("session-finalize", Some(&fresh))
+        .finish();
+    assert_eq!(
+        fixture.result("session-finalize")["data"]["finalized"],
+        true
+    );
+    fixture.assert_preserved();
+    keeper.kill();
+}
+
+#[test]
+fn separate_cli_writes_cannot_overlap_a_reader_and_wrong_vm_cannot_finalize() {
+    let fixture = Fixture::new();
+    fixture.prepare_browser();
+    let mut keeper = fixture.spawn("keeper-observe");
+    until(|| fixture.path("keeper-ready").exists());
+    let (_, shared_id) = prepared_session(&fixture, &mut keeper);
+    let mut held = fixture.spawn_with("session-participant-hold", Some(&shared_id));
+    until(|| fixture.path("browser-held").exists());
+    let path = fixture.path("smoke.browser.json");
+    let mut suite: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    suite["tests"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("concurrency");
+    fs::write(path, serde_json::to_vec(&suite).unwrap()).unwrap();
+    fixture
+        .spawn_with("session-participant", Some(&shared_id))
+        .finish();
+    let busy = fixture.result("session-participant");
+    assert_eq!(
+        busy["error"]["message"],
+        crate::winboat::test_session::APP_BUSY,
+        "{busy}"
+    );
+    assert_eq!(busy["error"]["retryable"], true);
+    assert_eq!(status(&fixture, &shared_id)["liveParticipants"], 1);
+    let other = Fixture::new();
+    other
+        .spawn_with("session-finalize", Some(&shared_id))
+        .finish();
+    assert_eq!(
+        other.result("session-finalize")["error"]["message"],
+        crate::winboat::test_session::WRONG_VM
+    );
+    assert_eq!(status(&fixture, &shared_id)["state"], "ready");
+    fs::write(fixture.path("browser-release"), b"").unwrap();
+    held.finish();
+    fixture
+        .spawn_with("session-participant", Some(&shared_id))
+        .finish();
+    assert_eq!(
+        fixture.result("session-participant")["data"]["outcome"],
+        "passed"
+    );
+    fixture.assert_preserved();
     keeper.kill();
 }

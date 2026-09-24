@@ -252,3 +252,9 @@ disposable-snapshot and opt-in rules above:
 - exclusive reservation of the #146 concurrent-stop and #148 connection-loss
   reproductions, so no ordinary worker runs beside them;
 - artifact commit and pruning racing a concurrent read of the same cache.
+
+## Shared-session integration (#149)
+
+See [shared Linux + WinBoat tests](shared-winboat-testing.md) for fixed preparation
+identity, cross-process data exclusion, supported combinations, upgrade behavior,
+and the installed-package real Studio F5 integration gate.

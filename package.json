@@ -1,7 +1,7 @@
 {
   "name": "mendimaru",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Manage Mendix Studio Pro natively on Windows or through WinBoat on Linux",
   "engines": {
     "node": ">=22.22.2"
@@ -30,7 +30,7 @@
     "test:browser": "node scripts/test-browser-e2e.mjs && npm run test:browser:frontend",
     "test:browser:security": "node --test scripts/browser-artifact-safety.node-test.mjs",
     "test:browser:winboat": "node scripts/test-browser-winboat-live.mjs",
-    "test:browser:winboat:helpers": "node --test scripts/browser-winboat-live.node-test.mjs scripts/browser-environment.node-test.mjs",
+    "test:browser:winboat:helpers": "node --test scripts/browser-winboat-live.node-test.mjs scripts/browser-environment.node-test.mjs scripts/shared-winboat-live.node-test.mjs scripts/browser-parallel.node-test.mjs",
     "test:browser:environment:live": "cargo test --manifest-path src-tauri/Cargo.toml --lib live_environment_generation_gate -- --ignored --nocapture",
     "test:browser:environment:fixtures": "cargo test --manifest-path src-tauri/Cargo.toml --lib external_environment_changes_preserve_browser_evidence -- --ignored --nocapture",
     "test:backend": "cargo test --manifest-path src-tauri/Cargo.toml",
@@ -49,7 +49,8 @@
     "preview": "vite preview",
     "tarui": "npm run tauri --",
     "tauri": "cross-env NO_STRIP=1 tauri",
-    "test:browser:frontend": "node --test scripts/browser-frontend-health.node-test.mjs"
+    "test:browser:frontend": "node --test scripts/browser-frontend-health.node-test.mjs",
+    "test:browser:shared:live": "node scripts/test-shared-winboat-live.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

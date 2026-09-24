@@ -30,7 +30,7 @@ async function command(binary, args, timeout = 10_000) {
   }
 }
 
-async function processIdentity(pid) {
+export async function processIdentity(pid) {
   const stat = await fs.readFile(`/proc/${pid}/stat`, "utf8");
   const fields = stat
     .slice(stat.lastIndexOf(")") + 2)
@@ -44,7 +44,7 @@ async function processIdentity(pid) {
   };
 }
 
-async function rdpProcesses() {
+export async function rdpProcesses() {
   const identities = [];
   for (const pid of await fs.readdir("/proc")) {
     if (!/^\d+$/.test(pid)) continue;
@@ -60,7 +60,7 @@ async function rdpProcesses() {
   return identities.sort((a, b) => a.pid - b.pid);
 }
 
-async function ownerStatus(cache, sessionId) {
+export async function ownerStatus(cache, sessionId) {
   const directory = path.join(cache, "cli-sessions");
   const socketPath = path.join(
     directory,

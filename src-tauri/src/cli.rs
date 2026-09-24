@@ -3089,6 +3089,8 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
             | crate::winboat::test_session::WRONG_VM
             | crate::winboat::test_session::FINALIZE_BUSY
             | crate::winboat::test_session::DRAINED_TIMEOUT
+            | crate::winboat::test_session::PREPARATION_REQUIRED
+            | crate::winboat::test_session::APP_BUSY
             | crate::winboat::test_session::UNTRUSTED
             | crate::application::BROWSER_SESSION_NO_OWNERSHIP),
         ) => message,
