@@ -186,6 +186,7 @@
   "environmentDiagnosticId": {
     "winboat": true,
     "compose": true,
+    "coordination-lock": true,
     "container-runtime": true,
     "freerdp": true,
     "shared-directory": true,
@@ -215,7 +216,10 @@
     "external-process-timeout": true,
     "external-process-cancelled": true,
     "external-process-interrupted": true,
-    "guest-clock-skew-exceeded": true
+    "guest-clock-skew-exceeded": true,
+    "coordination-lock-untrusted": true,
+    "coordination-lock-unavailable": true,
+    "coordination-identity-mismatch": true
   },
   "downloadState": {
     "starting": true,

@@ -39,11 +39,12 @@
     "checks": {
       "type": "array",
       "uniqueItems": true,
-      "maxItems": 11,
+      "maxItems": 12,
       "items": {
         "enum": [
           "winboat",
           "compose",
+          "coordination-lock",
           "container-runtime",
           "freerdp",
           "shared-directory",

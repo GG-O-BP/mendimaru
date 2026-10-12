@@ -3,7 +3,18 @@ use std::os::unix::fs::symlink;
 
 fn fixture() -> (tempfile::TempDir, Plan) {
     let root = tempfile::tempdir().unwrap();
+    // Storage must not be group-writable even when the test umask is 0002.
+    std::fs::set_permissions(
+        root.path(),
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
     std::fs::write(root.path().join(TARGET), vec![0; VARS_BYTES]).unwrap();
+    std::fs::set_permissions(
+        root.path().join(TARGET),
+        std::os::unix::fs::PermissionsExt::from_mode(0o644),
+    )
+    .unwrap();
     std::fs::write(
         root.path().join("data.img"),
         b"Windows data disk must never change",
@@ -86,19 +97,48 @@ fn config(root: &Path) -> AppConfig {
 }
 
 #[test]
-fn nvram_maintenance_excludes_operations_and_refuses_a_symlinked_lock() {
+fn nvram_maintenance_excludes_operations_without_following_a_symlinked_legacy_lock() {
     let (root, _plan) = fixture();
-    let config = config(root.path());
+    let mut config = config(root.path());
+    // The maintenance lock is keyed by the managed VM identity (#225).
+    config.container_name = crate::contracts::secure_identifier("vm").unwrap();
+    let compose = root.path().join("managed-compose.yml");
+    std::fs::write(
+        &compose,
+        format!(
+            "services:\n  windows:\n    image: ghcr.io/dockur/windows:6.03\n    labels:\n      io.winboat.managed: 'true'\n    container_name: {}\n    volumes:\n      - data:/storage\n",
+            config.container_name
+        ),
+    )
+    .unwrap();
+    config.compose_file = compose.to_string_lossy().into_owned();
     let reader = super::super::maintenance::shared(&config).unwrap();
-    assert!(super::super::maintenance::acquire(&config, true).is_err());
+    assert_eq!(
+        super::super::maintenance::acquire(&config, true).unwrap_err(),
+        super::super::maintenance::LockError::Busy
+    );
     drop(reader);
     let writer = super::super::maintenance::acquire(&config, true).unwrap();
-    assert!(super::super::maintenance::shared(&config).is_err());
+    assert_eq!(
+        super::super::maintenance::shared(&config).unwrap_err(),
+        super::super::maintenance::LockError::Busy
+    );
     drop(writer);
+    // A symlinked legacy lock cannot be used by any version: it is neither
+    // followed nor allowed to weaken the private lock.
     let lock = root.path().join(".mendimaru-maintenance.lock");
     std::fs::remove_file(&lock).unwrap();
-    symlink(root.path().join("data.img"), lock).unwrap();
-    assert!(super::super::maintenance::shared(&config).is_err());
+    symlink(root.path().join("data.img"), &lock).unwrap();
+    let reader = super::super::maintenance::shared(&config).unwrap();
+    assert_eq!(
+        super::super::maintenance::acquire(&config, true).unwrap_err(),
+        super::super::maintenance::LockError::Busy
+    );
+    drop(reader);
+    assert!(std::fs::symlink_metadata(&lock)
+        .unwrap()
+        .file_type()
+        .is_symlink());
     protected_unchanged(root.path());
 }
 
@@ -157,6 +197,11 @@ fn nvram_backup_precedes_retirement_and_failure_restores_original_bytes() {
     assert!(!root.path().join(TARGET).exists());
     // Simulate the regenerated file left by a failed disposable guest boot.
     std::fs::write(root.path().join(TARGET), vec![0x42; VARS_BYTES]).unwrap();
+    std::fs::set_permissions(
+        root.path().join(TARGET),
+        std::os::unix::fs::PermissionsExt::from_mode(0o644),
+    )
+    .unwrap();
     plan.restore().unwrap();
     assert_eq!(
         std::fs::read(root.path().join(TARGET)).unwrap(),

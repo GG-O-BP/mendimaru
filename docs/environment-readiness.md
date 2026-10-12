@@ -11,12 +11,14 @@ independent fields. Existing `guestOnline` and `ready` remain compatible.
 - `health`: `attentionRequired` plus the stable IDs in `attentionChecks`. This
   includes warnings as well as failures, without examining translated text.
 
-| Diagnostic                                                                            | Launch / uninstall / projects | Installation          |
-| ------------------------------------------------------------------------------------- | ----------------------------- | --------------------- |
-| WinBoat, Compose, runtime, FreeRDP, shared directory/mount, container, Guest API, RDP | Required success              | Required success      |
-| Guest clock                                                                           | Nonblocking attention         | Nonblocking attention |
-| Marketplace browser                                                                   | Nonblocking attention         | Required success      |
+| Diagnostic                                                                                               | Launch / uninstall / projects | Installation          |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------- | --------------------- |
+| WinBoat, Compose, coordination lock, runtime, FreeRDP, shared directory/mount, container, Guest API, RDP | Required success              | Required success      |
+| Guest clock                                                                                              | Nonblocking attention         | Nonblocking attention |
+| Marketplace browser                                                                                      | Nonblocking attention         | Required success      |
 
+The coordination lock check verifies Mendimaru's private maintenance and Runtime
+stop locks without holding them; see [coordination locks](winboat-coordination-locks.md).
 `blockingChecks` lists failed or warning common prerequisites; browser availability
 is an additional installation-specific prerequisite. Native Windows evaluates only
 its applicable checks and retains its existing native connection label and controls.

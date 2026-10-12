@@ -99,10 +99,16 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
             }
         }
     }
+    // Independent preflight of the exact locks every coordinated operation
+    // takes, so a blocked lock is never reported as ready (#225).
+    let coordination_error = super::maintenance::probe(config)
+        .err()
+        .and_then(super::maintenance::LockError::diagnostic_code);
     let state = LinuxDiagnosticState {
         winboat_available,
         compose_available,
         compose_valid,
+        coordination_error,
         runtime,
         freerdp,
         shared_directory_available,
@@ -160,6 +166,7 @@ struct LinuxDiagnosticState {
     winboat_available: bool,
     compose_available: bool,
     compose_valid: bool,
+    coordination_error: Option<EnvironmentDiagnosticErrorCode>,
     runtime: ToolProbe,
     freerdp: ToolProbe,
     shared_directory_available: bool,
@@ -211,6 +218,7 @@ impl LinuxDiagnosticState {
     fn ready(&self) -> bool {
         self.winboat_available
             && self.compose_valid
+            && self.coordination_error.is_none()
             && self.runtime.usable
             && self.freerdp.usable
             && self.shared_directory_available
@@ -224,8 +232,8 @@ impl LinuxDiagnosticState {
 fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagnostic> {
     use EnvironmentDiagnosticAction::{OpenSettings, OpenWinboat, Redetect, StartWinboat};
     use EnvironmentDiagnosticId::{
-        Compose, Container, ContainerRuntime, Freerdp, GuestApi, GuestClock, MarketplaceBrowser,
-        Rdp, SharedDirectory, SharedMount, Winboat,
+        Compose, Container, ContainerRuntime, CoordinationLock, Freerdp, GuestApi, GuestClock,
+        MarketplaceBrowser, Rdp, SharedDirectory, SharedMount, Winboat,
     };
     use EnvironmentDiagnosticStatus::{Failure, Success, Warning};
 
@@ -262,6 +270,23 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
                 Redetect
             }),
             None,
+        ),
+        diagnostic(
+            CoordinationLock,
+            if state.coordination_error.is_none() {
+                Success
+            } else {
+                Failure
+            },
+            None,
+            state.coordination_error.map(|code| {
+                if code == EnvironmentDiagnosticErrorCode::CoordinationIdentityMismatch {
+                    OpenSettings
+                } else {
+                    Redetect
+                }
+            }),
+            state.coordination_error,
         ),
         diagnostic(
             ContainerRuntime,
@@ -1064,6 +1089,7 @@ mod tests {
     use crate::models::{
         AppConfig, ContainerRuntime, ContainerStatus, EnvironmentDiagnosticAction,
         EnvironmentDiagnosticErrorCode, EnvironmentDiagnosticId, EnvironmentDiagnosticStatus,
+        EnvironmentStatus,
     };
     use crate::process::CommandPolicy;
     use chrono::{DateTime, Utc};
@@ -1103,6 +1129,7 @@ mod tests {
             winboat_available: true,
             compose_available: true,
             compose_valid: true,
+            coordination_error: None,
             runtime: ToolProbe {
                 available: true,
                 usable: true,
@@ -1140,7 +1167,7 @@ mod tests {
         let diagnostics = build_linux_diagnostics(&state);
 
         assert!(state.ready());
-        assert_eq!(diagnostics.len(), 11);
+        assert_eq!(diagnostics.len(), 12);
         assert!(diagnostics
             .iter()
             .all(|diagnostic| diagnostic.status == EnvironmentDiagnosticStatus::Success));
@@ -1163,6 +1190,78 @@ mod tests {
                 .and_then(|diagnostic| diagnostic.observed.as_deref()),
             Some("151.0.7922.137; sandbox=active")
         );
+    }
+
+    #[test]
+    fn blocked_coordination_locks_are_reported_and_block_readiness() {
+        use crate::models::EnvironmentAssessment;
+        for (code, action) in [
+            (
+                EnvironmentDiagnosticErrorCode::CoordinationLockUntrusted,
+                EnvironmentDiagnosticAction::Redetect,
+            ),
+            (
+                EnvironmentDiagnosticErrorCode::CoordinationLockUnavailable,
+                EnvironmentDiagnosticAction::Redetect,
+            ),
+            (
+                EnvironmentDiagnosticErrorCode::CoordinationIdentityMismatch,
+                EnvironmentDiagnosticAction::OpenSettings,
+            ),
+        ] {
+            let mut state = healthy_state();
+            state.coordination_error = Some(code);
+            let diagnostics = build_linux_diagnostics(&state);
+            assert!(!state.ready(), "{code:?} must not report ready");
+            let check = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.id == EnvironmentDiagnosticId::CoordinationLock)
+                .expect("coordination check");
+            assert_eq!(check.status, EnvironmentDiagnosticStatus::Failure);
+            assert_eq!(check.error_code, Some(code));
+            assert_eq!(check.action, Some(action));
+            // Unrelated checks keep their own verdicts.
+            assert!(diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.id != EnvironmentDiagnosticId::CoordinationLock)
+                .all(|diagnostic| diagnostic.status == EnvironmentDiagnosticStatus::Success));
+            let status = EnvironmentStatus {
+                assessment: EnvironmentAssessment::default(),
+                nvram_recovery_available: false,
+                startup: None,
+                platform: crate::models::PlatformCapabilities {
+                    kind: crate::models::HostPlatform::LinuxWinboat,
+                    architecture: "x86_64".into(),
+                    requires_winboat: true,
+                    supports_studio_management: true,
+                    supports_installation: true,
+                    supports_uninstallation: true,
+                    supports_projects: true,
+                },
+                ready: state.ready(),
+                winboat_available: true,
+                winboat_initialized: true,
+                setup_pending: false,
+                compose_available: true,
+                runtime_available: true,
+                freerdp_available: true,
+                shared_directory_available: true,
+                shared_mount_matches: true,
+                container_status: ContainerStatus::Running,
+                guest_online: true,
+                diagnostics,
+            }
+            .assessed();
+            assert!(!status.ready);
+            assert!(status.assessment.connectivity);
+            let readiness = &status.assessment.readiness;
+            assert!(!readiness.studio_launch && !readiness.installation);
+            assert!(!readiness.uninstallation && !readiness.projects);
+            assert_eq!(
+                readiness.blocking_checks,
+                vec![EnvironmentDiagnosticId::CoordinationLock]
+            );
+        }
     }
 
     #[test]
@@ -1497,7 +1596,7 @@ mod tests {
         let config = crate::config::detect_config().expect("live configuration is detected");
         let status = tauri::async_runtime::block_on(environment_status(&config));
         assert!(status.ready, "live environment diagnostics: {status:#?}");
-        assert_eq!(status.diagnostics.len(), 11);
+        assert_eq!(status.diagnostics.len(), 12);
         let ids = status
             .diagnostics
             .iter()
@@ -1507,6 +1606,7 @@ mod tests {
         for expected in [
             EnvironmentDiagnosticId::Winboat,
             EnvironmentDiagnosticId::Compose,
+            EnvironmentDiagnosticId::CoordinationLock,
             EnvironmentDiagnosticId::ContainerRuntime,
             EnvironmentDiagnosticId::Freerdp,
             EnvironmentDiagnosticId::SharedDirectory,

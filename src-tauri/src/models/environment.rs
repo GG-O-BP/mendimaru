@@ -65,6 +65,7 @@ impl ContainerStatus {
 pub enum EnvironmentDiagnosticId {
     Winboat,
     Compose,
+    CoordinationLock,
     ContainerRuntime,
     Freerdp,
     SharedDirectory,
@@ -104,6 +105,9 @@ pub enum EnvironmentDiagnosticErrorCode {
     ExternalProcessCancelled,
     ExternalProcessInterrupted,
     GuestClockSkewExceeded,
+    CoordinationLockUntrusted,
+    CoordinationLockUnavailable,
+    CoordinationIdentityMismatch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -185,8 +189,10 @@ impl EnvironmentStatus {
             attention.push(check.id);
             match check.id {
                 GuestClock | MarketplaceBrowser => {}
-                Winboat | Compose | ContainerRuntime | Freerdp | SharedDirectory | SharedMount
-                | Container | GuestApi | Rdp => blockers.push(check.id),
+                Winboat | Compose | CoordinationLock | ContainerRuntime | Freerdp
+                | SharedDirectory | SharedMount | Container | GuestApi | Rdp => {
+                    blockers.push(check.id)
+                }
             }
         }
         // Preserve platform-level preconditions, including unsupported architectures.

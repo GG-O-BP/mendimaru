@@ -3078,6 +3078,14 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
             | crate::winboat::vm_use::UNTRUSTED
             | crate::winboat::vm_use::UPGRADE),
         ) => message,
+        // Coordination lock causes (#225): the localized GUI message maps back
+        // to one exact, path-free reason per cause.
+        (BackendErrorCode::PreconditionFailed, Some(BackendId::LinuxWinboat), Some(_), message)
+            if crate::winboat::maintenance::LockError::from_message(message).is_some() =>
+        {
+            crate::winboat::maintenance::LockError::from_message(message)
+                .map_or("", crate::winboat::maintenance::LockError::reason)
+        }
         #[cfg(target_os = "linux")]
         (
             BackendErrorCode::PreconditionFailed,
@@ -3498,6 +3506,41 @@ mod tests {
                 sanitize_backend_error(error).message,
                 safe_error_message(BackendErrorCode::PreconditionFailed)
             );
+        }
+    }
+
+    #[test]
+    fn coordination_lock_causes_survive_cli_redaction_with_one_reason_each() {
+        use crate::winboat::maintenance::LockError;
+        crate::i18n::initialize("en-US").expect("localization");
+        for lock in LockError::ALL {
+            for capability in [
+                CapabilityId::StudioDetect,
+                CapabilityId::StudioInstall,
+                CapabilityId::StudioStatus,
+                CapabilityId::RuntimeStop,
+            ] {
+                // The GUI carries a localized message; the CLI keeps the exact reason.
+                let error = lock.backend_error(capability);
+                assert_ne!(error.message, lock.reason());
+                let sanitized = sanitize_backend_error(error.clone());
+                assert_eq!(sanitized.message, lock.reason());
+                assert_eq!(sanitized.code, BackendErrorCode::PreconditionFailed);
+                assert_eq!(sanitized.capability, Some(capability));
+                assert_eq!(sanitized.retryable, lock.retryable());
+                assert_eq!(exit_code(&sanitized), EXIT_OPERATION_FAILED);
+                let via_command = command_error_to_backend(
+                    lock.command_error(capability),
+                    BackendId::LinuxWinboat,
+                );
+                assert_eq!(via_command.message, lock.reason());
+                let mut tampered = error;
+                tampered.message.push_str(" /home/private/.winboat");
+                assert_eq!(
+                    sanitize_backend_error(tampered).message,
+                    safe_error_message(BackendErrorCode::PreconditionFailed)
+                );
+            }
         }
     }
 

@@ -64,6 +64,8 @@ pub(crate) fn failure(code: BackendErrorCode) -> BackendError {
             crate::tr!("error-container-exited-during-startup")
         }
         BackendErrorCode::GuestStartupTimeout => crate::tr!("error-guest-startup-timeout"),
+        // Nothing was started: never call a precondition a failed start command.
+        BackendErrorCode::PreconditionFailed => crate::tr!("error-startup-precondition-failed"),
         _ => crate::tr!("error-startup-command-failed"),
     };
     let mut error =
@@ -301,8 +303,10 @@ pub async fn ensure_guest_online(config: &AppConfig) -> Result<(), BackendError>
 }
 
 async fn ensure_guest_online_with_lease(config: &AppConfig) -> Result<(), BackendError> {
+    // Fails before any Windows start command; keep the actual lock cause. The
+    // environment diagnostics probe the same locks independently (#225).
     let _maintenance = super::maintenance::shared(config)
-        .map_err(|_| failure(BackendErrorCode::PreconditionFailed))?;
+        .map_err(|error| error.backend_error(CapabilityId::StudioDetect))?;
     ensure_guest_online_unlocked(config).await
 }
 
@@ -384,6 +388,18 @@ mod tests {
             health_calls: AtomicUsize::new(0),
         }
     }
+    #[test]
+    fn preconditions_are_never_reported_as_a_failed_start_command() {
+        crate::i18n::initialize("en-US").expect("localization");
+        let error = failure(BackendErrorCode::PreconditionFailed);
+        assert_eq!(error.code, BackendErrorCode::PreconditionFailed);
+        assert_eq!(
+            error.message,
+            crate::tr!("error-startup-precondition-failed")
+        );
+        assert_ne!(error.message, crate::tr!("error-startup-command-failed"));
+    }
+
     #[tokio::test]
     async fn delayed_health_is_the_only_success_condition() {
         let f = fixture(vec![ContainerStatus::Exited, ContainerStatus::Running], 1);

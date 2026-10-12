@@ -50,4 +50,35 @@ describe("environment diagnostic process failures", () => {
     expect(text.detail).toBe("diagnostic-clock-skew-exceeded");
     expect(text.action).toBe("diagnostic-action-redetect");
   });
+
+  it("renders each coordination lock cause with its own recovery message", () => {
+    for (const [errorCode, detail, action] of [
+      [
+        "coordination-lock-untrusted",
+        "diagnostic-coordination-lock-untrusted",
+        "redetect",
+      ],
+      [
+        "coordination-lock-unavailable",
+        "diagnostic-coordination-lock-unavailable",
+        "redetect",
+      ],
+      [
+        "coordination-identity-mismatch",
+        "diagnostic-coordination-identity-mismatch",
+        "open-settings",
+      ],
+    ] as const) {
+      const text = diagnosticText(
+        { id: "coordination-lock", status: "failure", action, errorCode },
+        t,
+      );
+      expect(text.title).toBe("diagnostic-coordination-lock-title");
+      expect(text.detail).toBe(detail);
+      expect(text.detail).not.toBe("windows-startup-failed-detail");
+    }
+    expect(
+      diagnosticText({ id: "coordination-lock", status: "success" }, t).detail,
+    ).toBe("diagnostic-check-passed");
+  });
 });

@@ -114,11 +114,15 @@ async fn save_settings_with_lease(
     expected_compose_revision: Option<String>,
     previous_config: Option<AppConfig>,
 ) -> Result<SettingsSaveResult, CommandError> {
-    let _maintenance = crate::winboat::maintenance::shared(&config)?;
+    let coordination = |error: crate::winboat::maintenance::LockError| {
+        error.command_error(crate::contracts::CapabilityId::RuntimeStart)
+    };
+    let _maintenance = crate::winboat::maintenance::shared(&config).map_err(coordination)?;
     let _previous_maintenance = previous_config
         .as_ref()
         .map(crate::winboat::maintenance::shared)
-        .transpose()?;
+        .transpose()
+        .map_err(coordination)?;
     let config_snapshot = crate::config::snapshot_config(app)?;
     let plan = crate::config::plan_shared_mount(
         &PathBuf::from(&config.compose_file),

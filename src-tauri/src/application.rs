@@ -13,7 +13,7 @@ use crate::models::{
     EnvironmentDiagnosticStatus, EnvironmentStatus, OperationKind, OperationRecord, OperationStage,
     StudioVersion,
 };
-use crate::operations::{OperationTracker, SessionActionGuard};
+use crate::operations::{BeginError, OperationTracker, SessionActionGuard};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -1175,7 +1175,7 @@ pub(crate) async fn launch(
         OperationStage::Launching,
         retry_of,
     )
-    .map_err(operation_history_error)?;
+    .map_err(operation_begin_error(CapabilityId::StudioStart))?;
     let operation_id = tracker.id().to_string();
     let result = crate::platform::launch_studio(config, &version, &operation_id, project_mpr_path)
         .await
@@ -1250,7 +1250,7 @@ pub(crate) async fn uninstall(
         OperationStage::Uninstalling,
         retry_of,
     )
-    .map_err(operation_history_error)?;
+    .map_err(operation_begin_error(CapabilityId::StudioUninstall))?;
     let operation_id = tracker.id().to_string();
     let result = crate::platform::uninstall_studio(config, &version, &operation_id)
         .await
@@ -1310,7 +1310,7 @@ pub(crate) async fn execute_install(
         OperationStage::Starting,
         retry_of,
     )
-    .map_err(operation_history_error)?;
+    .map_err(operation_begin_error(CapabilityId::StudioInstall))?;
     let operation_id = tracker.id().to_string();
     let result = crate::downloads::download_and_launch(
         paths,
@@ -1469,7 +1469,14 @@ async fn ensure_no_running_session(
     capability: CapabilityId,
 ) -> ApplicationResult<()> {
     if crate::platform::studio_sessions(config)
-        .await?
+        .await
+        .map_err(|mut error| {
+            // The session query only prepares this action; report the action.
+            if crate::winboat::maintenance::LockError::from_message(&error.message).is_some() {
+                error.capability = Some(capability);
+            }
+            error
+        })?
         .iter()
         .any(|session| session.version == version)
     {
@@ -1527,12 +1534,23 @@ fn ensure_no_connected_remote_app_version(
     Ok(())
 }
 
-fn session_conflict_error(_message: String, capability: CapabilityId) -> CommandError {
-    precondition_error(
-        capability,
-        "another action for this Studio Pro version is already running",
-        true,
-    )
+fn session_conflict_error(error: BeginError, capability: CapabilityId) -> CommandError {
+    match error {
+        // A lock that cannot be trusted or opened is not a conflicting action.
+        BeginError::Coordination(error) => error.command_error(capability),
+        BeginError::Rejected(_) => precondition_error(
+            capability,
+            "another action for this Studio Pro version is already running",
+            true,
+        ),
+    }
+}
+
+fn operation_begin_error(capability: CapabilityId) -> impl FnOnce(BeginError) -> CommandError {
+    move |error| match error {
+        BeginError::Coordination(error) => error.command_error(capability),
+        BeginError::Rejected(message) => operation_history_error(message),
+    }
 }
 
 fn complete_operation(
@@ -1610,7 +1628,7 @@ mod tests {
     use super::{
         ensure_no_connected_remote_app_version, ensure_version_not_installed,
         exact_project_launch_path, invalidate_installed_versions_cache_after_mutation,
-        launch_project, operation, project, projects, session_conflict_error,
+        launch_project, operation, project, projects, session_conflict_error, BeginError,
         SafeEnvironmentStatus,
     };
     #[cfg(target_os = "linux")]
@@ -1648,9 +1666,14 @@ mod tests {
 
     #[test]
     fn session_action_conflicts_report_the_requested_capability() {
-        let stop = session_conflict_error("fixture conflict".into(), CapabilityId::StudioStop);
-        let reconnect =
-            session_conflict_error("fixture conflict".into(), CapabilityId::StudioStatus);
+        let stop = session_conflict_error(
+            BeginError::Rejected("fixture conflict".into()),
+            CapabilityId::StudioStop,
+        );
+        let reconnect = session_conflict_error(
+            BeginError::Rejected("fixture conflict".into()),
+            CapabilityId::StudioStatus,
+        );
 
         assert_eq!(
             stop.details
@@ -1667,6 +1690,39 @@ mod tests {
                 .capability,
             Some(CapabilityId::StudioStatus)
         );
+    }
+
+    #[test]
+    fn coordination_lock_failures_are_never_relabelled_as_conflicts_or_history_errors() {
+        use crate::winboat::maintenance::LockError;
+        crate::i18n::initialize("en-US").expect("localization");
+        for lock in LockError::ALL {
+            let session =
+                session_conflict_error(BeginError::Coordination(lock), CapabilityId::StudioStop);
+            let begin = super::operation_begin_error(CapabilityId::StudioInstall)(
+                BeginError::Coordination(lock),
+            );
+            for (error, capability) in [
+                (session, CapabilityId::StudioStop),
+                (begin, CapabilityId::StudioInstall),
+            ] {
+                assert_eq!(error.code, CommandErrorCode::PreconditionFailed);
+                assert_eq!(error.message, lock.localized());
+                assert_ne!(
+                    error.message,
+                    "another action for this Studio Pro version is already running"
+                );
+                let details = error.details.expect("structured coordination details");
+                assert_eq!(details.capability, Some(capability));
+                assert_eq!(details.retryable, lock.retryable());
+                assert_eq!(LockError::from_message(&details.message), Some(lock));
+            }
+        }
+        let history = super::operation_begin_error(CapabilityId::StudioInstall)(
+            BeginError::Rejected("history unavailable".into()),
+        );
+        assert_eq!(history.code, CommandErrorCode::OperationFailed);
+        assert_eq!(history.message, "history unavailable");
     }
 
     #[cfg(target_os = "linux")]
