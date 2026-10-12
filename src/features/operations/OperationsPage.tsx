@@ -69,6 +69,9 @@ const REASON_KEYS: Record<string, MessageKey> = {
   coordination_unavailable: "error-coordination-unavailable",
   coordination_identity_mismatch: "error-coordination-identity",
   coordination_timeout: "error-coordination-timeout",
+  remote_desktop_unavailable: "error-remote-desktop-unavailable",
+  remote_desktop_certificate_mismatch:
+    "error-remote-desktop-certificate-mismatch",
   operation_failed: "operation-reason-operation-failed",
   external_process_timeout: "operation-reason-external-process-timeout",
   external_process_cancelled: "operation-reason-external-process-cancelled",

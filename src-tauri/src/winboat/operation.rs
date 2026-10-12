@@ -77,7 +77,12 @@ impl From<BackendError> for WindowsOperationFailure {
 
 const REMOTE_APP_START_ATTEMPTS: usize = 2;
 const REMOTE_APP_RETRY_DELAY_SECONDS: u64 = 2;
-const REMOTE_APP_ENDPOINT_READY_TIMEOUT: Duration = Duration::from_secs(15);
+/// Bound for the RDP endpoint to answer the X.224 negotiation after a
+/// container recreation. The guest API is already online at this point, so
+/// this only covers the RDP listener and the host port forwarder settling.
+const REMOTE_DESKTOP_READY_TIMEOUT: Duration = Duration::from_secs(30);
+const REMOTE_DESKTOP_STABLE_PROBES: usize = 2;
+const REMOTE_DESKTOP_PROBE_INTERVAL: Duration = Duration::from_millis(500);
 
 pub(super) struct WindowsOperationRequest<'a> {
     pub(super) script_path: &'a Path,
@@ -100,12 +105,11 @@ where
     F: FnMut(&WindowsOperationReport) + Send,
 {
     ensure_private_operation_transport(config).await?;
-    let mut connection_config = config.clone();
-    connection_config.rdp_port = crate::config::runtime_host_port_async(config, 3389, "tcp")
-        .await?
-        .unwrap_or(config.rdp_port);
-    wait_for_remote_app_endpoint(&connection_config, REMOTE_APP_ENDPOINT_READY_TIMEOUT).await?;
     for attempt in 0..REMOTE_APP_START_ATTEMPTS {
+        // Every container recreation can move the published RDP port inside
+        // its host range (#227), so the endpoint is resolved per attempt.
+        let connection_config = remote_desktop_connection(config).await?;
+        wait_for_remote_desktop(&connection_config, REMOTE_DESKTOP_READY_TIMEOUT).await?;
         remove_stale_report(request.report_path).await?;
         let security = OperationSecurity::generate(request.script_sha256)
             .map_err(|error| crate::tr!("error-operation-security-create", error = error))?;
@@ -139,6 +143,9 @@ where
         .await
         {
             Ok(wait) => {
+                // The HMAC-authenticated report proves this connection reached
+                // the real guest; only now may its certificate become trusted.
+                remote_app.confirm_trust();
                 let remote_app = if request.keep_remote_app_alive {
                     Some(remote_app)
                 } else {
@@ -155,17 +162,12 @@ where
             }
             Err(error) => {
                 stop_remote_app(&mut remote_app);
+                remote_app.discard_unconfirmed_trust();
                 if error.retryable && attempt + 1 < REMOTE_APP_START_ATTEMPTS {
                     tokio::time::sleep(Duration::from_secs(REMOTE_APP_RETRY_DELAY_SECONDS)).await;
                     continue;
                 }
-                return Err(WindowsOperationFailure {
-                    message: error.message,
-                    exit_code: error.exit_code,
-                    retryable: error.retryable || error.user_retryable,
-                    failure_kind: error.failure_kind,
-                    backend_error_code: None,
-                });
+                return Err(wait_failure(error));
             }
         }
     }
@@ -193,41 +195,55 @@ pub(super) async fn wait_for_followup_windows_operation(
         &mut |_| {},
     )
     .await
-    .map_err(|error| WindowsOperationFailure {
-        message: error.message,
-        exit_code: error.exit_code,
-        retryable: error.retryable || error.user_retryable,
-        failure_kind: error.failure_kind,
-        backend_error_code: None,
-    })?;
+    .map_err(wait_failure)?;
     Ok((wait.report, wait.authenticated))
 }
 
-async fn wait_for_remote_app_endpoint(
-    config: &crate::models::AppConfig,
+fn wait_failure(error: runner::WindowsOperationWaitError) -> WindowsOperationFailure {
+    // A rejected RDP certificate is a trust decision, never a transient fault.
+    let certificate_rejected =
+        error.backend_error_code == Some(BackendErrorCode::RemoteDesktopCertificateMismatch);
+    WindowsOperationFailure {
+        message: error.message,
+        exit_code: error.exit_code,
+        retryable: !certificate_rejected && (error.retryable || error.user_retryable),
+        failure_kind: error.failure_kind,
+        backend_error_code: error.backend_error_code,
+    }
+}
+
+async fn remote_desktop_connection(
+    config: &AppConfig,
+) -> Result<AppConfig, WindowsOperationFailure> {
+    let mut connection_config = config.clone();
+    connection_config.rdp_port = crate::config::runtime_host_port_async(config, 3389, "tcp")
+        .await?
+        .unwrap_or(config.rdp_port);
+    Ok(connection_config)
+}
+
+async fn wait_for_remote_desktop(
+    config: &AppConfig,
     timeout: Duration,
 ) -> Result<(), WindowsOperationFailure> {
-    let started = tokio::time::Instant::now();
-    loop {
-        if tokio::net::TcpStream::connect((config.rdp_host.as_str(), config.rdp_port))
-            .await
-            .is_ok()
-        {
-            return Ok(());
-        }
-        let elapsed = started.elapsed();
-        if elapsed >= timeout {
-            return Err(WindowsOperationFailure {
-                message: "the WinBoat RemoteApp endpoint was not ready before the deadline"
-                    .to_string(),
-                exit_code: None,
-                retryable: true,
-                failure_kind: Some(CommandFailureKind::Wait),
-                backend_error_code: None,
-            });
-        }
-        let remaining = timeout - elapsed;
-        tokio::time::sleep(remaining.min(Duration::from_millis(250))).await;
+    super::rdp_probe::wait_until_stable(
+        &config.rdp_host,
+        config.rdp_port,
+        timeout,
+        REMOTE_DESKTOP_STABLE_PROBES,
+        REMOTE_DESKTOP_PROBE_INTERVAL,
+    )
+    .await
+    .map_err(|_| remote_desktop_unavailable())
+}
+
+fn remote_desktop_unavailable() -> WindowsOperationFailure {
+    WindowsOperationFailure {
+        message: crate::tr!("error-remote-desktop-unavailable"),
+        exit_code: None,
+        retryable: true,
+        failure_kind: Some(CommandFailureKind::Wait),
+        backend_error_code: Some(BackendErrorCode::RemoteDesktopUnavailable),
     }
 }
 
@@ -258,9 +274,12 @@ fn stop_remote_app(remote_app: &mut RemoteAppProcess) {
 
 #[cfg(test)]
 mod tests {
-    use super::wait_for_remote_app_endpoint;
+    use super::{wait_failure, wait_for_remote_desktop};
+    use crate::contracts::BackendErrorCode;
     use crate::models::{AppConfig, ContainerRuntime};
     use crate::process::CommandFailureKind;
+    use crate::winboat::operation::runner::WindowsOperationWaitError;
+    use crate::winboat::rdp_probe::tests::{fake_endpoint, Behaviour};
     use std::time::Duration;
 
     fn endpoint_config(host: &str, port: u16) -> AppConfig {
@@ -285,15 +304,67 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unready_remoteapp_endpoint_is_bounded_and_retryable() {
-        let error = wait_for_remote_app_endpoint(
-            &endpoint_config("127.0.0.1", 9),
-            Duration::from_millis(10),
-        )
-        .await
-        .expect_err("the closed fixture endpoint is not ready");
+    async fn an_unready_remote_desktop_is_bounded_retryable_and_typed() {
+        let error =
+            wait_for_remote_desktop(&endpoint_config("127.0.0.1", 9), Duration::from_millis(10))
+                .await
+                .expect_err("the closed fixture endpoint is not ready");
 
         assert!(error.retryable);
         assert_eq!(error.failure_kind, Some(CommandFailureKind::Wait));
+        assert_eq!(
+            error.backend_error_code,
+            Some(BackendErrorCode::RemoteDesktopUnavailable)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_forwarder_that_accepts_tcp_is_not_a_ready_remote_desktop() {
+        // A bare TCP connect succeeded here before #227 and FreeRDP was
+        // started against a container that was still being recreated.
+        let (port, _) = fake_endpoint(vec![Behaviour::CloseImmediately]).await;
+        let error = wait_for_remote_desktop(
+            &endpoint_config("127.0.0.1", port),
+            Duration::from_millis(300),
+        )
+        .await
+        .expect_err("accepting TCP is not answering RDP");
+        assert_eq!(
+            error.backend_error_code,
+            Some(BackendErrorCode::RemoteDesktopUnavailable)
+        );
+
+        let (ready, _) = fake_endpoint(vec![Behaviour::Confirm]).await;
+        wait_for_remote_desktop(&endpoint_config("127.0.0.1", ready), Duration::from_secs(5))
+            .await
+            .expect("a stable RDP endpoint is ready");
+    }
+
+    #[test]
+    fn a_rejected_certificate_keeps_its_cause_and_is_never_retryable() {
+        let failure = wait_failure(WindowsOperationWaitError {
+            message: "rejected".into(),
+            retryable: true,
+            user_retryable: false,
+            exit_code: None,
+            failure_kind: None,
+            backend_error_code: Some(BackendErrorCode::RemoteDesktopCertificateMismatch),
+        });
+        assert!(!failure.retryable);
+        assert_eq!(
+            failure.backend_error_code,
+            Some(BackendErrorCode::RemoteDesktopCertificateMismatch)
+        );
+
+        let transient = wait_failure(WindowsOperationWaitError {
+            message: "ended".into(),
+            retryable: false,
+            user_retryable: true,
+            exit_code: None,
+            failure_kind: Some(CommandFailureKind::Wait),
+            backend_error_code: None,
+        });
+        assert!(transient.retryable);
+        assert_eq!(transient.backend_error_code, None);
     }
 }

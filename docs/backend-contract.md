@@ -221,7 +221,9 @@ WinBoat Run Locally status fields, and its distinct failure codes. Version 3
 adds the first supported browser-test contract and optional Runtime version
 metadata. Version 4 adds external-process failure enum values. Version 5 adds
 the supported Linux WinBoat UI provider and CLI command variants. Version 6 adds
-distinct coordination-lock error codes, `environment.configure`, and per-Runtime
+distinct coordination-lock error codes, the distinct WinBoat remote desktop
+codes `remote_desktop_unavailable` and `remote_desktop_certificate_mismatch`
+(#227, added before 6.0.0 was released), `environment.configure`, and per-Runtime
 readiness while retaining unchanged v4/v5 persisted Runtime and artifact reads. Its Runtime,
 build, and browser readers also accept unchanged v4 persisted records, retaining
 original artifact/snapshot versions. These are major

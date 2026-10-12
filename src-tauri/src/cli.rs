@@ -3019,6 +3019,10 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
         CommandErrorCode::RuntimeComposeRecoveryFailed => {
             BackendErrorCode::RuntimeComposeRecoveryFailed
         }
+        CommandErrorCode::RemoteDesktopUnavailable => BackendErrorCode::RemoteDesktopUnavailable,
+        CommandErrorCode::RemoteDesktopCertificateMismatch => {
+            BackendErrorCode::RemoteDesktopCertificateMismatch
+        }
         CommandErrorCode::ComposeNotWinboat | CommandErrorCode::ComposeAmbiguous => {
             BackendErrorCode::InvalidRequest
         }
@@ -3047,6 +3051,7 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
                 | CommandErrorCode::ExternalProcessCancelled
                 | CommandErrorCode::ExternalProcessInterrupted
                 | CommandErrorCode::ComposeRevisionConflict
+                | CommandErrorCode::RemoteDesktopUnavailable
         ),
         diagnostic_ref: None,
     }
@@ -3203,6 +3208,12 @@ fn safe_error_message(code: BackendErrorCode) -> &'static str {
         BackendErrorCode::RuntimeComposeRecoveryFailed => {
             "the original WinBoat Compose configuration could not be recovered"
         }
+        BackendErrorCode::RemoteDesktopUnavailable => {
+            "the WinBoat RDP endpoint did not answer RDP negotiation before the deadline"
+        }
+        BackendErrorCode::RemoteDesktopCertificateMismatch => {
+            "the WinBoat RDP certificate does not match the trusted certificate of this VM"
+        }
     }
 }
 
@@ -3252,7 +3263,9 @@ fn exit_code(error: &BackendError) -> i32 {
         | BackendErrorCode::RuntimePortForwardingInvalid
         | BackendErrorCode::RuntimeFirewallBlocked
         | BackendErrorCode::RuntimeNotListening
-        | BackendErrorCode::RuntimeComposeRecoveryFailed => EXIT_OPERATION_FAILED,
+        | BackendErrorCode::RuntimeComposeRecoveryFailed
+        | BackendErrorCode::RemoteDesktopUnavailable
+        | BackendErrorCode::RemoteDesktopCertificateMismatch => EXIT_OPERATION_FAILED,
     }
 }
 

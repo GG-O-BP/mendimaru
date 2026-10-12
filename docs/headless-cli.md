@@ -128,6 +128,10 @@ but it preserves the structured cause code and retry policy. For example, a
 WinBoat launch that cannot link a Runtime record reports
 `runtime_session_not_found`, not a generic `operation_failed`; timeout,
 cancellation, and external-process interruption codes also remain distinct.
+A WinBoat RDP endpoint that does not answer RDP negotiation in time reports
+`remote_desktop_unavailable` (retryable), and a rejected RDP server certificate
+reports `remote_desktop_certificate_mismatch` (not retryable); see
+[`winboat-rdp-trust.md`](winboat-rdp-trust.md).
 Exit code `1` still covers all of these operational failures.
 
 ## Polling and lightweight status

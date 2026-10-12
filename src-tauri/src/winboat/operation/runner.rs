@@ -1,5 +1,6 @@
 use super::reason::{localize_operation_state, localize_windows_reason};
 use super::report::{parse_install_report, WindowsOperationReport, WindowsOperationState};
+use crate::contracts::BackendErrorCode;
 use crate::process::{CancellationToken, CommandFailureKind};
 use crate::winboat::remote_app::RemoteAppProcess;
 use crate::winboat::security::{
@@ -22,6 +23,7 @@ pub(super) struct WindowsOperationWaitError {
     pub(super) user_retryable: bool,
     pub(super) exit_code: Option<i32>,
     pub(super) failure_kind: Option<CommandFailureKind>,
+    pub(super) backend_error_code: Option<BackendErrorCode>,
 }
 
 pub(super) struct WindowsOperationContinuation<'a> {
@@ -92,16 +94,11 @@ where
                 user_retryable: true,
                 exit_code: None,
                 failure_kind: Some(CommandFailureKind::Cancelled),
+                backend_error_code: None,
             });
         }
         if remote_app.certificate_failed() {
-            return Err(WindowsOperationWaitError {
-                message: crate::tr!("error-freerdp-certificate-mismatch"),
-                retryable: false,
-                user_retryable: false,
-                exit_code: None,
-                failure_kind: None,
-            });
+            return Err(certificate_rejected_error());
         }
         match tokio::fs::symlink_metadata(report_path).await {
             Ok(metadata) => {
@@ -175,6 +172,7 @@ where
                         user_retryable: false,
                         exit_code: None,
                         failure_kind: None,
+                        backend_error_code: None,
                     });
                 }
             }
@@ -205,6 +203,21 @@ where
     }
 }
 
+/// FreeRDP aborted the TLS handshake because the server certificate is not
+/// the one Mendimaru trusts for this VM. The attempt loop may re-probe the
+/// endpoint once (a transient listener), but the final verdict is never
+/// retryable: a changed certificate needs an explicit owner decision.
+fn certificate_rejected_error() -> WindowsOperationWaitError {
+    WindowsOperationWaitError {
+        message: crate::tr!("error-freerdp-certificate-mismatch"),
+        retryable: true,
+        user_retryable: false,
+        exit_code: None,
+        failure_kind: None,
+        backend_error_code: Some(BackendErrorCode::RemoteDesktopCertificateMismatch),
+    }
+}
+
 fn operation_timeout_error(timeout_seconds: u64, operation: &str) -> WindowsOperationWaitError {
     WindowsOperationWaitError {
         message: crate::tr!(
@@ -216,6 +229,7 @@ fn operation_timeout_error(timeout_seconds: u64, operation: &str) -> WindowsOper
         user_retryable: true,
         exit_code: None,
         failure_kind: Some(CommandFailureKind::Timeout),
+        backend_error_code: None,
     }
 }
 
@@ -235,6 +249,7 @@ fn remote_app_ended_after_progress(
         user_retryable: true,
         exit_code: None,
         failure_kind: Some(CommandFailureKind::Wait),
+        backend_error_code: None,
     }
 }
 
@@ -252,6 +267,7 @@ fn remote_app_ended_before_progress(
         user_retryable: true,
         exit_code: None,
         failure_kind: Some(CommandFailureKind::Wait),
+        backend_error_code: None,
     }
 }
 
@@ -270,6 +286,7 @@ fn report_authentication_error(operation: &str, reason: &str) -> WindowsOperatio
         user_retryable: false,
         exit_code: None,
         failure_kind: None,
+        backend_error_code: None,
     }
 }
 
@@ -305,6 +322,7 @@ fn failed_operation(report: &WindowsOperationReport, operation: &str) -> Windows
         user_retryable: true,
         exit_code: report.exit_code,
         failure_kind: None,
+        backend_error_code: None,
     }
 }
 

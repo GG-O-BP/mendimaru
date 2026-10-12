@@ -38,6 +38,8 @@ pub enum CommandErrorCode {
     RuntimeFirewallBlocked,
     RuntimeNotListening,
     RuntimeComposeRecoveryFailed,
+    RemoteDesktopUnavailable,
+    RemoteDesktopCertificateMismatch,
     ComposeNotWinboat,
     ComposeAmbiguous,
     ComposeRevisionConflict,
@@ -111,6 +113,12 @@ impl From<BackendError> for CommandError {
             BackendErrorCode::RuntimeNotListening => CommandErrorCode::RuntimeNotListening,
             BackendErrorCode::RuntimeComposeRecoveryFailed => {
                 CommandErrorCode::RuntimeComposeRecoveryFailed
+            }
+            BackendErrorCode::RemoteDesktopUnavailable => {
+                CommandErrorCode::RemoteDesktopUnavailable
+            }
+            BackendErrorCode::RemoteDesktopCertificateMismatch => {
+                CommandErrorCode::RemoteDesktopCertificateMismatch
             }
         };
         Self {

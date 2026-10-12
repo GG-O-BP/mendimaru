@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "cargoAuditVersion": "0.22.2",
-  "reviewedAt": "2026-09-11",
+  "reviewedAt": "2026-10-12",
   "policy": {
     "vulnerabilities": "deny",
     "unsound": "deny-unless-explicit-bounded-reachability",
@@ -105,20 +105,20 @@
       },
       "owner": "GGOBP",
       "introducedBy": ["tauri v2.11.5 / wry v0.55.1 Linux WebKitGTK stack"],
-      "reason": "The unsound VariantStrIter API is not referenced by Mendimaru source; the crate remains a transitive Tauri/WebKitGTK dependency.",
+      "reason": "The unsound VariantStrIter API is not referenced by Mendimaru source or by any crate in the locked graph that depends on glib 0.18.5; the crate remains a transitive Tauri/WebKitGTK dependency because no Tauri/wry release supports glib >=0.20 yet.",
       "reachability": {
         "status": "not-reachable",
-        "evidence": "A source search at the pinned review commit finds no VariantStrIter or variant_str_iter reference outside generated/locked dependencies.",
-        "checkedCommit": "fe911c62879f0215bc073635b4d9e0ef0236bb9b"
+        "evidence": "2026-10-12 re-review (#228): no VariantStrIter, variant_str_iter or Variant::array_iter_str reference in src/ or src-tauri/src at the checked commit or on the #227/#228 branch, and none in the locked sources of atk, cairo-rs, gdk, gdk-pixbuf, gdkx11, gio, gtk, javascriptcore-rs, libappindicator, muda, pango, rfd, soup3, tao, tauri, tauri-runtime, tauri-runtime-wry, tauri-plugin-dialog, tauri-plugin-fs, tauri-plugin-opener, tray-icon, webkit2gtk and wry (every dependent of glib 0.18.5); inside glib 0.18.5 array_iter_str() is used only by its own tests.",
+        "checkedCommit": "26c17e80f8184e2493fa5b0affd03986b7fcdcd4"
       },
       "upstreamUrl": "https://github.com/gtk-rs/gtk-rs-core/pull/1343",
-      "remediationPlan": "Upgrade glib to >=0.20 through Tauri/wry; remove this exception immediately if a source reference to VariantStrIter is introduced.",
-      "expiresAt": "2026-10-01"
+      "remediationPlan": "Upgrade glib to >=0.20 through Tauri/wry as soon as a release drops gtk 0.18/webkit2gtk 2.0 (tauri 2.12.3, wry 0.57.0 and webkit2gtk 2.0.2 still require glib 0.18 on 2026-10-12); remove this exception immediately if a source reference to VariantStrIter or array_iter_str is introduced.",
+      "expiresAt": "2026-12-31"
     }
   ],
   "advisoryDatabase": {
-    "advisoryCount": 1243,
-    "lastCommit": "b50980aad8b8f14f77e25a97b32dd94bf008b0af",
-    "lastUpdated": "2026-09-09T12:49:52+02:00"
+    "advisoryCount": 1296,
+    "lastCommit": "078fd9bd0dbb9e063cd9b704fc9c83e1d3257462",
+    "lastUpdated": "2026-10-12T10:13:28+02:00"
   }
 }

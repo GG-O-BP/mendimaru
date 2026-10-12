@@ -502,6 +502,8 @@
   "error-coordination-unavailable": true,
   "error-coordination-identity": true,
   "error-coordination-timeout": true,
+  "error-remote-desktop-unavailable": true,
+  "error-remote-desktop-certificate-mismatch": true,
   "action-coordination-repair": true,
   "confirm-coordination-repair-title": true,
   "confirm-coordination-repair-description": true,

@@ -2,6 +2,72 @@ import fs from "node:fs";
 import process from "node:process";
 
 const DEFAULT_POLICY_PATH = "security/rustsec-exceptions.json";
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// An exception expiring within this window is reported as a warning so its
+// owner can re-review it before the gate turns red on an unchanged lockfile.
+export const EXPIRY_WARNING_DAYS = 30;
+
+function isoDay(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+export function isValidIsoDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && isoDay(parsed) === value;
+}
+
+function exceptionKey(exception) {
+  return `${exception?.kind}:${exception?.advisoryId}`;
+}
+
+/**
+ * Date-only check of every policy exception. It needs no cargo-audit report,
+ * so it can run on every pull request even when the dependency audit itself
+ * is skipped by path relevance: an expiry is caused by the calendar, not by a
+ * changed path (#228).
+ */
+export function verifyExceptionExpiry(
+  policy,
+  now = new Date(),
+  warningDays = EXPIRY_WARNING_DAYS,
+) {
+  const errors = [];
+  const expiringSoon = [];
+  if (!Array.isArray(policy?.exceptions)) {
+    errors.push("RustSec policy manifest has no exceptions list");
+    return { ok: false, exceptionCount: 0, errors, expiringSoon };
+  }
+  const today = isoDay(now);
+  const todayMs = Date.parse(`${today}T00:00:00.000Z`);
+  for (const exception of policy.exceptions) {
+    const key = exceptionKey(exception);
+    const expiresAt = exception?.expiresAt;
+    if (!isValidIsoDate(expiresAt)) {
+      errors.push(`${key} has an invalid expiresAt date`);
+      continue;
+    }
+    if (today > expiresAt) {
+      errors.push(`policy exception expired on ${expiresAt}: ${key}`);
+      continue;
+    }
+    const daysRemaining = Math.round(
+      (Date.parse(`${expiresAt}T00:00:00.000Z`) - todayMs) / DAY_MS,
+    );
+    if (daysRemaining <= warningDays) {
+      expiringSoon.push({ key, expiresAt, daysRemaining });
+    }
+  }
+  return {
+    ok: errors.length === 0,
+    exceptionCount: policy.exceptions.length,
+    errors,
+    expiringSoon,
+  };
+}
 
 export function collectRustsecWarnings(report) {
   const warnings = [];
@@ -86,7 +152,7 @@ export function verifyRustsecPolicy(report, policy, now = new Date()) {
     ) {
       errors.push(`${key} must record at least one introducing dependency`);
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(exception.expiresAt ?? "")) {
+    if (!isValidIsoDate(exception.expiresAt)) {
       errors.push(`${key} has an invalid expiresAt date`);
     } else if (today > exception.expiresAt) {
       errors.push(`policy exception expired on ${exception.expiresAt}: ${key}`);
@@ -133,6 +199,11 @@ export function verifyRustsecPolicy(report, policy, now = new Date()) {
     );
   }
 
+  const expiringSoon = verifyExceptionExpiry(
+    { exceptions: [...exceptions.values()] },
+    now,
+  ).expiringSoon.filter((entry) => warningKeys.has(entry.key));
+
   return {
     ok: errors.length === 0,
     vulnerabilityCount: vulnerabilities.length,
@@ -144,6 +215,7 @@ export function verifyRustsecPolicy(report, policy, now = new Date()) {
       (key) => !warningKeys.has(key),
     ).length,
     errors,
+    expiringSoon,
   };
 }
 
@@ -152,13 +224,30 @@ function parseArguments(argv) {
     policy: DEFAULT_POLICY_PATH,
     report: null,
     output: null,
+    expiryOnly: false,
+    today: null,
+    warningDays: EXPIRY_WARNING_DAYS,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--policy") options.policy = argv[++index];
     else if (argument === "--report") options.report = argv[++index];
     else if (argument === "--output") options.output = argv[++index];
-    else throw new Error(`unknown argument: ${argument}`);
+    else if (argument === "--expiry-only") options.expiryOnly = true;
+    else if (argument === "--today") options.today = argv[++index];
+    else if (argument === "--warning-days") {
+      const value = argv[++index];
+      if (!/^\d{1,4}$/.test(value ?? "")) {
+        throw new Error("--warning-days requires a non-negative integer");
+      }
+      options.warningDays = Number(value);
+    } else throw new Error(`unknown argument: ${argument}`);
+  }
+  if (options.today !== null && !isValidIsoDate(options.today)) {
+    throw new Error("--today requires a YYYY-MM-DD date");
+  }
+  if (options.expiryOnly && options.report) {
+    throw new Error("--expiry-only does not read a cargo audit report");
   }
   return options;
 }
@@ -180,17 +269,55 @@ function parseJson(source, label) {
   }
 }
 
+export function formatExpiryWarning(entry, githubActions) {
+  const message = `RustSec policy exception ${entry.key} expires on ${entry.expiresAt} (${entry.daysRemaining} day(s) left); re-review it before then`;
+  return githubActions
+    ? `::warning title=RustSec exception expiring::${message}`
+    : `warning: ${message}`;
+}
+
+function writeExpiryWarnings(expiringSoon) {
+  // GITHUB_* variables cannot be overridden per step, so the Markdown step
+  // summary opts out of workflow-command output with its own variable.
+  const githubActions =
+    process.env.GITHUB_ACTIONS === "true" &&
+    process.env.RUSTSEC_WARNING_FORMAT !== "plain";
+  for (const entry of expiringSoon) {
+    process.stdout.write(`${formatExpiryWarning(entry, githubActions)}\n`);
+  }
+}
+
+function readPolicy(path) {
+  return parseJson(fs.readFileSync(path, "utf8"), "RustSec policy manifest");
+}
+
 async function main() {
   const options = parseArguments(process.argv.slice(2));
+  const now = options.today
+    ? new Date(`${options.today}T00:00:00.000Z`)
+    : new Date();
+  if (options.expiryOnly) {
+    const result = verifyExceptionExpiry(
+      readPolicy(options.policy),
+      now,
+      options.warningDays,
+    );
+    process.stdout.write(
+      `RustSec exception expiry: ${result.ok ? "PASS" : "FAIL"} — exceptions=${result.exceptionCount}, expiringSoon=${result.expiringSoon.length}\n`,
+    );
+    writeExpiryWarnings(result.expiringSoon);
+    if (!result.ok) {
+      for (const error of result.errors) process.stderr.write(`${error}\n`);
+      process.exitCode = 1;
+    }
+    return;
+  }
   const reportSource = options.report
     ? fs.readFileSync(options.report, "utf8")
     : await readStdin();
   const report = parseJson(reportSource, "cargo audit JSON report");
-  const policy = parseJson(
-    fs.readFileSync(options.policy, "utf8"),
-    "RustSec policy manifest",
-  );
-  const result = verifyRustsecPolicy(report, policy);
+  const policy = readPolicy(options.policy);
+  const result = verifyRustsecPolicy(report, policy, now);
   const artifact = {
     schemaVersion: 1,
     checkedAt: new Date().toISOString(),
@@ -205,6 +332,7 @@ async function main() {
   process.stdout.write(
     `RustSec policy: ${result.ok ? "PASS" : "FAIL"} — vulnerabilities=${result.vulnerabilityCount}, warnings=${result.warningCount}, exceptions=${result.activeExceptionCount}, stale=${result.staleExceptionCount}\n`,
   );
+  writeExpiryWarnings(result.expiringSoon);
   if (!result.ok) {
     for (const error of result.errors) process.stderr.write(`${error}\n`);
     process.exitCode = 1;

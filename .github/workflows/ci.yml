@@ -472,6 +472,14 @@ jobs:
           echo "Dependency audit skipped: no npm or Cargo manifest, RustSec
           policy, or audit action path changed."
 
+      # Path relevance cannot see the calendar. A RustSec exception expires on
+      # an unchanged manifest, so its date is checked on every pull request
+      # even when the full audit above is skipped (#228). The check reads only
+      # the policy manifest and needs neither npm nor cargo-audit.
+      - name: Check RustSec exception expiry
+        if: needs.changes.outputs.security != 'true'
+        run: node scripts/verify-rustsec-policy.mjs --expiry-only
+
   windows-native-e2e:
     name: Actual Windows Tauri dev E2E
     needs: changes

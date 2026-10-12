@@ -6,17 +6,17 @@ entry, expired exception, and stale exception. `cargo audit --json` is parsed by
 cargo-audit exits zero.
 
 The current exception baseline is `security/rustsec-exceptions.json`. It was
-reviewed against cargo-audit 0.22.2 and RustSec advisory database commit
-`b50980aad8b8f14f77e25a97b32dd94bf008b0af` (1,243 advisories, last updated
-2026-09-09). Each exception records an owner, introducing dependency, reason,
-upstream HTTPS link, remediation plan, exact package/version, and expiry date.
-An exception whose advisory disappears or whose package version changes is
+reviewed on 2026-10-12 against cargo-audit 0.22.2 and RustSec advisory database
+commit `078fd9bd0dbb9e063cd9b704fc9c83e1d3257462` (1,296 advisories, last
+updated 2026-10-12). Each exception records an owner, introducing dependency,
+reason, upstream HTTPS link, remediation plan, exact package/version, and expiry
+date. An exception whose advisory disappears or whose package version changes is
 reported as stale and fails CI.
 
-The 2026-09-11 review removed the ten stale GTK3 unmaintained exceptions
-`RUSTSEC-2024-0411` through `RUSTSEC-2024-0420`, which are no longer reported by
-that database for the unchanged lockfile. The audit reports zero vulnerabilities
-and seven warnings covered by the remaining exceptions.
+The 2026-10-12 review (#228) found the unchanged lockfile still reports zero
+vulnerabilities and the same seven warnings, all covered by the exceptions
+below. The earlier 2026-09-11 review removed the ten stale GTK3 unmaintained
+exceptions `RUSTSEC-2024-0411` through `RUSTSEC-2024-0420`.
 
 ## Exception classes
 
@@ -25,10 +25,24 @@ and seven warnings covered by the remaining exceptions.
   dependencies of Tauri/wry/urlpattern and expire on 2026-12-31.
 - **Unsound:** denied by default. The only current exception is
   `RUSTSEC-2024-0429` in `glib 0.18.5`, and it uses the stricter
-  `bounded-reachability` class. Mendimaru source has no reference to the
-  affected `VariantStrIter` API; the checked commit and evidence are embedded in
-  the manifest. Any new source reference or absence of that evidence fails the
-  policy. This exception expires on 2026-10-01.
+  `bounded-reachability` class. The affected functions are
+  `glib::VariantStrIter::{next, nth, last, next_back, nth_back}`; the iterator
+  is only created by `glib::Variant::array_iter_str()`.
+  - _Upgrade path (re-checked 2026-10-12):_ not yet available. The newest
+    `tauri` (2.12.3), `wry` (0.57.0) and `webkit2gtk` (2.0.2) still require
+    `gtk 0.18` / `glib 0.18` on Linux, and `glib 0.18` has no patched release.
+  - _Reachability (re-checked 2026-10-12 at
+    `26c17e80f8184e2493fa5b0affd03986b7fcdcd4` and on the #227/#228 branch):_
+    Mendimaru source has no reference to `VariantStrIter`, `variant_str_iter`
+    or `array_iter_str`. The review also covered the locked sources of every
+    crate that depends on `glib 0.18.5` (the GTK/GDK/GIO/Pango/Cairo bindings,
+    `webkit2gtk`, `javascriptcore-rs`, `soup3`, `wry`, `tao`, `muda`,
+    `tray-icon`, `rfd`, `libappindicator`, `tauri`, its runtimes and the
+    dialog/fs/opener plugins); none calls the affected API, and inside `glib`
+    itself `array_iter_str()` is only used by its own tests.
+  - Any new source reference or absence of that evidence fails the policy. This
+    exception now expires on 2026-12-31, together with the unmaintained
+    exceptions, so the next review re-checks the Tauri/wry upgrade path.
 - **Yanked:** no exception class. A yanked entry must be updated or removed.
 
 The stale `chacha20 0.10.1` lockfile entry was updated to `0.10.2`, eliminating
@@ -41,6 +55,21 @@ action stores raw npm audit and cargo-audit JSON plus a machine-readable policy
 result under `artifacts/dependency-audit/`, and writes a human-readable GitHub
 step summary.
 
+On pull requests the full audit is gated by path relevance: it is skipped when
+no npm or Cargo manifest, RustSec policy, or audit action path changed. An
+exception expiry, however, is caused by the calendar and not by a changed path
+(#228). The skipped gate therefore still runs the date-only check
+
+```sh
+node scripts/verify-rustsec-policy.mjs --expiry-only
+```
+
+which reads only the policy manifest, fails on an expired or invalid
+`expiresAt`, and needs neither npm nor cargo-audit. Both the full verdict and
+the expiry-only check print a GitHub `::warning::` for every exception that
+expires within 30 days (`--warning-days` overrides the window), so the owner
+can re-review an exception before `main` turns red.
+
 When changing `src-tauri/Cargo.lock`, run:
 
 ```sh
@@ -50,5 +79,8 @@ cargo audit --file src-tauri/Cargo.lock --json \
 
 Update exception metadata and expiry during dependency review. Do not add an
 ID without an owner, upstream link, introducing dependency, remediation plan,
-and explicit expiry. The weekly scheduled workflow also creates a compatible
-Cargo update PR after running the portable check suite.
+and explicit expiry. Extending an expiry is an owner decision that requires a
+fresh review: re-check the upgrade path and, for an unsound exception, re-run
+the reachability review and record its commit in `checkedCommit`. The weekly
+scheduled workflow also creates a compatible Cargo update PR after running the
+portable check suite.

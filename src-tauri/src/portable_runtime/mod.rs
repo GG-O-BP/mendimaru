@@ -1048,6 +1048,12 @@ fn safe_runtime_error_message(code: BackendErrorCode) -> &'static str {
         BackendErrorCode::RuntimeComposeRecoveryFailed => {
             "the original WinBoat Compose configuration could not be recovered"
         }
+        BackendErrorCode::RemoteDesktopUnavailable => {
+            "the WinBoat RDP endpoint did not answer RDP negotiation before the deadline"
+        }
+        BackendErrorCode::RemoteDesktopCertificateMismatch => {
+            "the WinBoat RDP certificate does not match the trusted certificate of this VM"
+        }
         BackendErrorCode::UnsupportedCapability => {
             "the selected backend does not support this runtime operation"
         }
