@@ -50,6 +50,8 @@ const commands = {
   setProjectFavorite: "set_project_favorite",
   startWinBoatWindows: "start_winboat_windows",
   previewWinBoatNvram: "preview_winboat_nvram",
+  previewCoordinationPermissions: "preview_coordination_permissions",
+  repairCoordinationPermissions: "repair_coordination_permissions",
   recoverWinBoatNvram: "recover_winboat_nvram",
   restoreWinBoatNvram: "restore_winboat_nvram",
   openWinBoat: "open_winboat",
@@ -81,6 +83,15 @@ export const tauriApi = {
       commands.diagnoseFrontendHealth,
       { target },
     ),
+  previewCoordinationPermissions: () =>
+    invoke<{ id: string; directory: string; files: string[] }>(
+      commands.previewCoordinationPermissions,
+    ),
+  repairCoordinationPermissions: (previewId: string) =>
+    invoke<void>(commands.repairCoordinationPermissions, {
+      previewId,
+      confirmed: true,
+    }),
   previewWinBoatNvram: () =>
     invoke<import("../domain/types").NvramRecoveryPreview>(
       commands.previewWinBoatNvram,

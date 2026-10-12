@@ -58,6 +58,7 @@ export interface SettingsPageModel {
   ) => void;
   onCopyDiagnosticReport: () => void;
   onRerunDiagnostics: () => void;
+  onRepairCoordination?: () => void;
   nvramRecoveryAvailable: boolean;
   nvramRollbackRequired: boolean;
   onRecoverNvram: () => void;
@@ -410,6 +411,27 @@ export function SettingsPage({
             <p>{t("diagnostics-description")}</p>
           </div>
           <div className="diagnostic-report-actions">
+            {!model.nativeWindows &&
+              model.onRepairCoordination &&
+              model.diagnostics.some(
+                (check) =>
+                  (check.id === "coordination-lock" ||
+                    check.id === "runtime-stop-lock") &&
+                  check.errorCode === "coordination-lock-untrusted",
+              ) && (
+                <button
+                  type="button"
+                  className="button secondary compact"
+                  onClick={model.onRepairCoordination}
+                  disabled={
+                    model.isBusy("preview-coordination-permissions") ||
+                    model.isBusy("repair-coordination-permissions")
+                  }
+                >
+                  {t("action-coordination-repair")}
+                </button>
+              )}
+
             {model.nvramRecoveryAvailable && !model.nvramRollbackRequired && (
               <button
                 type="button"

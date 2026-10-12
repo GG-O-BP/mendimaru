@@ -1118,7 +1118,7 @@ fn real_binary_builds_starts_observes_redacts_and_stops_portable_runtime() {
     let started = stdout_json(&started_output);
     assert_complete_envelope(&started, "runtime.start");
     assert_eq!(started["data"]["build"]["cacheHit"], true);
-    assert_eq!(started["data"]["runtime"]["schemaVersion"], "5.0.0");
+    assert_eq!(started["data"]["runtime"]["schemaVersion"], "6.0.0");
     assert_eq!(started["data"]["runtime"]["mode"], "portable");
     assert_eq!(started["data"]["runtime"]["runtimeVersion"], "11.12.2");
     assert_eq!(started["data"]["runtime"]["state"], "ready");
@@ -1808,9 +1808,9 @@ fn real_browser_tests_mirror_host_lan_assets_for_studio_runtime() {
         "--runtime-session-id",
         runtime_session_id,
         "--navigation-timeout-ms",
-        "1000",
+        "5000",
         "--observation-ms",
-        "200",
+        "500",
         "--json",
     ]);
     assert_eq!(health_output.status.code(), Some(1));
@@ -2446,7 +2446,7 @@ fn linux_studio_status_summary_does_not_contact_the_backend() {
 }
 
 fn assert_complete_envelope(document: &Value, command: &str) {
-    assert_eq!(document["schemaVersion"], "5.0.0");
+    assert_eq!(document["schemaVersion"], "6.0.0");
     assert_eq!(document["command"], command);
     assert!(document["ok"].is_boolean());
     assert!(document["platform"].is_string());

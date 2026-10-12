@@ -5,12 +5,12 @@ use std::fmt;
 /// Contract versions follow semantic versioning. Changes accepted by the
 /// current closed schemas may increment the minor version; serialized fields,
 /// enum variants, capability IDs, or semantics require a major version.
-pub const CONTRACT_SCHEMA_VERSION: &str = "5.0.0";
+pub const CONTRACT_SCHEMA_VERSION: &str = "6.0.0";
 
 /// UI commands added in v5 do not change persisted v4 Runtime/build/browser
 /// records. Read both without rewriting old snapshots or artifact descriptors.
 pub(crate) fn compatible_record_schema(version: &str) -> bool {
-    matches!(version, "4.0.0" | "5.0.0")
+    matches!(version, "4.0.0" | "5.0.0" | "6.0.0")
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -85,6 +85,8 @@ pub enum RuntimeMode {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CapabilityId {
+    #[serde(rename = "environment.configure")]
+    EnvironmentConfigure,
     #[serde(rename = "studio.detect")]
     StudioDetect,
     #[serde(rename = "studio.install")]
@@ -130,7 +132,8 @@ pub enum CapabilityId {
 }
 
 impl CapabilityId {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
+        Self::EnvironmentConfigure,
         Self::StudioDetect,
         Self::StudioInstall,
         Self::StudioUninstall,
@@ -156,6 +159,7 @@ impl CapabilityId {
 
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::EnvironmentConfigure => "environment.configure",
             Self::StudioDetect => "studio.detect",
             Self::StudioInstall => "studio.install",
             Self::StudioUninstall => "studio.uninstall",
@@ -197,6 +201,12 @@ pub enum CapabilityStatus {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendErrorCode {
+    CoordinationBusy,
+    CoordinationUntrusted,
+    CoordinationUnavailable,
+    CoordinationIdentityMismatch,
+    CoordinationTimeout,
+
     QemuBootTimeout,
     ContainerExitedDuringStartup,
     GuestStartupTimeout,
@@ -1129,6 +1139,11 @@ mod tests {
         assert_registry(
             "backendErrorCode",
             [
+                BackendErrorCode::CoordinationBusy,
+                BackendErrorCode::CoordinationUntrusted,
+                BackendErrorCode::CoordinationUnavailable,
+                BackendErrorCode::CoordinationIdentityMismatch,
+                BackendErrorCode::CoordinationTimeout,
                 BackendErrorCode::UnsupportedCapability,
                 BackendErrorCode::ContainerExitedDuringStartup,
                 BackendErrorCode::GuestStartupTimeout,
@@ -1342,7 +1357,7 @@ mod tests {
             if name == "artifact" {
                 assert_eq!(
                     schema["properties"]["schemaVersion"]["enum"],
-                    serde_json::json!(["4.0.0", CONTRACT_SCHEMA_VERSION])
+                    serde_json::json!(["4.0.0", "5.0.0", CONTRACT_SCHEMA_VERSION])
                 );
             } else {
                 assert_eq!(

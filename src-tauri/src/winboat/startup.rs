@@ -296,7 +296,7 @@ pub async fn ensure_guest_online(config: &AppConfig) -> Result<(), BackendError>
     let lease = crate::winboat::vm_use::acquire(
         config,
         crate::winboat::vm_use::Mode::Exclusive,
-        crate::contracts::CapabilityId::StudioStart,
+        crate::contracts::CapabilityId::StudioDetect,
     )
     .await?;
     lease.run(ensure_guest_online_with_lease(config)).await

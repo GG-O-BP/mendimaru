@@ -6,13 +6,19 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "code", "message", "retryable"],
   "properties": {
-    "schemaVersion": { "const": "5.0.0" },
+    "schemaVersion": { "const": "6.0.0" },
     "code": {
       "enum": [
         "unsupported_capability",
         "backend_mismatch",
         "invalid_request",
         "precondition_failed",
+        "coordination_busy",
+        "coordination_untrusted",
+        "coordination_unavailable",
+        "coordination_identity_mismatch",
+        "coordination_timeout",
+
         "operation_failed",
         "external_process_timeout",
         "external_process_cancelled",
@@ -42,7 +48,7 @@
     },
     "capability": {
       "type": "string",
-      "pattern": "^(studio|runtime|ui|browser)\\.[a-z-]+$"
+      "pattern": "^(environment|studio|runtime|ui|browser)\\.[a-z-]+$"
     },
     "reason": {
       "type": "object",
@@ -55,6 +61,12 @@
             "backend_mismatch",
             "invalid_request",
             "precondition_failed",
+            "coordination_busy",
+            "coordination_untrusted",
+            "coordination_unavailable",
+            "coordination_identity_mismatch",
+            "coordination_timeout",
+
             "operation_failed",
             "external_process_timeout",
             "external_process_cancelled",

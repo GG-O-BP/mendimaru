@@ -1009,6 +1009,12 @@ fn runtime_error(
 
 fn safe_runtime_error_message(code: BackendErrorCode) -> &'static str {
     match code {
+        BackendErrorCode::CoordinationBusy => crate::winboat::maintenance::BUSY,
+        BackendErrorCode::CoordinationUntrusted => crate::winboat::maintenance::UNTRUSTED,
+        BackendErrorCode::CoordinationUnavailable => crate::winboat::maintenance::UNAVAILABLE,
+        BackendErrorCode::CoordinationIdentityMismatch => crate::winboat::maintenance::IDENTITY,
+        BackendErrorCode::CoordinationTimeout => crate::winboat::maintenance::TIMEOUT,
+
         BackendErrorCode::QemuBootTimeout => "QEMU timed out while booting Windows",
         BackendErrorCode::ContainerExitedDuringStartup => "the WinBoat container exited before Windows became ready",
         BackendErrorCode::GuestStartupTimeout => "Windows did not become ready before the startup deadline",

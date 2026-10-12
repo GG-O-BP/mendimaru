@@ -525,11 +525,11 @@ mod tests {
         );
     }
     #[test]
-    fn v5_preserves_v4_record_read_compatibility_and_rejects_older_shapes() {
-        for v in ["4.0.0", "5.0.0"] {
+    fn v6_preserves_v4_and_v5_record_read_compatibility_and_rejects_other_shapes() {
+        for v in ["4.0.0", "5.0.0", "6.0.0"] {
             assert!(crate::contracts::compatible_record_schema(v));
         }
-        for v in ["3.0.0", "6.0.0", "5.1.0"] {
+        for v in ["3.0.0", "7.0.0", "5.1.0"] {
             assert!(!crate::contracts::compatible_record_schema(v));
         }
     }

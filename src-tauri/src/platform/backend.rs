@@ -253,7 +253,8 @@ fn capability_for(backend: BackendId, id: CapabilityId, architecture: &str) -> C
         && architecture_supported
         && matches!(
             id,
-            CapabilityId::StudioDetect
+            CapabilityId::EnvironmentConfigure
+                | CapabilityId::StudioDetect
                 | CapabilityId::StudioInstall
                 | CapabilityId::StudioUninstall
                 | CapabilityId::StudioStart
@@ -1231,7 +1232,8 @@ mod tests {
             for capability in CapabilityId::ALL {
                 let expected = matches!(
                     capability,
-                    CapabilityId::StudioDetect
+                    CapabilityId::EnvironmentConfigure
+                        | CapabilityId::StudioDetect
                         | CapabilityId::StudioInstall
                         | CapabilityId::StudioUninstall
                         | CapabilityId::StudioStart

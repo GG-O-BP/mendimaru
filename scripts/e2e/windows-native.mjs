@@ -231,6 +231,8 @@ async function run() {
       "open_winboat",
       "begin_winboat_setup",
       "complete_winboat_setup",
+      "preview_coordination_permissions",
+      "repair_coordination_permissions",
     ]) {
       const result = await client.invokeResult(command);
       recordAssertion(

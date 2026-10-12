@@ -37,7 +37,8 @@ The locks now live in a fixed, Mendimaru-owned private namespace:
   must be owned by the current UID with no group/other bits; lock files must be
   regular, owned by that UID, have exactly one link and no group/other bits.
   Symlinks, hardlinks, FIFOs, directories, public files and foreign owners are
-  refused before any lock is taken. Mendimaru never repairs or deletes them.
+  refused before any lock is taken. No automatic repair or deletion occurs.
+  Owner-verified permissions may be repaired only through the explicit preview below.
 - Lock files are never unlinked, including on timeout, cancellation or crash.
   The kernel's `flock` ownership is authoritative; closing the descriptor (also
   on SIGKILL) releases it.
@@ -50,41 +51,35 @@ and Compose edits keep their own direct-file and revision checks.
 
 ## Mixed versions
 
-An older Mendimaru (≤ 0.6.x) only coordinates through the legacy file in the
-Compose directory, and only when that directory and file pass its trust checks.
-The current version therefore also takes the legacy lock, in the same mode and
-after the private lock, **exactly when an older version could hold it**:
+Mendimaru versions before #226 used legacy files in the Compose directory. The
+current version always joins an existing legacy regular inode, even when the
+parent changed to 775 after acquisition. A trusted legacy file is opened without
+creation; busy ownership refuses the operation. Existing unsafe modes, symlinks,
+hardlinks, non-files, unknown owners or I/O errors fail closed. The file is never
+unlinked or silently ignored.
 
-| Legacy location                                                       | Older version           | Current version                                            |
-| --------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------- |
-| Compose directory and legacy file pass the original checks (e.g. 755) | Locks the legacy file   | Locks private **and** legacy; legacy busy → refuses        |
-| Compose directory refused (e.g. 775, symlinked ancestor, foreign)     | Refuses every operation | Private lock only; nothing can overlap                     |
-| Legacy file refused (e.g. 640, symlink, hardlink, directory)          | Refuses every operation | Private lock only; the entry is neither followed nor fixed |
-| Unexpected I/O error on the legacy location                           | —                       | Refuses (fail closed)                                      |
-
-There is no best-effort dual locking: when the legacy lock is joined and busy,
-the current version reports the busy cause and does not proceed. A Runtime stop
-waits for both locks within its bounded deadline. Running only current versions
-makes the legacy file irrelevant; it is retained for compatibility and never
-deleted. Changing the Compose directory permissions while an older version is
-running is an external change outside this advisory boundary.
+If the legacy file is absent, it is created only in a directory passing the
+original non-group/other-writable policy. A normal 775 folder with no legacy file
+uses just the private lock. Compose symlinks, foreign owners and world-writable
+paths are not this normal case and are rejected. VM identity/private coordination
+remains the source of truth across current clients with different Compose paths.
 
 ## Causes and messages
 
-Every failure keeps its cause up to the GUI and CLI. All are structured
-`precondition_failed` errors with the capability of the requested action
+Every failure keeps its cause up to the GUI and CLI. Contract v6 supplies distinct
+`coordination_*` codes with the capability of the requested action
 (`studio.install`, `studio.uninstall`, `studio.start`, `studio.stop`,
 `studio.status`, `runtime.start`, `runtime.stop`, `studio.detect` for
-`env ensure`, ...). The GUI shows a localized (ko-KR/en-US/ja-JP) message; the
+`env ensure`, `environment.configure` for settings and setup). The GUI shows a localized (ko-KR/en-US/ja-JP) message; the
 CLI keeps exactly one path-free reason per cause:
 
-| Cause                         | Retryable | CLI message                                                                                                            |
-| ----------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Busy (another operation/UEFI) | yes       | `another Mendimaru operation or UEFI recovery is using this WinBoat VM; retry after it finishes`                       |
-| Untrusted private lock        | no        | `the private Mendimaru coordination lock failed its ownership or permission check; review the environment diagnostics` |
-| Other I/O failure             | no        | `the private Mendimaru coordination lock could not be opened or locked`                                                |
-| Compose names another VM      | no        | `the WinBoat Compose file does not identify the configured VM; check the Compose path and container name`              |
-| Runtime stop wait expired     | yes       | `another Runtime stop for this WinBoat VM did not finish before the deadline; retry after it finishes`                 |
+| Cause                         | Retryable | CLI message                                                                                                                |
+| ----------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Busy (another operation/UEFI) | yes       | `another Mendimaru operation or UEFI recovery is using this WinBoat VM; retry after it finishes`                           |
+| Untrusted private lock        | no        | `a Mendimaru coordination entry failed its ownership, direct-path or permission check; review the environment diagnostics` |
+| Other I/O failure             | no        | `the private Mendimaru coordination lock could not be opened or locked`                                                    |
+| Compose names another VM      | no        | `the WinBoat Compose file does not identify the configured VM; check the Compose path and container name`                  |
+| Runtime stop wait expired     | yes       | `another Runtime stop for this WinBoat VM did not finish before the deadline; retry after it finishes`                     |
 
 A permission problem is never reported as "another operation is running", and a
 failure before any start command is never reported as "the Windows startup
@@ -94,9 +89,10 @@ command failed". Exit status remains `1`.
 
 `env status`, the Settings diagnostics and the exported report include the
 `coordination-lock` check. It opens and verifies the same private (and, where
-applicable, legacy) lock files every coordinated operation needs, without
-holding any lock, so it never reserves the VM or delays UEFI recovery. A failure
-carries `coordination-lock-untrusted`, `coordination-lock-unavailable` or
+applicable, legacy) maintenance files and immediately tries the shared flock.
+Descriptors close before slow diagnostics, so the preflight never waits for UEFI
+recovery or holds a VM reservation through Docker/HTTP probes. A failure
+carries `coordination-lock-busy`, `coordination-lock-untrusted`, `coordination-lock-unavailable` or
 `coordination-identity-mismatch`, is listed in `readiness.blockingChecks` and
 clears `ready`, so the readiness flags match what operations will actually do.
 This preflight is independent of startup attempts, so a lock failure that occurs
@@ -108,9 +104,46 @@ before a startup attempt is recorded is still visible.
 `664` Compose file, private `600`/`640` files, symlinked/hardlinked/FIFO/directory
 entries, public or symlinked namespaces, exclusive vs shared exclusion across
 different Compose paths of one VM, older versions holding the legacy lock
-(shared, exclusive and Runtime stop), refused legacy locations that are neither
-joined nor followed, identity mismatch, and distinct causes/messages. Real child
+(shared, exclusive and Runtime stop), unsafe existing legacy locations that fail closed without being followed, identity mismatch, and distinct causes/messages. Real child
 processes with separate config/cache/TMPDIR prove UEFI exclusion, SIGKILL release
 and Runtime stop serialization across processes. `cli::runtime_stop_tests` runs
 real CLI stops against both a legacy owner and a current owner and checks the
 exact untrusted reason for the private lock.
+
+## Acceptance audit after #226
+
+Existing legacy entries are now **always** part of the bridge, even if the Compose
+folder changed from 755 to 775 after an older process acquired its flock. A held
+file descriptor remains locked after chmod. Only an absent legacy entry in a
+normal 775 folder is omitted; an existing symlink, unsafe mode or unknown owner
+fails closed. A dangling Compose symlink or permission error is not absence, and
+an absent Compose file still reserves its VM management identity.
+
+The maintenance preflight now performs an immediate shared try-flock and reports
+exclusive maintenance contention. The independent `runtime-stop-lock` check only
+clears `readiness.runtimeStop`; it does not disable Studio or Runtime start.
+Common blockers clear both `runtimeStart` and `runtimeStop`. Diagnostics never
+wait for another participant or reserve the VM while probing Docker/Guest health.
+
+Contract **6.0.0** provides stable `coordination_busy`,
+`coordination_untrusted`, `coordination_unavailable`,
+`coordination_identity_mismatch` and `coordination_timeout` codes. Cancellation
+continues to use `external_process_cancelled` from the command lifetime. Causes
+are no longer inferred from translated messages. Settings save and initial setup
+report `environment.configure`, not `runtime.start`. Existing v4/v5 Runtime and
+artifact records remain readable; private shared-browser descriptors accept v5/v6
+and still reject the older incompatible v4 shape. The diagnostic report is v3.
+
+### Explicit in-app permission repair
+
+For owner-verified nonstandard permissions, Settings offers **Review coordination
+permissions**. The preview lists the exact private folder and regular files,
+including the two existing legacy Mendimaru lock files for the selected VM.
+Explicit confirmation is required. The single-use, five-minute preview is bound
+to the selected VM, Compose path, directory/file inodes and reviewed modes.
+Changed entries, unknown files, links, hardlinks, foreign owners and active locks
+are refused before chmod. The repair uses held descriptors, sets only the private
+folder to 700 and listed files to 600, preserves file contents/inodes and does not
+recursively chmod, unlink files, change Compose parents or touch WinBoat storage.
+If the app cannot safely verify an entry, it remains blocked; there is no terminal
+command or root installer modification of a user's home as a fallback.

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const ENVIRONMENT_DIAGNOSTIC_SCHEMA_VERSION: &str = "2.0.0";
+pub const ENVIRONMENT_DIAGNOSTIC_SCHEMA_VERSION: &str = "3.0.0";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -66,6 +66,7 @@ pub enum EnvironmentDiagnosticId {
     Winboat,
     Compose,
     CoordinationLock,
+    RuntimeStopLock,
     ContainerRuntime,
     Freerdp,
     SharedDirectory,
@@ -108,6 +109,7 @@ pub enum EnvironmentDiagnosticErrorCode {
     CoordinationLockUntrusted,
     CoordinationLockUnavailable,
     CoordinationIdentityMismatch,
+    CoordinationLockBusy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -163,6 +165,8 @@ pub struct EnvironmentReadiness {
     pub installation: bool,
     pub uninstallation: bool,
     pub projects: bool,
+    pub runtime_start: bool,
+    pub runtime_stop: bool,
     pub blocking_checks: Vec<EnvironmentDiagnosticId>,
 }
 
@@ -179,7 +183,11 @@ impl EnvironmentStatus {
         let mut blockers = Vec::new();
         let mut attention = Vec::new();
         let mut browser_ready = false;
+        let mut stop_ready = true;
         for check in &self.diagnostics {
+            if check.id == RuntimeStopLock {
+                stop_ready = check.status == EnvironmentDiagnosticStatus::Success;
+            }
             if check.id == MarketplaceBrowser {
                 browser_ready = check.status == EnvironmentDiagnosticStatus::Success;
             }
@@ -188,7 +196,7 @@ impl EnvironmentStatus {
             }
             attention.push(check.id);
             match check.id {
-                GuestClock | MarketplaceBrowser => {}
+                GuestClock | MarketplaceBrowser | RuntimeStopLock => {}
                 Winboat | Compose | CoordinationLock | ContainerRuntime | Freerdp
                 | SharedDirectory | SharedMount | Container | GuestApi | Rdp => {
                     blockers.push(check.id)
@@ -204,6 +212,19 @@ impl EnvironmentStatus {
                 installation: self.ready && browser_ready && self.platform.supports_installation,
                 uninstallation: self.ready && self.platform.supports_uninstallation,
                 projects: self.ready && self.platform.supports_projects,
+                runtime_start: self.ready
+                    && self.platform.architecture == "x86_64"
+                    && matches!(
+                        self.platform.kind,
+                        HostPlatform::LinuxWinboat | HostPlatform::WindowsNative
+                    ),
+                runtime_stop: self.ready
+                    && stop_ready
+                    && self.platform.architecture == "x86_64"
+                    && matches!(
+                        self.platform.kind,
+                        HostPlatform::LinuxWinboat | HostPlatform::WindowsNative
+                    ),
                 blocking_checks: blockers,
             },
             health: EnvironmentHealth {
@@ -425,9 +446,70 @@ mod diagnostic_report_tests {
         assert!(report.contains("qemu_boot_timeout"));
         assert!(!report.contains("rawLog"));
         assert!(!report.contains("observed"));
-        assert!(report.contains("\"schemaVersion\": \"2.0.0\""));
+        assert!(report.contains("\"schemaVersion\": \"3.0.0\""));
         assert!(report.contains("\"id\": \"winboat\""));
         assert!(report.contains("\"action\": \"redetect\""));
         assert!(report.contains("\"errorCode\": \"external-process-timeout\""));
+    }
+}
+
+#[cfg(test)]
+mod coordination_readiness_tests {
+    use super::*;
+    #[test]
+    fn stop_only_trust_failure_does_not_disable_studio_or_runtime_start() {
+        let status = EnvironmentStatus {
+            assessment: Default::default(),
+            nvram_recovery_available: false,
+            startup: None,
+            platform: PlatformCapabilities {
+                kind: HostPlatform::LinuxWinboat,
+                architecture: "x86_64".into(),
+                requires_winboat: true,
+                supports_studio_management: true,
+                supports_installation: true,
+                supports_uninstallation: true,
+                supports_projects: true,
+            },
+            ready: true,
+            winboat_available: true,
+            winboat_initialized: true,
+            setup_pending: false,
+            compose_available: true,
+            runtime_available: true,
+            freerdp_available: true,
+            shared_directory_available: true,
+            shared_mount_matches: true,
+            container_status: ContainerStatus::Running,
+            guest_online: true,
+            diagnostics: vec![
+                EnvironmentDiagnostic {
+                    id: EnvironmentDiagnosticId::MarketplaceBrowser,
+                    status: EnvironmentDiagnosticStatus::Success,
+                    observed: None,
+                    action: None,
+                    error_code: None,
+                },
+                EnvironmentDiagnostic {
+                    id: EnvironmentDiagnosticId::RuntimeStopLock,
+                    status: EnvironmentDiagnosticStatus::Failure,
+                    observed: None,
+                    action: Some(EnvironmentDiagnosticAction::Redetect),
+                    error_code: Some(EnvironmentDiagnosticErrorCode::CoordinationLockUntrusted),
+                },
+            ],
+        }
+        .assessed();
+        assert!(status.ready);
+        assert!(
+            status.assessment.readiness.installation && status.assessment.readiness.studio_launch
+        );
+        assert!(status.assessment.readiness.runtime_start);
+        assert!(!status.assessment.readiness.runtime_stop);
+        assert!(status.assessment.readiness.blocking_checks.is_empty());
+        assert_eq!(
+            status.assessment.health.attention_checks,
+            vec![EnvironmentDiagnosticId::RuntimeStopLock]
+        );
     }
 }

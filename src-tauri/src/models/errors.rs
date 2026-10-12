@@ -4,6 +4,12 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandErrorCode {
+    CoordinationBusy,
+    CoordinationUntrusted,
+    CoordinationUnavailable,
+    CoordinationIdentityMismatch,
+    CoordinationTimeout,
+
     QemuBootTimeout,
     ContainerExitedDuringStartup,
     GuestStartupTimeout,
@@ -59,6 +65,14 @@ impl CommandError {
 impl From<BackendError> for CommandError {
     fn from(error: BackendError) -> Self {
         let code = match error.code {
+            BackendErrorCode::CoordinationBusy => CommandErrorCode::CoordinationBusy,
+            BackendErrorCode::CoordinationUntrusted => CommandErrorCode::CoordinationUntrusted,
+            BackendErrorCode::CoordinationUnavailable => CommandErrorCode::CoordinationUnavailable,
+            BackendErrorCode::CoordinationIdentityMismatch => {
+                CommandErrorCode::CoordinationIdentityMismatch
+            }
+            BackendErrorCode::CoordinationTimeout => CommandErrorCode::CoordinationTimeout,
+
             BackendErrorCode::QemuBootTimeout => CommandErrorCode::QemuBootTimeout,
             BackendErrorCode::ContainerExitedDuringStartup => {
                 CommandErrorCode::ContainerExitedDuringStartup

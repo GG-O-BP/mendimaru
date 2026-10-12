@@ -15,7 +15,7 @@
     "data"
   ],
   "properties": {
-    "schemaVersion": { "const": "5.0.0" },
+    "schemaVersion": { "const": "6.0.0" },
     "command": { "const": "capabilities" },
     "ok": { "const": true },
     "platform": { "$ref": "#/$defs/platformId" },
@@ -36,6 +36,7 @@
     },
     "capabilityId": {
       "enum": [
+        "environment.configure",
         "studio.detect",
         "studio.install",
         "studio.uninstall",
@@ -65,6 +66,12 @@
         "backend_mismatch",
         "invalid_request",
         "precondition_failed",
+        "coordination_busy",
+        "coordination_untrusted",
+        "coordination_unavailable",
+        "coordination_identity_mismatch",
+        "coordination_timeout",
+
         "operation_failed",
         "external_process_timeout",
         "external_process_cancelled",
@@ -148,7 +155,7 @@
         "capabilities"
       ],
       "properties": {
-        "schemaVersion": { "const": "5.0.0" },
+        "schemaVersion": { "const": "6.0.0" },
         "backend": { "$ref": "#/$defs/backendId" },
         "hostPlatform": { "$ref": "#/$defs/platformId" },
         "studioPlatform": { "$ref": "#/$defs/platformId" },
@@ -164,8 +171,8 @@
         "architecture": { "type": "string", "minLength": 1 },
         "capabilities": {
           "type": "array",
-          "minItems": 21,
-          "maxItems": 21,
+          "minItems": 22,
+          "maxItems": 22,
           "items": { "$ref": "#/$defs/capability" }
         }
       }
@@ -175,7 +182,7 @@
       "additionalProperties": false,
       "required": ["schemaVersion", "snapshotId", "capturedAt", "manifest"],
       "properties": {
-        "schemaVersion": { "const": "5.0.0" },
+        "schemaVersion": { "const": "6.0.0" },
         "snapshotId": { "type": "string", "pattern": "^cap_[0-9a-f]{32}$" },
         "capturedAt": { "type": "string", "format": "date-time" },
         "manifest": { "$ref": "#/$defs/capabilityManifest" }

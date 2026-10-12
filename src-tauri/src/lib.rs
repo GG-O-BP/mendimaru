@@ -94,6 +94,8 @@ pub fn run() {
             set_project_favorite,
             start_winboat_windows,
             preview_winboat_nvram,
+            preview_coordination_permissions,
+            repair_coordination_permissions,
             recover_winboat_nvram,
             restore_winboat_nvram,
             open_winboat,

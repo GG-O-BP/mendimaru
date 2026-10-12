@@ -795,9 +795,26 @@ fn unready_runtime_fails_prepare_without_leaving_a_session() {
     let registry = format!("/tmp/mendimaru-test-sessions-{}", unsafe {
         libc::geteuid()
     });
-    let before = fs::read_dir(&registry)
-        .map(|entries| entries.flatten().count())
-        .unwrap_or(0);
+    let config: crate::models::AppConfig =
+        serde_json::from_slice(&fs::read(fixture.path("config.json")).unwrap()).unwrap();
+    let key = crate::winboat::vm_use::identity_key(&config).unwrap();
+    let records_for_fixture = || {
+        fs::read_dir(&registry)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|entry| {
+                if entry.path().extension().and_then(|ext| ext.to_str()) != Some("json") {
+                    return false;
+                }
+                fs::read(entry.path())
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                    .is_some_and(|record| record["vmKey"] == key)
+            })
+            .count()
+    };
+    let before = records_for_fixture();
     fs::write(fixture.path("http-unready"), b"").unwrap();
     fixture.spawn("session-prepare-unready").finish();
     let failed = fixture.result("session-prepare-unready");
@@ -805,9 +822,8 @@ fn unready_runtime_fails_prepare_without_leaving_a_session() {
     assert_eq!(failed["error"]["code"], "precondition_failed");
     assert_eq!(failed["error"]["retryable"], true);
     // No preparing record is left behind for participants to observe.
-    let after = fs::read_dir(&registry)
-        .map(|entries| entries.flatten().count())
-        .unwrap_or(0);
+    // Other parallel tests may create/remove unrelated registry entries.
+    let after = records_for_fixture();
     assert_eq!(after, before);
     keeper.kill();
 }

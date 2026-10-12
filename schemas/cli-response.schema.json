@@ -14,7 +14,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": "5.0.0"
+      "const": "6.0.0"
     },
     "command": {
       "enum": [

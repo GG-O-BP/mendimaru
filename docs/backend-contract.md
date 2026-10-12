@@ -215,12 +215,14 @@ launcher details remain private. See
 
 ## Compatibility and versioning
 
-The current schema version is `5.0.0` and follows semantic versioning. Version
+The current schema version is `6.0.0` and follows semantic versioning. Version
 2 added multi-mode capability discovery, explicit Runtime backend/readiness,
 WinBoat Run Locally status fields, and its distinct failure codes. Version 3
 adds the first supported browser-test contract and optional Runtime version
 metadata. Version 4 adds external-process failure enum values. Version 5 adds
-the supported Linux WinBoat UI provider and CLI command variants. Its Runtime,
+the supported Linux WinBoat UI provider and CLI command variants. Version 6 adds
+distinct coordination-lock error codes, `environment.configure`, and per-Runtime
+readiness while retaining unchanged v4/v5 persisted Runtime and artifact reads. Its Runtime,
 build, and browser readers also accept unchanged v4 persisted records, retaining
 original artifact/snapshot versions. These are major
 versions because they add serialized fields or enum values and, for version 3,

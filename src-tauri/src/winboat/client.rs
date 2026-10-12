@@ -566,16 +566,25 @@ mod tests {
         crate::i18n::initialize("en-US").expect("English localization initializes");
     }
 
+    /// A WinBoat-owned token with an explicit owner-only mode, so the fixture
+    /// does not depend on the test process umask (for example 0002).
+    fn write_fixture_token(directory: &std::path::Path) {
+        let token = directory.join("guest_token");
+        std::fs::write(&token, b"fixture-token-1234567890").expect("write fixture token");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600))
+                .expect("owner-only fixture token");
+        }
+    }
+
     #[tokio::test]
     async fn uses_authenticated_projected_query_when_capability_is_advertised() {
         initialize_i18n();
         let temporary = tempfile::tempdir().expect("temporary WinBoat directory");
         let compose = temporary.path().join("docker-compose.yml");
-        std::fs::write(
-            temporary.path().join("guest_token"),
-            b"fixture-token-1234567890",
-        )
-        .expect("write fixture token");
+        write_fixture_token(temporary.path());
         let (api_url, requests, worker) = fixture_server(vec![
             FixtureResponse::json(
                 r#"{"status":"ok","apiVersion":1,"authentication":"bearer","capabilities":["apps-query-v1"]}"#,
@@ -685,11 +694,7 @@ mod tests {
         initialize_i18n();
         let temporary = tempfile::tempdir().expect("temporary WinBoat directory");
         let compose = temporary.path().join("docker-compose.yml");
-        std::fs::write(
-            temporary.path().join("guest_token"),
-            b"fixture-token-1234567890",
-        )
-        .expect("write fixture token");
+        write_fixture_token(temporary.path());
         let (api_url, requests, worker) = fixture_server(vec![
             FixtureResponse::json(r#"{"status":"ok"}"#),
             FixtureResponse::status(401),
@@ -745,11 +750,7 @@ mod tests {
         initialize_i18n();
         let temporary = tempfile::tempdir().expect("temporary WinBoat directory");
         let compose = temporary.path().join("docker-compose.yml");
-        std::fs::write(
-            temporary.path().join("guest_token"),
-            b"fixture-token-1234567890",
-        )
-        .expect("write fixture token");
+        write_fixture_token(temporary.path());
 
         let authorization = load_guest_authorization(&config(&compose))
             .expect("load fixture token")

@@ -1,3 +1,4 @@
+use crate::app_paths::AppPaths;
 use crate::config::{AppliedSharedMount, ComposeError, ComposeErrorKind};
 use crate::models::{
     AppConfig, CommandError, CommandErrorCode, SettingsSavePreview, SettingsSaveResult,
@@ -31,13 +32,28 @@ pub fn preview_settings_save(
 
 pub async fn save_settings(
     app: &AppHandle,
+    config: AppConfig,
+    apply_mount: bool,
+    expected_compose_revision: Option<String>,
+) -> Result<SettingsSaveResult, CommandError> {
+    save_settings_from(
+        &AppPaths::from_app(app)?,
+        config,
+        apply_mount,
+        expected_compose_revision,
+    )
+    .await
+}
+
+pub(crate) async fn save_settings_from(
+    paths: &AppPaths,
     mut config: AppConfig,
     apply_mount: bool,
     expected_compose_revision: Option<String>,
 ) -> Result<SettingsSaveResult, CommandError> {
     crate::config::normalize_and_validate(&mut config)?;
     if crate::platform::is_windows_native() {
-        crate::config::persist_config(app, &config)?;
+        crate::config::persist_config_from(paths, &config)?;
         return Ok(SettingsSaveResult {
             config,
             mount_changed: false,
@@ -55,7 +71,10 @@ pub async fn save_settings(
     .map_err(compose_command_error)?
     .apply_detection(&mut config);
 
-    let previous_config = crate::config::load_config(app).ok();
+    let previous_config = Some(
+        crate::config::load_config_from(paths)
+            .map_err(|message| CommandError::new(CommandErrorCode::ConfigLoadFailed, message))?,
+    );
     let mut identities = vec![&config];
     if let Some(previous) = previous_config.as_ref() {
         identities.push(previous);
@@ -75,7 +94,7 @@ pub async fn save_settings(
     let first = crate::winboat::vm_use::acquire(
         identities[0],
         crate::winboat::vm_use::Mode::Exclusive,
-        crate::contracts::CapabilityId::RuntimeStart,
+        crate::contracts::CapabilityId::EnvironmentConfigure,
     )
     .await?;
     let second = if identities.len() == 2 {
@@ -83,7 +102,7 @@ pub async fn save_settings(
             crate::winboat::vm_use::acquire(
                 identities[1],
                 crate::winboat::vm_use::Mode::Exclusive,
-                crate::contracts::CapabilityId::RuntimeStart,
+                crate::contracts::CapabilityId::EnvironmentConfigure,
             )
             .await?,
         )
@@ -91,7 +110,7 @@ pub async fn save_settings(
         None
     };
     let work = save_settings_with_lease(
-        app,
+        paths,
         config,
         apply_mount,
         expected_compose_revision,
@@ -108,14 +127,14 @@ pub async fn save_settings(
 }
 
 async fn save_settings_with_lease(
-    app: &AppHandle,
+    paths: &AppPaths,
     mut config: AppConfig,
     apply_mount: bool,
     expected_compose_revision: Option<String>,
     previous_config: Option<AppConfig>,
 ) -> Result<SettingsSaveResult, CommandError> {
     let coordination = |error: crate::winboat::maintenance::LockError| {
-        error.command_error(crate::contracts::CapabilityId::RuntimeStart)
+        error.command_error(crate::contracts::CapabilityId::EnvironmentConfigure)
     };
     let _maintenance = crate::winboat::maintenance::shared(&config).map_err(coordination)?;
     let _previous_maintenance = previous_config
@@ -123,7 +142,7 @@ async fn save_settings_with_lease(
         .map(crate::winboat::maintenance::shared)
         .transpose()
         .map_err(coordination)?;
-    let config_snapshot = crate::config::snapshot_config(app)?;
+    let config_snapshot = crate::config::snapshot_config_from(paths)?;
     let plan = crate::config::plan_shared_mount(
         &PathBuf::from(&config.compose_file),
         &config.shared_directory,
@@ -141,7 +160,7 @@ async fn save_settings_with_lease(
     let applied = crate::config::apply_shared_mount(plan).map_err(compose_command_error)?;
     let mount_changed = applied.changed;
 
-    if let Err(error) = crate::config::persist_config(app, &config) {
+    if let Err(error) = crate::config::persist_config_from(paths, &config) {
         return Err(rollback_files(&config_snapshot, &applied, error).0.into());
     }
 

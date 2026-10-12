@@ -40,6 +40,8 @@ export function SettingsView({
           void environment.runDiagnosticAction(action, id),
         onCopyDiagnosticReport: () => void environment.copyDiagnosticReport(),
         onRerunDiagnostics: () => void environment.rerunDiagnostics(),
+        onRepairCoordination: () =>
+          void environment.coordination.previewRepair(),
         nvramRecoveryAvailable: Boolean(
           environment.status?.nvramRecoveryAvailable,
         ),
