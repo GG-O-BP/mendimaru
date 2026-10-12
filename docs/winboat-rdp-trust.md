@@ -29,7 +29,7 @@ rootless forwarders and QEMU host forwarding accept TCP immediately even when
 nothing in the guest listens. The probe never starts TLS, never authenticates
 and sends no credentials.
 
-If the endpoint does not become stable within 60 seconds, the operation fails
+If the endpoint does not become stable within 30 seconds, the operation fails
 with `remote_desktop_unavailable` (retryable). It is not reported as a generic
 `operation_failed`.
 

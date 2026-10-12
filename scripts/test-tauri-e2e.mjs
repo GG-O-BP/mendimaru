@@ -12,6 +12,20 @@ import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+// Windows answers an X.224 Connection Request with a Connection Confirm before
+// any TLS. Mendimaru's RDP readiness probe requires that answer (#227), so the
+// fixture gives it and then closes, like an endpoint that refuses the session.
+const RDP_CONNECTION_CONFIRM = Buffer.from(
+  "030000130ed00000123400020f080008000000",
+  "hex",
+);
+
+function answerRdpNegotiation(socket) {
+  socket.on("error", () => undefined);
+  socket.setTimeout(5_000, () => socket.destroy());
+  socket.once("data", () => socket.end(RDP_CONNECTION_CONFIRM));
+}
+
 const fetch = globalThis.fetch;
 
 const repository = path.resolve(
@@ -1567,7 +1581,7 @@ async function createFixture(root) {
   const apiPort = await listen(api);
   servers.push(api);
 
-  const rdp = net.createServer((socket) => socket.end());
+  const rdp = net.createServer(answerRdpNegotiation);
   const rdpPort = await listen(rdp);
   servers.push(rdp);
 

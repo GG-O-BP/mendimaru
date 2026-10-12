@@ -80,7 +80,7 @@ const REMOTE_APP_RETRY_DELAY_SECONDS: u64 = 2;
 /// Bound for the RDP endpoint to answer the X.224 negotiation after a
 /// container recreation. The guest API is already online at this point, so
 /// this only covers the RDP listener and the host port forwarder settling.
-const REMOTE_DESKTOP_READY_TIMEOUT: Duration = Duration::from_secs(60);
+const REMOTE_DESKTOP_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const REMOTE_DESKTOP_STABLE_PROBES: usize = 2;
 const REMOTE_DESKTOP_PROBE_INTERVAL: Duration = Duration::from_millis(500);
 
