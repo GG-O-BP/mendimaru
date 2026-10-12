@@ -32,13 +32,13 @@ exceptions `RUSTSEC-2024-0411` through `RUSTSEC-2024-0420`.
     `tauri` (2.12.3), `wry` (0.57.0) and `webkit2gtk` (2.0.2) still require
     `gtk 0.18` / `glib 0.18` on Linux, and `glib 0.18` has no patched release.
   - _Reachability (re-checked 2026-10-12 at
-    `26c17e80f8184e2493fa5b0affd03986b7fcdcd4` and on the #227/#228 branch):_
+    `cdd66b5c738eb86979f7f99631409f358367d061` (#231 follow-up review)):_
     Mendimaru source has no reference to `VariantStrIter`, `variant_str_iter`
     or `array_iter_str`. The review also covered the locked sources of every
     crate that depends on `glib 0.18.5` (the GTK/GDK/GIO/Pango/Cairo bindings,
     `webkit2gtk`, `javascriptcore-rs`, `soup3`, `wry`, `tao`, `muda`,
-    `tray-icon`, `rfd`, `libappindicator`, `tauri`, its runtimes and the
-    dialog/fs/opener plugins); none calls the affected API, and inside `glib`
+    `tray-icon`, `libappindicator`, `tauri`, its runtimes and the
+    dialog/fs/opener plugins); the Cargo metadata inverse closure comprises 23 packages including the app; none calls the affected API, and inside `glib`
     itself `array_iter_str()` is only used by its own tests.
   - Any new source reference or absence of that evidence fails the policy. This
     exception now expires on 2026-12-31, together with the unmaintained
