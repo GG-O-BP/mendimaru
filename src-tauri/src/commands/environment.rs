@@ -99,6 +99,23 @@ async fn complete_winboat_setup_with_config(
     if !preferred.winboat_setup_pending {
         return Err(crate::tr!("error-winboat-setup-not-pending").into());
     }
+    #[cfg(target_os = "linux")]
+    {
+        crate::winboat::maintenance::validate_identity(&preferred).map_err(|error| {
+            error.command_error(crate::contracts::CapabilityId::EnvironmentConfigure)
+        })?;
+        // A pending configuration can already select a healthy custom VM.
+        // Finishing its setup must not silently retarget the default ~/.winboat
+        // VM found by auto-detection (especially with CLI/config overrides).
+        if std::fs::symlink_metadata(&preferred.compose_file).is_ok() {
+            detected.compose_file = preferred.compose_file.clone();
+            detected.container_runtime = preferred.container_runtime;
+            detected.container_name = preferred.container_name.clone();
+            detected.api_url = preferred.api_url.clone();
+            detected.rdp_host = preferred.rdp_host.clone();
+            detected.rdp_port = preferred.rdp_port;
+        }
+    }
     if !crate::winboat::guest_is_online(&preferred).await {
         return Err(crate::tr!("error-winboat-setup-not-ready").into());
     }

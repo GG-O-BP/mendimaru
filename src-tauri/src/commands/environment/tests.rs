@@ -196,3 +196,26 @@ async fn live_complete_pending_setup_without_vm_mutation() {
         mode
     );
 }
+
+#[tokio::test]
+async fn completing_pending_setup_does_not_retarget_an_explicit_custom_vm() {
+    crate::i18n::initialize("en-US").unwrap();
+    let (root, paths, preferred, health) = fixture().await;
+    let mut autodetected = preferred.clone();
+    autodetected.compose_file = root
+        .path()
+        .join("unselected-compose.yml")
+        .to_string_lossy()
+        .into_owned();
+    autodetected.container_name = "UnselectedDefaultVm".into();
+    autodetected.api_url = "http://127.0.0.1:9".into();
+    let result = complete_winboat_setup_with_config(&paths, preferred.clone(), autodetected)
+        .await
+        .unwrap();
+    assert_eq!(result.config.compose_file, preferred.compose_file);
+    assert_eq!(result.config.container_name, preferred.container_name);
+    assert_eq!(result.config.api_url, preferred.api_url);
+    assert!(!result.container_recreated && !result.mount_changed);
+    assert!(!result.config.winboat_setup_pending);
+    health.abort();
+}
