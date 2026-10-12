@@ -116,7 +116,18 @@ fn ordinary_operations_do_not_depend_on_compose_parent_permissions() {
             "{tag}"
         );
         drop(lease);
-        let recovery = acquire(&config, true).unwrap();
+        // Parallel subprocess fixtures can briefly inherit a CLOEXEC fd
+        // between fork and exec. Retry the truthful Busy until it has closed.
+        let mut recovered = None;
+        until(|| match acquire(&config, true) {
+            Ok(lease) => {
+                recovered = Some(lease);
+                true
+            }
+            Err(LockError::Busy) => false,
+            Err(error) => panic!("{error:?}"),
+        });
+        let recovery = recovered.unwrap();
         assert_eq!(shared(&config).unwrap_err(), LockError::Busy, "{tag}");
         drop(recovery);
         // The WinBoat directory and Compose file are never modified.
@@ -244,47 +255,32 @@ async fn locks_held_by_older_versions_fail_closed() {
 }
 
 #[test]
-fn legacy_locations_refused_by_older_versions_are_not_joined_or_followed() {
+fn untrusted_existing_legacy_entries_fail_closed_and_are_never_followed() {
     let root = tempfile::tempdir().unwrap();
-    // A legacy lock with group permissions: older versions refuse it entirely.
-    let public = winboat_directory(root.path(), "public-lock", 0o755, &vm_name());
-    let legacy = legacy_path(&public, Kind::Maintenance);
-    fs::write(&legacy, b"").unwrap();
-    fs::set_permissions(&legacy, fs::Permissions::from_mode(0o640)).unwrap();
-    let lease = shared(&public).unwrap();
-    assert!(lease.is_some());
-    assert_eq!(
-        fs::metadata(&legacy).unwrap().mode() & 0o777,
-        0o640,
-        "never repaired or replaced"
-    );
-    drop(lease);
-
-    // A symlinked legacy lock is neither followed nor modified.
-    let linked = winboat_directory(root.path(), "linked-lock", 0o755, &vm_name());
+    for mode in [0o700, 0o755, 0o775] {
+        let public = winboat_directory(root.path(), &format!("public-{mode:o}"), mode, &vm_name());
+        let legacy = legacy_path(&public, Kind::Maintenance);
+        fs::write(&legacy, b"").unwrap();
+        fs::set_permissions(&legacy, fs::Permissions::from_mode(0o640)).unwrap();
+        assert_eq!(shared(&public).unwrap_err(), LockError::Untrusted);
+        assert_eq!(fs::metadata(&legacy).unwrap().mode() & 0o777, 0o640);
+        fs::set_permissions(
+            Path::new(&public.compose_file).parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+    }
+    let linked = winboat_directory(root.path(), "linked", 0o755, &vm_name());
     let target = root.path().join("protected.img");
     fs::write(&target, b"protected").unwrap();
     symlink(&target, legacy_path(&linked, Kind::Maintenance)).unwrap();
-    assert!(shared(&linked).unwrap().is_some());
+    assert_eq!(shared(&linked).unwrap_err(), LockError::Untrusted);
     assert_eq!(fs::read(&target).unwrap(), b"protected");
-    assert!(
-        fs::symlink_metadata(legacy_path(&linked, Kind::Maintenance))
-            .unwrap()
-            .file_type()
-            .is_symlink()
-    );
-
-    // A symlinked Compose ancestor is refused by older versions as well.
     let real = winboat_directory(root.path(), "real", 0o755, &vm_name());
     let alias = root.path().join("alias");
     symlink(Path::new(&real.compose_file).parent().unwrap(), &alias).unwrap();
     let aliased = config_at(&alias.join("docker-compose.yml"), &real.container_name);
-    assert!(
-        linux::legacy(Path::new(&aliased.compose_file), Kind::Maintenance)
-            .unwrap()
-            .is_none()
-    );
-    assert!(shared(&aliased).unwrap().is_some());
+    assert_eq!(shared(&aliased).unwrap_err(), LockError::Untrusted);
 }
 
 #[test]
@@ -373,7 +369,7 @@ fn compose_identity_mismatch_is_reported_as_identity() {
     fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
     // An absent Compose file has nothing to recover and takes no lock.
     let missing = config_at(&root.path().join("missing/compose.yml"), &vm_name());
-    assert!(shared(&missing).unwrap().is_none());
+    assert!(shared(&missing).unwrap().is_some());
 }
 
 #[test]
@@ -390,7 +386,7 @@ fn every_cause_has_a_distinct_safe_reason_message_and_retry_policy() {
             assert_ne!(messages[index], messages[other]);
         }
         let backend = error.backend_error(crate::contracts::CapabilityId::StudioInstall);
-        assert_eq!(backend.code, BackendErrorCode::PreconditionFailed);
+        assert_eq!(backend.code, error.code());
         assert_eq!(
             backend.capability,
             Some(crate::contracts::CapabilityId::StudioInstall)
@@ -493,7 +489,11 @@ async fn uefi_exclusion_and_stop_serialization_hold_across_processes() {
     let mut recovery = spawn(root.path(), &child_config, "recovery", "exclusive");
     until(|| event("recovery", "held").exists());
     assert_eq!(shared(&parent).unwrap_err(), LockError::Busy);
-    assert_eq!(probe(&parent), Ok(()), "diagnostics never take the lock");
+    assert_eq!(
+        probe(&parent),
+        Err(LockError::Busy),
+        "diagnostics test availability without waiting"
+    );
     // A crashed recovery process releases through the kernel, never by unlink.
     recovery.0.kill().unwrap();
     recovery.0.wait().unwrap();
@@ -537,4 +537,99 @@ async fn uefi_exclusion_and_stop_serialization_hold_across_processes() {
         let directory = Path::new(&config.compose_file).parent().unwrap();
         fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
     }
+}
+
+#[test]
+fn a_live_legacy_holder_is_not_bypassed_after_directory_permissions_change() {
+    let root = tempfile::tempdir().unwrap();
+    let config = winboat_directory(root.path(), "winboat", 0o755, &vm_name());
+    let legacy = legacy_path(&config, Kind::Maintenance);
+    let owner = raw_lock(&legacy, true);
+    fs::set_permissions(
+        Path::new(&config.compose_file).parent().unwrap(),
+        fs::Permissions::from_mode(0o775),
+    )
+    .unwrap();
+    assert_eq!(shared(&config).unwrap_err(), LockError::Busy);
+    assert_eq!(probe(&config), Err(LockError::Busy));
+    // Changing the existing file's mode cannot turn an unknown/live inode into
+    // an absent compatibility participant either.
+    fs::set_permissions(&legacy, fs::Permissions::from_mode(0o640)).unwrap();
+    assert_eq!(shared(&config).unwrap_err(), LockError::Untrusted);
+    drop(owner);
+    fs::set_permissions(&legacy, fs::Permissions::from_mode(0o600)).unwrap();
+    drop(shared(&config).unwrap());
+    assert_eq!(fs::metadata(&legacy).unwrap().nlink(), 1);
+}
+
+#[test]
+fn missing_compose_still_coordinates_and_dangling_links_are_not_missing() {
+    let root = tempfile::tempdir().unwrap();
+    let name = vm_name();
+    let missing = config_at(&root.path().join("not-yet.yml"), &name);
+    let writer = acquire(&missing, true).unwrap();
+    assert_eq!(shared(&missing).unwrap_err(), LockError::Busy);
+    drop(writer);
+    let alias = root.path().join("dangling.yml");
+    symlink(root.path().join("absent.yml"), &alias).unwrap();
+    assert_eq!(
+        shared(&config_at(&alias, &name)).unwrap_err(),
+        LockError::Untrusted
+    );
+    let dangling_directory = root.path().join("dangling-parent");
+    symlink(root.path().join("absent-parent"), &dangling_directory).unwrap();
+    assert_eq!(
+        shared(&config_at(&dangling_directory.join("compose.yml"), &name)).unwrap_err(),
+        LockError::Untrusted
+    );
+}
+
+#[tokio::test]
+async fn cancellation_while_waiting_for_the_legacy_stop_releases_the_private_lock() {
+    let root = tempfile::tempdir().unwrap();
+    let config = winboat_directory(root.path(), "winboat", 0o755, &vm_name());
+    let old_stop = raw_lock(&legacy_path(&config, Kind::RuntimeStop), true);
+    assert!(tokio::time::timeout(
+        Duration::from_millis(60),
+        runtime_stop(&config, Duration::from_secs(30))
+    )
+    .await
+    .is_err());
+    let private = linux::open_private(
+        &linux::root(),
+        &crate::winboat::vm_use::identity_key(&config).unwrap(),
+        Kind::RuntimeStop,
+    )
+    .unwrap();
+    assert_eq!(linux::try_lock(&private, true), Ok(()));
+    drop(private);
+    drop(old_stop);
+    drop(runtime_stop(&config, Duration::ZERO).await.unwrap());
+}
+
+#[test]
+fn private_modes_are_exact_not_just_no_group_permissions() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("private");
+    let key = "b".repeat(64);
+    drop(linux::open_private(&directory, &key, Kind::Maintenance).unwrap());
+    let file = directory.join(format!("{key}.maintenance.lock"));
+    for mode in [0o400, 0o700, 0o1600, 0o4600] {
+        fs::set_permissions(&file, fs::Permissions::from_mode(mode)).unwrap();
+        assert_eq!(
+            linux::open_private(&directory, &key, Kind::Maintenance).unwrap_err(),
+            LockError::Untrusted
+        );
+        assert_eq!(fs::metadata(&file).unwrap().mode() & 0o7777, mode);
+    }
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+    for mode in [0o500, 0o1700, 0o2700] {
+        fs::set_permissions(&directory, fs::Permissions::from_mode(mode)).unwrap();
+        assert_eq!(
+            linux::open_private(&directory, &key, Kind::Maintenance).unwrap_err(),
+            LockError::Untrusted
+        );
+        assert_eq!(fs::metadata(&directory).unwrap().mode() & 0o7777, mode);
+    }
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
 }

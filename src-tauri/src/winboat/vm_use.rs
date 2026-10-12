@@ -56,6 +56,11 @@ pub(crate) async fn acquire_for(
 ) -> Result<Lease, BackendError> {
     #[cfg(target_os = "linux")]
     {
+        // Validate before the outer VM lease too, otherwise an identity/trust
+        // defect is collapsed into vm_use's legacy generic precondition before
+        // the typed coordination error ever reaches startup/settings.
+        super::maintenance::validate_identity(config)
+            .map_err(|error| error.backend_error(capability))?;
         linux::acquire(config, mode, wait.min(WAIT))
             .await
             .map_err(|message| error(capability, message))

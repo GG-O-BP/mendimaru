@@ -79,15 +79,29 @@ pub(crate) fn begin_winboat_setup(app: AppHandle) -> CommandResult<()> {
 #[tauri::command]
 pub(crate) async fn complete_winboat_setup(app: AppHandle) -> CommandResult<SettingsSaveResult> {
     require_winboat()?;
-    let preferred = load_command_config(&app)?;
+    let paths = crate::app_paths::AppPaths::from_app(&app)?;
+    complete_winboat_setup_from(&paths).await
+}
+
+pub(crate) async fn complete_winboat_setup_from(
+    paths: &crate::app_paths::AppPaths,
+) -> CommandResult<SettingsSaveResult> {
+    let preferred = crate::config::load_config_from(paths)?;
+    let detected = crate::config::detect_config()?;
+    complete_winboat_setup_with_config(paths, preferred, detected).await
+}
+
+async fn complete_winboat_setup_with_config(
+    paths: &crate::app_paths::AppPaths,
+    preferred: crate::models::AppConfig,
+    mut detected: crate::models::AppConfig,
+) -> CommandResult<SettingsSaveResult> {
     if !preferred.winboat_setup_pending {
         return Err(crate::tr!("error-winboat-setup-not-pending").into());
     }
     if !crate::winboat::guest_is_online(&preferred).await {
         return Err(crate::tr!("error-winboat-setup-not-ready").into());
     }
-
-    let mut detected = crate::config::detect_config()?;
     detected.language_preference = preferred.language_preference;
     detected.winboat_setup_pending = false;
     detected.shared_directory = preferred.shared_directory;
@@ -95,10 +109,9 @@ pub(crate) async fn complete_winboat_setup(app: AppHandle) -> CommandResult<Sett
     detected.mendix_install_root = preferred.mendix_install_root;
     detected.mendix_data_root = preferred.mendix_data_root;
     detected.startup_timeout_seconds = preferred.startup_timeout_seconds;
-
     let revision = crate::settings::preview_settings_save(detected.clone(), true)?
         .map(|preview| preview.compose_revision);
-    crate::settings::save_settings(&app, detected, true, revision).await
+    crate::settings::save_settings_from(paths, detected, true, revision).await
 }
 
 fn require_winboat() -> CommandResult<()> {
@@ -189,5 +202,46 @@ mod tests {
             assert_eq!(snapshot.manifest.backend, BackendId::LinuxWinboat);
             assert_eq!(snapshot.manifest.studio_platform, PlatformId::Windows);
         }
+    }
+}
+
+#[cfg(test)]
+#[path = "environment/tests.rs"]
+mod setup_tests;
+
+#[tauri::command]
+pub(crate) fn preview_coordination_permissions(app: AppHandle) -> CommandResult<serde_json::Value> {
+    require_winboat()?;
+    let config = load_command_config(&app)?;
+    #[cfg(target_os = "linux")]
+    {
+        serde_json::to_value(crate::winboat::maintenance::repair::preview(&config)?).map_err(|_| {
+            crate::winboat::maintenance::LockError::Unavailable
+                .command_error(crate::contracts::CapabilityId::EnvironmentConfigure)
+        })
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = config;
+        Err(crate::tr!("error-winboat-not-required").into())
+    }
+}
+
+#[tauri::command]
+pub(crate) fn repair_coordination_permissions(
+    app: AppHandle,
+    preview_id: String,
+    confirmed: bool,
+) -> CommandResult<()> {
+    require_winboat()?;
+    let config = load_command_config(&app)?;
+    #[cfg(target_os = "linux")]
+    {
+        crate::winboat::maintenance::repair::repair(&config, &preview_id, confirmed)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (config, preview_id, confirmed);
+        Err(crate::tr!("error-winboat-not-required").into())
     }
 }

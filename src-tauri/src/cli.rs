@@ -1427,7 +1427,7 @@ fn finish_session_keeper_launch(mut response: SessionKeeperResponse) -> i32 {
         ));
     }
     let serialized = serde_json::to_vec(&response).unwrap_or_else(|_| {
-        br#"{"ok":false,"error":{"schemaVersion":"5.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
+        br#"{"ok":false,"error":{"schemaVersion":"6.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
     });
     let written = std::io::stdout()
         .write_all(&serialized)
@@ -2977,6 +2977,14 @@ fn command_error_to_backend(error: CommandError, backend: BackendId) -> BackendE
         return sanitize_backend_error(*details);
     }
     let code = match error.code {
+        CommandErrorCode::CoordinationBusy => BackendErrorCode::CoordinationBusy,
+        CommandErrorCode::CoordinationUntrusted => BackendErrorCode::CoordinationUntrusted,
+        CommandErrorCode::CoordinationUnavailable => BackendErrorCode::CoordinationUnavailable,
+        CommandErrorCode::CoordinationIdentityMismatch => {
+            BackendErrorCode::CoordinationIdentityMismatch
+        }
+        CommandErrorCode::CoordinationTimeout => BackendErrorCode::CoordinationTimeout,
+
         CommandErrorCode::QemuBootTimeout => BackendErrorCode::QemuBootTimeout,
         CommandErrorCode::ContainerExitedDuringStartup => {
             BackendErrorCode::ContainerExitedDuringStartup
@@ -3078,14 +3086,6 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
             | crate::winboat::vm_use::UNTRUSTED
             | crate::winboat::vm_use::UPGRADE),
         ) => message,
-        // Coordination lock causes (#225): the localized GUI message maps back
-        // to one exact, path-free reason per cause.
-        (BackendErrorCode::PreconditionFailed, Some(BackendId::LinuxWinboat), Some(_), message)
-            if crate::winboat::maintenance::LockError::from_message(message).is_some() =>
-        {
-            crate::winboat::maintenance::LockError::from_message(message)
-                .map_or("", crate::winboat::maintenance::LockError::reason)
-        }
         #[cfg(target_os = "linux")]
         (
             BackendErrorCode::PreconditionFailed,
@@ -3159,6 +3159,11 @@ fn safe_error_message(code: BackendErrorCode) -> &'static str {
         }
         BackendErrorCode::BackendMismatch => "the selected backend does not match this host",
         BackendErrorCode::InvalidRequest => "the command request is invalid",
+        BackendErrorCode::CoordinationBusy => crate::winboat::maintenance::BUSY,
+        BackendErrorCode::CoordinationUntrusted => crate::winboat::maintenance::UNTRUSTED,
+        BackendErrorCode::CoordinationUnavailable => crate::winboat::maintenance::UNAVAILABLE,
+        BackendErrorCode::CoordinationIdentityMismatch => crate::winboat::maintenance::IDENTITY,
+        BackendErrorCode::CoordinationTimeout => crate::winboat::maintenance::TIMEOUT,
         BackendErrorCode::PreconditionFailed => "a required precondition was not satisfied",
         BackendErrorCode::OperationFailed => "the command could not be completed",
         BackendErrorCode::ExternalProcessTimeout => {
@@ -3205,6 +3210,9 @@ fn safe_error_message_for_backend(
     code: BackendErrorCode,
     backend: Option<BackendId>,
 ) -> &'static str {
+    if let Some(lock) = crate::winboat::maintenance::LockError::from_code(code) {
+        return lock.reason();
+    }
     if code == BackendErrorCode::RuntimeSessionNotFound && backend == Some(BackendId::LinuxWinboat)
     {
         return "the WinBoat Runtime session was not found";
@@ -3222,7 +3230,12 @@ fn exit_code(error: &BackendError) -> i32 {
         BackendErrorCode::BackendMismatch
         | BackendErrorCode::UnsupportedCapability
         | BackendErrorCode::RuntimeVersionUnsupported => EXIT_BACKEND_UNAVAILABLE,
-        BackendErrorCode::PreconditionFailed
+        BackendErrorCode::CoordinationBusy
+        | BackendErrorCode::CoordinationUntrusted
+        | BackendErrorCode::CoordinationUnavailable
+        | BackendErrorCode::CoordinationIdentityMismatch
+        | BackendErrorCode::CoordinationTimeout
+        | BackendErrorCode::PreconditionFailed
         | BackendErrorCode::OperationFailed
         | BackendErrorCode::ExternalProcessTimeout
         | BackendErrorCode::ExternalProcessCancelled
@@ -3525,7 +3538,7 @@ mod tests {
                 assert_ne!(error.message, lock.reason());
                 let sanitized = sanitize_backend_error(error.clone());
                 assert_eq!(sanitized.message, lock.reason());
-                assert_eq!(sanitized.code, BackendErrorCode::PreconditionFailed);
+                assert_eq!(sanitized.code, lock.code());
                 assert_eq!(sanitized.capability, Some(capability));
                 assert_eq!(sanitized.retryable, lock.retryable());
                 assert_eq!(exit_code(&sanitized), EXIT_OPERATION_FAILED);
@@ -3536,10 +3549,7 @@ mod tests {
                 assert_eq!(via_command.message, lock.reason());
                 let mut tampered = error;
                 tampered.message.push_str(" /home/private/.winboat");
-                assert_eq!(
-                    sanitize_backend_error(tampered).message,
-                    safe_error_message(BackendErrorCode::PreconditionFailed)
-                );
+                assert_eq!(sanitize_backend_error(tampered).message, lock.reason());
             }
         }
     }

@@ -129,12 +129,10 @@ fn nvram_maintenance_excludes_operations_without_following_a_symlinked_legacy_lo
     let lock = root.path().join(".mendimaru-maintenance.lock");
     std::fs::remove_file(&lock).unwrap();
     symlink(root.path().join("data.img"), &lock).unwrap();
-    let reader = super::super::maintenance::shared(&config).unwrap();
     assert_eq!(
-        super::super::maintenance::acquire(&config, true).unwrap_err(),
-        super::super::maintenance::LockError::Busy
+        super::super::maintenance::shared(&config).unwrap_err(),
+        super::super::maintenance::LockError::Untrusted
     );
-    drop(reader);
     assert!(std::fs::symlink_metadata(&lock)
         .unwrap()
         .file_type()

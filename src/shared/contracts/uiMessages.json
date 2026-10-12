@@ -495,5 +495,16 @@
   "frontend-cause-mendix-error-dialog": true,
   "frontend-cause-browser-dialog": true,
   "frontend-cause-navigation-timeout": true,
-  "frontend-cause-observation-incomplete": true
+  "frontend-cause-observation-incomplete": true,
+  "diagnostic-runtime-stop-lock-title": true,
+  "error-coordination-busy": true,
+  "error-coordination-untrusted": true,
+  "error-coordination-unavailable": true,
+  "error-coordination-identity": true,
+  "error-coordination-timeout": true,
+  "action-coordination-repair": true,
+  "confirm-coordination-repair-title": true,
+  "confirm-coordination-repair-description": true,
+  "confirm-coordination-repair-action": true,
+  "toast-coordination-repaired": true
 }

@@ -866,18 +866,20 @@ fn runtime_stop_recovers_after_lock_owner_process_exits() {
 }
 
 #[test]
-fn runtime_stop_ignores_legacy_lock_entries_that_older_versions_refuse() {
+fn runtime_stop_fails_closed_on_an_existing_untrusted_legacy_entry() {
     use std::os::unix::fs::symlink;
     let fixture = Fixture::new();
     let target = fixture.path("lock-target");
     fs::write(&target, b"untouched").unwrap();
     symlink(&target, fixture.path(".mendimaru-runtime-stop.lock")).unwrap();
-    // A group-writable Compose directory no longer blocks ordinary work.
     fs::set_permissions(fixture.root.path(), fs::Permissions::from_mode(0o775)).unwrap();
     fixture.spawn("stop").finish();
     fs::set_permissions(fixture.root.path(), fs::Permissions::from_mode(0o700)).unwrap();
-    assert_eq!(fixture.result("stop")["data"]["completed"], true);
-    fixture.assert_stopped(1);
+    assert_eq!(
+        fixture.result("stop")["error"]["code"],
+        "coordination_untrusted"
+    );
+    assert_eq!(fixture.calls(), 0);
     assert_eq!(fs::read(&target).unwrap(), b"untouched");
 }
 
@@ -907,7 +909,7 @@ fn runtime_stop_refuses_untrusted_lock_files_without_touching_compose() {
         let compose = fs::read(fixture.path("compose.yml")).unwrap();
         fixture.spawn("stop").finish();
         let result = fixture.result("stop");
-        assert_eq!(result["error"]["code"], "precondition_failed", "{kind}");
+        assert_eq!(result["error"]["code"], "coordination_untrusted", "{kind}");
         assert_eq!(result["error"]["capability"], "runtime.stop", "{kind}");
         assert_eq!(
             result["error"]["message"],

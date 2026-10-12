@@ -24,7 +24,9 @@ pub(crate) use compose::{
     RuntimeComposeBaseline, RuntimePortMapping,
 };
 pub use store::{load_config, persist_config};
-pub(crate) use store::{load_config_from, restore_config, snapshot_config, ConfigSnapshot};
+pub(crate) use store::{
+    load_config_from, persist_config_from, restore_config, snapshot_config_from, ConfigSnapshot,
+};
 pub(crate) use validation::normalize_and_validate;
 
 const DEFAULT_API_PORT: u16 = 47280;

@@ -1472,7 +1472,7 @@ async fn ensure_no_running_session(
         .await
         .map_err(|mut error| {
             // The session query only prepares this action; report the action.
-            if crate::winboat::maintenance::LockError::from_message(&error.message).is_some() {
+            if crate::winboat::maintenance::LockError::from_code(error.code).is_some() {
                 error.capability = Some(capability);
             }
             error
@@ -1706,7 +1706,7 @@ mod tests {
                 (session, CapabilityId::StudioStop),
                 (begin, CapabilityId::StudioInstall),
             ] {
-                assert_eq!(error.code, CommandErrorCode::PreconditionFailed);
+                assert_eq!(error.details.as_ref().unwrap().code, lock.code());
                 assert_eq!(error.message, lock.localized());
                 assert_ne!(
                     error.message,

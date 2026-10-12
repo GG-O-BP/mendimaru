@@ -65,8 +65,8 @@ pub(crate) fn persist_config_from(paths: &AppPaths, config: &AppConfig) -> Resul
     atomic_write(&path, &serialized)
 }
 
-pub(crate) fn snapshot_config(app: &AppHandle) -> Result<ConfigSnapshot, String> {
-    let path = config_path(&AppPaths::from_app(app)?);
+pub(crate) fn snapshot_config_from(paths: &AppPaths) -> Result<ConfigSnapshot, String> {
+    let path = config_path(paths);
     let content = match fs::symlink_metadata(&path) {
         Ok(metadata) => {
             if !metadata.is_file() || metadata.file_type().is_symlink() {

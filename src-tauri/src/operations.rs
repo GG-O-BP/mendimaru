@@ -15,7 +15,7 @@ use tauri::AppHandle;
 
 const HISTORY_FILE_NAME: &str = "operation-history.json";
 const HISTORY_SCHEMA_VERSION: &str = "1.0.0";
-const LEGACY_RECORD_SCHEMA_VERSIONS: &[&str] = &["1.0.0", "2.0.0", "3.0.0", "4.0.0"];
+const LEGACY_RECORD_SCHEMA_VERSIONS: &[&str] = &["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0"];
 const MAX_HISTORY_BYTES: u64 = 512 * 1024;
 const MAX_RECORDS: usize = 250;
 const MAX_IDENTIFIER_BYTES: usize = 160;
@@ -886,6 +886,11 @@ fn trim_history(records: &mut Vec<OperationRecord>) {
 fn failure_classification(error: &CommandError) -> (&'static str, bool) {
     use crate::models::CommandErrorCode;
     match error.code {
+        CommandErrorCode::CoordinationBusy => ("coordination_busy", true),
+        CommandErrorCode::CoordinationUntrusted => ("coordination_untrusted", false),
+        CommandErrorCode::CoordinationUnavailable => ("coordination_unavailable", false),
+        CommandErrorCode::CoordinationIdentityMismatch => ("coordination_identity_mismatch", false),
+        CommandErrorCode::CoordinationTimeout => ("coordination_timeout", true),
         CommandErrorCode::QemuBootTimeout => ("qemu_boot_timeout", true),
         CommandErrorCode::ContainerExitedDuringStartup => ("container_exited_during_startup", true),
         CommandErrorCode::GuestStartupTimeout => ("guest_startup_timeout", true),

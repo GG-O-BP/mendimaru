@@ -49,7 +49,9 @@ mod tests {
         .await
         .is_err());
         drop(owner);
-        let next = wait_exclusive(open(), Duration::ZERO).await.unwrap();
+        let next = wait_exclusive(open(), Duration::from_secs(1))
+            .await
+            .unwrap();
         drop(next);
         assert!(
             path.exists(),

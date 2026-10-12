@@ -341,24 +341,25 @@ pub(crate) async fn available(config: &AppConfig) -> bool {
     plan(config).await.is_ok()
 }
 
-pub(crate) async fn preview(config: &AppConfig) -> Result<Preview, String> {
+pub(crate) async fn preview(config: &AppConfig) -> Result<Preview, crate::models::CommandError> {
     let lease = crate::winboat::vm_use::acquire(
         config,
         crate::winboat::vm_use::Mode::Exclusive,
-        crate::contracts::CapabilityId::StudioStart,
+        crate::contracts::CapabilityId::EnvironmentConfigure,
     )
-    .await
-    .map_err(|error| error.message)?;
+    .await?;
     lease.run(preview_with_lease(config)).await
 }
 
-async fn preview_with_lease(config: &AppConfig) -> Result<Preview, String> {
-    let _lease = super::maintenance::acquire(config, true)?;
+async fn preview_with_lease(config: &AppConfig) -> Result<Preview, crate::models::CommandError> {
+    let _lease = super::maintenance::acquire(config, true).map_err(|error| {
+        error.command_error(crate::contracts::CapabilityId::EnvironmentConfigure)
+    })?;
     let plan = plan(config).await?;
     let preview = plan.preview.clone();
     let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
     if pending.as_ref().is_some_and(|p| p.replaced) {
-        return Err(crate::tr!("error-nvram-rollback-required"));
+        return Err(crate::tr!("error-nvram-rollback-required").into());
     }
     *pending = Some(plan);
     Ok(preview)
@@ -500,14 +501,13 @@ pub(crate) async fn recover(
     config: &AppConfig,
     id: &str,
     confirmed: bool,
-) -> Result<Outcome, String> {
+) -> Result<Outcome, crate::models::CommandError> {
     let lease = super::vm_use::acquire(
         config,
         super::vm_use::Mode::Exclusive,
-        crate::contracts::CapabilityId::StudioStart,
+        crate::contracts::CapabilityId::EnvironmentConfigure,
     )
-    .await
-    .map_err(|error| error.message)?;
+    .await?;
     lease.run(recover_with_lease(config, id, confirmed)).await
 }
 
@@ -515,24 +515,26 @@ async fn recover_with_lease(
     config: &AppConfig,
     id: &str,
     confirmed: bool,
-) -> Result<Outcome, String> {
+) -> Result<Outcome, crate::models::CommandError> {
     if !confirmed {
-        return Err(crate::tr!("error-nvram-confirmation-required"));
+        return Err(crate::tr!("error-nvram-confirmation-required").into());
     }
-    let _lease = super::maintenance::acquire(config, true)?;
+    let _lease = super::maintenance::acquire(config, true).map_err(|error| {
+        error.command_error(crate::contracts::CapabilityId::EnvironmentConfigure)
+    })?;
     let mut plan = {
         let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
         if !pending.as_ref().is_some_and(|p| {
             p.preview.id == id && !p.replaced && p.created.elapsed() < PREVIEW_LIFETIME
         }) {
-            return Err(changed());
+            return Err(changed().into());
         }
         pending.take().ok_or_else(changed)?
     };
     plan.revalidate(config, true).await?;
     let prepared = plan.backup_and_retire();
     if prepared.is_err() && !plan.replaced {
-        return Err(changed());
+        return Err(changed().into());
     }
     let ready = if prepared.is_ok() {
         super::startup::ensure_guest_online_unlocked(config)
@@ -565,14 +567,13 @@ pub(crate) async fn restore(
     config: &AppConfig,
     id: &str,
     confirmed: bool,
-) -> Result<Outcome, String> {
+) -> Result<Outcome, crate::models::CommandError> {
     let lease = super::vm_use::acquire(
         config,
         super::vm_use::Mode::Exclusive,
-        crate::contracts::CapabilityId::StudioStart,
+        crate::contracts::CapabilityId::EnvironmentConfigure,
     )
-    .await
-    .map_err(|error| error.message)?;
+    .await?;
     lease.run(restore_with_lease(config, id, confirmed)).await
 }
 
@@ -580,18 +581,20 @@ async fn restore_with_lease(
     config: &AppConfig,
     id: &str,
     confirmed: bool,
-) -> Result<Outcome, String> {
+) -> Result<Outcome, crate::models::CommandError> {
     if !confirmed {
-        return Err(crate::tr!("error-nvram-confirmation-required"));
+        return Err(crate::tr!("error-nvram-confirmation-required").into());
     }
-    let _lease = super::maintenance::acquire(config, true)?;
+    let _lease = super::maintenance::acquire(config, true).map_err(|error| {
+        error.command_error(crate::contracts::CapabilityId::EnvironmentConfigure)
+    })?;
     let mut plan = {
         let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
         if !pending
             .as_ref()
             .is_some_and(|p| p.preview.id == id && p.replaced)
         {
-            return Err(changed());
+            return Err(changed().into());
         }
         pending.take().ok_or_else(changed)?
     };
@@ -602,7 +605,7 @@ async fn restore_with_lease(
     .await;
     if result.is_err() {
         *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(plan);
-        return Err(crate::tr!("error-nvram-rollback-required"));
+        return Err(crate::tr!("error-nvram-rollback-required").into());
     }
     Ok(Outcome {
         ready: false,

@@ -6,7 +6,7 @@ independent fields. Existing `guestOnline` and `ready` remain compatible.
 - `connectivity`: Guest API reachability on Linux; local workspace connectivity on
   native Windows. It does not authorize an operation.
 - `readiness`: `studioLaunch`, `installation`, `uninstallation`, `projects`, and
-  `blockingChecks`. Platform support is also required. Missing or unknown status
+  `runtimeStart`, `runtimeStop`, and `blockingChecks`. Platform support is also required. Missing or unknown status
   is never sufficient to enable an action.
 - `health`: `attentionRequired` plus the stable IDs in `attentionChecks`. This
   includes warnings as well as failures, without examining translated text.
@@ -28,6 +28,10 @@ simultaneously. RDP or mount failure can mean connected but not ready. Header an
 Studio notice provide a text-labelled diagnostics action; color is supplementary.
 Startup failure remains a distinct, sticky lifecycle state and takes precedence
 over the connected presentation until a successful startup attempt.
+
+`runtime-stop-lock` defects disable only `runtimeStop`; normal Studio readiness
+and Runtime start remain available. Maintenance contention disables common work
+with a distinct busy diagnosis.
 
 The readiness flags are UI affordances, not a security boundary. Backend operations
 continue to validate their own current process, runtime, mount and session

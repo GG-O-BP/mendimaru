@@ -166,6 +166,8 @@ export interface EnvironmentStatus {
     installation: boolean;
     uninstallation: boolean;
     projects: boolean;
+    runtimeStart?: boolean;
+    runtimeStop?: boolean;
     blockingChecks: EnvironmentDiagnosticId[];
   };
   health?: {

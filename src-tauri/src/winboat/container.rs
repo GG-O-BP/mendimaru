@@ -125,6 +125,20 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     };
     let ready = state.ready();
     let mut diagnostics = build_linux_diagnostics(&state);
+    let stop_error = super::maintenance::probe_runtime_stop(config)
+        .err()
+        .and_then(super::maintenance::LockError::diagnostic_code);
+    diagnostics.push(diagnostic(
+        EnvironmentDiagnosticId::RuntimeStopLock,
+        if stop_error.is_some() {
+            EnvironmentDiagnosticStatus::Failure
+        } else {
+            EnvironmentDiagnosticStatus::Success
+        },
+        None,
+        stop_error.map(|_| EnvironmentDiagnosticAction::Redetect),
+        stop_error,
+    ));
     let startup = super::startup::snapshot(config);
     super::startup_diagnostics::apply(startup.as_ref(), &mut diagnostics);
     #[cfg(target_os = "linux")]
@@ -1596,7 +1610,7 @@ mod tests {
         let config = crate::config::detect_config().expect("live configuration is detected");
         let status = tauri::async_runtime::block_on(environment_status(&config));
         assert!(status.ready, "live environment diagnostics: {status:#?}");
-        assert_eq!(status.diagnostics.len(), 12);
+        assert_eq!(status.diagnostics.len(), 13);
         let ids = status
             .diagnostics
             .iter()
@@ -1607,6 +1621,7 @@ mod tests {
             EnvironmentDiagnosticId::Winboat,
             EnvironmentDiagnosticId::Compose,
             EnvironmentDiagnosticId::CoordinationLock,
+            EnvironmentDiagnosticId::RuntimeStopLock,
             EnvironmentDiagnosticId::ContainerRuntime,
             EnvironmentDiagnosticId::Freerdp,
             EnvironmentDiagnosticId::SharedDirectory,

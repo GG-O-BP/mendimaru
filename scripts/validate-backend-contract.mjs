@@ -33,6 +33,8 @@ for (const blocking of [false, true]) {
     connectivity: true,
     readiness: {
       studioLaunch: !blocking,
+      runtimeStart: !blocking,
+      runtimeStop: !blocking,
       installation: !blocking,
       uninstallation: !blocking,
       projects: !blocking,
@@ -96,7 +98,7 @@ const sessionId = `session_${"ab".repeat(16)}`;
 validate(
   schemas[2].$id,
   {
-    schemaVersion: "5.0.0",
+    schemaVersion: "6.0.0",
     sessionId,
     createdAt: snapshot.capturedAt,
     state: "created",
@@ -107,7 +109,7 @@ validate(
 validate(
   schemas[3].$id,
   {
-    schemaVersion: "5.0.0",
+    schemaVersion: "6.0.0",
     artifactId: `artifact_${"cd".repeat(16)}`,
     sessionId,
     backend: manifest.backend,
@@ -119,7 +121,7 @@ validate(
 validate(
   schemas[1].$id,
   {
-    schemaVersion: "5.0.0",
+    schemaVersion: "6.0.0",
     code: "unsupported_capability",
     message: "runtime.url is not implemented by this backend",
     backend: manifest.backend,
@@ -137,7 +139,7 @@ const parseErrorEnvelope = {
   command: "studio",
   ok: false,
   error: {
-    schemaVersion: "5.0.0",
+    schemaVersion: "6.0.0",
     code: "invalid_request",
     message: "the command request is invalid",
     backend: manifest.backend,
@@ -151,7 +153,7 @@ const stopErrorEnvelope = {
   command: "studio.stop",
   ok: false,
   error: {
-    schemaVersion: "5.0.0",
+    schemaVersion: "6.0.0",
     code: "precondition_failed",
     message: "a required precondition was not satisfied",
     backend: manifest.backend,
@@ -168,7 +170,7 @@ validate(schemas[4].$id, stopErrorEnvelope, "CLI Studio stop error envelope");
 validate(
   schemas[4].$id,
   {
-    schemaVersion: "5.0.0",
+    schemaVersion: "6.0.0",
     command: "unknown",
     ok: false,
     platform: manifest.hostPlatform,
@@ -176,7 +178,7 @@ validate(
     sessionId: "session_unavailable",
     capabilitySnapshot: null,
     error: {
-      schemaVersion: "5.0.0",
+      schemaVersion: "6.0.0",
       code: "operation_failed",
       message: "the command could not be completed",
       backend: manifest.backend,
@@ -199,7 +201,7 @@ validate(
 validate(
   schemas[5].$id,
   {
-    schemaVersion: "5.0.0",
+    schemaVersion: "6.0.0",
     command: "studio.install",
     event: "progress",
     sessionId,
@@ -218,7 +220,7 @@ validate(
 const runtimeSessionId = `runtime_${"12".repeat(16)}`;
 const runtimeBuildSessionId = `session_${"56".repeat(16)}`;
 const runtimeLogArtifact = {
-  schemaVersion: "5.0.0",
+  schemaVersion: "6.0.0",
   artifactId: `artifact_${"34".repeat(16)}`,
   sessionId: runtimeSessionId,
   backend: manifest.backend,
@@ -228,7 +230,7 @@ const runtimeLogArtifact = {
   location: `mendimaru-cache://artifact_${"34".repeat(16)}`,
 };
 const buildArtifact = (suffix, kind, mediaType) => ({
-  schemaVersion: "5.0.0",
+  schemaVersion: "6.0.0",
   artifactId: `artifact_${suffix.repeat(16)}`,
   sessionId: runtimeBuildSessionId,
   backend: manifest.backend,
@@ -264,7 +266,7 @@ validate(
 validate(
   schemas[6].$id,
   {
-    schemaVersion: "5.0.0",
+    schemaVersion: "6.0.0",
     sessionId: runtimeSessionId,
     backend: manifest.backend,
     mode: "portable",
@@ -281,7 +283,7 @@ validate(
 validate(
   schemas[6].$id,
   {
-    schemaVersion: "5.0.0",
+    schemaVersion: "6.0.0",
     sessionId: runtimeSessionId,
     backend: "linux-winboat",
     mode: "studio-run-locally",
@@ -309,7 +311,7 @@ validate(
 
 const browserSessionId = `session_${"90".repeat(16)}`;
 const browserArtifact = {
-  schemaVersion: "5.0.0",
+  schemaVersion: "6.0.0",
   artifactId: `artifact_${"91".repeat(16)}`,
   sessionId: browserSessionId,
   backend: manifest.backend,
@@ -323,7 +325,7 @@ const browserArtifact = {
 validate(
   `${schemas[8].$id}#/$defs/doctor`,
   {
-    schemaVersion: "5.0.0",
+    schemaVersion: "6.0.0",
     runnerVersion: "1.0.0",
     ready: true,
     nodeVersion: "22.22.2",
@@ -396,7 +398,7 @@ reject(
 validate(
   `${schemas[8].$id}#/$defs/summary`,
   {
-    schemaVersion: "5.0.0",
+    schemaVersion: "6.0.0",
     sessionId: browserSessionId,
     outcome: "passed",
     passed: 1,
@@ -422,7 +424,7 @@ validate(
 validate(
   `${schemas[8].$id}#/$defs/manifest`,
   {
-    schemaVersion: "5.0.0",
+    schemaVersion: "6.0.0",
     sessionId: browserSessionId,
     createdAt: snapshot.capturedAt,
     hostPlatform: "linux",
@@ -461,6 +463,7 @@ validate(
 );
 
 const expectedIds = new Set([
+  "environment.configure",
   "studio.detect",
   "studio.install",
   "studio.uninstall",

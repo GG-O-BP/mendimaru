@@ -5,6 +5,27 @@ import { diagnosticText } from "./environmentDiagnostics";
 const t: Translate = (key) => key;
 
 describe("environment diagnostic process failures", () => {
+  it("distinguishes immediate maintenance contention and stop-only trust errors", () => {
+    const busy = diagnosticText(
+      {
+        id: "coordination-lock",
+        status: "failure",
+        errorCode: "coordination-lock-busy",
+      },
+      t,
+    );
+    expect(busy.detail).toBe("error-coordination-busy");
+    const stop = diagnosticText(
+      {
+        id: "runtime-stop-lock",
+        status: "failure",
+        errorCode: "coordination-lock-untrusted",
+      },
+      t,
+    );
+    expect(stop.title).toBe("diagnostic-runtime-stop-lock-title");
+    expect(stop.detail).toBe("diagnostic-coordination-lock-untrusted");
+  });
   it("renders QEMU's stable diagnosis without remote output", () => {
     const text = diagnosticText(
       {

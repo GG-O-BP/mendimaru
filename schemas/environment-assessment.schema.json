@@ -6,7 +6,9 @@
   "additionalProperties": false,
   "required": ["connectivity", "readiness", "health"],
   "properties": {
-    "connectivity": { "type": "boolean" },
+    "connectivity": {
+      "type": "boolean"
+    },
     "readiness": {
       "type": "object",
       "additionalProperties": false,
@@ -15,14 +17,32 @@
         "installation",
         "uninstallation",
         "projects",
-        "blockingChecks"
+        "blockingChecks",
+        "runtimeStart",
+        "runtimeStop"
       ],
       "properties": {
-        "studioLaunch": { "type": "boolean" },
-        "installation": { "type": "boolean" },
-        "uninstallation": { "type": "boolean" },
-        "projects": { "type": "boolean" },
-        "blockingChecks": { "$ref": "#/$defs/checks" }
+        "studioLaunch": {
+          "type": "boolean"
+        },
+        "installation": {
+          "type": "boolean"
+        },
+        "uninstallation": {
+          "type": "boolean"
+        },
+        "projects": {
+          "type": "boolean"
+        },
+        "blockingChecks": {
+          "$ref": "#/$defs/checks"
+        },
+        "runtimeStart": {
+          "type": "boolean"
+        },
+        "runtimeStop": {
+          "type": "boolean"
+        }
       }
     },
     "health": {
@@ -30,8 +50,12 @@
       "additionalProperties": false,
       "required": ["attentionRequired", "attentionChecks"],
       "properties": {
-        "attentionRequired": { "type": "boolean" },
-        "attentionChecks": { "$ref": "#/$defs/checks" }
+        "attentionRequired": {
+          "type": "boolean"
+        },
+        "attentionChecks": {
+          "$ref": "#/$defs/checks"
+        }
       }
     }
   },
@@ -39,12 +63,13 @@
     "checks": {
       "type": "array",
       "uniqueItems": true,
-      "maxItems": 12,
+      "maxItems": 13,
       "items": {
         "enum": [
           "winboat",
           "compose",
           "coordination-lock",
+          "runtime-stop-lock",
           "container-runtime",
           "freerdp",
           "shared-directory",

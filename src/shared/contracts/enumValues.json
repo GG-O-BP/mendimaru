@@ -71,7 +71,8 @@
     "ui.wait": true,
     "ui.screenshot": true,
     "browser.test": true,
-    "browser.artifacts": true
+    "browser.artifacts": true,
+    "environment.configure": true
   },
   "capabilityStatus": {
     "supported": true,
@@ -102,7 +103,12 @@
     "container_exited_during_startup": true,
     "qemu_boot_timeout": true,
     "guest_startup_timeout": true,
-    "runtime_compose_recovery_failed": true
+    "runtime_compose_recovery_failed": true,
+    "coordination_busy": true,
+    "coordination_untrusted": true,
+    "coordination_unavailable": true,
+    "coordination_identity_mismatch": true,
+    "coordination_timeout": true
   },
   "sessionState": {
     "created": true,
@@ -195,7 +201,8 @@
     "guest-api": true,
     "guest-clock": true,
     "rdp": true,
-    "marketplace-browser": true
+    "marketplace-browser": true,
+    "runtime-stop-lock": true
   },
   "environmentDiagnosticStatus": {
     "success": true,
@@ -219,7 +226,8 @@
     "guest-clock-skew-exceeded": true,
     "coordination-lock-untrusted": true,
     "coordination-lock-unavailable": true,
-    "coordination-identity-mismatch": true
+    "coordination-identity-mismatch": true,
+    "coordination-lock-busy": true
   },
   "downloadState": {
     "starting": true,
@@ -306,7 +314,12 @@
     "runtime_compose_recovery_failed": true,
     "compose_not_winboat": true,
     "compose_ambiguous": true,
-    "compose_revision_conflict": true
+    "compose_revision_conflict": true,
+    "coordination_busy": true,
+    "coordination_untrusted": true,
+    "coordination_unavailable": true,
+    "coordination_identity_mismatch": true,
+    "coordination_timeout": true
   },
   "textDirection": {
     "ltr": true,
