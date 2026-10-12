@@ -103,7 +103,9 @@ intact; explicitly retry `runtime stop` after shared use ends. The lease does no
 undo Docker requests already accepted by the daemon when a process crashes.
 
 The new transaction order is VM use → existing maintenance lock → Runtime-stop
-lock → Compose/guest work and recovery → final record write. Existing operation
+lock → Compose/guest work and recovery → final record write. The maintenance and
+Runtime-stop locks share this identity in a separate private namespace; see
+[coordination locks](winboat-coordination-locks.md). Existing operation
 trackers may already own a shared maintenance guard; maintenance acquisitions are
 always immediate try-locks, so they never wait while holding a VM lease. The VM
 wait remains bounded. Settings takes distinct VM identities in runtime/name order,

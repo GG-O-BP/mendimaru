@@ -655,7 +655,7 @@ async fn start_with_lease(
     request: &RuntimeStartRequest,
 ) -> BackendResult<RuntimeStatus> {
     let _maintenance = super::maintenance::shared(config)
-        .map_err(|_| super::startup::failure(BackendErrorCode::PreconditionFailed))?;
+        .map_err(|error| error.backend_error(CapabilityId::RuntimeStart))?;
     validate_start_request(request)?;
     if !guest_is_online(config).await {
         return Err(runtime_error(
@@ -1284,18 +1284,15 @@ pub(crate) async fn stop(config: &AppConfig, session_id: &str) -> BackendResult<
 
 async fn stop_with_lease(config: &AppConfig, session_id: &str) -> BackendResult<()> {
     let _maintenance = super::maintenance::shared(config)
-        .map_err(|_| super::startup::failure(BackendErrorCode::PreconditionFailed))?;
+        .map_err(|error| error.backend_error(CapabilityId::RuntimeStop))?;
     let (_, record) = load_session(session_id, CapabilityId::RuntimeStop)?;
     // Compose recreation disconnects the keeper's RDP client. Hold this lease
     // through recovery and the final record write, then reload after waiting so
     // that the keeper (or another CLI process) observes the completed stop.
-    let _stop = stop_lock::acquire(config).await.map_err(|_| {
-        runtime_error(
-            CapabilityId::RuntimeStop,
-            BackendErrorCode::PreconditionFailed,
-            true,
-            Some(record.log_artifact.artifact_id.clone()),
-        )
+    let _stop = stop_lock::acquire(config).await.map_err(|error| {
+        let mut error = error.backend_error(CapabilityId::RuntimeStop);
+        error.diagnostic_ref = Some(record.log_artifact.artifact_id.clone());
+        error
     })?;
     let (directory, mut record) = load_session(session_id, CapabilityId::RuntimeStop)?;
     let compose_path = direct_compose_path(config, CapabilityId::RuntimeStop)?;

@@ -20,6 +20,11 @@ const DIAGNOSTIC_MESSAGES: Record<
     recovery: "diagnostic-compose-recovery",
     target: "compose-file-input",
   },
+  "coordination-lock": {
+    title: "diagnostic-coordination-lock-title",
+    recovery: "diagnostic-coordination-lock-recovery",
+    target: "environment-settings-heading",
+  },
   "container-runtime": {
     title: "diagnostic-runtime-title",
     recovery: "diagnostic-runtime-recovery",
@@ -83,6 +88,9 @@ const ERROR_MESSAGES: Record<EnvironmentDiagnosticErrorCode, MessageKey> = {
   "external-process-cancelled": "diagnostic-process-cancelled",
   "external-process-interrupted": "diagnostic-process-interrupted",
   "guest-clock-skew-exceeded": "diagnostic-clock-skew-exceeded",
+  "coordination-lock-untrusted": "diagnostic-coordination-lock-untrusted",
+  "coordination-lock-unavailable": "diagnostic-coordination-lock-unavailable",
+  "coordination-identity-mismatch": "diagnostic-coordination-identity-mismatch",
 };
 
 export function diagnosticText(

@@ -281,6 +281,12 @@ waits at most three seconds per VM (or the shorter command timeout) and returns
 `precondition_failed` with a retryable, path-free busy message on contention.
 See [WinBoat VM use](winboat-vm-use.md) for identity, generations, and limitations.
 
+Maintenance and Runtime-stop coordination failures are also `precondition_failed`
+with one exact path-free message per cause: busy and Runtime-stop timeout are
+retryable; an untrusted private lock, other lock I/O failure, or a Compose file
+that names another VM are not. A group-writable WinBoat Compose directory does
+not block ordinary commands. See [coordination locks](winboat-coordination-locks.md).
+
 ## Shared browser test sessions (#151)
 
 One owner prepares a shared session from a readiness-verified WinBoat Runtime;

@@ -27,7 +27,10 @@ a separate retained-original name without overwriting anything. Windows disks,
 Compose, ROM, TPM state, and installed apps are not edited or deleted.
 
 Mendimaru holds a cross-process maintenance lease through restart and Guest
-readiness verification. Studio/install/session actions and Runtime start/stop
+readiness verification. The lease lives in Mendimaru's private coordination
+namespace, not in the WinBoat Compose directory
+([coordination locks](winboat-coordination-locks.md)); the storage checks above
+are unchanged. Studio/install/session actions and Runtime start/stop
 cannot overlap recovery. The container must be stopped before changing UEFI
 files. This lease coordinates Mendimaru processes, not external Docker/WinBoat
 controllers: stop their automatic restarts and do not start or modify the VM

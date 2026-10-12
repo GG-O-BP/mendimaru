@@ -106,6 +106,7 @@ mod tests {
             [
                 EnvironmentDiagnosticId::Winboat,
                 EnvironmentDiagnosticId::Compose,
+                EnvironmentDiagnosticId::CoordinationLock,
                 EnvironmentDiagnosticId::ContainerRuntime,
                 EnvironmentDiagnosticId::Freerdp,
                 EnvironmentDiagnosticId::SharedDirectory,
@@ -149,6 +150,9 @@ mod tests {
                 EnvironmentDiagnosticErrorCode::ExternalProcessCancelled,
                 EnvironmentDiagnosticErrorCode::ExternalProcessInterrupted,
                 EnvironmentDiagnosticErrorCode::GuestClockSkewExceeded,
+                EnvironmentDiagnosticErrorCode::CoordinationLockUntrusted,
+                EnvironmentDiagnosticErrorCode::CoordinationLockUnavailable,
+                EnvironmentDiagnosticErrorCode::CoordinationIdentityMismatch,
                 EnvironmentDiagnosticErrorCode::QemuBootTimeout,
                 EnvironmentDiagnosticErrorCode::ContainerExitedDuringStartup,
                 EnvironmentDiagnosticErrorCode::GuestStartupTimeout,

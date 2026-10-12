@@ -56,6 +56,29 @@ impl Default for OperationHistory {
     }
 }
 
+/// Why an operation could not begin. Coordination lock causes stay typed so
+/// callers never relabel a permission problem as a conflicting operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BeginError {
+    Coordination(crate::winboat::maintenance::LockError),
+    Rejected(String),
+}
+
+impl From<String> for BeginError {
+    fn from(message: String) -> Self {
+        Self::Rejected(message)
+    }
+}
+
+impl std::fmt::Display for BeginError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Coordination(error) => formatter.write_str(&error.localized()),
+            Self::Rejected(message) => formatter.write_str(message),
+        }
+    }
+}
+
 pub(crate) struct OperationTracker {
     _maintenance: Option<crate::winboat::maintenance::Lease>,
     history_path: PathBuf,
@@ -82,7 +105,7 @@ impl OperationTracker {
         protected_project: bool,
         stage: OperationStage,
         retry_of: Option<String>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, BeginError> {
         Self::begin_at(
             config,
             history_path(paths)?,
@@ -102,9 +125,10 @@ impl OperationTracker {
         protected_project: bool,
         stage: OperationStage,
         retry_of: Option<String>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, BeginError> {
         validate_target_version(target_version)?;
-        let maintenance = crate::winboat::maintenance::shared(config)?;
+        let maintenance =
+            crate::winboat::maintenance::shared(config).map_err(BeginError::Coordination)?;
         let log_directory = operation_log_directory(config);
         let _store = lock_store()?;
         let mut history = load_history(&history_path)?;
@@ -116,7 +140,8 @@ impl OperationTracker {
         }) {
             return Err(format!(
                 "another Studio Pro {target_version} operation is already running"
-            ));
+            )
+            .into());
         }
         if is_mutation(kind)
             && active_session_actions()?.contains(&ActiveSessionAction {
@@ -124,9 +149,9 @@ impl OperationTracker {
                 target_version: target_version.to_string(),
             })
         {
-            return Err(format!(
-                "a Studio Pro {target_version} session action is already running"
-            ));
+            return Err(
+                format!("a Studio Pro {target_version} session action is already running").into(),
+            );
         }
         let id = operation_id(kind, target_version)?;
         let now = Utc::now();
@@ -295,7 +320,7 @@ impl SessionActionGuard {
         paths: &AppPaths,
         config: &AppConfig,
         target_version: &str,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, BeginError> {
         Self::begin_at(config, history_path(paths)?, target_version)
     }
 
@@ -303,8 +328,9 @@ impl SessionActionGuard {
         config: &AppConfig,
         history_path: PathBuf,
         target_version: &str,
-    ) -> Result<Self, String> {
-        let maintenance = crate::winboat::maintenance::shared(config)?;
+    ) -> Result<Self, BeginError> {
+        let maintenance =
+            crate::winboat::maintenance::shared(config).map_err(BeginError::Coordination)?;
         validate_target_version(target_version)?;
         let _store = lock_store()?;
         let mut history = load_history(&history_path)?;
@@ -318,9 +344,9 @@ impl SessionActionGuard {
                 && record.target_version == target_version
                 && is_mutation(record.kind)
         }) {
-            return Err(format!(
-                "Studio Pro {target_version} is being installed or removed"
-            ));
+            return Err(
+                format!("Studio Pro {target_version} is being installed or removed").into(),
+            );
         }
         let action = ActiveSessionAction {
             history_path: history_path.clone(),
@@ -329,7 +355,8 @@ impl SessionActionGuard {
         if !active_session_actions()?.insert(action) {
             return Err(format!(
                 "another Studio Pro {target_version} session action is already running"
-            ));
+            )
+            .into());
         }
         Ok(Self {
             history_path,
@@ -1101,6 +1128,7 @@ mod tests {
             stage,
             retry_of,
         )
+        .map_err(|error| error.to_string())
     }
 
     fn list(config: &AppConfig) -> Result<Vec<crate::models::OperationRecord>, String> {
@@ -1123,6 +1151,7 @@ mod tests {
         target_version: &str,
     ) -> Result<SessionActionGuard, String> {
         SessionActionGuard::begin_at(config, history_path(config), target_version)
+            .map_err(|error| error.to_string())
     }
 
     #[test]

@@ -318,6 +318,17 @@ fn isolated_runtime_stop_process() {
         fs2::FileExt::lock_exclusive(&file).unwrap();
         fs::write(root.join("lock-owned"), b"owned").unwrap();
         thread::sleep(Duration::from_secs(60));
+    } else if mode == "current-lock-owner" {
+        // A current-version stop holds the private coordination lock (#225).
+        let config: crate::models::AppConfig =
+            serde_json::from_slice(&fs::read(root.join("config.json")).unwrap()).unwrap();
+        let _lease = tauri::async_runtime::block_on(crate::winboat::maintenance::runtime_stop(
+            &config,
+            Duration::ZERO,
+        ))
+        .unwrap();
+        fs::write(root.join("lock-owned"), b"owned").unwrap();
+        thread::sleep(Duration::from_secs(60));
     } else if mode == "keeper-prepare-failed" || mode == "keeper-unaccepted" {
         use crate::models::{OperationKind, OperationStage, OperationState};
 
@@ -830,17 +841,44 @@ fn concurrent_runtime_stop_and_cancelled_waiter_do_not_recreate_twice() {
 
 #[test]
 fn runtime_stop_recovers_after_lock_owner_process_exits() {
+    // "lock-owner" is an older version holding the legacy Compose-directory
+    // lock in a directory it trusts; "current-lock-owner" holds the private lock.
+    for owner_mode in ["lock-owner", "current-lock-owner"] {
+        let fixture = Fixture::new();
+        // The legacy owner models an older version, which only coordinates in
+        // a Compose directory that is not group/other writable.
+        fs::set_permissions(fixture.root.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        let owner = fixture.spawn(owner_mode);
+        until(|| fixture.path("lock-owned").exists());
+        let mut stop = fixture.spawn("stop");
+        until(|| fixture.path("stop-started").exists());
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(fixture.calls(), 0, "{owner_mode}");
+        drop(owner);
+        stop.finish();
+        assert_eq!(
+            fixture.result("stop")["data"]["completed"],
+            true,
+            "{owner_mode}"
+        );
+        fixture.assert_stopped(1);
+    }
+}
+
+#[test]
+fn runtime_stop_ignores_legacy_lock_entries_that_older_versions_refuse() {
+    use std::os::unix::fs::symlink;
     let fixture = Fixture::new();
-    let owner = fixture.spawn("lock-owner");
-    until(|| fixture.path("lock-owned").exists());
-    let mut stop = fixture.spawn("stop");
-    until(|| fixture.path("stop-started").exists());
-    thread::sleep(Duration::from_millis(100));
-    assert_eq!(fixture.calls(), 0);
-    drop(owner);
-    stop.finish();
+    let target = fixture.path("lock-target");
+    fs::write(&target, b"untouched").unwrap();
+    symlink(&target, fixture.path(".mendimaru-runtime-stop.lock")).unwrap();
+    // A group-writable Compose directory no longer blocks ordinary work.
+    fs::set_permissions(fixture.root.path(), fs::Permissions::from_mode(0o775)).unwrap();
+    fixture.spawn("stop").finish();
+    fs::set_permissions(fixture.root.path(), fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(fixture.result("stop")["data"]["completed"], true);
     fixture.assert_stopped(1);
+    assert_eq!(fs::read(&target).unwrap(), b"untouched");
 }
 
 #[test]
@@ -848,7 +886,11 @@ fn runtime_stop_refuses_untrusted_lock_files_without_touching_compose() {
     use std::os::unix::fs::symlink;
     for kind in ["symlink", "hardlink", "public", "directory"] {
         let fixture = Fixture::new();
-        let lock = fixture.path(".mendimaru-runtime-stop.lock");
+        let config: crate::models::AppConfig =
+            serde_json::from_slice(&fs::read(fixture.path("config.json")).unwrap()).unwrap();
+        // The private coordination lock is the one every version must trust.
+        let lock = crate::winboat::maintenance::private_lock_path(&config, true);
+        fs::create_dir_all(lock.parent().unwrap()).unwrap();
         let target = fixture.path("lock-target");
         fs::write(&target, b"untouched").unwrap();
         fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
@@ -867,9 +909,20 @@ fn runtime_stop_refuses_untrusted_lock_files_without_touching_compose() {
         let result = fixture.result("stop");
         assert_eq!(result["error"]["code"], "precondition_failed", "{kind}");
         assert_eq!(result["error"]["capability"], "runtime.stop", "{kind}");
+        assert_eq!(
+            result["error"]["message"],
+            crate::winboat::maintenance::UNTRUSTED,
+            "{kind}"
+        );
+        assert_eq!(result["error"]["retryable"], false, "{kind}");
         assert_eq!(fixture.calls(), 0);
         assert_eq!(fs::read(fixture.path("compose.yml")).unwrap(), compose);
         assert_eq!(fs::read(&target).unwrap(), b"untouched");
+        if kind == "directory" {
+            fs::remove_dir(&lock).unwrap();
+        } else {
+            fs::remove_file(&lock).unwrap();
+        }
         assert!(!result
             .to_string()
             .contains(fixture.root.path().to_str().unwrap()));
