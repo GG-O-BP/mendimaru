@@ -445,3 +445,54 @@ test("the Markdown summary can request plain expiry warnings", () => {
     /^warning: RustSec policy exception .*2026-12-31/m,
   );
 });
+
+test("the full audit CLI honors the same warning window as expiry-only", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "rustsec-window-"));
+  try {
+    const policyPath = path.join(directory, "policy.json");
+    fs.writeFileSync(
+      policyPath,
+      JSON.stringify({ exceptions: [maintainedException()] }),
+    );
+    const audited = report({
+      warnings: {
+        unmaintained: [
+          advisoryWarning(
+            "unmaintained",
+            "RUSTSEC-2026-0001",
+            "fixture",
+            "1.0.0",
+          ),
+        ],
+      },
+    });
+    for (const days of [0, 7, 30]) {
+      const result = spawnSync(
+        process.execPath,
+        [
+          script,
+          "--policy",
+          policyPath,
+          "--today",
+          "2026-12-10",
+          "--warning-days",
+          String(days),
+        ],
+        {
+          encoding: "utf8",
+          input: JSON.stringify(audited),
+          env: {
+            ...process.env,
+            GITHUB_ACTIONS: "true",
+            RUSTSEC_WARNING_FORMAT: "",
+          },
+        },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /RustSec policy: PASS/);
+      assert.equal(result.stdout.includes("::warning"), days >= 21);
+    }
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
