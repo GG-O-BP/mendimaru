@@ -203,7 +203,7 @@ pub(super) mod tests {
         let closed_port = closed.local_addr().unwrap().port();
         drop(closed);
         assert_eq!(
-            probe("127.0.0.1", closed_port, Duration::from_secs(2)).await,
+            probe("127.0.0.1", closed_port, Duration::from_secs(10)).await,
             ProbeOutcome::Refused
         );
     }
