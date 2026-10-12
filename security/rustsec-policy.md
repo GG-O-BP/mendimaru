@@ -6,12 +6,21 @@ entry, expired exception, and stale exception. `cargo audit --json` is parsed by
 cargo-audit exits zero.
 
 The current exception baseline is `security/rustsec-exceptions.json`. It was
-reviewed on 2026-10-12 against cargo-audit 0.22.2 and RustSec advisory database
-commit `078fd9bd0dbb9e063cd9b704fc9c83e1d3257462` (1,296 advisories, last
+reviewed on 2026-10-13 against cargo-audit 0.22.2 and RustSec advisory database
+commit `57dcc0f2192e025138907a495c1ac9a7e1e3e123` (1,307 advisories, last
 updated 2026-10-12). Each exception records an owner, introducing dependency,
 reason, upstream HTTPS link, remediation plan, exact package/version, and expiry
 date. An exception whose advisory disappears or whose package version changes is
 reported as stale and fails CI.
+
+The 2026-10-13 review (#232) handled two advisories published after the #228
+review without adding an exception. `RUSTSEC-2024-0449` (unsafe-libyaml
+unmaintained) is removed by replacing the deprecated `serde_yaml 0.9` with its
+API-compatible, maintained successor `yaml_serde` from the YAML Organization.
+`RUSTSEC-2026-0338` through `RUSTSEC-2026-0342` in `quinn-proto 0.11.16` are
+removed by the compatible lockfile update to `0.11.19`; `quinn` is only an
+optional, uncompiled HTTP/3 dependency of `reqwest`, but cargo-audit scans every
+lockfile entry.
 
 The 2026-10-12 review (#228) found the unchanged lockfile still reports zero
 vulnerabilities and the same seven warnings, all covered by the exceptions

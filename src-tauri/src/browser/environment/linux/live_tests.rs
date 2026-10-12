@@ -65,10 +65,10 @@ fn live_environment_generation_gate() {
                         std::fs::write(&next, "prepared-build-one").unwrap();
                         std::fs::rename(next, &marker_copy).unwrap();
                     } else if scenario == "ports" {
-                        let mut value: serde_yaml::Value = serde_yaml::from_slice(&original).unwrap();
+                        let mut value: yaml_serde::Value = yaml_serde::from_slice(&original).unwrap();
                         let service = value["services"].as_mapping_mut().unwrap().values_mut().next().unwrap();
-                        service["ports"].as_sequence_mut().unwrap().push(serde_yaml::Value::String("127.0.0.1::18080".into()));
-                        std::fs::write(&cfg.compose_file, serde_yaml::to_string(&value).unwrap()).unwrap();
+                        service["ports"].as_sequence_mut().unwrap().push(yaml_serde::Value::String("127.0.0.1::18080".into()));
+                        std::fs::write(&cfg.compose_file, yaml_serde::to_string(&value).unwrap()).unwrap();
                     }
                     if matches!(scenario, "recreate" | "ports") {
                         // Deliberately emulate an external controller: bypass
