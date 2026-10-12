@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "cargoAuditVersion": "0.22.2",
-  "reviewedAt": "2026-10-12",
+  "reviewedAt": "2026-10-13",
   "policy": {
     "vulnerabilities": "deny",
     "unsound": "deny-unless-explicit-bounded-reachability",
@@ -117,8 +117,8 @@
     }
   ],
   "advisoryDatabase": {
-    "advisoryCount": 1296,
-    "lastCommit": "078fd9bd0dbb9e063cd9b704fc9c83e1d3257462",
-    "lastUpdated": "2026-10-12T10:13:28+02:00"
+    "advisoryCount": 1307,
+    "lastCommit": "57dcc0f2192e025138907a495c1ac9a7e1e3e123",
+    "lastUpdated": "2026-10-12T20:06:48+02:00"
   }
 }

@@ -1,9 +1,9 @@
 use crate::models::AppConfig;
-use serde_yaml::Value;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use yaml_serde::Value;
 
 #[derive(Debug, Clone)]
 pub(crate) struct FileSnapshot {
@@ -266,11 +266,11 @@ pub(super) fn read_compose(path: &Path) -> Result<Value, String> {
     file.take(MAX_COMPOSE_BYTES + 1)
         .read_to_string(&mut content)
         .map_err(|error| crate::tr!("error-compose-read", error = error))?;
-    serde_yaml::from_str(&content).map_err(|error| crate::tr!("error-compose-parse", error = error))
+    yaml_serde::from_str(&content).map_err(|error| crate::tr!("error-compose-parse", error = error))
 }
 
 fn write_compose(path: &Path, compose: &Value, expected_revision: &str) -> Result<(), String> {
-    let serialized = serde_yaml::to_string(compose)
+    let serialized = yaml_serde::to_string(compose)
         .map_err(|error| crate::tr!("error-compose-serialize", error = error))?;
     let temporary_path = path.with_extension("yml.mendimaru.tmp");
     atomic_replace(
@@ -469,7 +469,7 @@ pub(crate) fn original_port_mappings(
     guest_port: u16,
 ) -> Option<Vec<RuntimePortMapping>> {
     let text = std::str::from_utf8(bytes).ok()?;
-    let compose: Value = serde_yaml::from_str(text).ok()?;
+    let compose: Value = yaml_serde::from_str(text).ok()?;
     let service_name = winboat_service_name(&compose).ok()?;
     let ports = service_value_named(&compose, &service_name)?
         .get("ports")?
@@ -819,7 +819,7 @@ pub(crate) fn apply_shared_mount(
         ));
     }
 
-    let serialized = serde_yaml::to_string(&plan.compose).map_err(|error| {
+    let serialized = yaml_serde::to_string(&plan.compose).map_err(|error| {
         ComposeError::from(crate::tr!("error-compose-serialize", error = error))
     })?;
     let applied_revision = revision_for(serialized.as_bytes());
@@ -931,7 +931,7 @@ fn parse_snapshot(snapshot: &FileSnapshot) -> Result<Value, String> {
             path = snapshot.path.display()
         )
     })?;
-    serde_yaml::from_slice(content)
+    yaml_serde::from_slice(content)
         .map_err(|error| crate::tr!("error-compose-parse", error = error))
 }
 
@@ -1281,7 +1281,7 @@ pub(crate) fn nvram_mount_plan(config: &AppConfig) -> Result<NvramMountPlan, Str
     if bytes.len() as u64 > MAX_COMPOSE_BYTES {
         return Err(reject());
     }
-    let compose: Value = serde_yaml::from_slice(&bytes).map_err(|_| reject())?;
+    let compose: Value = yaml_serde::from_slice(&bytes).map_err(|_| reject())?;
     let service = winboat_service_name(&compose).map_err(|_| reject())?;
     let value = service_value_named(&compose, &service).ok_or_else(reject)?;
     if value.get("command").is_some()
@@ -1373,8 +1373,45 @@ mod tests {
         restore_file_if_revision, runtime_port_mapping, runtime_port_mappings, shared_mount_source,
         snapshot_file, update_shared_mount, ComposeErrorKind, RuntimePortMapping,
     };
-    use serde_yaml::Value;
     use std::fs;
+    use yaml_serde::Value;
+
+    /// The YAML backend rewrites the user's WinBoat Compose file. Replacing
+    /// the deprecated `serde_yaml` with `yaml_serde` (#232) must keep the
+    /// emitted bytes and YAML 1.1 scalar handling exactly as before.
+    #[test]
+    fn compose_yaml_round_trip_bytes_and_scalars_are_stable() {
+        let source = "services:\n  windows:\n    image: ghcr.io/dockur/windows:5.07\n    container_name: WinBoat\n    environment:\n      VERSION: \"11\"\n      PASSWORD: \"p@ss: word # x\"\n      MULTI: |\n        line1\n        line2\n    volumes:\n    - /home/u/My Folder:/shared\n    - data:/storage\n    ports:\n    - 127.0.0.1:47300-47309:3389/tcp\n    - 127.0.0.1:8080:8080\n    restart: 'no'\nvolumes:\n  data: {}\n";
+        let compose: Value = yaml_serde::from_str(source).expect("parse Compose");
+        // Golden bytes produced by serde_yaml 0.9.34 for the same document.
+        let expected = "services:\n  windows:\n    image: ghcr.io/dockur/windows:5.07\n    container_name: WinBoat\n    environment:\n      VERSION: '11'\n      PASSWORD: 'p@ss: word # x'\n      MULTI: |\n        line1\n        line2\n    volumes:\n    - /home/u/My Folder:/shared\n    - data:/storage\n    ports:\n    - 127.0.0.1:47300-47309:3389/tcp\n    - 127.0.0.1:8080:8080\n    restart: no\nvolumes:\n  data: {}\n";
+        let emitted = yaml_serde::to_string(&compose).expect("emit Compose");
+        assert_eq!(emitted, expected);
+        let reparsed: Value = yaml_serde::from_str(&emitted).expect("reparse Compose");
+        assert_eq!(reparsed, compose);
+
+        let scalars: Value =
+            yaml_serde::from_str("a: yes\nb: '007'\nc: 0x1F\nd: ~\ne: 1e3\n").expect("scalars");
+        assert_eq!(scalars["a"], Value::String("yes".into()));
+        assert_eq!(scalars["b"], Value::String("007".into()));
+        assert_eq!(scalars["c"].as_u64(), Some(31));
+        assert!(scalars["d"].is_null());
+        assert_eq!(scalars["e"].as_f64(), Some(1000.0));
+
+        let mut ports = Value::Sequence(Vec::new());
+        for port in ["127.0.0.1::18080", "no", "1.0", "a: b", "yes", "11"] {
+            ports
+                .as_sequence_mut()
+                .expect("sequence")
+                .push(Value::String(port.into()));
+        }
+        assert_eq!(
+            yaml_serde::to_string(&ports).expect("emit ports"),
+            "- 127.0.0.1::18080\n- no\n- '1.0'\n- 'a: b'\n- yes\n- '11'\n"
+        );
+        assert!(yaml_serde::from_str::<Value>("a: [1, 2\n").is_err());
+        assert!(yaml_serde::from_str::<Value>("a: 1\na: 2\n").is_err());
+    }
 
     #[test]
     fn extracts_shared_mount_source_with_options() {
@@ -1392,7 +1429,7 @@ mod tests {
     #[test]
     fn extracts_host_ports_from_compose_values() {
         let ports: Vec<Value> =
-            serde_yaml::from_str("- 127.0.0.1:47271:7148\n- 127.0.0.1:47273:3389/tcp\n")
+            yaml_serde::from_str("- 127.0.0.1:47271:7148\n- 127.0.0.1:47273:3389/tcp\n")
                 .expect("ports yaml");
         assert_eq!(host_port_for_guest(&ports, 7148), Some(47271));
         assert_eq!(host_port_for_guest(&ports, 3389), Some(47273));
@@ -1400,7 +1437,7 @@ mod tests {
 
     #[test]
     fn extracts_winboat_port_range_fallbacks() {
-        let ports: Vec<Value> = serde_yaml::from_str(
+        let ports: Vec<Value> = yaml_serde::from_str(
             "- 127.0.0.1:47280-47289:7148\n- 127.0.0.1:47300-47309:3389/tcp\n- 127.0.0.1::8006\n",
         )
         .expect("ports yaml");
@@ -1721,7 +1758,7 @@ mod tests {
         )
         .expect("write multi-service Compose");
         let before: Value =
-            serde_yaml::from_str(&fs::read_to_string(&compose).expect("read original Compose"))
+            yaml_serde::from_str(&fs::read_to_string(&compose).expect("read original Compose"))
                 .expect("parse original Compose");
 
         let plan = plan_shared_mount(&compose, "/new/workspace").expect("mount plan");
@@ -1731,7 +1768,7 @@ mod tests {
         assert!(applied.changed);
 
         let after: Value =
-            serde_yaml::from_str(&fs::read_to_string(&compose).expect("read updated Compose"))
+            yaml_serde::from_str(&fs::read_to_string(&compose).expect("read updated Compose"))
                 .expect("parse updated Compose");
         assert_eq!(
             before["services"]["database"],
