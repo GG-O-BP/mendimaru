@@ -939,6 +939,10 @@ fn failure_classification(error: &CommandError) -> (&'static str, bool) {
         CommandErrorCode::RuntimeComposeRecoveryFailed => {
             ("runtime_compose_recovery_failed", false)
         }
+        CommandErrorCode::RemoteDesktopUnavailable => ("remote_desktop_unavailable", true),
+        CommandErrorCode::RemoteDesktopCertificateMismatch => {
+            ("remote_desktop_certificate_mismatch", false)
+        }
         CommandErrorCode::ComposeNotWinboat => ("compose_not_winboat", false),
         CommandErrorCode::ComposeAmbiguous => ("compose_ambiguous", false),
         CommandErrorCode::ComposeRevisionConflict => ("compose_revision_conflict", true),

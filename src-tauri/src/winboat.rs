@@ -9,6 +9,8 @@ pub(crate) mod nvram;
 mod operation;
 mod project_access;
 mod project_locks;
+mod rdp_probe;
+mod rdp_trust;
 mod remote_app;
 #[cfg(target_os = "linux")]
 pub(crate) mod runtime;
@@ -500,8 +502,8 @@ mod tests {
         assert!(!arguments.contains("Bypass"));
         assert!(!arguments.contains("WindowStyle Normal"));
         assert!(arguments.ends_with(&powershell_arguments));
-        assert_eq!(FREERDP_CERTIFICATE_POLICY, "/cert:tofu");
-        assert_ne!(FREERDP_CERTIFICATE_POLICY, "/cert:ignore");
+        assert_eq!(FREERDP_CERTIFICATE_POLICY, "/cert:tofu,deny");
+        assert!(!FREERDP_CERTIFICATE_POLICY.contains("ignore"));
     }
 
     #[test]
@@ -608,17 +610,21 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "temporarily replaces the app-scoped FreeRDP pin in the live environment"]
+    #[ignore = "temporarily replaces the app-scoped RDP trust anchor in the live environment"]
     fn live_e2e_rejects_an_rdp_certificate_pin_mismatch() {
         let (config, _version) = live_e2e_context();
         let base = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
             .expect("locate user configuration directory");
-        let pin = base
-            .join("mendimaru/freerdp-config/freerdp/server")
-            .join(format!("{}_{}.pem", config.rdp_host, config.rdp_port));
-        let original = std::fs::read(&pin).expect("a prior live launch must create the TOFU pin");
+        // The VM anchor, not the per-port FreeRDP file, is the trust decision
+        // since #227; the per-port file is rewritten from it before connecting.
+        let pin = base.join("mendimaru/freerdp-config/anchors").join(format!(
+            "{}.pem",
+            super::rdp_trust::anchor_identity(&config)
+        ));
+        let original =
+            std::fs::read(&pin).expect("a prior confirmed live operation must create the anchor");
         let restore = FileRestore {
             path: pin.clone(),
             content: original.clone(),

@@ -232,6 +232,8 @@ pub enum BackendErrorCode {
     RuntimeFirewallBlocked,
     RuntimeNotListening,
     RuntimeComposeRecoveryFailed,
+    RemoteDesktopUnavailable,
+    RemoteDesktopCertificateMismatch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1169,6 +1171,8 @@ mod tests {
                 BackendErrorCode::RuntimeFirewallBlocked,
                 BackendErrorCode::RuntimeNotListening,
                 BackendErrorCode::RuntimeComposeRecoveryFailed,
+                BackendErrorCode::RemoteDesktopUnavailable,
+                BackendErrorCode::RemoteDesktopCertificateMismatch,
             ],
         );
         assert_registry(

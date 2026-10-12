@@ -273,6 +273,8 @@ mod tests {
                 CommandErrorCode::RuntimeFirewallBlocked,
                 CommandErrorCode::RuntimeNotListening,
                 CommandErrorCode::RuntimeComposeRecoveryFailed,
+                CommandErrorCode::RemoteDesktopUnavailable,
+                CommandErrorCode::RemoteDesktopCertificateMismatch,
                 CommandErrorCode::ComposeNotWinboat,
                 CommandErrorCode::ComposeAmbiguous,
                 CommandErrorCode::ComposeRevisionConflict,

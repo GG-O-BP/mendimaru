@@ -1,4 +1,5 @@
 use super::project_access::ProjectAccessLease;
+use super::rdp_trust::TrustAttempt;
 use super::security::{
     redirected_bootstrap_launcher, secure_powershell_launcher, OperationSecurity,
 };
@@ -6,23 +7,41 @@ use crate::models::AppConfig;
 use crate::process::{self, CommandPolicy};
 use crate::projects::linux_path_to_windows_share;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Mutex;
 
-pub(super) const FREERDP_CERTIFICATE_POLICY: &str = "/cert:tofu";
+#[cfg(test)]
+pub(super) const FREERDP_CERTIFICATE_POLICY: &str = super::rdp_trust::FIRST_USE_POLICY;
 pub(super) const HEADLESS_CONSOLE_HOST: &str = r"C:\Windows\System32\conhost.exe";
 pub(super) const POWERSHELL_EXECUTABLE: &str =
     r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
 const MAX_DIAGNOSTIC_BYTES: usize = 64 * 1024;
+/// FreeRDP 3 handles SIGTERM by aborting the connection and disconnecting the
+/// RDP session cleanly. A SIGKILL leaves a half-closed RemoteApp session that
+/// the next connection can inherit (#227), so SIGKILL is only the fallback.
+#[cfg(unix)]
+const GRACEFUL_STOP: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// The only FreeRDP output that means the server certificate was rejected.
+///
+/// FreeRDP prints alarming text on a successful first use as well: the Windows
+/// self-signed certificate never names `127.0.0.1` ("CERTIFICATE NAME
+/// MISMATCH"), OpenSSL reports "Certificate verification failure
+/// 'self-signed certificate'", and FreeRDP 3.15 prints its "REMOTE HOST
+/// IDENTIFICATION HAS CHANGED ... Host key verification failed" block for an
+/// unknown host (the new- and changed-host messages are swapped upstream).
+/// TOFU still accepts the certificate after all of them. Only the TLS
+/// handshake verdict below aborts the connection (#227).
+const CERTIFICATE_REJECTION_MARKERS: &[&str] = &["certificate not trusted"];
 
 pub(super) struct RemoteAppProcess {
     child: Child,
     diagnostics: Mutex<File>,
     _bootstrap: Option<tempfile::TempDir>,
+    trust: Option<TrustAttempt>,
 }
 
 impl RemoteAppProcess {
@@ -32,6 +51,7 @@ impl RemoteAppProcess {
             child,
             diagnostics: Mutex::new(tempfile::tempfile().expect("fixture diagnostics")),
             _bootstrap: None,
+            trust: None,
         }
     }
 
@@ -39,7 +59,29 @@ impl RemoteAppProcess {
         self.child.try_wait()
     }
 
+    /// Stops FreeRDP: SIGTERM first so the RDP session is disconnected
+    /// cleanly, SIGKILL only if it has not exited within a short grace period.
     pub(super) fn kill(&mut self) -> std::io::Result<()> {
+        if let Ok(Some(_)) = self.child.try_wait() {
+            return Ok(());
+        }
+        #[cfg(unix)]
+        {
+            // The child is ours and not yet reaped, so its PID cannot have
+            // been reused by another process.
+            let process_id = libc::pid_t::try_from(self.child.id()).unwrap_or(0);
+            // SAFETY: kill(2) with a PID owned by this un-reaped child.
+            if process_id > 0 && unsafe { libc::kill(process_id, libc::SIGTERM) } == 0 {
+                let deadline = std::time::Instant::now() + GRACEFUL_STOP;
+                while std::time::Instant::now() < deadline {
+                    match self.child.try_wait() {
+                        Ok(Some(_)) => return Ok(()),
+                        Ok(None) => std::thread::sleep(std::time::Duration::from_millis(25)),
+                        Err(_) => break,
+                    }
+                }
+            }
+        }
         self.child.kill()
     }
 
@@ -53,21 +95,33 @@ impl RemoteAppProcess {
             let mut bytes = vec![0_u8; length];
             let count = read_diagnostics_at(&file, &mut bytes).ok()?;
             bytes.truncate(count);
-            Some(String::from_utf8_lossy(&bytes).to_ascii_lowercase())
+            Some(String::from_utf8_lossy(&bytes).into_owned())
         });
-        let diagnostics = diagnostics.unwrap_or_default();
-        diagnostics.contains("certificate")
-            && [
-                "mismatch",
-                "verification failure",
-                "verify failed",
-                "not match",
-                "changed",
-                "denied",
-            ]
-            .iter()
-            .any(|pattern| diagnostics.contains(pattern))
+        certificate_rejected(&diagnostics.unwrap_or_default())
     }
+
+    /// Promotes the certificate of this connection to the VM trust anchor
+    /// after Windows returned an authenticated report through it.
+    pub(super) fn confirm_trust(&self) {
+        if let Some(trust) = &self.trust {
+            let _ = trust.confirm();
+        }
+    }
+
+    /// Drops a pin that this attempt created through TOFU without ever
+    /// receiving an authenticated report, so it cannot become trusted.
+    pub(super) fn discard_unconfirmed_trust(&self) {
+        if let Some(trust) = &self.trust {
+            trust.discard_unconfirmed();
+        }
+    }
+}
+
+pub(super) fn certificate_rejected(diagnostics: &str) -> bool {
+    let diagnostics = diagnostics.to_ascii_lowercase();
+    CERTIFICATE_REJECTION_MARKERS
+        .iter()
+        .any(|marker| diagnostics.contains(marker))
 }
 
 impl Drop for RemoteAppProcess {
@@ -75,7 +129,7 @@ impl Drop for RemoteAppProcess {
         match self.child.try_wait() {
             Ok(Some(_)) => {}
             Ok(None) | Err(_) => {
-                let _ = self.child.kill();
+                let _ = self.kill();
                 let _ = self.child.wait();
             }
         }
@@ -198,7 +252,8 @@ fn spawn_remote_app(
         remote_app.push_str(arguments);
     }
     let trust_store = app_freerdp_config_directory()?;
-    let certificate_policy = certificate_policy(config, &trust_store)?;
+    let trust = TrustAttempt::prepare(config, &trust_store)?;
+    let certificate_policy = trust.certificate_argument();
     let mut arguments = vec![
         format!("/u:{username}"),
         format!("/p:{password}"),
@@ -265,6 +320,7 @@ fn spawn_remote_app(
         child,
         diagnostics: Mutex::new(diagnostics),
         _bootstrap: Some(bootstrap),
+        trust: Some(trust),
     })
 }
 
@@ -286,42 +342,6 @@ fn read_diagnostics_at(file: &File, bytes: &mut [u8]) -> std::io::Result<usize> 
     let mut file = file.try_clone()?;
     file.seek(SeekFrom::Start(0))?;
     file.read(bytes)
-}
-
-fn certificate_policy(config: &AppConfig, trust_store: &Path) -> Result<String, String> {
-    let pin = trust_store
-        .join("freerdp/server")
-        .join(format!("{}_{}.pem", config.rdp_host, config.rdp_port));
-    match std::fs::read(&pin) {
-        Ok(pem) => fingerprint_policy_from_pem(&pem),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Ok(FREERDP_CERTIFICATE_POLICY.to_string())
-        }
-        Err(error) => Err(crate::tr!("error-freerdp-pin-read", error = error)),
-    }
-}
-
-fn fingerprint_policy_from_pem(pem: &[u8]) -> Result<String, String> {
-    let pem = std::str::from_utf8(pem)
-        .map_err(|error| crate::tr!("error-freerdp-pin-invalid", error = error))?;
-    let body = pem
-        .lines()
-        .skip_while(|line| line.trim() != "-----BEGIN CERTIFICATE-----")
-        .skip(1)
-        .take_while(|line| line.trim() != "-----END CERTIFICATE-----")
-        .map(str::trim)
-        .collect::<String>();
-    if body.is_empty() {
-        return Err(crate::tr!(
-            "error-freerdp-pin-invalid",
-            error = "the certificate body is missing"
-        ));
-    }
-    let certificate = BASE64_STANDARD
-        .decode(body)
-        .map_err(|error| crate::tr!("error-freerdp-pin-invalid", error = error))?;
-    let fingerprint = format!("{:x}", Sha256::digest(certificate));
-    Ok(format!("/cert:fingerprint:sha256:{fingerprint}"))
 }
 
 fn app_freerdp_config_directory() -> Result<PathBuf, String> {
@@ -358,19 +378,39 @@ fn css_slug(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{fingerprint_policy_from_pem, read_diagnostics_at};
+    use super::{certificate_rejected, read_diagnostics_at};
     use std::io::Write;
 
+    /// FreeRDP 3.15.0 output of a successful TOFU first use against the
+    /// WinBoat guest, as captured on the #227 host (timestamps removed).
+    const FIRST_USE_ACCEPTED: &str = "\
+[WARN][com.freerdp.crypto] - [verify_cb]: Certificate verification failure 'self-signed certificate (18)' at stack position 0
+[ERROR][com.freerdp.crypto] - [tls_print_certificate_name_mismatch_error]: @           WARNING: CERTIFICATE NAME MISMATCH!           @
+[ERROR][com.freerdp.crypto] - [tls_print_certificate_name_mismatch_error]: does not match the name given in the certificate:
+[ERROR][com.freerdp.crypto] - [tls_print_certificate_name_mismatch_error]: A valid certificate for the wrong name should NOT be trusted!
+[ERROR][com.freerdp.crypto] - [tls_print_new_certificate_warn]: The host key for 127.0.0.1:47303 has changed
+[ERROR][com.freerdp.crypto] - [tls_print_new_certificate_warn]: @    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+[ERROR][com.freerdp.crypto] - [tls_print_new_certificate_warn]: Host key for 127.0.0.1 has changed and you have requested strict checking.
+[ERROR][com.freerdp.crypto] - [tls_print_new_certificate_warn]: Host key verification failed.
+[WARN][com.freerdp.core.license] - [license_read_binary_blob_data]: license binary blob::type BB_ERROR_BLOB, length=0, skipping.
+";
+
+    /// FreeRDP 3.15.0 output when `deny` rejects a certificate that differs
+    /// from the pinned one.
+    const PINNED_REJECTED: &str = "\
+[WARN][com.freerdp.crypto] - [verify_cb]: Certificate verification failure 'self-signed certificate (18)' at stack position 0
+[ERROR][com.freerdp.crypto] - [tls_print_certificate_error]: New host key for 127.0.0.1:47304
+[ERROR][com.freerdp.crypto] - [tls_print_certificate_error]: @    WARNING: NEW HOST IDENTIFICATION!     @
+[ERROR][com.freerdp.crypto] - [freerdp_tls_handshake]: certificate not trusted, aborting.
+[ERROR][com.freerdp.core] - [transport_default_connect_tls]: ERRCONNECT_TLS_CONNECT_FAILED [0x00020008]
+";
+
     #[test]
-    fn converts_the_app_pin_to_an_exact_sha256_fingerprint_policy() {
-        let policy = fingerprint_policy_from_pem(
-            b"-----BEGIN CERTIFICATE-----\nbWVuZGltYXJ1\n-----END CERTIFICATE-----\n",
-        )
-        .expect("fixture pin parses");
-        assert_eq!(
-            policy,
-            "/cert:fingerprint:sha256:8edde51f9bc00d3fff19237df43bc1c6d058839aa1469b3fbd0c5479c929825d"
-        );
+    fn a_successful_first_use_is_not_mistaken_for_a_certificate_rejection() {
+        assert!(!certificate_rejected(FIRST_USE_ACCEPTED));
+        assert!(!certificate_rejected(""));
+        assert!(certificate_rejected(PINNED_REJECTED));
+        assert!(certificate_rejected("CERTIFICATE NOT TRUSTED, ABORTING."));
     }
 
     #[test]
@@ -402,6 +442,7 @@ mod tests {
                 tempfile::tempfile().expect("anonymous diagnostics"),
             ),
             _bootstrap: None,
+            trust: None,
         };
 
         drop(remote_app);
@@ -410,5 +451,53 @@ mod tests {
             !std::path::Path::new(&format!("/proc/{process_id}")).exists(),
             "the dropped RemoteApp child was not reaped"
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stopping_a_remote_app_asks_freerdp_to_disconnect_before_killing_it() {
+        let directory = tempfile::tempdir().expect("marker directory");
+        let marker = directory.path().join("terminated");
+        let child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "trap 'echo graceful > {}; exit 0' TERM; sleep 60 & wait",
+                marker.display()
+            ))
+            .spawn()
+            .expect("spawn RemoteApp stand-in");
+        let mut remote_app = super::RemoteAppProcess::from_test_child(child);
+        // Let the shell install its trap before the signal arrives.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        remote_app.kill().expect("stop RemoteApp");
+        let status = remote_app.wait().expect("reap RemoteApp");
+
+        assert!(status.success(), "SIGTERM must allow a clean exit");
+        assert_eq!(
+            std::fs::read_to_string(&marker).expect("graceful marker"),
+            "graceful\n"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_remote_app_that_ignores_sigterm_is_still_killed_within_the_grace_period() {
+        let child = std::process::Command::new("sh")
+            .args(["-c", "trap '' TERM; exec sleep 60"])
+            .spawn()
+            .expect("spawn RemoteApp stand-in");
+        let process_id = child.id();
+        let mut remote_app = super::RemoteAppProcess::from_test_child(child);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let started = std::time::Instant::now();
+
+        remote_app.kill().expect("stop RemoteApp");
+        let _ = remote_app.wait();
+
+        let elapsed = started.elapsed();
+        assert!(elapsed >= super::GRACEFUL_STOP, "{elapsed:?}");
+        assert!(elapsed < super::GRACEFUL_STOP * 4, "{elapsed:?}");
+        assert!(!std::path::Path::new(&format!("/proc/{process_id}")).exists());
     }
 }
