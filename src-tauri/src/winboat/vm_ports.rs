@@ -443,6 +443,16 @@ mod tests {
         }
     }
 
+    /// The production registry root is created 0700; keep fixtures equally
+    /// private regardless of the test process umask (for example 0002).
+    fn registry_root() -> tempfile::TempDir {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().expect("registry directory");
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("private registry directory");
+        directory
+    }
+
     fn record_directory(root: &Path, name: &str) -> PathBuf {
         let directory = root.join(name);
         std::fs::create_dir_all(&directory).expect("record directory");
@@ -451,7 +461,7 @@ mod tests {
 
     #[test]
     fn reserve_conflict_reconciliation_and_release() {
-        let directory = tempfile::tempdir().expect("registry directory");
+        let directory = registry_root();
         let paths = (
             directory.path().join("vm.json"),
             directory.path().join("vm.lock"),
@@ -492,7 +502,7 @@ mod tests {
 
     #[test]
     fn crashed_and_stopped_records_are_reconciled() {
-        let directory = tempfile::tempdir().expect("registry directory");
+        let directory = registry_root();
         let paths = (
             directory.path().join("vm.json"),
             directory.path().join("vm.lock"),
@@ -550,7 +560,7 @@ mod tests {
 
     #[test]
     fn corrupt_or_future_registry_content_is_refused() {
-        let directory = tempfile::tempdir().expect("registry directory");
+        let directory = registry_root();
         let paths = (
             directory.path().join("vm.json"),
             directory.path().join("vm.lock"),
