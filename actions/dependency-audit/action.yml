@@ -47,6 +47,10 @@ runs:
     - name: Write audit summary
       if: ${{ always() }}
       shell: bash
+      # The summary is Markdown, not the step log: print expiry warnings as
+      # plain text there instead of as workflow commands.
+      env:
+        RUSTSEC_WARNING_FORMAT: plain
       run: |
         {
           echo '## Dependency audit'
