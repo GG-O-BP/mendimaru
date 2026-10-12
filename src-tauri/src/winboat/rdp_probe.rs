@@ -71,7 +71,11 @@ async fn exchange(host: &str, port: u16) -> ProbeOutcome {
 
 fn is_connection_confirm(tpdu: &[u8]) -> bool {
     // X.224 length indicator (excluding itself) followed by the CC code.
-    tpdu.len() >= 7 && usize::from(tpdu[0]) < tpdu.len() && tpdu[1] & 0xf0 == 0xd0
+    tpdu.len() >= 7
+        && tpdu[0] >= 6
+        && usize::from(tpdu[0]) + 1 == tpdu.len()
+        && tpdu[1] == 0xd0
+        && tpdu[6] == 0
 }
 
 /// Waits until `required` consecutive probes see a Connection Confirm. A
@@ -258,5 +262,14 @@ pub(super) mod tests {
         assert!(is_connection_confirm(&CONNECTION_CONFIRM[4..]));
         assert!(!is_connection_confirm(&CONNECTION_REQUEST[4..]));
         assert!(!is_connection_confirm(&[0x06, 0xd0]));
+        for malformed in [
+            vec![0x00, 0xd0, 0, 0, 0, 0, 0], // impossible length indicator
+            vec![0x07, 0xd0, 0, 0, 0, 0, 0], // truncated TPDU
+            vec![0x06, 0xd1, 0, 0, 0, 0, 0], // wrong control code
+            vec![0x06, 0xd0, 0, 0, 0, 0, 1], // unsupported class
+        ] {
+            assert!(!is_connection_confirm(&malformed), "{malformed:?}");
+        }
+        assert!(is_connection_confirm(&[0x06, 0xd0, 0, 0, 0, 0, 0]));
     }
 }

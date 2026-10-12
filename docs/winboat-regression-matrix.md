@@ -72,6 +72,23 @@ explicit Runtime stop, and verify both processes exit, Compose is restored, the
 configured container name is running, and the Runtime record is stopped. A
 second stop must succeed without another recreation.
 
+## RDP readiness and trust lifecycle (#227)
+
+The ordinary Rust suite uses fake X.224 endpoints and owned child-process
+stand-ins; these cases do not touch a live Windows guest or recreate a VM.
+Readiness checks proxy-only, malformed, silent, refused and flapping endpoints,
+strict Connection Confirm framing, cancellation and missing live mappings.
+RemoteApp tests distinguish accepted TOFU warnings from actual TLS rejection,
+including rejection after a large diagnostic burst.
+
+Trust tests verify port-independent anchors, legacy migration, private per-attempt
+TOFU stores, abandonment and crash leftovers, create-only concurrent promotion,
+corrupt files, symlink refusals and persistence failures. Runner tests require a
+valid authenticated report before promotion, preserve a Windows failure's exit
+code and prohibit automatic replay after a trust write failure. Dropping a
+pending operation future reaps only its owned child and removes its temporary
+trust store. Existing confirmed anchors and prior legacy pins survive.
+
 ## Keeper socket preflight and failed launch cleanup (#147)
 
 The ordinary Rust suite binds real Linux Unix sockets at 107, 108, and 156

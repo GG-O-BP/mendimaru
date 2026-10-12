@@ -101,7 +101,12 @@ export function collectRustsecWarnings(report) {
   return warnings;
 }
 
-export function verifyRustsecPolicy(report, policy, now = new Date()) {
+export function verifyRustsecPolicy(
+  report,
+  policy,
+  now = new Date(),
+  warningDays = EXPIRY_WARNING_DAYS,
+) {
   const errors = [];
   const vulnerabilities = report.vulnerabilities?.list ?? [];
   for (const vulnerability of vulnerabilities) {
@@ -202,6 +207,7 @@ export function verifyRustsecPolicy(report, policy, now = new Date()) {
   const expiringSoon = verifyExceptionExpiry(
     { exceptions: [...exceptions.values()] },
     now,
+    warningDays,
   ).expiringSoon.filter((entry) => warningKeys.has(entry.key));
 
   return {
@@ -317,7 +323,7 @@ async function main() {
     : await readStdin();
   const report = parseJson(reportSource, "cargo audit JSON report");
   const policy = readPolicy(options.policy);
-  const result = verifyRustsecPolicy(report, policy, now);
+  const result = verifyRustsecPolicy(report, policy, now, options.warningDays);
   const artifact = {
     schemaVersion: 1,
     checkedAt: new Date().toISOString(),

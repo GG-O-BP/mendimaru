@@ -104,13 +104,30 @@ pub(super) async fn run_windows_operation<F>(
 where
     F: FnMut(&WindowsOperationReport) + Send,
 {
+    if request
+        .cancellation
+        .is_some_and(CancellationToken::is_cancelled)
+    {
+        return Err(cancelled_before_remote_app());
+    }
     ensure_private_operation_transport(config).await?;
     for attempt in 0..REMOTE_APP_START_ATTEMPTS {
         // Every container recreation can move the published RDP port inside
         // its host range (#227), so the endpoint is resolved per attempt.
         let connection_config = remote_desktop_connection(config).await?;
-        wait_for_remote_desktop(&connection_config, REMOTE_DESKTOP_READY_TIMEOUT).await?;
+        wait_for_remote_desktop(
+            &connection_config,
+            REMOTE_DESKTOP_READY_TIMEOUT,
+            request.cancellation,
+        )
+        .await?;
         remove_stale_report(request.report_path).await?;
+        if request
+            .cancellation
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Err(cancelled_before_remote_app());
+        }
         let security = OperationSecurity::generate(request.script_sha256)
             .map_err(|error| crate::tr!("error-operation-security-create", error = error))?;
         let spawn_config = connection_config.clone();
@@ -143,9 +160,6 @@ where
         .await
         {
             Ok(wait) => {
-                // The HMAC-authenticated report proves this connection reached
-                // the real guest; only now may its certificate become trusted.
-                remote_app.confirm_trust();
                 let remote_app = if request.keep_remote_app_alive {
                     Some(remote_app)
                 } else {
@@ -162,7 +176,6 @@ where
             }
             Err(error) => {
                 stop_remote_app(&mut remote_app);
-                remote_app.discard_unconfirmed_trust();
                 if error.retryable && attempt + 1 < REMOTE_APP_START_ATTEMPTS {
                     tokio::time::sleep(Duration::from_secs(REMOTE_APP_RETRY_DELAY_SECONDS)).await;
                     continue;
@@ -216,25 +229,51 @@ async fn remote_desktop_connection(
     config: &AppConfig,
 ) -> Result<AppConfig, WindowsOperationFailure> {
     let mut connection_config = config.clone();
-    connection_config.rdp_port = crate::config::runtime_host_port_async(config, 3389, "tcp")
-        .await?
-        .unwrap_or(config.rdp_port);
+    let published = crate::config::runtime_host_port_async(config, 3389, "tcp").await?;
+    connection_config.rdp_port = current_remote_desktop_port(published)?;
     Ok(connection_config)
+}
+
+fn current_remote_desktop_port(published: Option<u16>) -> Result<u16, WindowsOperationFailure> {
+    // A missing live mapping is not permission to connect to the range's
+    // configured first port: it can now belong to a different listener.
+    published
+        .filter(|port| *port != 0)
+        .ok_or_else(remote_desktop_unavailable)
 }
 
 async fn wait_for_remote_desktop(
     config: &AppConfig,
     timeout: Duration,
+    cancellation: Option<&CancellationToken>,
 ) -> Result<(), WindowsOperationFailure> {
-    super::rdp_probe::wait_until_stable(
+    let readiness = super::rdp_probe::wait_until_stable(
         &config.rdp_host,
         config.rdp_port,
         timeout,
         REMOTE_DESKTOP_STABLE_PROBES,
         REMOTE_DESKTOP_PROBE_INTERVAL,
-    )
-    .await
-    .map_err(|_| remote_desktop_unavailable())
+    );
+    let observation = if let Some(cancellation) = cancellation {
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(cancelled_before_remote_app()),
+            result = readiness => result,
+        }
+    } else {
+        readiness.await
+    };
+    observation.map_err(|_| remote_desktop_unavailable())
+}
+
+fn cancelled_before_remote_app() -> WindowsOperationFailure {
+    WindowsOperationFailure {
+        message: "the Windows operation was cancelled".into(),
+        exit_code: None,
+        retryable: true,
+        failure_kind: Some(CommandFailureKind::Cancelled),
+        backend_error_code: None,
+    }
 }
 
 fn remote_desktop_unavailable() -> WindowsOperationFailure {
@@ -305,10 +344,13 @@ mod tests {
 
     #[tokio::test]
     async fn an_unready_remote_desktop_is_bounded_retryable_and_typed() {
-        let error =
-            wait_for_remote_desktop(&endpoint_config("127.0.0.1", 9), Duration::from_millis(10))
-                .await
-                .expect_err("the closed fixture endpoint is not ready");
+        let error = wait_for_remote_desktop(
+            &endpoint_config("127.0.0.1", 9),
+            Duration::from_millis(10),
+            None,
+        )
+        .await
+        .expect_err("the closed fixture endpoint is not ready");
 
         assert!(error.retryable);
         assert_eq!(error.failure_kind, Some(CommandFailureKind::Wait));
@@ -326,6 +368,7 @@ mod tests {
         let error = wait_for_remote_desktop(
             &endpoint_config("127.0.0.1", port),
             Duration::from_millis(300),
+            None,
         )
         .await
         .expect_err("accepting TCP is not answering RDP");
@@ -335,9 +378,38 @@ mod tests {
         );
 
         let (ready, _) = fake_endpoint(vec![Behaviour::Confirm]).await;
-        wait_for_remote_desktop(&endpoint_config("127.0.0.1", ready), Duration::from_secs(5))
-            .await
-            .expect("a stable RDP endpoint is ready");
+        wait_for_remote_desktop(
+            &endpoint_config("127.0.0.1", ready),
+            Duration::from_secs(5),
+            None,
+        )
+        .await
+        .expect("a stable RDP endpoint is ready");
+    }
+
+    #[tokio::test]
+    async fn cancelling_rdp_readiness_does_not_wait_for_the_endpoint_deadline() {
+        let (port, _) = fake_endpoint(vec![Behaviour::Silent]).await;
+        let cancellation = crate::process::CancellationToken::default();
+        let cancelling = cancellation.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            cancelling.cancel();
+        });
+        let error = tokio::time::timeout(
+            Duration::from_secs(1),
+            wait_for_remote_desktop(
+                &endpoint_config("127.0.0.1", port),
+                Duration::from_secs(30),
+                Some(&cancellation),
+            ),
+        )
+        .await
+        .expect("cancellation must be prompt")
+        .unwrap_err();
+        assert_eq!(error.failure_kind, Some(CommandFailureKind::Cancelled));
+        assert_eq!(error.backend_error_code, None);
+        assert!(error.retryable);
     }
 
     #[test]
@@ -366,5 +438,21 @@ mod tests {
         });
         assert!(transient.retryable);
         assert_eq!(transient.backend_error_code, None);
+    }
+
+    #[test]
+    fn missing_live_mappings_never_fall_back_to_a_stale_configured_port() {
+        assert_eq!(
+            super::current_remote_desktop_port(Some(47304)).unwrap(),
+            47304
+        );
+        for mapping in [None, Some(0)] {
+            let error = super::current_remote_desktop_port(mapping).unwrap_err();
+            assert!(error.retryable);
+            assert_eq!(
+                error.backend_error_code,
+                Some(BackendErrorCode::RemoteDesktopUnavailable)
+            );
+        }
     }
 }

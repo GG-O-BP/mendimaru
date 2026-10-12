@@ -7,29 +7,36 @@
 //! a fresh TOFU decision, and an unrelated stale pin could linger on a port
 //! that a later recreation hands out again.
 //!
-//! Mendimaru therefore owns one trust anchor per VM identity and treats the
-//! FreeRDP per-port file only as a cache it rewrites before each connection:
+//! Mendimaru therefore owns one trust anchor per VM identity. Each connection
+//! gets a private FreeRDP store; persistent per-port files are migration input
+//! and a cache updated only after confirmation:
 //!
 //! * **Anchor** – a confirmed certificate exists. FreeRDP may accept exactly
-//!   its fingerprint, and the per-port pin is rewritten to the same
+//!   its fingerprint, and the private per-port pin is seeded with the same
 //!   certificate so no stale per-port entry can widen trust.
 //! * **Legacy pin** – no anchor yet, but an older version pinned the current
 //!   port (or every older pin agrees on one certificate). That certificate is
 //!   used exactly like an anchor and is promoted after a confirmed operation.
-//! * **First use** – nothing is known. FreeRDP's TOFU accepts the presented
-//!   certificate and writes the per-port pin. The pin becomes the anchor only
-//!   after Windows returned an HMAC-authenticated operation report through
-//!   that connection; a pin created by an attempt that failed is removed, so
-//!   no transient listener can ever become trusted.
+//! * **First use** – nothing is known. FreeRDP's TOFU writes only into an
+//!   isolated, private attempt directory, never the persistent trust store.
+//!   A pin is promoted after a valid authenticated Windows report. Failed,
+//!   cancelled and abandoned attempts cannot become legacy trust on retry.
+//!
+//! TOFU is still an initial trust decision, not independent server
+//! authentication: a report MAC protects the operation report, not the
+//! identity of a server that received the bootstrap key over this connection.
+//! Existing or conflicting trust must therefore never fall back to TOFU.
 //!
 //! Every policy carries `deny`: FreeRDP must never block on its interactive
 //! "Do you trust the above certificate?" prompt, which would otherwise hang
 //! until the operation deadline.
 
+use super::operation::WindowsOperationFailure;
+use crate::contracts::BackendErrorCode;
 use crate::models::AppConfig;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use sha2::{Digest, Sha256};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub(super) const FIRST_USE_POLICY: &str = "/cert:tofu,deny";
@@ -54,17 +61,26 @@ impl PinnedCertificate {
     pub(super) fn from_pem(pem: &[u8]) -> Result<Self, String> {
         let pem = std::str::from_utf8(pem)
             .map_err(|error| crate::tr!("error-freerdp-pin-invalid", error = error))?;
-        let body = pem
-            .lines()
-            .skip_while(|line| line.trim() != "-----BEGIN CERTIFICATE-----")
-            .skip(1)
-            .take_while(|line| line.trim() != "-----END CERTIFICATE-----")
-            .map(str::trim)
-            .collect::<String>();
-        if body.is_empty() {
+        let mut lines = pem.lines().map(str::trim);
+        if !lines.any(|line| line == "-----BEGIN CERTIFICATE-----") {
             return Err(crate::tr!(
                 "error-freerdp-pin-invalid",
-                error = "the certificate body is missing"
+                error = "the certificate header is missing"
+            ));
+        }
+        let mut body = String::new();
+        let mut ended = false;
+        for line in lines {
+            if line == "-----END CERTIFICATE-----" {
+                ended = true;
+                break;
+            }
+            body.push_str(line);
+        }
+        if !ended || body.is_empty() {
+            return Err(crate::tr!(
+                "error-freerdp-pin-invalid",
+                error = "the certificate body or footer is missing"
             ));
         }
         let der = BASE64_STANDARD
@@ -102,10 +118,21 @@ pub(super) struct TrustAttempt {
     anchor_path: PathBuf,
     port_pin_path: PathBuf,
     certificate: Option<PinnedCertificate>,
+    config_directory: tempfile::TempDir,
+    attempt_pin_path: PathBuf,
+    confirmed: bool,
 }
 
 impl TrustAttempt {
-    pub(super) fn prepare(config: &AppConfig, trust_store: &Path) -> Result<Self, String> {
+    #[cfg(test)]
+    pub(super) fn fixture(trust_store: &Path) -> Self {
+        prepare_for(trust_store, "winboat-test", "127.0.0.1", 47300).expect("fixture trust")
+    }
+
+    pub(super) fn prepare(
+        config: &AppConfig,
+        trust_store: &Path,
+    ) -> Result<Self, WindowsOperationFailure> {
         prepare_for(
             trust_store,
             &anchor_identity(config),
@@ -125,32 +152,46 @@ impl TrustAttempt {
             .map_or_else(|| FIRST_USE_POLICY.to_string(), PinnedCertificate::policy)
     }
 
-    /// Promotes the certificate this attempt connected with to the VM anchor.
-    /// Call only after an authenticated Windows report proved the connection
-    /// reached the real guest.
-    pub(super) fn confirm(&self) -> Result<(), String> {
+    pub(super) fn config_directory(&self) -> &Path {
+        self.config_directory.path()
+    }
+
+    /// Promotes this attempt's pin after a valid authenticated Windows report.
+    /// Existing anchors are immutable, including a concurrent first-use
+    /// attempt's anchor. Persistence errors must be returned to the caller.
+    pub(super) fn confirm(&mut self) -> Result<(), WindowsOperationFailure> {
+        if self.confirmed {
+            return Ok(());
+        }
         let certificate = match self.source {
-            TrustSource::Anchor => return Ok(()),
-            TrustSource::LegacyPin => self.certificate.clone(),
-            TrustSource::FirstUse => read_pin(&self.port_pin_path).ok().flatten(),
+            TrustSource::Anchor | TrustSource::LegacyPin => self.certificate.clone(),
+            TrustSource::FirstUse => read_pin(&self.attempt_pin_path)?,
         };
         let Some(certificate) = certificate else {
             return Err(crate::tr!(
                 "error-freerdp-pin-invalid",
                 error = "the accepted certificate was not recorded"
-            ));
+            )
+            .into());
         };
-        write_private_atomic(&self.anchor_path, certificate.to_pem().as_bytes())
-            .map_err(|error| crate::tr!("error-freerdp-trust-directory-create", error = error))
-    }
-
-    /// Removes a pin that FreeRDP created through TOFU during an attempt that
-    /// never produced an authenticated report. Pins that existed before the
-    /// attempt (anchors and legacy pins) are never touched.
-    pub(super) fn discard_unconfirmed(&self) {
-        if self.source == TrustSource::FirstUse {
-            let _ = std::fs::remove_file(&self.port_pin_path);
+        if let Some(anchor) = read_pin(&self.anchor_path)? {
+            if anchor != certificate {
+                return Err(certificate_mismatch());
+            }
+        } else {
+            match write_private_new(&self.anchor_path, certificate.to_pem().as_bytes()) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if read_pin(&self.anchor_path)?.as_ref() != Some(&certificate) {
+                        return Err(certificate_mismatch());
+                    }
+                }
+                Err(error) => return Err(trust_io_error(error).into()),
+            }
         }
+        sync_port_pin(&self.port_pin_path, &certificate)?;
+        self.confirmed = true;
+        Ok(())
     }
 }
 
@@ -159,59 +200,92 @@ fn prepare_for(
     identity: &str,
     host: &str,
     port: u16,
-) -> Result<TrustAttempt, String> {
+) -> Result<TrustAttempt, WindowsOperationFailure> {
+    private_directory(trust_store).map_err(trust_io_error)?;
+    private_directory(&trust_store.join(ANCHOR_DIRECTORY)).map_err(trust_io_error)?;
+    private_directory(&trust_store.join("freerdp")).map_err(trust_io_error)?;
+    private_directory(&trust_store.join(FREERDP_SERVER_DIRECTORY)).map_err(trust_io_error)?;
     let anchor_path = trust_store
         .join(ANCHOR_DIRECTORY)
         .join(format!("{identity}.pem"));
     let server_directory = trust_store.join(FREERDP_SERVER_DIRECTORY);
-    // FreeRDP lowercases the whole `<host>_<port>.pem` name.
     let port_pin_path = server_directory.join(format!("{}_{port}.pem", host.to_ascii_lowercase()));
+    let (source, certificate) = if let Some(anchor) = read_pin(&anchor_path)? {
+        (TrustSource::Anchor, Some(anchor))
+    } else if let Some(pin) = read_pin(&port_pin_path)? {
+        (TrustSource::LegacyPin, Some(pin))
+    } else if let Some(pin) = agreed_legacy_pin(&server_directory, host)? {
+        (TrustSource::LegacyPin, Some(pin))
+    } else {
+        (TrustSource::FirstUse, None)
+    };
 
-    if let Some(anchor) = read_pin(&anchor_path)? {
-        sync_port_pin(&port_pin_path, &anchor)?;
-        return Ok(TrustAttempt {
-            source: TrustSource::Anchor,
-            anchor_path,
-            port_pin_path,
-            certificate: Some(anchor),
-        });
+    // Only this attempt can read FreeRDP's TOFU output. Even a crash that
+    // leaves this scratch directory behind cannot make it a legacy pin.
+    let config_directory = tempfile::Builder::new()
+        .prefix(".rdp-attempt-")
+        .tempdir_in(trust_store)
+        .map_err(trust_io_error)?;
+    private_directory(&config_directory.path().join("freerdp")).map_err(trust_io_error)?;
+    let attempt_server = config_directory.path().join(FREERDP_SERVER_DIRECTORY);
+    private_directory(&attempt_server).map_err(trust_io_error)?;
+    let attempt_pin_path = attempt_server.join(
+        port_pin_path
+            .file_name()
+            .expect("the generated pin path has a filename"),
+    );
+    if let Some(pin) = &certificate {
+        sync_port_pin(&attempt_pin_path, pin)?;
     }
-
-    match read_pin(&port_pin_path) {
-        Ok(Some(certificate)) => {
-            return Ok(TrustAttempt {
-                source: TrustSource::LegacyPin,
-                anchor_path,
-                port_pin_path,
-                certificate: Some(certificate),
-            });
-        }
-        Ok(None) => {}
-        // A truncated or foreign per-port file carries no trust decision. It
-        // must not block every future connection, and FreeRDP would treat it
-        // as absent anyway, so it is cleared before the first-use path.
-        Err(_) => {
-            std::fs::remove_file(&port_pin_path)
-                .map_err(|error| crate::tr!("error-freerdp-pin-read", error = error))?;
-        }
-    }
-
-    if let Some(certificate) = agreed_legacy_pin(&server_directory, host) {
-        sync_port_pin(&port_pin_path, &certificate)?;
-        return Ok(TrustAttempt {
-            source: TrustSource::LegacyPin,
-            anchor_path,
-            port_pin_path,
-            certificate: Some(certificate),
-        });
-    }
-
     Ok(TrustAttempt {
-        source: TrustSource::FirstUse,
+        source,
         anchor_path,
         port_pin_path,
-        certificate: None,
+        certificate,
+        config_directory,
+        attempt_pin_path,
+        confirmed: false,
     })
+}
+
+fn certificate_mismatch() -> WindowsOperationFailure {
+    WindowsOperationFailure {
+        message: crate::tr!("error-freerdp-certificate-mismatch"),
+        exit_code: None,
+        retryable: false,
+        failure_kind: None,
+        backend_error_code: Some(BackendErrorCode::RemoteDesktopCertificateMismatch),
+    }
+}
+
+fn trust_io_error(error: std::io::Error) -> String {
+    crate::tr!("error-freerdp-trust-directory-create", error = error)
+}
+
+fn private_directory(path: &Path) -> std::io::Result<()> {
+    match std::fs::create_dir(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_dir() {
+        return Err(std::io::Error::other(
+            "the trust directory is not a direct directory",
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        // SAFETY: geteuid has no preconditions.
+        if metadata.uid() != unsafe { libc::geteuid() } {
+            return Err(std::io::Error::other(
+                "the trust directory is not owned by this user",
+            ));
+        }
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
 }
 
 /// Stable, path-safe identity of the VM whose RDP endpoint is trusted. The
@@ -230,12 +304,16 @@ pub(super) fn anchor_identity(config: &AppConfig) -> String {
 }
 
 /// The single certificate every legacy per-port pin of this host agrees on.
-/// Disagreeing pins prove that at least one of them is stale, so none of them
-/// is trusted and the connection falls back to a confirmed first use.
-fn agreed_legacy_pin(server_directory: &Path, host: &str) -> Option<PinnedCertificate> {
+/// Ambiguous or invalid prior trust must not be replaced by a new TOFU
+/// decision. Resetting it is an explicit owner action.
+fn agreed_legacy_pin(
+    server_directory: &Path,
+    host: &str,
+) -> Result<Option<PinnedCertificate>, WindowsOperationFailure> {
     let prefix = format!("{}_", host.to_ascii_lowercase());
     let mut agreed: Option<PinnedCertificate> = None;
-    for entry in std::fs::read_dir(server_directory).ok()?.flatten() {
+    for entry in std::fs::read_dir(server_directory).map_err(trust_io_error)? {
+        let entry = entry.map_err(trust_io_error)?;
         let name = entry.file_name();
         let Some(port) = name
             .to_str()
@@ -244,35 +322,63 @@ fn agreed_legacy_pin(server_directory: &Path, host: &str) -> Option<PinnedCertif
         else {
             continue;
         };
-        if port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
+        if !port.parse::<u16>().is_ok_and(|port| port != 0) {
             continue;
         }
-        let Ok(Some(certificate)) = read_pin(&entry.path()) else {
+        let Some(certificate) = read_pin(&entry.path())? else {
             continue;
         };
         match &agreed {
-            Some(existing) if existing.fingerprint != certificate.fingerprint => return None,
+            Some(existing) if existing.fingerprint != certificate.fingerprint => {
+                return Err(certificate_mismatch())
+            }
             Some(_) => {}
             None => agreed = Some(certificate),
         }
     }
-    agreed
+    Ok(agreed)
 }
 
 fn read_pin(path: &Path) -> Result<Option<PinnedCertificate>, String> {
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Refuse symlinks at open time and do not block on a racing FIFO.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(not(unix))]
+    if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(crate::tr!(
+            "error-freerdp-pin-invalid",
+            error = "the pin is a symlink"
+        ));
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(crate::tr!("error-freerdp-pin-read", error = error)),
     };
+    let metadata = file
+        .metadata()
+        .map_err(|error| crate::tr!("error-freerdp-pin-read", error = error))?;
     if !metadata.file_type().is_file() || metadata.len() > MAX_PIN_BYTES {
         return Err(crate::tr!(
             "error-freerdp-pin-invalid",
             error = "the pin is not a bounded regular file"
         ));
     }
-    let pem =
-        std::fs::read(path).map_err(|error| crate::tr!("error-freerdp-pin-read", error = error))?;
+    let mut pem = Vec::new();
+    file.take(MAX_PIN_BYTES + 1)
+        .read_to_end(&mut pem)
+        .map_err(|error| crate::tr!("error-freerdp-pin-read", error = error))?;
+    if pem.len() as u64 > MAX_PIN_BYTES {
+        return Err(crate::tr!(
+            "error-freerdp-pin-invalid",
+            error = "the pin is too large"
+        ));
+    }
     PinnedCertificate::from_pem(&pem).map(Some)
 }
 
@@ -292,12 +398,7 @@ fn write_private_atomic(path: &Path, content: &[u8]) -> std::io::Result<()> {
     let directory = path
         .parent()
         .ok_or_else(|| std::io::Error::other("the pin path has no parent directory"))?;
-    std::fs::create_dir_all(directory)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
-    }
+    private_directory(directory)?;
     let mut temporary = tempfile::Builder::new()
         .prefix(".mendimaru-pin-")
         .tempfile_in(directory)?;
@@ -311,6 +412,20 @@ fn write_private_atomic(path: &Path, content: &[u8]) -> std::io::Result<()> {
     temporary.write_all(content)?;
     temporary.as_file().sync_all()?;
     temporary.persist(path).map_err(|error| error.error)?;
+    Ok(())
+}
+
+fn write_private_new(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    let directory = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("no pin parent"))?;
+    private_directory(directory)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
+    temporary.write_all(content)?;
+    temporary.as_file().sync_all()?;
+    temporary
+        .persist_noclobber(path)
+        .map_err(|error| error.error)?;
     Ok(())
 }
 
@@ -382,28 +497,30 @@ mod tests {
     #[test]
     fn first_use_is_promoted_only_after_confirmation_and_survives_a_port_move() {
         let store = tempfile::tempdir().unwrap();
-        let first = prepare(store.path(), 47300);
+        let mut first = prepare(store.path(), 47300);
         assert_eq!(first.source(), TrustSource::FirstUse);
         assert_eq!(first.certificate_argument(), FIRST_USE_POLICY);
 
         // FreeRDP TOFU writes the per-port pin; Windows then authenticates.
-        write_pin(store.path(), 47300, ALPHA);
+        std::fs::write(&first.attempt_pin_path, ALPHA).unwrap();
+        assert!(!pin_path(store.path(), 47300).exists());
         first.confirm().expect("confirm first use");
         assert!(anchor(store.path()).is_file());
 
         // A recreation moved the RDP port: no new TOFU decision is made.
-        let moved = prepare(store.path(), 47304);
+        let mut moved = prepare(store.path(), 47304);
         assert_eq!(moved.source(), TrustSource::Anchor);
         assert_eq!(
             moved.certificate_argument(),
             format!("/cert:fingerprint:sha256:{ALPHA_FINGERPRINT},deny")
         );
-        let synced = std::fs::read(pin_path(store.path(), 47304)).unwrap();
+        let synced = std::fs::read(&moved.attempt_pin_path).unwrap();
         assert_eq!(
             PinnedCertificate::from_pem(&synced).unwrap().fingerprint(),
             ALPHA_FINGERPRINT
         );
-        moved.discard_unconfirmed();
+        moved.confirm().unwrap();
+        drop(moved);
         assert!(
             pin_path(store.path(), 47304).is_file(),
             "anchored pins stay"
@@ -416,12 +533,14 @@ mod tests {
         let attempt = prepare(store.path(), 47303);
         // A transient listener answered and TOFU recorded it, but no
         // authenticated report ever arrived.
-        write_pin(store.path(), 47303, BETA);
-        attempt.discard_unconfirmed();
+        std::fs::write(&attempt.attempt_pin_path, BETA).unwrap();
+        let scratch = attempt.config_directory().to_path_buf();
+        drop(attempt);
+        assert!(!scratch.exists());
         assert!(!pin_path(store.path(), 47303).exists());
         assert!(!anchor(store.path()).exists());
 
-        let retry = prepare(store.path(), 47303);
+        let mut retry = prepare(store.path(), 47303);
         assert_eq!(retry.source(), TrustSource::FirstUse);
         assert!(retry.confirm().is_err(), "nothing was accepted yet");
         assert!(!anchor(store.path()).exists());
@@ -436,11 +555,21 @@ mod tests {
         // FreeRDP would otherwise accept as a known-hosts match.
         write_pin(store.path(), 47301, BETA);
 
-        let attempt = prepare(store.path(), 47301);
+        let mut attempt = prepare(store.path(), 47301);
         assert_eq!(attempt.source(), TrustSource::Anchor);
-        let synced = std::fs::read(pin_path(store.path(), 47301)).unwrap();
+        let synced = std::fs::read(&attempt.attempt_pin_path).unwrap();
         assert_eq!(
             PinnedCertificate::from_pem(&synced).unwrap().fingerprint(),
+            ALPHA_FINGERPRINT
+        );
+        // Preparing a connection does not mutate persistent prior trust.
+        assert_eq!(std::fs::read(pin_path(store.path(), 47301)).unwrap(), BETA);
+        attempt.confirm().unwrap();
+        assert_eq!(
+            read_pin(&pin_path(store.path(), 47301))
+                .unwrap()
+                .unwrap()
+                .fingerprint(),
             ALPHA_FINGERPRINT
         );
     }
@@ -451,13 +580,13 @@ mod tests {
         write_pin(store.path(), 47300, ALPHA);
         write_pin(store.path(), 47301, ALPHA);
 
-        let agreed = prepare(store.path(), 47304);
+        let mut agreed = prepare(store.path(), 47304);
         assert_eq!(agreed.source(), TrustSource::LegacyPin);
         assert!(agreed.certificate_argument().contains(ALPHA_FINGERPRINT));
-        assert!(pin_path(store.path(), 47304).is_file());
-        agreed.discard_unconfirmed();
-        assert!(pin_path(store.path(), 47304).is_file());
+        assert!(!pin_path(store.path(), 47304).exists());
+        assert!(agreed.attempt_pin_path.is_file());
         agreed.confirm().unwrap();
+        assert!(pin_path(store.path(), 47304).is_file());
         assert_eq!(
             read_pin(&anchor(store.path()))
                 .unwrap()
@@ -469,10 +598,14 @@ mod tests {
         let disagreeing = tempfile::tempdir().unwrap();
         write_pin(disagreeing.path(), 47300, ALPHA);
         write_pin(disagreeing.path(), 47301, BETA);
+        let error =
+            prepare_for(disagreeing.path(), "winboat-test", "127.0.0.1", 47309).unwrap_err();
         assert_eq!(
-            prepare(disagreeing.path(), 47309).source(),
-            TrustSource::FirstUse
+            error.backend_error_code,
+            Some(BackendErrorCode::RemoteDesktopCertificateMismatch)
         );
+        assert!(!error.retryable);
+        assert!(!pin_path(disagreeing.path(), 47309).exists());
         // The legacy pin of the exact port keeps the previous behaviour.
         assert_eq!(
             prepare(disagreeing.path(), 47301).source(),
@@ -481,12 +614,28 @@ mod tests {
     }
 
     #[test]
-    fn a_corrupt_per_port_pin_does_not_block_every_future_connection() {
+    fn a_corrupt_per_port_pin_never_silently_resets_prior_trust() {
         let store = tempfile::tempdir().unwrap();
-        write_pin(store.path(), 47302, b"-----BEGIN CERTIFICATE-----\n");
-        let attempt = prepare(store.path(), 47302);
-        assert_eq!(attempt.source(), TrustSource::FirstUse);
-        assert!(!pin_path(store.path(), 47302).exists());
+        let truncated = b"-----BEGIN CERTIFICATE-----\n";
+        write_pin(store.path(), 47302, truncated);
+        assert!(prepare_for(store.path(), "winboat-test", "127.0.0.1", 47302).is_err());
+        assert_eq!(
+            std::fs::read(pin_path(store.path(), 47302)).unwrap(),
+            truncated
+        );
+        // A confirmed anchor can repair an untrusted cache; without one an
+        // invalid legacy pin requires an explicit owner decision.
+        std::fs::write(anchor(store.path()), ALPHA).unwrap();
+        let mut attempt = prepare(store.path(), 47302);
+        assert_eq!(attempt.source(), TrustSource::Anchor);
+        attempt.confirm().unwrap();
+        assert_eq!(
+            read_pin(&pin_path(store.path(), 47302))
+                .unwrap()
+                .unwrap()
+                .fingerprint(),
+            ALPHA_FINGERPRINT
+        );
     }
 
     #[test]
@@ -495,6 +644,131 @@ mod tests {
         std::fs::create_dir_all(store.path().join(ANCHOR_DIRECTORY)).unwrap();
         std::fs::write(anchor(store.path()), b"garbage").unwrap();
         assert!(prepare_for(store.path(), "winboat-test", "127.0.0.1", 47300).is_err());
+    }
+
+    #[test]
+    fn a_crashed_attempt_cannot_become_legacy_trust_on_retry() {
+        let store = tempfile::tempdir().unwrap();
+        let attempt = prepare(store.path(), 47300);
+        std::fs::write(&attempt.attempt_pin_path, BETA).unwrap();
+        // An abrupt process exit leaves a scratch directory, but it is not
+        // part of the persistent FreeRDP pin namespace.
+        let orphan = attempt.config_directory.keep();
+        let retry = prepare(store.path(), 47300);
+        assert_eq!(retry.source(), TrustSource::FirstUse);
+        assert!(!pin_path(store.path(), 47300).exists());
+        assert!(!anchor(store.path()).exists());
+        std::fs::remove_dir_all(orphan).unwrap();
+    }
+
+    #[test]
+    fn concurrent_first_uses_never_replace_an_existing_anchor() {
+        let store = tempfile::tempdir().unwrap();
+        let mut first = prepare(store.path(), 47300);
+        let mut second = prepare(store.path(), 47301);
+        std::fs::write(&first.attempt_pin_path, ALPHA).unwrap();
+        std::fs::write(&second.attempt_pin_path, BETA).unwrap();
+        first.confirm().unwrap();
+        let error = second.confirm().unwrap_err();
+        assert_eq!(
+            error.backend_error_code,
+            Some(BackendErrorCode::RemoteDesktopCertificateMismatch)
+        );
+        assert!(!error.retryable);
+        assert_eq!(
+            read_pin(&anchor(store.path()))
+                .unwrap()
+                .unwrap()
+                .fingerprint(),
+            ALPHA_FINGERPRINT
+        );
+        assert!(!pin_path(store.path(), 47301).exists());
+    }
+
+    #[test]
+    fn simultaneous_matching_confirmations_are_idempotent() {
+        let store = tempfile::tempdir().unwrap();
+        let attempts = [
+            TrustAttempt::fixture(store.path()),
+            prepare(store.path(), 47301),
+        ];
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let children: Vec<_> = attempts
+            .into_iter()
+            .map(|mut attempt| {
+                std::fs::write(&attempt.attempt_pin_path, ALPHA).unwrap();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    attempt.confirm().expect("same first-use certificate");
+                    attempt.confirm().expect("confirmation is idempotent");
+                })
+            })
+            .collect();
+        for child in children {
+            child.join().unwrap();
+        }
+        assert_eq!(
+            read_pin(&anchor(store.path()))
+                .unwrap()
+                .unwrap()
+                .fingerprint(),
+            ALPHA_FINGERPRINT
+        );
+    }
+
+    #[test]
+    fn confirmation_io_errors_do_not_establish_trust() {
+        let store = tempfile::tempdir().unwrap();
+        let mut attempt = prepare(store.path(), 47300);
+        std::fs::write(&attempt.attempt_pin_path, ALPHA).unwrap();
+        let anchors = store.path().join(ANCHOR_DIRECTORY);
+        std::fs::remove_dir(&anchors).unwrap();
+        std::fs::write(&anchors, b"not a directory").unwrap();
+        assert!(attempt.confirm().is_err());
+        assert!(!pin_path(store.path(), 47300).exists());
+    }
+
+    #[test]
+    fn malformed_pem_never_becomes_a_fingerprint_pin() {
+        for pem in [
+            b"-----BEGIN CERTIFICATE-----\nbWVuZGltYXJ1\n".as_slice(),
+            b"-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n",
+            b"-----BEGIN CERTIFICATE-----\n???\n-----END CERTIFICATE-----\n",
+            b"-----BEGIN PUBLIC KEY-----\nbWVuZGltYXJ1\n-----END PUBLIC KEY-----\n",
+            b"\xff",
+        ] {
+            assert!(PinnedCertificate::from_pem(pem).is_err(), "{pem:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untrusted_file_types_and_directory_symlinks_fail_closed() {
+        use std::os::unix::fs::symlink;
+        let store = tempfile::tempdir().unwrap();
+        let target = store.path().join("outside.pem");
+        std::fs::write(&target, ALPHA).unwrap();
+        let prepared = prepare(store.path(), 47300);
+        drop(prepared);
+        symlink(&target, anchor(store.path())).unwrap();
+        assert!(prepare_for(store.path(), "winboat-test", "127.0.0.1", 47300).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), ALPHA);
+
+        let other = tempfile::tempdir().unwrap();
+        symlink(
+            store.path().join(ANCHOR_DIRECTORY),
+            other.path().join(ANCHOR_DIRECTORY),
+        )
+        .unwrap();
+        assert!(prepare_for(other.path(), "winboat-test", "127.0.0.1", 47300).is_err());
+        let oversized = store.path().join("oversized.pem");
+        std::fs::File::create(&oversized)
+            .unwrap()
+            .set_len(MAX_PIN_BYTES + 1)
+            .unwrap();
+        assert!(read_pin(&oversized).is_err());
+        assert!(read_pin(store.path()).is_err());
     }
 
     #[cfg(unix)]

@@ -22,7 +22,8 @@ recreation hands out again.
 ## Readiness
 
 Before each RemoteApp attempt, Mendimaru resolves the current published RDP
-port. It then sends an X.224 Connection Request with an RDP negotiation request
+port. A missing mapping is a retryable readiness failure, not permission to use
+the potentially stale configured range start. It then sends an X.224 Connection Request with an RDP negotiation request
 and waits until two consecutive probes, 500 ms apart, receive an X.224
 Connection Confirm. A bare TCP connect is not enough: Docker's userland proxy,
 rootless forwarders and QEMU host forwarding accept TCP immediately even when
@@ -32,6 +33,8 @@ and sends no credentials.
 If the endpoint does not become stable within 30 seconds, the operation fails
 with `remote_desktop_unavailable` (retryable). It is not reported as a generic
 `operation_failed`.
+Cancellation also interrupts this wait; it does not wait out the readiness
+deadline or start a new RemoteApp after cancellation is observed.
 
 ## Certificate trust
 
@@ -41,27 +44,41 @@ name and RDP host, never the port). The anchor lives in
 `~/.config/mendimaru/freerdp-config/anchors/`), with mode `0700` for the
 directory and `0600` for the files.
 
-| State      | FreeRDP policy                           | Per-port FreeRDP pin                                     |
-| ---------- | ---------------------------------------- | -------------------------------------------------------- |
-| Anchor     | `/cert:fingerprint:sha256:<anchor>,deny` | Rewritten to the anchor before connecting                |
-| Legacy pin | `/cert:fingerprint:sha256:<pin>,deny`    | The existing pin of this port, or the one all pins share |
-| First use  | `/cert:tofu,deny`                        | Written by FreeRDP when it accepts the certificate       |
+FreeRDP runs with a private, attempt-specific `XDG_CONFIG_HOME` beneath the
+application trust directory. It never writes its TOFU output directly into the
+persistent legacy pin namespace.
 
-- **Promotion.** A certificate becomes the anchor only after Windows has
-  returned an HMAC-authenticated operation report through that connection. A
-  listener that answers during a recreation therefore can never become
-  trusted.
-- **Discarding unconfirmed pins.** If a first-use attempt fails, the per-port
-  pin that FreeRDP created during that attempt is removed.
+| State      | FreeRDP policy                           | Pin in the private attempt directory             |
+| ---------- | ---------------------------------------- | ------------------------------------------------ |
+| Anchor     | `/cert:fingerprint:sha256:<anchor>,deny` | Seeded from the immutable VM anchor              |
+| Legacy pin | `/cert:fingerprint:sha256:<pin>,deny`    | Seeded from existing, unambiguous trust          |
+| First use  | `/cert:tofu,deny`                        | Written by FreeRDP, not yet persisted as trusted |
+
+- **Promotion.** A certificate becomes the anchor after the first valid
+  HMAC-authenticated Windows operation report, including an application
+  failure report. Invalid MACs and malformed reports never promote a pin.
+  Anchor writes are create-only: concurrent confirmations cannot replace
+  existing trust. Persistence errors are returned without retrying an
+  operation that might already have taken effect.
+- **Discarding unconfirmed pins.** Failed, cancelled and abandoned attempts
+  lose their private pin when their owner is dropped. Even an abrupt process
+  exit cannot turn a leftover attempt directory into legacy trust on retry:
+  migration scans only the persistent `freerdp/server/` namespace.
+- **First-use limitation.** TOFU is not independent server authentication.
+  The report MAC protects the operation channel, but its key was delivered
+  over this RDP connection. Existing or ambiguous trust must therefore never
+  silently revert to TOFU.
 - **Pins that are never removed.** Anchors and legacy pins are never removed
   automatically.
 - **Migration.** Pins from older versions are reused only when the current
   port has one, or when every pin of the host names the same certificate. If
-  they disagree, at least one of them is stale, so the connection starts from a
-  confirmed first use instead.
-- **Corrupt files.** A truncated per-port pin carries no trust decision, so it
-  is cleared rather than blocking every later connection. A corrupt anchor
-  fails closed.
+  the new port has no pin and older pins disagree, migration fails with
+  `remote_desktop_certificate_mismatch` rather than accepting a new certificate.
+- **Corrupt files.** Invalid prior trust fails closed and is preserved for
+  owner review. A valid anchor can repair a corrupt per-port cache after
+  confirmation, but no anchor means no automatic trust reset. Pins must be
+  bounded regular files; symlinks are refused at open time. Trust subdirectory
+  symlinks are also refused rather than followed or chmodded.
 - **No prompt.** Every policy includes `deny`. FreeRDP never stops at its
   interactive `Do you trust the above certificate? (Y/T/N)` prompt, which used
   to wait until the operation deadline.
