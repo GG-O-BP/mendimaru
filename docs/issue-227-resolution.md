@@ -59,9 +59,10 @@ See [`winboat-rdp-trust.md`](winboat-rdp-trust.md) for the full design.
 - Only FreeRDP's TLS handshake verdict `certificate not trusted` counts as a
   certificate rejection.
 - One port-independent trust anchor per VM is promoted only after an
-  HMAC-authenticated Windows report. The per-port FreeRDP pin is rewritten from
-  the anchor before each connection. Unconfirmed TOFU pins from failed attempts
-  are removed. Older per-port pins are migrated.
+  HMAC-authenticated Windows report. Each connection uses a private temporary
+  FreeRDP store seeded from the anchor. Unconfirmed TOFU output never enters
+  the persistent pin namespace, including on cancellation or process death.
+  Older per-port pins migrate without automatically resetting ambiguous trust.
 - Every certificate policy carries `deny`, so FreeRDP never waits at a prompt.
 - Readiness requires two consecutive X.224 Connection Confirms on the RDP port,
   which is re-resolved for every attempt. A bare TCP connect is not enough.
@@ -90,6 +91,11 @@ See [`winboat-rdp-trust.md`](winboat-rdp-trust.md) for the full design.
     endpoints
   - typed, non-retryable certificate failures
   - graceful and forced termination
+- Additional lifecycle cases cover dropped futures, crash leftovers,
+  conflicting and simultaneous matching confirmations, trust write errors,
+  malformed PEM, pin/directory symlinks, large diagnostic output, missing live
+  mappings and cancellation during readiness. Authenticated Windows failures
+  confirm trust without losing their Windows exit code; invalid reports do not.
 - Live FreeRDP 3.15.0 checks against the #227 VM: `/cert:tofu,deny` accepts and
   records a first use, and rejects a differing stored pin immediately.
   `/cert:fingerprint:sha256:<anchor>,deny` connects even when a stale

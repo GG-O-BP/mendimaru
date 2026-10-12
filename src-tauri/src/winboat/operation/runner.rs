@@ -120,6 +120,21 @@ where
                     let report = parse_install_report(&authenticated.payload).map_err(|error| {
                         report_authentication_error(operation, &error.to_string())
                     })?;
+                    // A valid report confirms this attempt's operation channel
+                    // even if Windows subsequently reports an application
+                    // error. Failed MACs and malformed payloads never promote
+                    // a certificate. A failed trust write is not retryable:
+                    // the Windows operation might already have taken effect.
+                    remote_app
+                        .confirm_trust()
+                        .map_err(|error| WindowsOperationWaitError {
+                            message: error.message,
+                            retryable: false,
+                            user_retryable: false,
+                            exit_code: error.exit_code,
+                            failure_kind: error.failure_kind,
+                            backend_error_code: error.backend_error_code,
+                        })?;
                     last_report_state = Some(report.state);
                     last_report_had_percentage = report.percentage.is_some();
                     if last_report_timestamp.as_ref() != Some(&report.timestamp) {
@@ -335,6 +350,133 @@ mod tests {
     use crate::winboat::operation::{WindowsOperationReport, WindowsOperationState};
     use std::os::unix::fs::symlink;
     use std::os::unix::process::ExitStatusExt;
+
+    #[cfg(target_os = "linux")]
+    fn trusted_standin(store: &std::path::Path) -> crate::winboat::remote_app::RemoteAppProcess {
+        let trust = crate::winboat::rdp_trust::TrustAttempt::fixture(store);
+        std::fs::write(
+            trust
+                .config_directory()
+                .join("freerdp/server/127.0.0.1_47300.pem"),
+            b"-----BEGIN CERTIFICATE-----\nbWVuZGltYXJ1\n-----END CERTIFICATE-----\n",
+        )
+        .unwrap();
+        let child = std::process::Command::new("sh")
+            .args(["-c", "exec sleep 60"])
+            .spawn()
+            .unwrap();
+        crate::winboat::remote_app::RemoteAppProcess::from_test_child_with_trust(child, trust)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn write_report(
+        path: &std::path::Path,
+        payload: &[u8],
+    ) -> crate::winboat::security::OperationSecurity {
+        let security = crate::winboat::security::OperationSecurity::fixture();
+        let envelope =
+            crate::winboat::security::authenticated_envelope(&security, 1, payload).unwrap();
+        std::fs::write(path, envelope).unwrap();
+        security
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn an_authenticated_windows_failure_confirms_the_certificate_without_hiding_its_exit_code(
+    ) {
+        let store = tempfile::tempdir().unwrap();
+        let report = store.path().join("report.json");
+        let mut remote_app = trusted_standin(store.path());
+        let security = write_report(&report, br#"{"state":"failed","message":"failed","timestamp":"2026-10-12T00:00:00Z","exitCode":1603}"#);
+        let result = super::wait_for_windows_operation(
+            &report,
+            &security,
+            &mut remote_app,
+            1,
+            "installing",
+            None,
+            &mut |_| {},
+        )
+        .await;
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("the Windows operation failed"),
+        };
+        assert_eq!(error.exit_code, Some(1603));
+        assert!(store.path().join("anchors/winboat-test.pem").is_file());
+        assert!(store
+            .path()
+            .join("freerdp/server/127.0.0.1_47300.pem")
+            .is_file());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_bad_mac_or_malformed_authenticated_report_never_confirms_tofu() {
+        for malformed_payload in [false, true] {
+            let store = tempfile::tempdir().unwrap();
+            let report = store.path().join("report.json");
+            let mut remote_app = trusted_standin(store.path());
+            let security = if malformed_payload {
+                write_report(&report, b"{}")
+            } else {
+                std::fs::write(&report, b"{}").unwrap();
+                crate::winboat::security::OperationSecurity::fixture()
+            };
+            let result = super::wait_for_windows_operation(
+                &report,
+                &security,
+                &mut remote_app,
+                1,
+                "installing",
+                None,
+                &mut |_| {},
+            )
+            .await;
+            assert!(result.is_err());
+            drop(remote_app);
+            assert!(!store.path().join("anchors/winboat-test.pem").exists());
+            assert!(!store
+                .path()
+                .join("freerdp/server/127.0.0.1_47300.pem")
+                .exists());
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_confirmation_write_error_is_not_reported_as_a_success_or_retried() {
+        let store = tempfile::tempdir().unwrap();
+        let report = store.path().join("report.json");
+        let mut remote_app = trusted_standin(store.path());
+        let security = write_report(
+            &report,
+            br#"{"state":"succeeded","timestamp":"2026-10-12T00:00:00Z"}"#,
+        );
+        let anchors = store.path().join("anchors");
+        std::fs::remove_dir(&anchors).unwrap();
+        std::fs::write(&anchors, b"not a directory").unwrap();
+        let result = super::wait_for_windows_operation(
+            &report,
+            &security,
+            &mut remote_app,
+            1,
+            "starting",
+            None,
+            &mut |_| {},
+        )
+        .await;
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("the trust write failed"),
+        };
+        assert!(!error.retryable);
+        assert!(!error.user_retryable);
+        assert!(!store
+            .path()
+            .join("freerdp/server/127.0.0.1_47300.pem")
+            .exists());
+    }
 
     #[test]
     fn refuses_symlinked_and_oversized_operation_reports() {

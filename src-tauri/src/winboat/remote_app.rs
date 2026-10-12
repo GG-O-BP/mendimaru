@@ -1,3 +1,4 @@
+use super::operation::WindowsOperationFailure;
 use super::project_access::ProjectAccessLease;
 use super::rdp_trust::TrustAttempt;
 use super::security::{
@@ -55,6 +56,13 @@ impl RemoteAppProcess {
         }
     }
 
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn from_test_child_with_trust(child: Child, trust: TrustAttempt) -> Self {
+        let mut process = Self::from_test_child(child);
+        process.trust = Some(trust);
+        process
+    }
+
     pub(super) fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
         self.child.try_wait()
     }
@@ -91,29 +99,25 @@ impl RemoteAppProcess {
 
     pub(super) fn certificate_failed(&self) -> bool {
         let diagnostics = self.diagnostics.lock().ok().and_then(|file| {
-            let length = file.metadata().ok()?.len().min(MAX_DIAGNOSTIC_BYTES as u64) as usize;
+            let total = file.metadata().ok()?.len();
+            let length = total.min(MAX_DIAGNOSTIC_BYTES as u64) as usize;
             let mut bytes = vec![0_u8; length];
-            let count = read_diagnostics_at(&file, &mut bytes).ok()?;
+            // Rejection can follow a large burst of connection warnings.
+            // Inspect the bounded tail instead of freezing the first 64 KiB.
+            let count = read_diagnostics_from(&file, &mut bytes, total - length as u64).ok()?;
             bytes.truncate(count);
             Some(String::from_utf8_lossy(&bytes).into_owned())
         });
         certificate_rejected(&diagnostics.unwrap_or_default())
     }
 
-    /// Promotes the certificate of this connection to the VM trust anchor
-    /// after Windows returned an authenticated report through it.
-    pub(super) fn confirm_trust(&self) {
-        if let Some(trust) = &self.trust {
-            let _ = trust.confirm();
+    /// Called on the first valid authenticated report, including Windows
+    /// failures. Trust persistence failures must not be silently ignored.
+    pub(super) fn confirm_trust(&mut self) -> Result<(), WindowsOperationFailure> {
+        if let Some(trust) = &mut self.trust {
+            trust.confirm()?;
         }
-    }
-
-    /// Drops a pin that this attempt created through TOFU without ever
-    /// receiving an authenticated report, so it cannot become trusted.
-    pub(super) fn discard_unconfirmed_trust(&self) {
-        if let Some(trust) = &self.trust {
-            trust.discard_unconfirmed();
-        }
+        Ok(())
     }
 }
 
@@ -175,7 +179,7 @@ pub(super) fn spawn_powershell_file(
     label: &str,
     security: &OperationSecurity,
     project_access: Option<&ProjectAccessLease>,
-) -> Result<RemoteAppProcess, String> {
+) -> Result<RemoteAppProcess, WindowsOperationFailure> {
     let windows_script_path = linux_path_to_windows_share(
         Path::new(&config.shared_directory),
         script_path,
@@ -200,7 +204,7 @@ pub(super) fn spawn_powershell_file(
     let encoded = encode_powershell_script(&redirected_bootstrap_launcher(launcher.as_bytes()));
     let arguments = headless_powershell_arguments(&encoded);
     if arguments.encode_utf16().count() * 2 >= 16_000 {
-        return Err(crate::tr!("error-remoteapp-command-too-long"));
+        return Err(crate::tr!("error-remoteapp-command-too-long").into());
     }
     spawn_remote_app(
         config,
@@ -240,7 +244,7 @@ fn spawn_remote_app(
     label: &str,
     project_access: Option<&ProjectAccessLease>,
     bootstrap: tempfile::TempDir,
-) -> Result<RemoteAppProcess, String> {
+) -> Result<RemoteAppProcess, WindowsOperationFailure> {
     let (username, password) = container_credentials(config)?;
     let safe_label: String = label
         .chars()
@@ -301,46 +305,55 @@ fn spawn_remote_app(
     let diagnostic_stderr = diagnostics
         .try_clone()
         .map_err(|error| crate::tr!("error-remoteapp-run", error = error))?;
-    let mut child = Command::new(&config.freerdp_binary)
+    let child = Command::new(&config.freerdp_binary)
         .arg("/args-from:stdin")
-        .env("XDG_CONFIG_HOME", &trust_store)
+        .env("XDG_CONFIG_HOME", trust.config_directory())
         .stdin(Stdio::piped())
         .stdout(Stdio::from(diagnostic_stdout))
         .stderr(Stdio::from(diagnostic_stderr))
         .spawn()
         .map_err(|error| crate::tr!("error-remoteapp-run", error = error))?;
+    // Install the owner before sending input: EPIPE or a missing input pipe
+    // must still reap the child and discard its private TOFU state.
+    let mut process = RemoteAppProcess {
+        child,
+        diagnostics: Mutex::new(diagnostics),
+        _bootstrap: Some(bootstrap),
+        trust: Some(trust),
+    };
     let payload = format!("{}\n", arguments.join("\n"));
-    child
+    process
+        .child
         .stdin
         .take()
         .ok_or_else(|| crate::tr!("error-freerdp-input-open"))?
         .write_all(payload.as_bytes())
         .map_err(|error| crate::tr!("error-freerdp-credentials-send", error = error))?;
-    Ok(RemoteAppProcess {
-        child,
-        diagnostics: Mutex::new(diagnostics),
-        _bootstrap: Some(bootstrap),
-        trust: Some(trust),
-    })
+    Ok(process)
+}
+
+#[cfg(test)]
+fn read_diagnostics_at(file: &File, bytes: &mut [u8]) -> std::io::Result<usize> {
+    read_diagnostics_from(file, bytes, 0)
 }
 
 #[cfg(unix)]
-fn read_diagnostics_at(file: &File, bytes: &mut [u8]) -> std::io::Result<usize> {
+fn read_diagnostics_from(file: &File, bytes: &mut [u8], offset: u64) -> std::io::Result<usize> {
     use std::os::unix::fs::FileExt;
-    file.read_at(bytes, 0)
+    file.read_at(bytes, offset)
 }
 
 #[cfg(windows)]
-fn read_diagnostics_at(file: &File, bytes: &mut [u8]) -> std::io::Result<usize> {
+fn read_diagnostics_from(file: &File, bytes: &mut [u8], offset: u64) -> std::io::Result<usize> {
     use std::os::windows::fs::FileExt;
-    file.seek_read(bytes, 0)
+    file.seek_read(bytes, offset)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn read_diagnostics_at(file: &File, bytes: &mut [u8]) -> std::io::Result<usize> {
+fn read_diagnostics_from(file: &File, bytes: &mut [u8], offset: u64) -> std::io::Result<usize> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = file.try_clone()?;
-    file.seek(SeekFrom::Start(0))?;
+    file.seek(SeekFrom::Start(offset))?;
     file.read(bytes)
 }
 
@@ -352,12 +365,8 @@ fn app_freerdp_config_directory() -> Result<PathBuf, String> {
     let directory = base.join("mendimaru/freerdp-config");
     std::fs::create_dir_all(&directory)
         .map_err(|error| crate::tr!("error-freerdp-trust-directory-create", error = error))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
-            .map_err(|error| crate::tr!("error-freerdp-trust-directory-create", error = error))?;
-    }
+    // TrustAttempt verifies this is a direct, user-owned directory before it
+    // changes permissions; never chmod through an untrusted symlink here.
     Ok(directory)
 }
 
@@ -426,6 +435,56 @@ mod tests {
         let mut complete = vec![0_u8; 64];
         let count = read_diagnostics_at(&diagnostics, &mut complete).expect("reread diagnostics");
         assert_eq!(&complete[..count], b"certificate mismatch");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn rejection_after_a_large_warning_burst_is_still_classified() {
+        let child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .unwrap();
+        let process = super::RemoteAppProcess::from_test_child(child);
+        let mut writer = process.diagnostics.lock().unwrap().try_clone().unwrap();
+        writer
+            .write_all(&vec![b'w'; super::MAX_DIAGNOSTIC_BYTES + 1])
+            .unwrap();
+        writer.write_all(PINNED_REJECTED.as_bytes()).unwrap();
+        assert!(process.certificate_failed());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn aborting_the_operation_future_discards_private_tofu_and_reaps_its_child() {
+        let store = tempfile::tempdir().unwrap();
+        let trust = crate::winboat::rdp_trust::TrustAttempt::fixture(store.path());
+        let scratch = trust.config_directory().to_path_buf();
+        std::fs::write(
+            scratch.join("freerdp/server/127.0.0.1_47300.pem"),
+            b"-----BEGIN CERTIFICATE-----\nbWVuZGltYXJ1\n-----END CERTIFICATE-----\n",
+        )
+        .unwrap();
+        let child = std::process::Command::new("sh")
+            .args(["-c", "exec sleep 60"])
+            .spawn()
+            .unwrap();
+        let process_id = child.id();
+        let process = super::RemoteAppProcess::from_test_child_with_trust(child, trust);
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _owner = process;
+            started.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        ready.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(!scratch.exists());
+        assert!(!store
+            .path()
+            .join("freerdp/server/127.0.0.1_47300.pem")
+            .exists());
+        assert!(!std::path::Path::new(&format!("/proc/{process_id}")).exists());
     }
 
     #[cfg(target_os = "linux")]
