@@ -86,3 +86,28 @@ jobs:
             for name in dirs+files:
               if any(word in name.lower() for word in ['149','parity','cold-copy']): print('fixture:',Path(root)/name)
           PYTHON
+
+      - name: Inspect retained parity lab and runner environment
+        run: |
+          python3 - <<'PYTHON'
+          import os, json
+          from pathlib import Path
+          allowed=['MENDIMARU_CONFIG_DIR','MENDIMARU_CACHE_DIR','MENDIMARU_STUDIO_PARITY_SHARED_SESSION_ID']
+          env=Path.home()/'actions-runner/.env'
+          if env.is_file():
+            for line in env.read_text().splitlines():
+              if line.split('=',1)[0] in allowed: print('runner setting:',line)
+          for base in [Path('/tmp'),Path.home()]:
+            for root,dirs,files in os.walk(base):
+              dirs[:]=[d for d in dirs if d not in ['.git','node_modules','target','.venv','.cargo','.npm','glendix-family','mxcli-family','pantos','pantos-demo','yarn','go','rustup']]
+              for name in dirs:
+                if any(word in name.lower() for word in ['149','parity','cold-copy']): print('retained lab:',Path(root)/name)
+              if 'config.json' in files and ('149' in root.lower() or 'parity' in root.lower()):
+                try:
+                  data=json.loads((Path(root)/'config.json').read_text())
+                  print('lab configuration:',root,{k:data.get(k) for k in ['containerName','composeFile','sharedDirectory']})
+                except Exception: pass
+          suite=Path(os.environ['HOME'])/'.config/mendimaru-gates/studio-f5-parity.browser.json'
+          data=json.loads(suite.read_text())
+          print('suite tests:',[{ 'name':test.get('name'), 'actions':[step.get('action') for step in test.get('steps',[])]} for test in data.get('tests',[])])
+          PYTHON
