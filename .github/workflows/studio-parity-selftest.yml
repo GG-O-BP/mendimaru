@@ -53,3 +53,30 @@ jobs:
             d=json.loads(path.read_text())
             print('VM registry:',[{k:e.get(k) for k in ['sessionId','guestPort','hostPort','stoppedAt','recordPath']} for e in d['entries']])
           PYTHON
+      - name: Stop the two verified abandoned Runtime records
+        run: |
+          xvfb-run -a python3 -u - <<'PYTHON'
+          import json, os, subprocess
+          from pathlib import Path
+          binary=Path(os.environ['GITHUB_WORKSPACE'])/'src-tauri/target/release/mendimaru'
+          def cli(*args):
+            p=subprocess.run([str(binary),*args,'--json'],capture_output=True,text=True,timeout=150)
+            d=json.loads(p.stdout or p.stderr)
+            print('cleanup command:',args,p.returncode,json.dumps(d),flush=True)
+            assert p.returncode==0 and d.get('ok')
+            return d
+          assert cli('studio','status','--refresh','--timeout-seconds','90')['data']==[]
+          known={
+            'runtime_3bae59ad2637bbef968506b873aa0722':'studio-8188-639246728621007784',
+            'runtime_a2150f77115e431a72bf4fe8947cd862':'studio-7368-639256339578829651',
+          }
+          records=cli('runtime','list')['data']['sessions']
+          for record in records:
+            sid=record['sessionId']
+            if sid not in known: continue
+            assert record.get('studioSessionId')==known[sid]
+            assert record.get('guestPort')==8080 and record.get('hostPort')==8080
+            assert record['startedAt'].startswith('2026-09-')
+            if record['state']!='stopped':
+              cli('runtime','stop','--session-id',sid,'--timeout-seconds','120')
+          PYTHON
