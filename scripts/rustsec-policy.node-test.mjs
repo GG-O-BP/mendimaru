@@ -10,6 +10,7 @@ import {
   EXPIRY_WARNING_DAYS,
   formatExpiryWarning,
   isValidIsoDate,
+  pruneStaleExceptions,
   verifyExceptionExpiry,
   verifyRustsecPolicy,
 } from "./verify-rustsec-policy.mjs";
@@ -495,4 +496,182 @@ test("the full audit CLI honors the same warning window as expiry-only", () => {
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("pruning removes only exceptions the audit no longer reports", () => {
+  const unsound = maintainedException({
+    advisoryId: "RUSTSEC-2026-0002",
+    kind: "unsound",
+    exceptionClass: "bounded-reachability",
+    package: { name: "unsound", version: "2.0.0" },
+    reachability: {
+      status: "not-reachable",
+      evidence: "No source reference to the affected API.",
+      checkedCommit: "0123456789abcdef0123456789abcdef01234567",
+    },
+  });
+  const resolved = maintainedException({ advisoryId: "RUSTSEC-2026-0003" });
+  const policy = {
+    schemaVersion: 1,
+    reviewedAt: "2026-09-01",
+    exceptions: [maintainedException(), resolved, unsound],
+  };
+  const audited = report({
+    warnings: {
+      unmaintained: [
+        advisoryWarning(
+          "unmaintained",
+          "RUSTSEC-2026-0001",
+          "fixture",
+          "1.0.0",
+        ),
+      ],
+      unsound: [
+        advisoryWarning("unsound", "RUSTSEC-2026-0002", "unsound", "2.0.0"),
+      ],
+    },
+  });
+
+  const pruned = pruneStaleExceptions(audited, policy);
+  assert.deepEqual(pruned.removed, ["unmaintained:RUSTSEC-2026-0003"]);
+  // Remaining exceptions and unrelated metadata are kept byte-for-byte.
+  assert.deepEqual(pruned.policy.exceptions, [maintainedException(), unsound]);
+  assert.equal(pruned.policy.reviewedAt, "2026-09-01");
+  assert.equal(policy.exceptions.length, 3, "the input is not mutated");
+  assert.equal(verifyRustsecPolicy(audited, pruned.policy, now).ok, true);
+
+  // An exception of the same ID but a different kind is still stale.
+  const kindDrift = pruneStaleExceptions(
+    report({
+      warnings: {
+        unsound: [
+          advisoryWarning("unsound", "RUSTSEC-2026-0001", "fixture", "1.0.0"),
+        ],
+      },
+    }),
+    { exceptions: [maintainedException()] },
+  );
+  assert.deepEqual(kindDrift.removed, ["unmaintained:RUSTSEC-2026-0001"]);
+
+  assert.throws(() => pruneStaleExceptions(audited, {}), /no exceptions list/);
+  const empty = pruneStaleExceptions(report(), { exceptions: [] });
+  assert.deepEqual(empty, { policy: { exceptions: [] }, removed: [] });
+});
+
+test("pruning never hides other policy failures", () => {
+  const audited = report({
+    warnings: {
+      unmaintained: [
+        advisoryWarning(
+          "unmaintained",
+          "RUSTSEC-2026-0001",
+          "fixture",
+          "1.1.0",
+        ),
+        advisoryWarning("unmaintained", "RUSTSEC-2026-0009", "new", "1.0.0"),
+      ],
+    },
+    vulnerabilities: [
+      advisoryWarning(
+        "vulnerability",
+        "RUSTSEC-2026-0008",
+        "vulnerable",
+        "4.0.0",
+      ),
+    ],
+  });
+  const pruned = pruneStaleExceptions(audited, {
+    exceptions: [maintainedException({ expiresAt: "2026-08-01" })],
+  });
+  assert.deepEqual(pruned.removed, []);
+  const errors = verifyRustsecPolicy(audited, pruned.policy, now).errors.join(
+    "\n",
+  );
+  assert.match(errors, /vulnerability denied/);
+  assert.match(
+    errors,
+    /unknown RustSec warning denied: unmaintained:RUSTSEC-2026-0009/,
+  );
+  assert.match(errors, /expired on 2026-08-01/);
+  assert.match(errors, /lockfile has fixture@1\.1\.0/);
+});
+
+function runPruneCli(policy, audited, ...extra) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "rustsec-prune-"));
+  try {
+    const policyPath = path.join(directory, "policy.json");
+    const reportPath = path.join(directory, "audit.json");
+    fs.writeFileSync(policyPath, JSON.stringify(policy));
+    fs.writeFileSync(reportPath, JSON.stringify(audited));
+    const result = spawnSync(
+      process.execPath,
+      [
+        script,
+        "--prune-stale",
+        "--policy",
+        policyPath,
+        "--report",
+        reportPath,
+        "--today",
+        "2026-09-02",
+        ...extra,
+      ],
+      { encoding: "utf8" },
+    );
+    return {
+      ...result,
+      policy: JSON.parse(fs.readFileSync(policyPath, "utf8")),
+      leftovers: fs.readdirSync(directory).sort(),
+    };
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test("the prune CLI rewrites the policy atomically and then verifies it", () => {
+  const audited = report({
+    warnings: {
+      unmaintained: [
+        advisoryWarning(
+          "unmaintained",
+          "RUSTSEC-2026-0001",
+          "fixture",
+          "1.0.0",
+        ),
+      ],
+    },
+  });
+  const stale = maintainedException({ advisoryId: "RUSTSEC-2026-0003" });
+  const passing = runPruneCli(
+    { exceptions: [maintainedException(), stale] },
+    audited,
+  );
+  assert.equal(passing.status, 0, passing.stderr);
+  assert.match(passing.stdout, /removed: 1 \(unmaintained:RUSTSEC-2026-0003\)/);
+  assert.match(passing.stdout, /RustSec policy: PASS .*stale=0/);
+  assert.deepEqual(passing.policy.exceptions, [maintainedException()]);
+  assert.deepEqual(passing.leftovers, ["audit.json", "policy.json"]);
+
+  const unchanged = runPruneCli(
+    { exceptions: [maintainedException()] },
+    audited,
+  );
+  assert.equal(unchanged.status, 0, unchanged.stderr);
+  assert.match(unchanged.stdout, /removed: 0\n/);
+
+  // A new warning still fails after pruning; the stale entry is still gone.
+  const failing = runPruneCli({ exceptions: [stale] }, audited);
+  assert.equal(failing.status, 1);
+  assert.match(failing.stderr, /unknown RustSec warning denied/);
+  assert.deepEqual(failing.policy.exceptions, []);
+
+  const conflicting = runPruneCli(
+    { exceptions: [] },
+    audited,
+    "--output",
+    "x.json",
+  );
+  assert.notEqual(conflicting.status, 0);
+  assert.match(conflicting.stderr, /--prune-stale rewrites only the policy/);
+  assert.deepEqual(conflicting.policy, { exceptions: [] });
 });

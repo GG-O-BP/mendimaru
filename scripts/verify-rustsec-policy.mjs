@@ -225,12 +225,37 @@ export function verifyRustsecPolicy(
   };
 }
 
+/**
+ * Removes only exceptions whose advisory no longer appears in the audit
+ * report (#237). A compatible dependency update that resolves an advisory
+ * must not be blocked by its now-unnecessary exception. This never adds,
+ * extends, or edits an exception: every remaining exception keeps its exact
+ * metadata and is still verified by verifyRustsecPolicy afterwards.
+ */
+export function pruneStaleExceptions(report, policy) {
+  if (!Array.isArray(policy?.exceptions)) {
+    throw new Error("RustSec policy manifest has no exceptions list");
+  }
+  const present = new Set(
+    collectRustsecWarnings(report).map((warning) => warning.key),
+  );
+  const kept = [];
+  const removed = [];
+  for (const exception of policy.exceptions) {
+    const key = exceptionKey(exception);
+    if (present.has(key)) kept.push(exception);
+    else removed.push(key);
+  }
+  return { policy: { ...policy, exceptions: kept }, removed };
+}
+
 function parseArguments(argv) {
   const options = {
     policy: DEFAULT_POLICY_PATH,
     report: null,
     output: null,
     expiryOnly: false,
+    pruneStale: false,
     today: null,
     warningDays: EXPIRY_WARNING_DAYS,
   };
@@ -240,6 +265,7 @@ function parseArguments(argv) {
     else if (argument === "--report") options.report = argv[++index];
     else if (argument === "--output") options.output = argv[++index];
     else if (argument === "--expiry-only") options.expiryOnly = true;
+    else if (argument === "--prune-stale") options.pruneStale = true;
     else if (argument === "--today") options.today = argv[++index];
     else if (argument === "--warning-days") {
       const value = argv[++index];
@@ -254,6 +280,11 @@ function parseArguments(argv) {
   }
   if (options.expiryOnly && options.report) {
     throw new Error("--expiry-only does not read a cargo audit report");
+  }
+  if (options.pruneStale && (options.expiryOnly || options.output)) {
+    throw new Error(
+      "--prune-stale rewrites only the policy and cannot be combined with --expiry-only or --output",
+    );
   }
   return options;
 }
@@ -322,7 +353,23 @@ async function main() {
     ? fs.readFileSync(options.report, "utf8")
     : await readStdin();
   const report = parseJson(reportSource, "cargo audit JSON report");
-  const policy = readPolicy(options.policy);
+  let policy = readPolicy(options.policy);
+  if (options.pruneStale) {
+    const pruned = pruneStaleExceptions(report, policy);
+    if (pruned.removed.length > 0) {
+      // Write through a temporary file so a crash never truncates the policy.
+      const temporary = `${options.policy}.tmp`;
+      fs.writeFileSync(
+        temporary,
+        `${JSON.stringify(pruned.policy, null, 2)}\n`,
+      );
+      fs.renameSync(temporary, options.policy);
+    }
+    process.stdout.write(
+      `RustSec stale exceptions removed: ${pruned.removed.length}${pruned.removed.length ? ` (${pruned.removed.join(", ")})` : ""}\n`,
+    );
+    policy = pruned.policy;
+  }
   const result = verifyRustsecPolicy(report, policy, now, options.warningDays);
   const artifact = {
     schemaVersion: 1,

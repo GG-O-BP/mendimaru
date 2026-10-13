@@ -90,6 +90,18 @@ Update exception metadata and expiry during dependency review. Do not add an
 ID without an owner, upstream link, introducing dependency, remediation plan,
 and explicit expiry. Extending an expiry is an owner decision that requires a
 fresh review: re-check the upgrade path and, for an unsound exception, re-run
-the reachability review and record its commit in `checkedCommit`. The weekly
-scheduled workflow also creates a compatible Cargo update PR after running the
-portable check suite.
+the reachability review and record its commit in `checkedCommit`.
+
+The weekly scheduled workflow also creates a compatible Cargo update PR after
+running the portable check suite. A compatible update can resolve an advisory;
+its exception is then stale. Before verification the workflow runs
+
+```sh
+node scripts/verify-rustsec-policy.mjs --prune-stale --report cargo-audit.json
+```
+
+which removes only exceptions the audit no longer reports (#237). It never adds,
+extends or edits an exception, and the full policy still fails on
+vulnerabilities, unknown warnings, expiry, package drift and yanked entries.
+The pruned manifest is committed with the lockfile so the owner reviews both in
+the same PR.
