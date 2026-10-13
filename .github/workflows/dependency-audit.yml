@@ -52,10 +52,17 @@ jobs:
       - name: Install pinned cargo-audit
         run: cargo install cargo-audit --locked --version 0.22.2
 
-      - name: Verify updated RustSec policy
+      # A compatible update can resolve an advisory. Its exception is then
+      # stale and would block the very update that fixes it (#237). Remove
+      # only exceptions the audit no longer reports; never add or extend one.
+      # The full policy still fails on vulnerabilities, unknown warnings,
+      # expiry, package drift and yanked entries after pruning.
+      - name: Verify updated RustSec policy and drop resolved exceptions
         run: |
           cargo audit --file src-tauri/Cargo.lock --json > /tmp/cargo-audit.json
-          node scripts/verify-rustsec-policy.mjs --report /tmp/cargo-audit.json
+          node scripts/verify-rustsec-policy.mjs --prune-stale \
+            --report /tmp/cargo-audit.json
+          npx prettier --write security/rustsec-exceptions.json
 
       - name: Test compatible dependency update
         run: npm run check:portable
@@ -65,19 +72,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BRANCH: deps/scheduled-cargo-update
         run: |
-          if git diff --quiet -- src-tauri/Cargo.lock; then
+          if git diff --quiet -- src-tauri/Cargo.lock security/rustsec-exceptions.json; then
             echo 'No compatible Cargo dependency updates are available.'
             exit 0
           fi
           git config user.name 'mendimaru-dependency-bot'
           git config user.email 'noreply@users.noreply.github.com'
           git switch -c "$BRANCH"
-          git add src-tauri/Cargo.lock
+          git add src-tauri/Cargo.lock security/rustsec-exceptions.json
           git commit -m 'chore(deps): update Cargo lockfile'
           git push --force-with-lease origin "$BRANCH"
           gh pr create \
             --base main \
             --head "$BRANCH" \
             --title 'chore(deps): update Cargo lockfile' \
-            --body 'Scheduled compatible Cargo dependency update. Created by the weekly dependency audit workflow.' \
+            --body 'Scheduled compatible Cargo dependency update. Created by the weekly dependency audit workflow. RustSec exceptions no longer reported by cargo-audit after the update were removed (never added or extended); review them in security/rustsec-exceptions.json.' \
             || true
