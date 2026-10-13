@@ -18,6 +18,8 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
+      - name: Install frontend dependencies
+        run: npm ci
       - name: Build the Linux release binary exactly like the release gate
         run: cargo build --release --locked --manifest-path src-tauri/Cargo.toml
       - name: Reproduce the release gate's first command with its stderr
