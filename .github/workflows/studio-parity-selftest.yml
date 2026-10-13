@@ -10,7 +10,7 @@ jobs:
   runner-environment:
     name: Verify winboat-studio runner prerequisites
     runs-on: [self-hosted, linux, winboat-studio]
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -110,4 +110,29 @@ jobs:
           suite=Path(os.environ['HOME'])/'.config/mendimaru-gates/studio-f5-parity.browser.json'
           data=json.loads(suite.read_text())
           print('suite tests:',[{ 'name':test.get('name'), 'actions':[step.get('action') for step in test.get('steps',[])]} for test in data.get('tests',[])])
+          PYTHON
+
+      - name: Start the configured dormant WinBoat guest
+        run: |
+          python3 - <<'PYTHON'
+          import json, subprocess, time
+          from pathlib import Path
+          cfg=json.loads((Path.home()/'.config/com.ggobp.mendimaru/config.json').read_text())
+          assert cfg['containerName']=='WinBoat'
+          assert cfg['composeFile']==str(Path.home()/'.winboat/docker-compose.yml')
+          inspected=json.loads(subprocess.check_output(['docker','inspect','WinBoat'],text=True))[0]
+          assert 'windows' in inspected['Config']['Image'].lower()
+          if not inspected['State']['Running']:
+            started=subprocess.run(['docker','start','WinBoat'],text=True,capture_output=True)
+            print('configured VM startup:',started.returncode,started.stdout.strip(),started.stderr.strip())
+            if started.returncode: raise SystemExit(started.returncode)
+          for attempt in range(36):
+            result=subprocess.run(['/usr/bin/mendimaru','env','status','--json','--timeout-seconds','15'],text=True,capture_output=True,timeout=25)
+            try:
+              data=json.loads(result.stdout or result.stderr)
+              checks=data.get('data',{}).get('checks',[])
+              print('guest readiness:',{k:data.get('data',{}).get(k) for k in ['ready','containerRunning','guestConnected','guestReady']},[{k:check.get(k) for k in ['label','status','detail']} for check in checks])
+              if data.get('data',{}).get('ready'): break
+            except (ValueError,TypeError): print('environment probe exit:',result.returncode)
+            time.sleep(5)
           PYTHON
