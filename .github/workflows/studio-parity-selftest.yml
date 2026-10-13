@@ -15,12 +15,17 @@ jobs:
           ref: v0.6.1
           fetch-depth: 0
           persist-credentials: false
+          # Preserve only disposable build caches between fixture preparations.
+          # Checkout still force-selects the immutable tag; the build step below
+          # rejects any tracked source difference before invoking locked builds.
+          clean: false
       - name: Set up the release Node.js toolchain
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
       - name: Build the release binary from the checked-out tag
         run: |
+          git diff --exit-code HEAD --
           npm ci
           cargo build --release --locked --manifest-path src-tauri/Cargo.toml
       - name: Prepare and verify the real Studio F5 application
@@ -55,6 +60,8 @@ jobs:
           shared_id = None
           watcher = None
           watcher_log = None
+          for retained_output in ["studio-f5-parity.json", "release-studio-login.png"]:
+              (workspace / "artifacts/e2e" / retained_output).unlink(missing_ok=True)
 
 
           def cli(*args, timeout=150):
@@ -146,6 +153,7 @@ jobs:
                       chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) +
                       chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b"")
                   )
+                  return width, height, b"".join(row[1:] for row in rows)
               finally:
                   if image:
                       x11.XDestroyImage(image)
@@ -237,15 +245,41 @@ jobs:
                       if title in ["멘딕스 스튜디오 프로 - 로그인", "Mendix Studio Pro - Sign In", "Mendix Studio Pro - Login"]
                   ]
                   if len(login_windows) == 1 and not login_captured:
-                      capture_owned_window(login_windows[0][0], workspace / "artifacts/e2e/release-studio-login.png")
+                      login_window = login_windows[0][0]
+                      width, height, pixels = capture_owned_window(
+                          login_window, workspace / "artifacts/e2e/release-studio-login.png",
+                      )
                       login_captured = True
-                      print("Captured the owned Studio login dialog for offline-entry inspection", flush=True)
+                      # The Korean 11.12.3 offline button was visually reviewed in
+                      # run 38485731858. Never guess coordinates on another layout:
+                      # authenticate the button's complete RGB region before input.
+                      assert (width, height) == (896, 706), "The known offline-entry dialog layout changed"
+                      button = b"".join(
+                          pixels[(y * width + 500) * 3:(y * width + 664) * 3]
+                          for y in range(406, 438)
+                      )
+                      assert hashlib.sha256(button).hexdigest() == \
+                          "42245544b9691ec465eed631d2ed324479598454e3c14e6d21be357e8b7ab4f6", \
+                          "The reviewed Sign In Later button changed; manual inspection is required"
+                      subprocess.run(
+                          ["xdotool", "windowfocus", "--sync", login_window],
+                          check=True, timeout=15,
+                      )
+                      subprocess.run(
+                          ["xdotool", "mousemove", "--window", login_window, "582", "422", "click", "1"],
+                          check=True, timeout=15,
+                      )
+                      print("Selected the verified Sign In Later button; waiting for the exact project", flush=True)
                   print("Waiting for the selected project window", flush=True)
                   time.sleep(5)
               assert window, "The exact project's visible RemoteApp window did not appear"
               print("Allowing project load to settle before F5", flush=True)
               time.sleep(45)
               subprocess.run(["xdotool", "windowfocus", "--sync", window], check=True, timeout=15)
+              # Acquire native menu focus rather than leaving F5 in a WebView.
+              subprocess.run(["xdotool", "key", "--clearmodifiers", "alt+f"], check=True, timeout=15)
+              time.sleep(0.5)
+              subprocess.run(["xdotool", "key", "--clearmodifiers", "Escape"], check=True, timeout=15)
               subprocess.run(["xdotool", "key", "--clearmodifiers", "F5"], check=True, timeout=15)
               print("Delivered ordinary Studio F5", flush=True)
 
