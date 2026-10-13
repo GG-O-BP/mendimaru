@@ -128,7 +128,214 @@ jobs:
         env:
           MENDIMARU_STUDIO_PARITY_BINARY: ${{ github.workspace }}/src-tauri/target/release/mendimaru
           MENDIMARU_STUDIO_PARITY_SUITE: ${{ vars.STUDIO_F5_PARITY_SUITE }}
-        run: node scripts/e2e/studio-f5-parity-gate.mjs
+        run: |
+          xvfb-run -a -s "-screen 0 1920x1080x24" python3 -u - <<'PYTHON'
+          import hashlib
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          import time
+          import urllib.request
+          from pathlib import Path
+
+          binary = os.environ["MENDIMARU_STUDIO_PARITY_BINARY"]
+          workspace = Path(os.environ["GITHUB_WORKSPACE"])
+          studio_id = None
+          shared_id = None
+          watcher = None
+          watcher_log = None
+
+
+          def cli(*args, timeout=150):
+              print("CLI:", " ".join(args), flush=True)
+              p = subprocess.run(
+                  [binary, *args, "--json"],
+                  text=True, capture_output=True, timeout=timeout,
+              )
+              try:
+                  envelope = json.loads(p.stdout)
+              except ValueError as error:
+                  raise RuntimeError(
+                      f"{args[:2]} returned no JSON: exit={p.returncode}, "
+                      f"stderr={p.stderr[:1200]}"
+                  ) from error
+              if p.returncode != 0 or not envelope.get("ok"):
+                  raise RuntimeError(f"{args[:2]} failed: {envelope.get('error')}")
+              return envelope
+
+
+          def build_generation(project):
+              generation = hashlib.sha256()
+              count = 0
+              for root in [project / "deployment/web", project / "deployment/model"]:
+                  if not root.is_dir():
+                      continue
+                  for p in sorted(root.rglob("*")):
+                      if not p.is_file() or p.is_symlink():
+                          continue
+                      stat = p.stat()
+                      generation.update(
+                          f"{p.relative_to(project)}:{stat.st_size}:{stat.st_mtime_ns}\n".encode()
+                      )
+                      count += 1
+              assert count > 0, "Studio has no generated build files"
+              return generation.hexdigest()
+
+
+          try:
+              existing = cli("studio", "status", "--refresh", "--timeout-seconds", "90")
+              assert not existing["data"], "The release fixture already has an active Studio owner"
+              projects = cli("project", "list")["data"]
+              matches = [p for p in projects if p["name"] == "IronCalcSpreadUIShowcase"]
+              assert len(matches) == 1, "The configured release project must be unique"
+              project = matches[0]
+              assert project["requiredVersion"] == "11.12.3", "Unexpected release fixture version"
+              assert any(p["version"] == project["requiredVersion"] for p in cli("studio", "list")["data"])
+              config = json.loads((Path.home() / ".config/com.ggobp.mendimaru/config.json").read_text())
+              assert config["containerName"] == "WinBoat", "Unexpected release VM"
+              share = Path(config["sharedDirectory"])
+              candidates = []
+              for root, dirs, files in os.walk(share):
+                  depth = len(Path(root).relative_to(share).parts)
+                  dirs[:] = [
+                      d for d in dirs if depth < 5
+                      and d not in [".git", "node_modules", "deployment", "target", ".gradle"]
+                  ]
+                  if "IronCalcSpreadUIShowcase.mpr" in files:
+                      candidates.append(Path(root))
+              assert len(candidates) == 1, "The release project's build tree must be unique"
+              project_directory = candidates[0]
+
+              # The documented UNC repair changes only generated bundler inputs. The
+              # actual release decision still requires an unmodified Chromium pass.
+              watcher_log = (workspace / "artifacts/e2e/release-asset-watcher.ndjson")
+              watcher_log.parent.mkdir(parents=True, exist_ok=True)
+              watcher_output = watcher_log.open("w")
+              watcher = subprocess.Popen(
+                  [binary, "assets", "watch", "--project-id", project["projectId"],
+                   "--rewrite-generated-assets"],
+                  stdout=watcher_output, stderr=subprocess.STDOUT,
+              )
+              time.sleep(1)
+              assert watcher.poll() is None, "The generated-asset watcher failed to start"
+
+              launched = cli(
+                  "studio", "start", "--version", project["requiredVersion"],
+                  "--project-id", project["projectId"], "--timeout-seconds", "360",
+                  timeout=390,
+              )
+              studio_id = launched.get("studioSessionId")
+              assert studio_id and re.fullmatch(r"studio-\d+-\d{18}", studio_id)
+              print("Owned Studio:", studio_id, flush=True)
+
+              # This exact fixture uses Studio 11.12.3. Its UIA adapter is not enabled,
+              # so send the ordinary F5 key to its visible, uniquely named RemoteApp.
+              window = None
+              deadline = time.monotonic() + 180
+              while time.monotonic() < deadline:
+                  p = subprocess.run(
+                      ["xdotool", "search", "--onlyvisible", "--name", "IronCalcSpreadUIShowcase"],
+                      text=True, capture_output=True, timeout=10,
+                  )
+                  observed = []
+                  for wid in p.stdout.splitlines():
+                      title = subprocess.check_output(
+                          ["xdotool", "getwindowname", wid], text=True, timeout=10,
+                      ).strip()
+                      if "IronCalcSpreadUIShowcase" in title and "Studio Pro" in title:
+                          observed.append((wid, title))
+                  if len(observed) == 1:
+                      window, title = observed[0]
+                      print("Studio project window:", title, flush=True)
+                      break
+                  print("Waiting for the selected project window", flush=True)
+                  time.sleep(5)
+              assert window, "The exact project's visible RemoteApp window did not appear"
+              print("Allowing project load to settle before F5", flush=True)
+              time.sleep(30)
+              subprocess.run(["xdotool", "windowfocus", "--sync", window], check=True, timeout=15)
+              subprocess.run(["xdotool", "key", "--clearmodifiers", "F5"], check=True, timeout=15)
+              print("Delivered ordinary Studio F5", flush=True)
+
+              runtime = cli(
+                  "runtime", "start", "--mode", "studio-run-locally",
+                  "--studio-session-id", studio_id, "--timeout-seconds", "600",
+                  timeout=630,
+              )
+              runtime_id = runtime["runtimeSessionId"]
+              ready = cli(
+                  "runtime", "wait", "--session-id", runtime_id,
+                  "--timeout-seconds", "600", timeout=630,
+              )["data"]
+              # runtime.wait exposes the RuntimeStatus directly.
+              if "runtime" in ready:
+                  ready = ready["runtime"]
+              assert ready["state"] == "ready" and ready["httpReady"]
+              print("Studio Runtime is HTTP-ready:", runtime_id, flush=True)
+              with urllib.request.urlopen(ready["url"], timeout=30) as response:
+                  assert response.status < 500
+                  response.read()
+
+              previous = None
+              stable_since = None
+              deadline = time.monotonic() + 240
+              while time.monotonic() < deadline:
+                  assert watcher.poll() is None, "The generated-asset watcher stopped"
+                  current = build_generation(project_directory)
+                  if current != previous:
+                      previous = current
+                      stable_since = time.monotonic()
+                  elif time.monotonic() - stable_since >= 20:
+                      break
+                  print("Waiting for generated build files to settle", flush=True)
+                  time.sleep(5)
+              else:
+                  raise RuntimeError("Studio's generated files did not stabilize")
+              marker = Path(os.environ["RUNNER_TEMP"]) / "mendimaru-v061-build-generation"
+              marker.write_text(previous + "\n")
+              descriptor = cli(
+                  "browser", "session", "prepare", "--runtime-session-id", runtime_id,
+                  "--build-marker", str(marker),
+              )["data"]
+              shared_id = descriptor["sessionId"]
+              assert descriptor["state"] == "ready"
+              assert descriptor["preparation"]["comparable"] is True
+              print("Prepared comparable shared session:", shared_id, flush=True)
+              gate_env = os.environ.copy()
+              gate_env["MENDIMARU_STUDIO_PARITY_SHARED_SESSION_ID"] = shared_id
+              subprocess.run(
+                  ["node", "scripts/e2e/studio-f5-parity-gate.mjs"],
+                  env=gate_env, check=True, timeout=1320,
+              )
+              assert build_generation(project_directory) == previous, "The build changed during parity verification"
+          finally:
+              primary_failure = sys.exc_info()[0] is not None
+              cleanup_failures = []
+              if shared_id:
+                  try:
+                      cli("browser", "session", "finalize", "--shared-session-id", shared_id)
+                  except Exception as error:
+                      cleanup_failures.append(error)
+              if studio_id:
+                  try:
+                      cli("studio", "stop", "--session-id", studio_id, "--timeout-seconds", "120", timeout=150)
+                  except Exception as error:
+                      cleanup_failures.append(error)
+              if watcher is not None:
+                  try:
+                      watcher.terminate()
+                      watcher.wait(timeout=20)
+                      watcher_output.close()
+                      print("Generated-asset watcher stopped", flush=True)
+                  except Exception as error:
+                      cleanup_failures.append(error)
+              for error in cleanup_failures:
+                  print("Owner cleanup error:", error, flush=True)
+              if cleanup_failures and not primary_failure:
+                  raise cleanup_failures[0]
+          PYTHON
 
       - name: Upload parity evidence
         if: always()
