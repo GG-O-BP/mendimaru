@@ -36,3 +36,28 @@ jobs:
             validateSuiteShape(suite, process.env.SUITE);
             console.log("parity suite validation: OK");
           '
+
+      - name: Diagnose release gate prerequisites without mutations
+        run: |
+          node --input-type=module <<'JS'
+          import { execFileSync, spawnSync } from 'node:child_process';
+          import { existsSync, readdirSync } from 'node:fs';
+          const binary = `${process.env.GITHUB_WORKSPACE}/src-tauri/target/release/mendimaru`;
+          console.log('release binary exists:', existsSync(binary));
+          for (const key of ['MENDIMARU_CONFIG_DIR', 'MENDIMARU_CACHE_DIR', 'MENDIMARU_STUDIO_PARITY_SHARED_SESSION_ID', 'DISPLAY', 'WAYLAND_DISPLAY']) console.log(key, process.env[key] ?? '(unset)');
+          for (const root of [`${process.env.HOME}/.config`, `${process.env.HOME}/.cache`, `${process.env.HOME}/.config/mendimaru-gates`]) {
+            if (existsSync(root)) console.log('candidate directories:', root, readdirSync(root).filter(name => root.endsWith('mendimaru-gates') || /mendimaru/i.test(name)));
+          }
+          function safe(value) {
+            if (Array.isArray(value)) return value.map(safe);
+            if (!value || typeof value !== 'object') return value;
+            const allow = new Set(['schemaVersion','command','ok','platform','backend','error','code','message','retryable','data','state','status','sessionId','runtimeSessionId','studioSessionId','preparationId','comparable','mode','httpReady','studioState','sessions','runtimes','checks','available','healthy','connected','ready','installed','kind','name','passed','identity','runtimeMode','preparation']);
+            return Object.fromEntries(Object.entries(value).filter(([key]) => allow.has(key)).map(([key,v])=>[key,safe(v)]));
+          }
+          for (const args of [['env','status'], ['runtime','list'], ['studio','status'], ['browser','doctor']]) {
+            const result = spawnSync(binary, [...args,'--json','--timeout-seconds','30'], {encoding:'utf8',timeout:45000,maxBuffer:1048576});
+            console.log('command:', args.join(' '), 'exit:', result.status, 'spawn error:', result.error?.message ?? null);
+            if (result.stdout) { try { console.log(JSON.stringify(safe(JSON.parse(result.stdout)))); } catch { console.log('non-JSON stdout bytes:', Buffer.byteLength(result.stdout)); } }
+            if (result.stderr) console.log('stderr:', result.stderr.slice(0,2000));
+          }
+          JS
