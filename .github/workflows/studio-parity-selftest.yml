@@ -18,34 +18,31 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
-      - name: Install frontend dependencies
-        run: npm ci
-      - name: Build the Linux release binary exactly like the release gate
-        run: cargo build --release --locked --manifest-path src-tauri/Cargo.toml
-      - name: Reproduce the release gate's first command with its stderr
-        env:
-          GATE_BINARY: ${{ github.workspace }}/src-tauri/target/release/mendimaru
+      - name: Inspect how the runner loads job environment (names only)
         run: |
-          docker port WinBoat
           python3 -u - <<'PYTHON'
-          import json, os, subprocess
-          binary=os.environ['GATE_BINARY']
-          home=os.environ['HOME']
-          def attempt(prefix,label):
-            proc=subprocess.run([*prefix,binary,'runtime','start','--mode','studio-run-locally','--json','--timeout-seconds','90'],text=True,capture_output=True,timeout=150)
-            print(label,'exit:',proc.returncode,'stdout bytes:',len(proc.stdout),flush=True)
-            print(label,'stdout:',proc.stdout.replace(home,'~')[:3000],flush=True)
-            print(label,'stderr:',proc.stderr.replace(home,'~')[:3000],flush=True)
+          import os, subprocess
+          from pathlib import Path
+          root=Path.home()/'actions-runner'
+          for name in ['.env','.path']:
+            path=root/name
+            if path.is_file():
+              keys=[line.split('=',1)[0] for line in path.read_text().splitlines() if '=' in line]
+              print('runner',name,'keys:',keys if name=='.env' else '(path file present)')
+          print('hook variables:',{k:bool(v) for k,v in os.environ.items() if k.startswith('ACTIONS_RUNNER_HOOK')})
+          print('parity env present:',{k:k in os.environ for k in ['MENDIMARU_STUDIO_PARITY_SHARED_SESSION_ID','MENDIMARU_CONFIG_DIR','MENDIMARU_CACHE_DIR','DISPLAY']})
+          print('runner parent chain:')
+          pid=os.getppid()
+          for _ in range(8):
             try:
-              envelope=json.loads(proc.stdout)
-            except Exception:
-              return False
-            session=envelope.get('runtimeSessionId') or ((envelope.get('data') or {}).get('runtime') or {}).get('sessionId')
-            if session:
-              stop=subprocess.run([binary,'runtime','stop','--session-id',session,'--json'],text=True,capture_output=True,timeout=150)
-              print(label,'cleanup exit:',stop.returncode,stop.stdout.replace(home,'~')[:1500],flush=True)
-            return True
-          if not attempt([],'headless'):
-            attempt(['xvfb-run','-a'],'xvfb')
+              cmd=Path(f'/proc/{pid}/cmdline').read_bytes().replace(b'\0',b' ').decode()[:160]
+              stat=Path(f'/proc/{pid}/stat').read_text().split()
+            except Exception: break
+            print(' ',pid,cmd.replace(str(Path.home()),'~'))
+            pid=int(stat[3])
+            if pid<=1: break
+          for unit in subprocess.run(['systemctl','list-units','--all','--no-legend','actions.runner*'],text=True,capture_output=True).stdout.splitlines(): print('system unit:',unit)
+          for unit in subprocess.run(['systemctl','--user','list-units','--all','--no-legend','actions.runner*'],text=True,capture_output=True).stdout.splitlines(): print('user unit:',unit)
+          print('displays:',sorted(p.name for p in Path('/tmp/.X11-unix').glob('X*')) if Path('/tmp/.X11-unix').exists() else [])
           PYTHON
-          docker port WinBoat
+          /usr/bin/mendimaru runtime list --json | python3 -c "import json,sys; d=json.load(sys.stdin); print('runtime records:',[(s.get('sessionId'),s.get('state'),s.get('studioState'),s.get('incompatibleRecord')) for s in d['data']['sessions']])"
