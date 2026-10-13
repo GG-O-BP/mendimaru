@@ -29,3 +29,13 @@ jobs:
               data['data']=[entry for entry in data['data'] if entry.get('name')=='IronCalcSpreadUIShowcase']
             print('operator prerequisites:',args,proc.returncode,json.dumps(data),flush=True)
           PYTHON
+      - name: Verify live Studio and application readiness
+        run: |
+          docker port WinBoat
+          xvfb-run -a python3 -u - <<'PYTHON'
+          import json, subprocess
+          proc=subprocess.run(['/usr/bin/mendimaru','studio','status','--refresh','--json','--timeout-seconds','90'],text=True,capture_output=True,timeout=120)
+          print('live Studio status:',proc.returncode,proc.stdout.strip() or proc.stderr.strip())
+          proc=subprocess.run(['curl','--max-time','5','-s','-o','/dev/null','-w','%{http_code}','http://127.0.0.1:8080/'],text=True,capture_output=True,timeout=10)
+          print('host Runtime readiness:',proc.returncode,proc.stdout.strip())
+          PYTHON
