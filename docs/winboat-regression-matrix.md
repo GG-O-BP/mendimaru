@@ -275,3 +275,15 @@ disposable-snapshot and opt-in rules above:
 See [shared Linux + WinBoat tests](shared-winboat-testing.md) for fixed preparation
 identity, cross-process data exclusion, supported combinations, upgrade behavior,
 and the installed-package real Studio F5 integration gate.
+
+## Authenticated Studio stop across startup roots (#234)
+
+`scripts/test-studio-stop.ps1` executes the shared production guest helper with
+an in-memory process stand-in under Windows PowerShell 5.1. The matrix covers
+idle/no owner request, absent/disabled roots, accepted close vs actual exit,
+startup window handoffs, handle de-duplication, explicit retries, exact PID/start
+time, exceptions, monotonic expiry and throttling. Template tests verify that
+launch, reconnect and standalone stop embed this helper without replacing the
+existing authenticated control validation. No save dialog is automatically
+answered and no Studio process is force-killed. See
+[`issue-234-resolution.md`](issue-234-resolution.md).

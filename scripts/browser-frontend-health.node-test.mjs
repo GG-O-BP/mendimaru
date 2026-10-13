@@ -47,6 +47,7 @@ test("endpoint categories and network causes discard URL secrets", () => {
     ["net::ERR_NAME_NOT_RESOLVED", "dns_failure"],
     ["net::ERR_CONNECTION_REFUSED", "connection_failure"],
     ["net::ERR_CERT_AUTHORITY_INVALID", "tls_failure"],
+    ["net::ERR_UNSAFE_PORT", "request_failure"],
     ["net::ERR_FAILED", "request_failure"],
   ])
     assert.equal(networkFailure(input), code);
@@ -81,8 +82,12 @@ test(
           `<h1>App</h1><div role="dialog">An error occurred, please contact your system administrator.</div><script type="module">import("/missing.js?token=${secret}"); throw Error("${secret}");</script><link rel="stylesheet" href="/widgets/com.mendix.css?token=${secret}">`,
         );
       else if (pathname === "/unc")
+        // Port 1 is rejected by Chromium before DNS resolution. This is a
+        // real browser request failure on a shared UNC endpoint, but unlike
+        // an unavailable DNS answer it deterministically finishes within the
+        // observation window. No route, mirror or host override is installed.
         response.end(
-          `<h1>App</h1><script type="module">import("http://host.lan/Data/${secret}/deployment/web/widget.js");</script>`,
+          `<h1>App</h1><script type="module">import("http://host.lan:1/Data/${secret}/deployment/web/widget.js");</script>`,
         );
       else if (pathname === "/dialog")
         response.end(`<h1>App</h1><script>alert("${secret}")</script>`);
@@ -150,7 +155,12 @@ test(
             ),
           );
         }
-        if (route === "unc") assert.equal(report.diagnostics[0].code, code);
+        if (route === "unc") {
+          assert.equal(report.diagnostics[0].code, code);
+          assert.equal(report.diagnostics[0].endpoint.hostKind, "shared-unc");
+          assert.equal(report.diagnostics[0].endpoint.port, 1);
+          assert.equal(report.diagnostics[0].failure, "request_failure");
+        }
         if (route === "flood") {
           assert(report.truncated);
           assert(report.diagnostics.length <= 100);

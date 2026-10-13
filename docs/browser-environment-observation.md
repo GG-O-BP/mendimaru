@@ -124,3 +124,14 @@ Compose bytes and retains the disposable VM for inspection; finish any owned
 Studio/Runtime session and explicitly stop that disposable Compose project afterward.
 The [September 16 verification evidence](issue-154-live-evidence.json) records the
 actual five-scenario VM run and its coverage boundary.
+
+### Deterministic shared-UNC failure fixture (#235)
+
+The frontend-health real-browser fixture imports a `host.lan:1/Data/...` module.
+Chromium rejects this unsafe port before DNS resolution, yielding an actual
+request failure inside the bounded observation window. This keeps the same
+shared-UNC endpoint classification, schema, redaction, public CLI exit code and
+`assetBypass: false` assertions without relying on DNS timing. It installs no
+route interception, mirror or resolver override. Separate pending-resource and
+navigation-timeout fixtures continue to require `inconclusive`: production
+health logic must not invent a failure merely because DNS has not completed.
