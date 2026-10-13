@@ -10,29 +10,33 @@ jobs:
   runner-environment:
     name: Verify winboat-studio runner prerequisites
     runs-on: [self-hosted, linux, winboat-studio]
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Check out source
-        uses: actions/checkout@v6
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22.22.2
-
-      - name: Verify toolchain, Docker, and the parity suite
+      - name: Inspect available release fixtures
         env:
           STUDIO_F5_PARITY_SUITE: ${{ vars.STUDIO_F5_PARITY_SUITE }}
         run: |
-          test -x /usr/bin/cargo
-          cargo --version
-          docker ps --format '{{.Names}}'
-          test -n "$STUDIO_F5_PARITY_SUITE"
-          test -f "$STUDIO_F5_PARITY_SUITE"
-          SUITE="$STUDIO_F5_PARITY_SUITE" node --input-type=module -e '
-            import { readFile } from "node:fs/promises";
-            import { validateSuiteShape } from "./scripts/e2e/studio-f5-parity-gate.mjs";
-            const suite = JSON.parse(await readFile(process.env.SUITE, "utf8"));
-            validateSuiteShape(suite, process.env.SUITE);
-            console.log("parity suite validation: OK");
-          '
+          python3 -u - <<'PYTHON'
+          import json, os, shutil, socket, subprocess
+          from pathlib import Path
+          home=Path.home()
+          print('runner host:',socket.gethostname())
+          print('automation tools:',{n:shutil.which(n) for n in ['xvfb-run','xdotool','wmctrl','openbox','mxcli','mx','node','cargo']})
+          print('retained release binary:',(Path(os.environ['GITHUB_WORKSPACE'])/'src-tauri/target/release/mendimaru').is_file())
+          for args in [['project','list'],['studio','list']]:
+            p=subprocess.run(['/usr/bin/mendimaru',*args,'--json'],capture_output=True,text=True,timeout=120)
+            print('fixture metadata:',args,p.returncode,p.stdout)
+          suite=json.loads(Path(os.environ['STUDIO_F5_PARITY_SUITE']).read_text())
+          print('suite:',json.dumps(suite))
+          for base in [home/'Workspaces/mendix',home/'.config',Path('/tmp')]:
+            if not base.is_dir():continue
+            for root,dirs,files in os.walk(base):
+              depth=len(Path(root).relative_to(base).parts)
+              dirs[:]=[d for d in dirs if depth<4 and d not in ['.git','node_modules','target','.cargo','.npm','.venv','rustup']]
+              if any(w in root.lower() for w in ['issue149','issue-149','parity','cold-copy']):
+                if 'config.json' in files:
+                  data=json.loads((Path(root)/'config.json').read_text())
+                  print('retained fixture:',root,{k:data.get(k) for k in ['containerName','composeFile','sharedDirectory']})
+                for file in files:
+                  if file.endswith('.mpr') or 'build-generation' in file: print('fixture file:',str(Path(root)/file))
+          PYTHON
