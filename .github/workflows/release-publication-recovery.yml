@@ -1,0 +1,829 @@
+name: Publish verified v0.6.1 release recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Verified release tag
+        required: true
+        default: v0.6.1
+        type: string
+      parity_run:
+        description: Successful immutable-source Studio F5 parity self-test run ID
+        required: true
+        type: string
+      publish:
+        description: Publish the verified AUR package
+        required: true
+        default: true
+        type: boolean
+      initialize_empty:
+        description: Allow initialization of an empty AUR repository
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+
+jobs:
+  verify-evidence:
+    name: Verify all existing checks against the same release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the verified release source and workflow history
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify main CI, release candidate checks, and real Studio F5 evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_PARITY_RUN: ${{ inputs.parity_run }}
+        run: |
+          python3 -u - <<'PYTHON'
+          import io
+          import json
+          import os
+          import re
+          import subprocess
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          import zipfile
+
+          REPOSITORY = "GG-O-BP/mendimaru"
+          SOURCE = "f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b"
+          CANDIDATE_SOURCE = "b910fe6f4d0c5b2c68f0de172ad52dc9acf6662c"
+          PARITY_SOURCE = "918556d9312b2671ac3876d6e0155171a8fda31f"
+          BINARY_SHA256 = "6572308a01b2e765ab180eed6e20add5cdcaf41db714edcd580d1e3caa0f281b"
+          SUITE_SHA256 = "2c76345af2701103b9e778d7cb89a010c3f6bf3a64cb52695b2c7b144114523c"
+
+          tag = os.environ["RELEASE_TAG"]
+          assert tag == "v0.6.1", "This recovery publishes only the verified v0.6.1 tag"
+          token = os.environ.get("GH_TOKEN")
+          if not token:
+              token = subprocess.check_output(["gh", "auth", "token"], text=True).strip()
+
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+
+          def api_bytes(path):
+              url = f"https://api.github.com/repos/{REPOSITORY}/{path}"
+              request = urllib.request.Request(
+                  url,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "mendimaru-release-recovery",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              for attempt in range(3):
+                  try:
+                      try:
+                          response = urllib.request.build_opener(NoRedirect).open(request, timeout=45)
+                      except urllib.error.HTTPError as error:
+                          if error.code not in [301, 302, 303, 307, 308]:
+                              raise
+                          location = error.headers["Location"]
+                          assert urllib.parse.urlparse(location).scheme == "https"
+                          # Signed log/artifact downloads do not receive the API token.
+                          response = urllib.request.urlopen(location, timeout=45)
+                      with response:
+                          return response.read(64 * 1024 * 1024)
+                  except (urllib.error.URLError, TimeoutError):
+                      if attempt == 2:
+                          raise
+                      time.sleep(3)
+
+
+          def api(path):
+              return json.loads(api_bytes(path))
+
+
+          def run_id(name, default):
+              value = os.environ.get(name, default)
+              assert re.fullmatch(r"[1-9][0-9]*", value), f"Invalid evidence run ID: {name}"
+              return value
+
+
+          def completed_run(identifier, source, workflow):
+              run = api(f"actions/runs/{identifier}")
+              assert run["status"] == "completed", f"Evidence run {identifier} is unfinished"
+              assert run["head_sha"] == source, "The evidence workflow revision changed"
+              assert run["path"] == workflow, "The evidence came from the wrong workflow"
+              return run
+
+
+          assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == SOURCE
+          assert subprocess.check_output(["git", "rev-parse", f"{tag}^{{}}"], text=True).strip() == SOURCE
+          assert api("git/ref/heads/main")["object"]["sha"] == SOURCE, "main advanced after verification"
+          remote_tag = api(f"git/ref/tags/{tag}")["object"]
+          while remote_tag["type"] == "tag":
+              remote_tag = api(f"git/tags/{remote_tag['sha']}")["object"]
+          assert remote_tag["type"] == "commit" and remote_tag["sha"] == SOURCE, "The remote release tag moved"
+
+          ci_id = run_id("VERIFIED_MAIN_CI_RUN", "38332533693")
+          candidate_id = run_id("VERIFIED_CANDIDATE_RUN", "38359419382")
+          # 38365734858 (the last attempt before the interruption) FAILED at the
+          # Studio login dialog, so there is no default: a new successful run is required.
+          parity_id = run_id("VERIFIED_PARITY_RUN", "")
+
+          ci = completed_run(ci_id, SOURCE, ".github/workflows/ci.yml")
+          assert ci["conclusion"] == "success", "The main CI checks did not all pass"
+          print("Verified complete main CI:", ci_id, SOURCE, flush=True)
+
+          candidate = completed_run(candidate_id, CANDIDATE_SOURCE, ".github/workflows/release.yml")
+          assert candidate["event"] == "workflow_dispatch"
+          subprocess.run(
+              ["git", "diff", "--exit-code", SOURCE, CANDIDATE_SOURCE,
+               "--", ".", ":(exclude).github/workflows"],
+              check=True, capture_output=True,
+          )
+          jobs = api(f"actions/runs/{candidate_id}/jobs?filter=latest&per_page=100")["jobs"]
+          for name in [
+              "Dependency security audit",
+              "Verify Windows release candidate",
+              "verify-aur / Build and smoke installed AUR package",
+          ]:
+              passed = [job for job in jobs if job["name"] == name and job["conclusion"] == "success"]
+              assert passed, f"The required release check did not pass: {name}"
+              log = api_bytes(f"actions/jobs/{passed[-1]['id']}/logs").decode("utf-8", "replace")
+              assert f"HEAD is now at {SOURCE[:7]}" in log, f"The check tested a different source: {name}"
+              print("Verified release candidate check:", name, flush=True)
+
+          parity = completed_run(parity_id, PARITY_SOURCE, ".github/workflows/studio-parity-selftest.yml")
+          assert parity["event"] == "workflow_dispatch"
+          subprocess.run(
+              ["git", "diff", "--exit-code", SOURCE, PARITY_SOURCE,
+               "--", ".", ":(exclude).github/workflows"],
+              check=True, capture_output=True,
+          )
+          assert parity["conclusion"] == "success", "The real Studio F5 preparation failed"
+          parity_jobs = api(f"actions/runs/{parity_id}/jobs?per_page=100")["jobs"]
+          assert parity_jobs and all(job["conclusion"] == "success" for job in parity_jobs)
+          log = api_bytes(f"actions/jobs/{parity_jobs[0]['id']}/logs").decode("utf-8", "replace")
+          assert f"Verified release source: {SOURCE}" in log
+          assert f"Release binary SHA-256: {BINARY_SHA256}" in log
+
+          artifacts = api(f"actions/runs/{parity_id}/artifacts")["artifacts"]
+          matches = [
+              artifact for artifact in artifacts
+              if artifact["name"] == "mendimaru-studio-f5-parity-evidence" and not artifact["expired"]
+          ]
+          assert len(matches) == 1, "The verified parity evidence is missing or ambiguous"
+          archive = api_bytes(f"actions/artifacts/{matches[0]['id']}/zip")
+          with zipfile.ZipFile(io.BytesIO(archive)) as evidence:
+              matches = [
+                  info for info in evidence.infolist()
+                  if info.filename.rsplit("/", 1)[-1] == "studio-f5-parity.json"
+              ]
+              assert len(matches) == 1 and matches[0].file_size <= 512 * 1024
+              report = json.loads(evidence.read(matches[0]))
+          assert report["issue"] == 141 and report["outcome"] == "passed"
+          assert report["suiteSha256"] == SUITE_SHA256
+          assert re.fullmatch(r"runtime_[a-f0-9]{32}", report["runtimeSessionId"])
+          assert re.fullmatch(r"shared_[a-f0-9]{32}", report["sharedSessionId"])
+          assert re.fullmatch(r"preparation_[a-f0-9]{32}", report["preparationId"])
+          for name, mode, applied in [("unmodified", "unmodified", False), ("assisted", "assisted", True)]:
+              run = report["runs"][name]
+              assert run["browserParity"] == mode
+              correction = [
+                  entry for entry in run["corrections"] if entry["kind"] == "host-lan-asset-mirror"
+              ]
+              assert len(correction) == 1 and correction[0]["applied"] is applied
+              assert run["environment"]["comparable"] is True
+              assert run["environment"]["preparationId"] == report["preparationId"]
+              if name == "unmodified":
+                  assert run["outcome"] == "passed"
+                  assert run["passed"] >= 2 and run["failed"] == 0 and run["skipped"] == 0
+          print("Verified real Studio F5 parity:", parity_id, report["preparationId"], flush=True)
+          print("All v0.6.1 release prerequisites passed for the same main source", flush=True)
+          PYTHON
+
+  release:
+    name: Create GitHub release
+    needs: verify-evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Verify release versions
+        shell: bash
+        run: |
+          version="${RELEASE_TAG#v}"
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+(\.[0-9]+){2}$ ]]; then
+            echo "::error::Release tags must use v-prefixed semantic versions."
+            exit 1
+          fi
+
+          package_version="$(jq -r '.version' package.json)"
+          lock_version="$(jq -r '.version' package-lock.json)"
+          lock_root_version="$(jq -r '.packages[""].version' package-lock.json)"
+          tauri_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          cargo_version="$(
+            sed -n -E 's/^version = "([^"]+)"$/\1/p' \
+              src-tauri/Cargo.toml | head -n 1
+          )"
+
+          for declared in \
+            "$package_version" \
+            "$lock_version" \
+            "$lock_root_version" \
+            "$tauri_version" \
+            "$cargo_version"; do
+            if [[ "$declared" != "$version" ]]; then
+              echo "::error::Declared version '$declared' does not match '$version'."
+              exit 1
+            fi
+          done
+
+      - name: Create GitHub release if needed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isDraft,isPrerelease >release-state.json; then
+            jq -e --arg tag "$RELEASE_TAG" \
+              '.tagName == $tag and .isDraft == false and .isPrerelease == false' \
+              release-state.json >/dev/null
+            echo "Reusing the published, non-prerelease $RELEASE_TAG."
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --latest=false \
+              --title "Mendimaru ${RELEASE_TAG#v}" \
+              --generate-notes
+          fi
+
+  publish-aur:
+    name: Publish mendimaru to AUR
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: archlinux:base-devel
+    env:
+      SHOULD_PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+      INITIALIZE_EMPTY: ${{ github.event_name == 'push' && vars.AUR_INITIALIZE_EMPTY == 'true' || inputs.initialize_empty }}
+      AUR_PACKAGE_NAME: mendimaru
+    steps:
+      - name: Install workflow dependencies
+        run: |
+          pacman -Syu --noconfirm git openssh curl jq
+          useradd --create-home --shell /bin/bash aurbuild
+
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Prepare non-root build user
+        run: install -d -o aurbuild -g aurbuild "$RUNNER_TEMP/aur"
+
+      - name: Configure AUR identity
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          AUR_GIT_EMAIL: ${{ vars.AUR_GIT_EMAIL }}
+          AUR_GIT_NAME: ${{ vars.AUR_GIT_NAME }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          if [[ -z "$AUR_SSH_PRIVATE_KEY" ]]; then
+            echo "::error::Repository secret AUR_SSH_PRIVATE_KEY is not configured."
+            exit 1
+          fi
+
+          install -d -m 700 -o aurbuild -g aurbuild /home/aurbuild/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" |
+            tr -d '\r' > /home/aurbuild/.ssh/aur
+          ssh-keyscan -T 15 -t ed25519 aur.archlinux.org \
+            > /home/aurbuild/.ssh/known_hosts
+
+          expected_fingerprint="SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4"
+          mapfile -t actual_fingerprints < <(
+            ssh-keygen -E sha256 -lf /home/aurbuild/.ssh/known_hosts |
+              awk '{ print $2 }' |
+              sort -u
+          )
+          if (( ${#actual_fingerprints[@]} != 1 )) ||
+            [[ "${actual_fingerprints[0]}" != "$expected_fingerprint" ]]; then
+            echo "::error::Unexpected aur.archlinux.org SSH host key."
+            exit 1
+          fi
+
+          chown aurbuild:aurbuild \
+            /home/aurbuild/.ssh/aur \
+            /home/aurbuild/.ssh/known_hosts
+          chmod 600 \
+            /home/aurbuild/.ssh/aur \
+            /home/aurbuild/.ssh/known_hosts
+
+          printf '%s\n' \
+            'Host aur.archlinux.org' \
+            '  User aur' \
+            '  IdentityFile ~/.ssh/aur' \
+            '  IdentitiesOnly yes' \
+            > /home/aurbuild/.ssh/config
+          chown aurbuild:aurbuild /home/aurbuild/.ssh/config
+          chmod 600 /home/aurbuild/.ssh/config
+
+          runuser -u aurbuild -- env HOME=/home/aurbuild \
+            git config --global user.name \
+            "${AUR_GIT_NAME:-Mendimaru release automation}"
+          runuser -u aurbuild -- env HOME=/home/aurbuild \
+            git config --global user.email \
+            "${AUR_GIT_EMAIL:-actions@users.noreply.github.com}"
+
+      - name: Prepare, validate, and publish AUR package
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          args=(
+            --tag "$RELEASE_TAG"
+            --work-dir "$RUNNER_TEMP/aur"
+            --verify-source
+          )
+
+          if [[ "$SHOULD_PUBLISH" == "true" ]]; then
+            if [[ "$INITIALIZE_EMPTY" == "true" ]]; then
+              args+=(--initialize-empty)
+            fi
+            args+=(--push)
+          else
+            args+=(--offline)
+          fi
+
+          runuser -u aurbuild -- env \
+            HOME=/home/aurbuild \
+            PATH="$PATH" \
+            AUR_PACKAGE_NAME="$AUR_PACKAGE_NAME" \
+            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+            GITHUB_TOKEN="$GITHUB_TOKEN" \
+            bash scripts/update-mendimaru-aur.sh "${args[@]}"
+
+      - name: Upload dry-run AUR files
+        if: env.SHOULD_PUBLISH != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-${{ env.RELEASE_TAG }}
+          path: |
+            ${{ runner.temp }}/aur/mendimaru/PKGBUILD
+            ${{ runner.temp }}/aur/mendimaru/.SRCINFO
+          if-no-files-found: error
+
+  publish-windows:
+    name: Build and publish Windows installers
+    needs: release
+    runs-on: windows-latest
+    timeout-minutes: 75
+    permissions:
+      contents: write
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.2
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Configure optional Windows code signing
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+        run: |
+          $hasCertificate = -not [string]::IsNullOrWhiteSpace(
+            $env:WINDOWS_CERTIFICATE
+          )
+          $hasPassword = -not [string]::IsNullOrWhiteSpace(
+            $env:WINDOWS_CERTIFICATE_PASSWORD
+          )
+          $hasTimestamp = -not [string]::IsNullOrWhiteSpace(
+            $env:WINDOWS_TIMESTAMP_URL
+          )
+          $configuredCount = @(
+            @(
+              $hasCertificate
+              $hasPassword
+              $hasTimestamp
+            ) | Where-Object { $_ }
+          ).Count
+
+          if ($configuredCount -eq 0) {
+            "WINDOWS_SIGNING_ENABLED=false" >> $env:GITHUB_ENV
+            $noticePath = Join-Path `
+              $env:RUNNER_TEMP `
+              "WINDOWS-BUILDS-UNSIGNED.txt"
+            @"
+          Mendimaru $env:RELEASE_TAG Windows build notice
+
+          The MSI and NSIS installers in this release are not Authenticode
+          signed. Windows SmartScreen may display an unknown-publisher warning.
+
+          These artifacts were built by the repository's GitHub Actions release
+          workflow and passed the isolated install, native-window launch,
+          performance, and uninstall lifecycle checks.
+          "@ | Set-Content -LiteralPath $noticePath -Encoding utf8
+            "WINDOWS_UNSIGNED_NOTICE_PATH=$noticePath" >> $env:GITHUB_ENV
+            Write-Warning "Publishing explicitly marked unsigned Windows installers."
+            exit 0
+          }
+
+          if ($configuredCount -ne 3) {
+            throw @"
+          Windows signing is only partially configured. Set all of
+          WINDOWS_CERTIFICATE, WINDOWS_CERTIFICATE_PASSWORD, and
+          WINDOWS_TIMESTAMP_URL, or remove all three to publish explicitly
+          marked unsigned installers.
+          "@
+          }
+
+          $timestamp = $null
+          if (
+            -not [Uri]::TryCreate(
+              $env:WINDOWS_TIMESTAMP_URL,
+              [UriKind]::Absolute,
+              [ref]$timestamp
+            ) -or
+            $timestamp.Scheme -notin @("http", "https")
+          ) {
+            throw "Repository variable WINDOWS_TIMESTAMP_URL must be an absolute HTTP(S) timestamp URL."
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP "mendimaru-signing.pfx"
+          $configPath = Join-Path $env:RUNNER_TEMP "mendimaru-windows-signing.json"
+          "WINDOWS_SIGNING_ENABLED=true" >> $env:GITHUB_ENV
+          "TAURI_WINDOWS_SIGNING_CONFIG=$configPath" >> $env:GITHUB_ENV
+          "MENDIMARU_WINDOWS_CERTIFICATE_PATH=$pfxPath" >> $env:GITHUB_ENV
+          [IO.File]::WriteAllBytes(
+            $pfxPath,
+            [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE)
+          )
+          $password = ConvertTo-SecureString `
+            -String $env:WINDOWS_CERTIFICATE_PASSWORD `
+            -AsPlainText -Force
+          $importedCertificates = @(
+            Import-PfxCertificate `
+              -FilePath $pfxPath `
+              -CertStoreLocation Cert:\CurrentUser\My `
+              -Password $password `
+              -Exportable:$false
+          )
+          "MENDIMARU_WINDOWS_IMPORTED_THUMBPRINTS=$($importedCertificates.Thumbprint -join ',')" >> $env:GITHUB_ENV
+          $signingCertificates = @(
+            $importedCertificates | Where-Object { $_.HasPrivateKey }
+          )
+          if ($signingCertificates.Count -ne 1) {
+            throw "The PFX must contain exactly one Windows code-signing certificate with a private key."
+          }
+          $certificate = $signingCertificates[0]
+          "MENDIMARU_WINDOWS_CERTIFICATE_THUMBPRINT=$($certificate.Thumbprint)" >> $env:GITHUB_ENV
+          if ($certificate.NotAfter -le [DateTime]::UtcNow.AddDays(7)) {
+            throw "Windows signing certificate is expired or expires within seven days."
+          }
+
+          @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $certificate.Thumbprint
+                digestAlgorithm = "sha256"
+                timestampUrl = $timestamp.AbsoluteUri
+              }
+            }
+          } | ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath $configPath -Encoding utf8
+
+      - name: Build MSI and NSIS installers
+        shell: pwsh
+        run: |
+          if ($env:WINDOWS_SIGNING_ENABLED -eq "true") {
+            npm run tauri -- build --bundles msi,nsis `
+              --config "$env:TAURI_WINDOWS_SIGNING_CONFIG"
+          }
+          else {
+            npm run tauri -- build --bundles msi,nsis
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tauri Windows bundle build failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Verify Authenticode on application and installers
+        if: env.WINDOWS_SIGNING_ENABLED == 'true'
+        shell: pwsh
+        run: |
+          $artifacts = @(
+            Get-Item "src-tauri/target/release/mendimaru.exe" -ErrorAction Stop
+            Get-ChildItem "src-tauri/target/release/bundle/msi" -Filter "*.msi" -File
+            Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -File
+          )
+          if ($artifacts.Count -lt 3) {
+            throw "Expected the application executable plus MSI and NSIS installers."
+          }
+          foreach ($artifact in $artifacts) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $artifact.FullName
+            if ($signature.Status -ne [Management.Automation.SignatureStatus]::Valid) {
+              throw "Invalid Authenticode signature on $($artifact.FullName): $($signature.StatusMessage)"
+            }
+            if (
+              $signature.SignerCertificate.Thumbprint -ne
+              $env:MENDIMARU_WINDOWS_CERTIFICATE_THUMBPRINT
+            ) {
+              throw "Unexpected signing certificate on $($artifact.FullName)."
+            }
+            if ($null -eq $signature.TimeStamperCertificate) {
+              throw "Missing trusted timestamp on $($artifact.FullName)."
+            }
+          }
+
+      - name: Install, launch, and uninstall MSI in the ephemeral VM
+        shell: pwsh
+        env:
+          MENDIMARU_EPHEMERAL_WINDOWS_VM: mendimaru-github-hosted-ephemeral-vm
+        run: |
+          $installers = @(
+            Get-ChildItem `
+              "src-tauri/target/release/bundle/msi" `
+              -Filter "*.msi" -File -ErrorAction Stop
+          )
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one MSI installer."
+          }
+          ./scripts/e2e/windows-bundle-smoke.ps1 `
+            -InstallerKind msi `
+            -InstallerPath $installers[0].FullName `
+            -Performance
+
+      - name: Install, launch, and uninstall NSIS in the ephemeral VM
+        shell: pwsh
+        env:
+          MENDIMARU_EPHEMERAL_WINDOWS_VM: mendimaru-github-hosted-ephemeral-vm
+        run: |
+          $installers = @(
+            Get-ChildItem `
+              "src-tauri/target/release/bundle/nsis" `
+              -Filter "*.exe" -File -ErrorAction Stop
+          )
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one NSIS installer."
+          }
+          ./scripts/e2e/windows-bundle-smoke.ps1 `
+            -InstallerKind nsis `
+            -InstallerPath $installers[0].FullName `
+            -Performance
+
+      - name: Validate release bundle performance reports and budgets
+        shell: pwsh
+        run: |
+          $commit = (git rev-parse HEAD).Trim()
+          if ($commit -notmatch '^[0-9a-f]{40}$') {
+            throw 'Release checkout did not resolve to a full Git commit.'
+          }
+          $artifactRoot = 'artifacts/e2e/release-performance'
+          New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+          foreach ($kind in @('msi', 'nsis')) {
+            $raw = "artifacts/bundle-smoke/$kind.json"
+            $report = "$artifactRoot/release-$kind.json"
+            node scripts/perf/bundle-report.mjs `
+              --raw $raw `
+              --output $report `
+              --commit $commit `
+              --baseline-commit $commit `
+              --run-id "$env:GITHUB_RUN_ID-release-$kind"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to normalize the release $kind report."
+            }
+            node scripts/perf/performance-gate.mjs $report $report
+            if ($LASTEXITCODE -ne 0) {
+              throw "Release $kind exceeded an absolute performance budget."
+            }
+          }
+
+      - name: Upload bundle smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mendimaru-release-windows-bundle-smoke
+          path: |
+            artifacts/bundle-smoke
+            artifacts/e2e/release-performance
+          if-no-files-found: warn
+
+      - name: Upload installers to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $installers = @(
+            Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Filter "*.msi" -File
+            Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -File
+          )
+          if ($installers.Count -lt 2) {
+            throw "Expected both MSI and NSIS release installers."
+          }
+          foreach ($installer in $installers) {
+            gh release upload $env:RELEASE_TAG $installer.FullName `
+              --repo $env:GITHUB_REPOSITORY --clobber
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload $($installer.Name) to the release."
+            }
+          }
+
+          if ($env:WINDOWS_SIGNING_ENABLED -eq "false") {
+            gh release upload `
+              $env:RELEASE_TAG `
+              $env:WINDOWS_UNSIGNED_NOTICE_PATH `
+              --repo $env:GITHUB_REPOSITORY `
+              --clobber
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload the unsigned-build notice."
+            }
+
+            $marker = "<!-- mendimaru-unsigned-windows-builds -->"
+            $body = (
+              gh release view `
+                $env:RELEASE_TAG `
+                --repo $env:GITHUB_REPOSITORY `
+                --json body `
+                --jq .body |
+                Out-String
+            ).TrimEnd()
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to read the current GitHub release notes."
+            }
+            if (-not $body.Contains($marker)) {
+              $notesPath = Join-Path `
+                $env:RUNNER_TEMP `
+                "mendimaru-release-notes.md"
+              $warning = @"
+          $marker
+          ## Windows installer signing notice
+
+          The MSI and NSIS installers attached to this release are **not
+          Authenticode signed**. Windows SmartScreen may show an
+          unknown-publisher warning. The installers were built by this
+          repository's GitHub Actions workflow and passed the isolated
+          install, launch, performance, and uninstall lifecycle checks.
+          "@
+              "$body`n`n$warning" |
+                Set-Content -LiteralPath $notesPath -Encoding utf8
+              gh release edit `
+                $env:RELEASE_TAG `
+                --repo $env:GITHUB_REPOSITORY `
+                --notes-file $notesPath
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to add the unsigned-build warning to the release."
+              }
+            }
+          }
+
+      - name: Remove temporary Windows signing material
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:MENDIMARU_WINDOWS_IMPORTED_THUMBPRINTS)) {
+            foreach ($thumbprint in ($env:MENDIMARU_WINDOWS_IMPORTED_THUMBPRINTS -split ',')) {
+              if ($thumbprint -match '^[0-9A-Fa-f]+$') {
+                Remove-Item `
+                  -LiteralPath "Cert:\CurrentUser\My\$thumbprint" `
+                  -Force -ErrorAction SilentlyContinue
+              }
+            }
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:MENDIMARU_WINDOWS_CERTIFICATE_PATH)) {
+            Remove-Item `
+              -LiteralPath $env:MENDIMARU_WINDOWS_CERTIFICATE_PATH `
+              -Force -ErrorAction SilentlyContinue
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:TAURI_WINDOWS_SIGNING_CONFIG)) {
+            Remove-Item `
+              -LiteralPath $env:TAURI_WINDOWS_SIGNING_CONFIG `
+              -Force -ErrorAction SilentlyContinue
+          }
+
+  verify-publication:
+    name: Verify published release and AUR postconditions
+    needs: [publish-aur, publish-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Verify the release tag still identifies the registered main source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source=f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$source"
+          type="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.type)"
+          commit="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)"
+          if [[ "$type" == tag ]]; then
+            commit="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$commit" --jq .object.sha)"
+          fi
+          test "$commit" = "$source"
+
+      - name: Verify both Windows installers and the signing disclosure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isDraft,isPrerelease,assets,body >release-state.json
+          python3 - <<'PYTHON'
+          import json
+          import os
+          release = json.load(open("release-state.json"))
+          tag = os.environ["RELEASE_TAG"]
+          assert release["tagName"] == tag and not release["isDraft"] and not release["isPrerelease"]
+          assets = {asset["name"]: asset for asset in release["assets"]}
+          assert len(assets) == len(release["assets"]), "Ambiguous release assets"
+          for name in [f"mendimaru_{tag[1:]}_x64_en-US.msi", f"mendimaru_{tag[1:]}_x64-setup.exe"]:
+              assert name in assets and assets[name]["size"] > 1024 * 1024, f"Missing/empty installer: {name}"
+          notice = "WINDOWS-BUILDS-UNSIGNED.txt"
+          if notice in assets:
+              assert assets[notice]["size"] > 0
+              assert "<!-- mendimaru-unsigned-windows-builds -->" in release["body"]
+              assert "not" in release["body"] and "Authenticode signed" in release["body"]
+          print("Verified published MSI, NSIS and signing disclosure")
+          PYTHON
+
+      - name: Verify the AUR master branch actually contains this release
+        if: inputs.publish
+        run: |
+          checkout="$RUNNER_TEMP/aur-publication-verification"
+          git clone --depth 1 --branch master \
+            https://aur.archlinux.org/mendimaru.git "$checkout"
+          python3 - "$checkout" <<'PYTHON'
+          import os
+          import re
+          import sys
+          from pathlib import Path
+          checkout = Path(sys.argv[1])
+          version = os.environ["RELEASE_TAG"][1:]
+          metadata = (checkout / ".SRCINFO").read_text()
+          package = (checkout / "PKGBUILD").read_text()
+          assert re.search(r"(?m)^\s*pkgname = mendimaru$", metadata)
+          assert re.search(rf"(?m)^\s*pkgver = {re.escape(version)}$", metadata)
+          assert re.search(rf"(?m)^pkgver=['\"]?{re.escape(version)}['\"]?$", package)
+          assert f"/archive/refs/tags/v{version}.tar.gz" in metadata
+          print("Verified public AUR master metadata:", version)
+          PYTHON
+
+      - name: Mark only the fully verified release as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --latest
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" = "$RELEASE_TAG"
+          {
+            echo "## Release registration completed"
+            echo "- Tag: $RELEASE_TAG"
+            echo "- Source: f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b (verified main)"
+            echo "- Windows MSI and NSIS: published and verified"
+            echo "- AUR publication requested: ${{ inputs.publish }}"
+            echo "- GitHub latest release: verified"
+          } >>"$GITHUB_STEP_SUMMARY"
