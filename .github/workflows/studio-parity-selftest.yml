@@ -18,24 +18,32 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22.22.2
-      - name: Inspect installed Studio and parity sample without modifying it
-        run: |
-          xvfb-run -a python3 -u - <<'PYTHON'
-          import json, subprocess
-          for args in [['env','status'],['studio','list'],['project','list']]:
-            proc=subprocess.run(['/usr/bin/mendimaru',*args,'--json','--timeout-seconds','120'],text=True,capture_output=True,timeout=150)
-            data=json.loads(proc.stdout or proc.stderr)
-            if args==['project','list'] and data.get('ok'):
-              data['data']=[entry for entry in data['data'] if entry.get('name')=='IronCalcSpreadUIShowcase']
-            print('operator prerequisites:',args,proc.returncode,json.dumps(data),flush=True)
-          PYTHON
-      - name: Verify live Studio and application readiness
+      - name: Build the Linux release binary exactly like the release gate
+        run: cargo build --release --locked --manifest-path src-tauri/Cargo.toml
+      - name: Reproduce the release gate's first command with its stderr
+        env:
+          GATE_BINARY: ${{ github.workspace }}/src-tauri/target/release/mendimaru
         run: |
           docker port WinBoat
-          xvfb-run -a python3 -u - <<'PYTHON'
-          import json, subprocess
-          proc=subprocess.run(['/usr/bin/mendimaru','studio','status','--refresh','--json','--timeout-seconds','90'],text=True,capture_output=True,timeout=120)
-          print('live Studio status:',proc.returncode,proc.stdout.strip() or proc.stderr.strip())
-          proc=subprocess.run(['curl','--max-time','5','-s','-o','/dev/null','-w','%{http_code}','http://127.0.0.1:8080/'],text=True,capture_output=True,timeout=10)
-          print('host Runtime readiness:',proc.returncode,proc.stdout.strip())
+          python3 -u - <<'PYTHON'
+          import json, os, subprocess
+          binary=os.environ['GATE_BINARY']
+          home=os.environ['HOME']
+          def attempt(prefix,label):
+            proc=subprocess.run([*prefix,binary,'runtime','start','--mode','studio-run-locally','--json','--timeout-seconds','90'],text=True,capture_output=True,timeout=150)
+            print(label,'exit:',proc.returncode,'stdout bytes:',len(proc.stdout),flush=True)
+            print(label,'stdout:',proc.stdout.replace(home,'~')[:3000],flush=True)
+            print(label,'stderr:',proc.stderr.replace(home,'~')[:3000],flush=True)
+            try:
+              envelope=json.loads(proc.stdout)
+            except Exception:
+              return False
+            session=envelope.get('runtimeSessionId') or ((envelope.get('data') or {}).get('runtime') or {}).get('sessionId')
+            if session:
+              stop=subprocess.run([binary,'runtime','stop','--session-id',session,'--json'],text=True,capture_output=True,timeout=150)
+              print(label,'cleanup exit:',stop.returncode,stop.stdout.replace(home,'~')[:1500],flush=True)
+            return True
+          if not attempt([],'headless'):
+            attempt(['xvfb-run','-a'],'xvfb')
           PYTHON
+          docker port WinBoat
