@@ -1,82 +1,40 @@
 name: Studio F5 parity gate self-test
-
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   runner-environment:
-    name: Verify winboat-studio runner prerequisites
+    name: Inspect the selected Studio RemoteApp window
     runs-on: [self-hosted, linux, winboat-studio]
     timeout-minutes: 15
     steps:
-      - name: Inspect Runtime ownership and keeper prerequisites
-        env:
-          STUDIO_F5_PARITY_SUITE: ${{ vars.STUDIO_F5_PARITY_SUITE }}
+      - name: Inspect the actual project window title
         run: |
-          python3 -u - <<'PYTHON'
-          import json, os, socket, subprocess, stat
-          from pathlib import Path
-          home=Path.home()
-          print('runner host:',socket.gethostname())
-          binary=Path(os.environ['GITHUB_WORKSPACE'])/'src-tauri/target/release/mendimaru'
-          assert binary.is_file()
-          for args in [['runtime','list'],['operation','list']]:
-            p=subprocess.run([str(binary),*args,'--json'],capture_output=True,text=True,timeout=120)
-            d=json.loads(p.stdout or p.stderr)
-            if args[0]=='runtime':
-              print('Runtime records:',d)
-            else:
-              entries=d.get('data',[])
-              if isinstance(entries,dict): entries=entries.get('operations',[])
-              print('Recent operations:',entries[-4:])
-          cache=home/'.cache/com.ggobp.mendimaru'
-          for path in [cache,cache/'cli-sessions']:
-            if path.exists() or path.is_symlink():
-              m=path.lstat()
-              print('keeper directory:',str(path),m.st_uid,oct(stat.S_IMODE(m.st_mode)),'symlink=',path.is_symlink())
-          name=cache/'cli-sessions'/('s-'+os.urandom(16).hex()+'.sock')
-          print('keeper socket bytes:',len(os.fsencode(name)))
-          s=socket.socket(socket.AF_UNIX)
-          try:
-            s.bind(str(name))
-            print('keeper socket bind: success')
-          except Exception as e:
-            print('keeper socket bind failed:',str(e))
-          finally:
-            s.close()
-            if name.exists(): name.unlink()
-          registry=Path(f'/tmp/mendimaru-vm-runtime-{os.getuid()}')
-          for path in registry.glob('*.json'):
-            d=json.loads(path.read_text())
-            print('VM registry:',[{k:e.get(k) for k in ['sessionId','guestPort','hostPort','stoppedAt','recordPath']} for e in d['entries']])
-          PYTHON
-      - name: Stop the two verified abandoned Runtime records
-        run: |
-          xvfb-run -a python3 -u - <<'PYTHON'
-          import json, os, subprocess
+          xvfb-run -a -s "-screen 0 1920x1080x24" python3 -u - <<'PYTHON'
+          import json, os, subprocess, time
           from pathlib import Path
           binary=Path(os.environ['GITHUB_WORKSPACE'])/'src-tauri/target/release/mendimaru'
+          owned=None
           def cli(*args):
-            p=subprocess.run([str(binary),*args,'--json'],capture_output=True,text=True,timeout=150)
-            d=json.loads(p.stdout or p.stderr)
-            print('cleanup command:',args,p.returncode,json.dumps(d),flush=True)
-            assert p.returncode==0 and d.get('ok')
-            return d
-          assert cli('studio','status','--refresh','--timeout-seconds','90')['data']==[]
-          known={
-            'runtime_3bae59ad2637bbef968506b873aa0722':'studio-8188-639246728621007784',
-            'runtime_a2150f77115e431a72bf4fe8947cd862':'studio-7368-639256339578829651',
-          }
-          records=cli('runtime','list')['data']['sessions']
-          for record in records:
-            sid=record['sessionId']
-            if sid not in known: continue
-            assert record.get('studioSessionId')==known[sid]
-            assert record.get('guestPort')==8080 and record.get('hostPort')==8080
-            assert record['startedAt'].startswith('2026-09-')
-            if record['state']!='stopped':
-              cli('runtime','stop','--session-id',sid,'--timeout-seconds','120')
+              p=subprocess.run([str(binary),*args,'--json'],capture_output=True,text=True,timeout=420)
+              d=json.loads(p.stdout or p.stderr)
+              print('CLI:',args,p.returncode,json.dumps(d),flush=True)
+              assert p.returncode==0 and d.get('ok')
+              return d
+          try:
+              assert cli('studio','status','--refresh','--timeout-seconds','90')['data']==[]
+              projects=cli('project','list')['data']
+              project=next(p for p in projects if p['name']=='IronCalcSpreadUIShowcase')
+              owned=cli('studio','start','--version',project['requiredVersion'],'--project-id',project['projectId'],'--timeout-seconds','360')['studioSessionId']
+              for i in range(6):
+                  p=subprocess.run(['xdotool','search','--onlyvisible','--name','.'],capture_output=True,text=True,timeout=15)
+                  titles=[]
+                  for wid in p.stdout.splitlines()[:30]:
+                      title=subprocess.run(['xdotool','getwindowname',wid],capture_output=True,text=True,timeout=10).stdout.strip()
+                      titles.append((wid,title))
+                  print('Visible RemoteApp windows:',json.dumps(titles),flush=True)
+                  time.sleep(10)
+          finally:
+              if owned: cli('studio','stop','--session-id',owned,'--timeout-seconds','120')
           PYTHON
