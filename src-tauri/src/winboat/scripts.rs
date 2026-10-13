@@ -1,3 +1,4 @@
+const STUDIO_STOP_PREAMBLE: &str = include_str!("../../scripts/studio_stop.ps1");
 const UI_SUPERVISOR: &str = include_str!("../../scripts/ui_supervisor.ps1");
 const UI_WORKER: &str = include_str!("../../scripts/ui_worker.ps1");
 fn ui_preamble() -> String {
@@ -42,6 +43,7 @@ pub(super) fn launch_studio_script(
             &project_ready_timeout_seconds.to_string(),
         )
         .replace("__UI_PREAMBLE__", &ui_preamble())
+        .replace("__STUDIO_STOP_PREAMBLE__", STUDIO_STOP_PREAMBLE)
         .replace("__SECURITY_PREAMBLE__", OPERATION_SECURITY_PREAMBLE)
 }
 
@@ -149,6 +151,7 @@ pub(super) fn studio_sessions_script(
         )
         .replace("__INSTALL_ROOT__", &powershell_literal(install_root))
         .replace("__UI_PREAMBLE__", &ui_preamble())
+        .replace("__STUDIO_STOP_PREAMBLE__", STUDIO_STOP_PREAMBLE)
         .replace("__SECURITY_PREAMBLE__", OPERATION_SECURITY_PREAMBLE))
 }
 
@@ -410,9 +413,38 @@ mod tests {
         assert!(script.contains("return $sessions.ToArray()"));
         assert!(script.contains("Assert-MendimaruTrustedExecutable"));
         assert!(script.contains("CloseMainWindow()"));
+        assert!(script.contains("function Invoke-MendimaruPendingStudioStop"));
+        assert!(script.contains("$pendingStop = New-MendimaruStudioStopState"));
+        assert!(script.contains("$State.DeliveredHandles.Contains($handle)"));
+        assert!(script.contains("$Process.Id -ne $ExpectedProcessId"));
+        assert!(script.contains("-ExpectedStartedTicks $targetStartedTicks"));
+        assert!(script.contains("$deadline.Elapsed.TotalSeconds -lt 30"));
         assert!(script.contains("Read-MendimaruStudioStopRequest"));
         assert!(script.contains("$controlPath = '\\\\host.lan\\Data\\session.control.json'"));
         assert!(!script.contains("Stop-Process"));
         assert!(!script.contains("__"));
+    }
+
+    #[test]
+    fn authenticated_launch_monitor_embeds_the_same_bounded_stop_helper() {
+        let script = launch_studio_script(
+            "studio.exe",
+            None,
+            "report",
+            "control",
+            "root",
+            "11.12.6",
+            30,
+        );
+        assert!(script.contains("function Invoke-MendimaruPendingStudioStop"));
+        assert!(script.contains("$pendingStop = New-MendimaruStudioStopState"));
+        assert!(script.contains(
+            "-ExpectedProcessId $readyProcessId -ExpectedStartedTicks $readyStartedTicks"
+        ));
+        assert!(script.contains("$stopStatus -eq 'expired'"));
+        assert!(!script.contains("__STUDIO_STOP_PREAMBLE__"));
+        assert!(!super::STUDIO_STOP_PREAMBLE.contains(".Kill("));
+        assert!(!super::STUDIO_STOP_PREAMBLE.contains("Stop-Process"));
+        assert!(!super::STUDIO_STOP_PREAMBLE.contains("SendKeys"));
     }
 }

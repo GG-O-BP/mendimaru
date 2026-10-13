@@ -14,6 +14,7 @@ $knownStudios = $knownStudiosJson | ConvertFrom-Json
 
 __SECURITY_PREAMBLE__
 __UI_PREAMBLE__
+__STUDIO_STOP_PREAMBLE__
 
 if (-not ('Mendimaru.ProcessSecurity' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -220,6 +221,7 @@ try {
             Write-SessionResult 'succeeded' 'Studio Pro session is ready to reconnect.' $null @($session)
             Initialize-MendimaruUi $process $session.sessionId
             $lastControlSequence = [long]0
+            $pendingStop = $null
             while ($true) {
                 Start-Sleep -Milliseconds 50
                 Service-MendimaruUi
@@ -248,36 +250,39 @@ try {
                             -ExpectedProcessId ([int]$session.processId) `
                             -ExpectedStartedTicks $targetStartedTicks `
                             -PreviousSequence $lastControlSequence
-                        $lastControlSequence = $sequence
                         Remove-Item -LiteralPath $controlPath -Force -ErrorAction Stop
-                        $process.Refresh()
-                        if ($process.StartTime.ToUniversalTime().Ticks -ne $targetStartedTicks) {
-                            continue
-                        }
-                        if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
-                            $null = $process.CloseMainWindow()
-                        }
+                        $lastControlSequence = $sequence
+                        $pendingStop = New-MendimaruStudioStopState
                     } catch {
                         # Invalid requests never close the selected Studio process.
                     }
+                }
+                $stopStatus = Invoke-MendimaruPendingStudioStop `
+                    -Process $process -State $pendingStop `
+                    -ExpectedProcessId $targetProcessId -ExpectedStartedTicks $targetStartedTicks
+                if ($stopStatus -eq 'identity-mismatch') { throw 'MENDIMARU_STUDIO_SESSION_ENDED' }
+                if ($stopStatus -eq 'expired') { $pendingStop = $null }
+                if ($stopStatus -eq 'ended') {
+                    Close-MendimaruUi
+                    Write-SessionResult 'succeeded' 'Studio Pro session closed.' $null @()
+                    exit 0
                 }
             }
         }
         'stop' {
             $session = Get-TargetSession
-            if (-not $session.hasWindow) {
-                throw 'MENDIMARU_STUDIO_SESSION_WINDOW_UNAVAILABLE'
-            }
             $process = Get-TargetProcess
-            if (-not $process.CloseMainWindow()) {
-                throw 'MENDIMARU_STUDIO_SESSION_CLOSE_REJECTED'
-            }
-            $deadline = (Get-Date).AddSeconds(30)
+            $pendingStop = New-MendimaruStudioStopState
+            $deadline = [Diagnostics.Stopwatch]::StartNew()
             do {
-                Start-Sleep -Milliseconds 500
-                $process.Refresh()
-            } while (-not $process.HasExited -and (Get-Date) -lt $deadline)
-            if (-not $process.HasExited) {
+                $stopStatus = Invoke-MendimaruPendingStudioStop `
+                    -Process $process -State $pendingStop `
+                    -ExpectedProcessId $targetProcessId -ExpectedStartedTicks $targetStartedTicks
+                if ($stopStatus -eq 'identity-mismatch') { throw 'MENDIMARU_STUDIO_SESSION_ENDED' }
+                if ($stopStatus -eq 'ended') { break }
+                Start-Sleep -Milliseconds 250
+            } while ($deadline.Elapsed.TotalSeconds -lt 30)
+            if ($stopStatus -ne 'ended') {
                 throw 'MENDIMARU_STUDIO_SESSION_CLOSE_PENDING'
             }
             Write-SessionResult 'succeeded' 'Studio Pro session closed.' $null @()

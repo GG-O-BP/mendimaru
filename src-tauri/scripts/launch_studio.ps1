@@ -9,6 +9,7 @@ $process = $null
 
 __SECURITY_PREAMBLE__
 __UI_PREAMBLE__
+__STUDIO_STOP_PREAMBLE__
 
 if (-not ('Mendimaru.ProcessSecurity' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -318,6 +319,7 @@ try {
     $readyStartedTicks = [long]$readyProcess.StartTime.ToUniversalTime().Ticks
     Initialize-MendimaruUi $readyProcess $sessionId
     $lastControlSequence = [long]0
+    $pendingStop = $null
     while ($true) {
         try {
             $current = $readyProcess
@@ -341,20 +343,20 @@ try {
                     -ExpectedProcessId $readyProcessId `
                     -ExpectedStartedTicks $readyStartedTicks `
                     -PreviousSequence $lastControlSequence
-                $lastControlSequence = $sequence
                 Remove-Item -LiteralPath $controlPath -Force -ErrorAction Stop
-                $current.Refresh()
-                if ($current.StartTime.ToUniversalTime().Ticks -ne $readyStartedTicks) {
-                    break
-                }
-                if ($current.MainWindowHandle -ne [IntPtr]::Zero) {
-                    $null = $current.CloseMainWindow()
-                }
+                $lastControlSequence = $sequence
+                $pendingStop = New-MendimaruStudioStopState
             } catch {
                 # An invalid or tampered request never closes Studio Pro. The
                 # host times out while this authenticated launch stays alive.
             }
         }
+        $stopStatus = Invoke-MendimaruPendingStudioStop `
+            -Process $current -State $pendingStop `
+            -ExpectedProcessId $readyProcessId -ExpectedStartedTicks $readyStartedTicks
+        if ($stopStatus -eq 'ended') { break }
+        if ($stopStatus -eq 'expired') { $pendingStop = $null }
+        if ($stopStatus -eq 'identity-mismatch') { throw 'MENDIMARU_STUDIO_SESSION_ENDED' }
         Start-Sleep -Milliseconds 50
     }
     Close-MendimaruUi

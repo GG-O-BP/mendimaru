@@ -453,6 +453,10 @@ jobs:
         shell: powershell
         run: ./scripts/test-ui-navigation.ps1
 
+      - name: Test authenticated Studio stop window handoffs
+        shell: powershell
+        run: ./scripts/test-studio-stop.ps1
+
   security:
     name: Dependency security audit
     needs: changes
