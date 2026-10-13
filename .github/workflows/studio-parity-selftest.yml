@@ -51,10 +51,10 @@ jobs:
           function safe(value) {
             if (Array.isArray(value)) return value.map(safe);
             if (!value || typeof value !== 'object') return value;
-            const allow = new Set(['schemaVersion','command','ok','platform','backend','error','code','message','retryable','data','state','status','sessionId','runtimeSessionId','studioSessionId','preparationId','comparable','mode','httpReady','studioState','sessions','runtimes','checks','available','healthy','connected','ready','installed','kind','name','passed','identity','runtimeMode','preparation','tools','configured','prerequisites','reasons','diagnostics']);
+            const allow = new Set(['schemaVersion','command','ok','platform','backend','error','code','message','retryable','data','state','status','sessionId','runtimeSessionId','studioSessionId','preparationId','comparable','mode','httpReady','studioState','sessions','runtimes','checks','available','healthy','connected','ready','installed','kind','name','passed','identity','runtimeMode','preparation','tools','configured','prerequisites','reasons','diagnostics','label','detail','id','title','summary','health','connectivity','guestReady']);
             return Object.fromEntries(Object.entries(value).filter(([key]) => allow.has(key)).map(([key,v])=>[key,safe(v)]));
           }
-          for (const args of [['env','status'], ['runtime','list'], ['studio','status'], ['browser','doctor'], ['project','list']]) {
+          for (const args of [['env','status'], ['runtime','list'], ['studio','status'], ['browser','doctor'], ['project','list'], ['runtime','start','--mode','studio-run-locally']]) {
             const result = spawnSync(binary, [...args,'--json','--timeout-seconds','30'], {encoding:'utf8',timeout:45000,maxBuffer:1048576});
             console.log('command:', args.join(' '), 'exit:', result.status, 'spawn error:', result.error?.message ?? null);
             if (result.stdout) { try { console.log(JSON.stringify(safe(JSON.parse(result.stdout)))); } catch { console.log('non-JSON stdout bytes:', Buffer.byteLength(result.stdout)); } }
@@ -68,3 +68,21 @@ jobs:
           find "$HOME" -maxdepth 4 -type d \( -name '*149*' -o -name '*parity*' -o -name '*mendimaru*' \) -print
           find "$HOME/.cache/com.ggobp.mendimaru" -maxdepth 3 -type f -name '*session*.json' -printf '%P\n' 2>/dev/null || true
           command -v mendimaru || true
+
+      - name: Locate safe operator fixture metadata
+        run: |
+          command -v Xvfb xvfb-run xfreerdp3 || true
+          pacman -Q mendimaru || true
+          python3 - <<'PYTHON'
+          import os, json
+          from pathlib import Path
+          home=Path.home()
+          config=home/'.config/com.ggobp.mendimaru/config.json'
+          if config.is_file():
+            data=json.loads(config.read_text())
+            print('default configuration:', {k:data.get(k) for k in ['containerName','composeFile','sharedDirectory','freerdpBinary']})
+          for root,dirs,files in os.walk(home/'Workspaces/mendix'):
+            dirs[:]=[d for d in dirs if d not in ['.git','node_modules','target','.venv']]
+            for name in dirs+files:
+              if any(word in name.lower() for word in ['149','parity','cold-copy']): print('fixture:',Path(root)/name)
+          PYTHON
