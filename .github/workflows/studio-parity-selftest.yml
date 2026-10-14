@@ -319,10 +319,46 @@ jobs:
                   raise RuntimeError("Studio's generated files did not stabilize")
               marker = Path(os.environ["RUNNER_TEMP"]) / "mendimaru-v061-build-generation"
               marker.write_text(previous + "\n")
-              descriptor = cli(
-                  "browser", "session", "prepare", "--runtime-session-id", runtime_id,
-                  "--build-marker", str(marker),
-              )["data"]
+              print("Owned Studio keeper status before preparation:", json.dumps(
+                  cli("studio", "status", "--session-id", studio_id)["data"],
+              ), flush=True)
+              preparation_deadline = time.monotonic() + 45
+              while True:
+                  try:
+                      descriptor = cli(
+                          "browser", "session", "prepare", "--runtime-session-id", runtime_id,
+                          "--build-marker", str(marker),
+                      )["data"]
+                      break
+                  except RuntimeError as error:
+                      if "no verified environment" not in str(error):
+                          raise
+                      if time.monotonic() < preparation_deadline:
+                          print("Waiting for complete owned environment observations:", error, flush=True)
+                          time.sleep(5)
+                          continue
+                      # Observe the same real F5 target through the tagged release's
+                      # standalone browser path. Diagnostic evidence never replaces
+                      # the required comparable shared preparation or passes this job.
+                      diagnostic = subprocess.run(
+                          [binary, "browser", "test", "--runtime-session-id", runtime_id,
+                           "--suite-path", os.environ["MENDIMARU_STUDIO_PARITY_SUITE"],
+                           "--build-marker", str(marker), "--asset-mirror", "off",
+                           "--fail-on-console-error", "--fail-on-network-failure", "--json"],
+                          text=True, capture_output=True, timeout=660,
+                      )
+                      try:
+                          envelope = json.loads(diagnostic.stdout or diagnostic.stderr)
+                          data = envelope.get("data") or {}
+                          print("Preparation environment diagnostic:", json.dumps({
+                              "exitCode": diagnostic.returncode,
+                              "error": envelope.get("error"),
+                              "outcome": data.get("outcome"),
+                              "environment": data.get("environment"),
+                          }), flush=True)
+                      except ValueError:
+                          print("The standalone environment diagnostic returned no JSON", flush=True)
+                      raise
               shared_id = descriptor["sessionId"]
               assert descriptor["state"] == "ready"
               assert descriptor["preparation"]["comparable"] is True

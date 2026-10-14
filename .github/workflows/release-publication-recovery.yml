@@ -234,6 +234,7 @@ jobs:
       - name: Verify release versions
         shell: bash
         run: |
+          test "$(git rev-parse HEAD)" = f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
           version="${RELEASE_TAG#v}"
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+(\.[0-9]+){2}$ ]]; then
             echo "::error::Release tags must use v-prefixed semantic versions."
@@ -307,7 +308,9 @@ jobs:
           persist-credentials: false
 
       - name: Prepare non-root build user
-        run: install -d -o aurbuild -g aurbuild "$RUNNER_TEMP/aur"
+        run: |
+          test "$(git rev-parse HEAD)" = f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
+          install -d -o aurbuild -g aurbuild "$RUNNER_TEMP/aur"
 
       - name: Configure AUR identity
         if: env.SHOULD_PUBLISH == 'true'
@@ -414,6 +417,14 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
+
+      - name: Verify the exact release source before building installers
+        shell: pwsh
+        run: |
+          $commit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $commit -ne "f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b") {
+            throw "The Windows release checkout no longer identifies the verified main source."
+          }
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -761,6 +772,15 @@ jobs:
         run: |
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = \
             f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
+          object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)"
+          type="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.type)"
+          while [[ "$type" == tag ]]; do
+            tag="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object")"
+            object="$(jq -r .object.sha <<<"$tag")"
+            type="$(jq -r .object.type <<<"$tag")"
+          done
+          test "$type" = commit
+          test "$object" = f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
             --json tagName,isPrerelease,assets >release-state.json
           jq -e --arg tag "$RELEASE_TAG" --arg version "${RELEASE_TAG#v}" \
@@ -833,7 +853,8 @@ jobs:
           assert re.search(r"(?m)^\s*pkgname = mendimaru$", metadata)
           assert re.search(rf"(?m)^\s*pkgver = {re.escape(version)}$", metadata)
           assert re.search(rf"(?m)^pkgver=['\"]?{re.escape(version)}['\"]?$", package)
-          assert f"/archive/refs/tags/v{version}.tar.gz" in metadata
+          expected_source = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/archive/refs/tags/v{version}.tar.gz"
+          assert expected_source in metadata, "AUR is not packaging this repository's release tag"
           print("Verified public AUR master metadata:", version)
           PYTHON
 
