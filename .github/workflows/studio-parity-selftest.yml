@@ -283,12 +283,17 @@ jobs:
               subprocess.run(["xdotool", "key", "--clearmodifiers", "F5"], check=True, timeout=15)
               print("Delivered ordinary Studio F5", flush=True)
 
+              # studio.start already calls link_studio_runtime_session. Starting
+              # this Runtime a second time asks the guest for fresh Studio metadata
+              # via another RDP operation, disconnecting the RemoteApp we must keep.
+              # Status/wait use the existing authenticated keeper, not guest discovery.
               runtime = cli(
-                  "runtime", "start", "--mode", "studio-run-locally",
-                  "--studio-session-id", studio_id, "--timeout-seconds", "600",
-                  timeout=630,
-              )
-              assert runtime["runtimeSessionId"] == runtime_id, "Studio must bind the owned preparation"
+                  "runtime", "status", "--session-id", runtime_id,
+                  "--timeout-seconds", "90", timeout=120,
+              )["data"]
+              if "runtime" in runtime:
+                  runtime = runtime["runtime"]
+              assert runtime["studioSessionId"] == studio_id, "Studio must bind the owned preparation"
               ready = cli(
                   "runtime", "wait", "--session-id", runtime_id,
                   "--timeout-seconds", "600", timeout=630,
