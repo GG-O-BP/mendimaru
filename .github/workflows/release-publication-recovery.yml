@@ -67,7 +67,7 @@ jobs:
           REPOSITORY = "GG-O-BP/mendimaru"
           SOURCE = "f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b"
           CANDIDATE_SOURCE = "b910fe6f4d0c5b2c68f0de172ad52dc9acf6662c"
-          PARITY_SOURCE = "9de5ac7fd692f21ec36680d850cca6238a4a2c8f"
+          PARITY_SOURCE = "dc22307668bc640a4c939ab8564ded7b01d66c51"
           BINARY_SHA256 = "6572308a01b2e765ab180eed6e20add5cdcaf41db714edcd580d1e3caa0f281b"
           SUITE_SHA256 = "2c76345af2701103b9e778d7cb89a010c3f6bf3a64cb52695b2c7b144114523c"
 
