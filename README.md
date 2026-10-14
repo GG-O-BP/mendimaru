@@ -173,7 +173,7 @@ On Linux, `browser test` runs the same declarative Playwright/Chromium suite aga
 
 ## Development
 
-Development requires Node.js 22.22.2 or later, Rust, and the Tauri system dependencies for the host platform. Linux integration additionally requires WinBoat, Docker or Podman, FreeRDP 3, and Chrome or Chromium. Native Windows catalog discovery uses Edge or Chrome.
+Development requires Node.js 22.22.2 or later, Rust, and the Tauri system dependencies for the host platform. Linux integration additionally requires WinBoat, Docker or Podman, FreeRDP 3.24+ (3.x), and Chrome or Chromium. Native Windows catalog discovery uses Edge or Chrome.
 
 ```bash
 npm install

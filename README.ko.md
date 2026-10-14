@@ -168,7 +168,7 @@ Linux의 `browser test`는 명시적 URL, Portable Runtime 세션 또는 WinBoat
 
 ## 개발
 
-필수 환경은 Node.js 22.22.2 이상, Rust와 호스트 플랫폼용 Tauri 시스템 의존성입니다. Linux 통합에는 WinBoat, Docker 또는 Podman, FreeRDP 3, Chrome/Chromium이 추가로 필요하며 Windows 목록 조회에는 Edge 또는 Chrome을 사용합니다.
+필수 환경은 Node.js 22.22.2 이상, Rust와 호스트 플랫폼용 Tauri 시스템 의존성입니다. Linux 통합에는 WinBoat, Docker 또는 Podman, FreeRDP 3.24+ (3.x), Chrome/Chromium이 추가로 필요하며 Windows 목록 조회에는 Edge 또는 Chrome을 사용합니다.
 
 ```bash
 npm install

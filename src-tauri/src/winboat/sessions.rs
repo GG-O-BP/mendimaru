@@ -134,6 +134,7 @@ pub(crate) async fn reconnect(
             "another connected Studio Pro session must be closed before reconnecting",
         ));
     }
+    super::freerdp::ensure_supported(config).await?;
     ensure_guest_online(config).await?;
     let studios = installed_versions_cached(config).await?;
     let mut execution = execute(

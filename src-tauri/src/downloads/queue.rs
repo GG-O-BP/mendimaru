@@ -238,7 +238,11 @@ impl InstallQueue {
         let mut state = self.lock_state()?;
         let store_path = state.store_path.clone();
         let Some(index) = state.items.iter().position(|item| item.id == item_id) else {
-            return Err("the install queue item was not found".to_string());
+            // Removal is idempotent: another view may already have removed it.
+            let snapshot = state.items.clone();
+            drop(state);
+            self.publish(snapshot);
+            return Ok(());
         };
         if !state.items[index].state.is_terminal() {
             return Err("only finished installs can be removed".to_string());
@@ -299,7 +303,11 @@ impl InstallQueue {
     }
 
     fn publish(&self, items: Vec<InstallQueueItem>) {
-        let _ = self.inner.watch.send(items);
+        let host = self.lock_state().ok().and_then(|state| state.host.clone());
+        self.inner.watch.send_replace(items.clone());
+        if let Some(host) = host {
+            host.emit_queue_changed(items);
+        }
     }
 
     fn ensure_worker(&self) {
@@ -345,7 +353,7 @@ fn begin_next(inner: &QueueInner) -> Option<(InstallQueueItem, Arc<DownloadCance
             let _ = persist(path, &snapshot);
         }
         drop(state);
-        let _ = inner.watch.send(snapshot.clone());
+        inner.watch.send_replace(snapshot.clone());
         if let Some(host) = host {
             host.emit_queue_changed(snapshot);
         }
@@ -386,7 +394,7 @@ fn finish_current(
             let _ = persist(path, &snapshot);
         }
         drop(state);
-        let _ = inner.watch.send(snapshot.clone());
+        inner.watch.send_replace(snapshot.clone());
         if let Some(host) = host {
             host.emit_queue_changed(snapshot);
         }
@@ -418,7 +426,7 @@ fn update_progress(inner: &QueueInner, item_id: &str, progress: &crate::models::
         let progress = progress.clone();
         let snapshot = state.items.clone();
         drop(state);
-        let _ = inner.watch.send(snapshot.clone());
+        inner.watch.send_replace(snapshot.clone());
         if let Some(host) = host {
             host.emit_queue_changed(snapshot);
             host.emit_download_progress(progress);
@@ -627,6 +635,74 @@ mod tests {
             .restore(store_path(temporary))
             .expect("restore empty queue");
         queue
+    }
+
+    #[derive(Default)]
+    struct RecordingHost {
+        events: std::sync::Mutex<Vec<Vec<InstallQueueItem>>>,
+    }
+
+    impl super::InstallQueueHost for RecordingHost {
+        fn emit_download_progress(&self, _: crate::models::DownloadProgress) {}
+
+        fn emit_queue_changed(&self, items: Vec<InstallQueueItem>) {
+            self.events.lock().unwrap().push(items);
+        }
+
+        fn install_context(
+            &self,
+        ) -> Result<(crate::app_paths::AppPaths, crate::models::AppConfig), String> {
+            unreachable!("this queue has no worker")
+        }
+
+        fn spawn_worker(&self, _: super::InstallQueueWorker) {
+            unreachable!("this queue has no worker")
+        }
+    }
+
+    #[test]
+    fn queue_mutations_publish_to_desktop_and_late_subscribers() {
+        let temporary = tempfile::tempdir().unwrap();
+        let queue = queue(temporary.path());
+        let host = std::sync::Arc::new(RecordingHost::default());
+        queue.set_host(host.clone());
+        let alpha = queue.enqueue("11.12.6".into(), false, false, None).unwrap();
+        let beta = queue.enqueue("11.12.5".into(), false, false, None).unwrap();
+        queue.move_item(&beta.id, true).unwrap();
+        queue.cancel(&alpha.id, true).unwrap();
+        queue.retry(&alpha.id).unwrap();
+        queue.cancel(&alpha.id, false).unwrap();
+        queue.remove(&alpha.id).unwrap();
+        queue.remove(&alpha.id).expect("repeated removal succeeds");
+
+        let events = host.events.lock().unwrap();
+        assert_eq!(events.len(), 8);
+        assert_eq!(events[0][0].id, alpha.id);
+        assert_eq!(events[2][0].id, beta.id);
+        assert_eq!(events[3][1].state, InstallQueueState::Cancelled);
+        assert_eq!(events[4][1].state, InstallQueueState::Queued);
+        assert_eq!(events[6].len(), 1);
+        assert_eq!(events[7][0].id, beta.id);
+        assert_eq!(queue.subscribe().borrow().len(), 1);
+        assert_eq!(queue.subscribe().borrow()[0].id, beta.id);
+        assert_eq!(load_store(&store_path(temporary.path())).unwrap().len(), 1);
+        assert!(queue.remove(&beta.id).is_err());
+        assert!(queue.retry(&alpha.id).is_err());
+    }
+
+    #[tokio::test]
+    async fn terminal_wait_observes_completion_before_subscription() {
+        let temporary = tempfile::tempdir().unwrap();
+        let queue = queue(temporary.path());
+        let item = queue.enqueue("11.12.6".into(), false, false, None).unwrap();
+        queue.cancel(&item.id, true).unwrap();
+        let terminal = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            queue.wait_for_terminal(&item.id),
+        )
+        .await
+        .expect("completion must remain available without prior receivers");
+        assert_eq!(terminal.state, InstallQueueState::Cancelled);
     }
 
     #[test]

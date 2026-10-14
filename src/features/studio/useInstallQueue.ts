@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tauriApi } from "../../api/tauri";
 import type { InstallQueueItem, InstallQueueState } from "../../domain/types";
-import { useTauriSubscription } from "../../shared/hooks/useTauriSubscription";
 import type { StudioInstallationDependencies } from "./dependencies";
 
 const TERMINAL_QUEUE_STATES: ReadonlySet<InstallQueueState> = new Set([
@@ -25,31 +24,41 @@ export function useInstallQueue({
 
   useEffect(() => {
     let disposed = false;
+    let unsubscribe: (() => void) | undefined;
+    let receivedChange = false;
     void (async () => {
       try {
+        const stop = await tauriApi.onInstallQueueChanged((incoming) => {
+          receivedChange = true;
+          if (!disposed) {
+            setItems(incoming);
+            setLoadError(null);
+          }
+        });
+        if (disposed) {
+          stop();
+          return;
+        }
+        unsubscribe = stop;
+      } catch (error) {
+        if (!disposed) onWarning(String(error));
+      }
+      if (disposed) return;
+      try {
         const next = await tauriApi.getInstallQueue();
-        if (!disposed) {
+        if (!disposed && !receivedChange) {
           setItems(next);
           setLoadError(null);
         }
       } catch (error) {
-        if (!disposed) setLoadError(String(error));
+        if (!disposed && !receivedChange) setLoadError(String(error));
       }
     })();
     return () => {
       disposed = true;
+      unsubscribe?.();
     };
-  }, []);
-
-  const subscribe = useCallback(
-    () => tauriApi.onInstallQueueChanged((incoming) => setItems(incoming)),
-    [],
-  );
-  const handleSubscriptionError = useCallback(
-    (error: unknown) => onWarning(String(error)),
-    [onWarning],
-  );
-  useTauriSubscription(subscribe, handleSubscriptionError);
+  }, [onWarning]);
 
   useEffect(() => {
     const nextSucceeded = items.filter(

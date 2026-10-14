@@ -3,6 +3,7 @@ mod asset_mirror;
 pub(crate) mod asset_normalizer;
 mod client;
 mod container;
+mod freerdp;
 pub(crate) mod maintenance;
 #[cfg(target_os = "linux")]
 pub(crate) mod nvram;

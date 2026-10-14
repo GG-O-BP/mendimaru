@@ -167,7 +167,7 @@ Linux の `browser test` は、明示 URL、Portable Runtime session、または
 
 ## 開発
 
-開発には Node.js 22.22.2 以降、Rust、ホスト向け Tauri システム依存パッケージが必要です。Linux 統合には WinBoat、Docker または Podman、FreeRDP 3、Chrome／Chromium が追加で必要で、Windows の一覧取得には Edge または Chrome を使用します。
+開発には Node.js 22.22.2 以降、Rust、ホスト向け Tauri システム依存パッケージが必要です。Linux 統合には WinBoat、Docker または Podman、FreeRDP 3.24+（3.x）、Chrome／Chromium が追加で必要で、Windows の一覧取得には Edge または Chrome を使用します。
 
 ```bash
 npm install
