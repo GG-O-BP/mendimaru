@@ -215,6 +215,32 @@ try {
     await execute("return Boolean(window.__TAURI_INTERNALS__);"),
     true,
   );
+  await waitFor(
+    async () =>
+      await execute(
+        "return Boolean(document.querySelector('.install-queue-item[data-version=\"11.12.6\"]'));",
+      ),
+    5_000,
+    "the restored terminal installation was not displayed",
+  );
+  await execute(`
+    document.querySelector('.install-queue-item[data-version="11.12.6"] button').click();
+    return true;
+  `);
+  await waitFor(
+    async () =>
+      await execute(
+        "return !document.querySelector('.install-queue-item[data-version=\"11.12.6\"]');",
+      ),
+    5_000,
+    "removing an installation left a stale queue row in the real WebView",
+  );
+  await invoke("remove_install_queue_item", { itemId: "install-queue-e2e" });
+  assert.deepEqual(await invoke("get_install_queue"), []);
+  recordAssertion(
+    true,
+    "terminal queue removal updates the real WebView and repeated removal succeeds",
+  );
   const csp = await execute(
     "return document.querySelector('meta[http-equiv=\"Content-Security-Policy\"]')?.content || '';",
   );
@@ -1755,6 +1781,23 @@ if (existsSync(hangFlag) && ["info", "inspect", "port"].includes(args[0])) {
       null,
       2,
     )}\n`,
+  );
+  await fs.writeFile(
+    path.join(xdgConfig, "install-queue.json"),
+    JSON.stringify({
+      schema_version: 1,
+      items: [
+        {
+          id: "install-queue-e2e",
+          version: "11.12.6",
+          forceRedownload: false,
+          state: "succeeded",
+          createdAt: "2026-10-14T00:00:00Z",
+          updatedAt: "2026-10-14T00:00:00Z",
+        },
+      ],
+    }),
+    { mode: 0o600 },
   );
   await fs.writeFile(
     path.join(xdgConfig, "operation-history.json"),

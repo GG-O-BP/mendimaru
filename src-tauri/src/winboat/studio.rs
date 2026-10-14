@@ -83,6 +83,7 @@ pub async fn launch_studio(
     operation_id: &str,
     project_mpr_path: Option<&str>,
 ) -> Result<(), WindowsOperationFailure> {
+    super::freerdp::ensure_supported(config).await?;
     let lease = crate::winboat::vm_use::acquire(
         config,
         crate::winboat::vm_use::Mode::Exclusive,

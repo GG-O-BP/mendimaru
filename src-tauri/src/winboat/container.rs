@@ -31,7 +31,7 @@ pub async fn environment_status(config: &AppConfig) -> EnvironmentStatus {
     };
     let (runtime, freerdp, browser, inspection) = tokio::join!(
         probe_container_runtime(config.container_runtime.as_str()),
-        probe_tool(&config.freerdp_binary, &["/version"]),
+        probe_freerdp(&config.freerdp_binary),
         browser_probe,
         inspect_container(config),
     );
@@ -321,7 +321,7 @@ fn build_linux_diagnostics(state: &LinuxDiagnosticState) -> Vec<EnvironmentDiagn
                 Failure
             },
             observed_tool(&state.freerdp),
-            (!state.freerdp.usable).then_some(Redetect),
+            (!state.freerdp.usable).then_some(OpenSettings),
             state.freerdp.error_code,
         ),
         diagnostic(
@@ -550,6 +550,15 @@ async fn probe_tool(executable: &str, arguments: &[&str]) -> ToolProbe {
     probe_tool_with_policy(executable, arguments, CommandPolicy::PROBE).await
 }
 
+async fn probe_freerdp(executable: &str) -> ToolProbe {
+    let mut probe = probe_tool(executable, &["/version"]).await;
+    probe.usable &= probe
+        .version
+        .as_deref()
+        .is_some_and(super::freerdp::supported_version);
+    probe
+}
+
 async fn probe_tool_with_policy(
     executable: &str,
     arguments: &[&str],
@@ -598,7 +607,7 @@ const fn environment_error_code(kind: CommandFailureKind) -> EnvironmentDiagnost
     }
 }
 
-fn extract_version(output: &[u8]) -> Option<String> {
+pub(super) fn extract_version(output: &[u8]) -> Option<String> {
     String::from_utf8_lossy(output)
         .split_whitespace()
         .map(|token| {
@@ -1108,6 +1117,25 @@ mod tests {
     use crate::process::CommandPolicy;
     use chrono::{DateTime, Utc};
     use std::time::Duration;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn freerdp_probe_requires_a_client_with_remoteapp_rendering_fixes() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("xfreerdp3");
+        for (version, usable) in [("3.15.0", false), ("3.32.2", true), ("unknown", false)] {
+            std::fs::write(
+                &executable,
+                format!("#!/bin/sh\necho 'This is FreeRDP version {version}'\n"),
+            )
+            .unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let probe = super::probe_freerdp(executable.to_str().unwrap()).await;
+            assert!(probe.available);
+            assert_eq!(probe.usable, usable, "{version}");
+        }
+    }
 
     #[test]
     fn parses_status_and_active_shared_mount_from_runtime_inspection() {
