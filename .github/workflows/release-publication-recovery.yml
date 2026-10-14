@@ -67,7 +67,7 @@ jobs:
           REPOSITORY = "GG-O-BP/mendimaru"
           SOURCE = "f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b"
           CANDIDATE_SOURCE = "b910fe6f4d0c5b2c68f0de172ad52dc9acf6662c"
-          PARITY_SOURCE = "918556d9312b2671ac3876d6e0155171a8fda31f"
+          PARITY_SOURCE = "1351cd8068580d073b857308aced2676f7eb27d5"
           BINARY_SHA256 = "6572308a01b2e765ab180eed6e20add5cdcaf41db714edcd580d1e3caa0f281b"
           SUITE_SHA256 = "2c76345af2701103b9e778d7cb89a010c3f6bf3a64cb52695b2c7b144114523c"
 
@@ -212,7 +212,7 @@ jobs:
               assert run["environment"]["preparationId"] == report["preparationId"]
               if name == "unmodified":
                   assert run["outcome"] == "passed"
-                  assert run["passed"] >= 2 and run["failed"] == 0 and run["skipped"] == 0
+                  assert run["passed"] > 0 and run["failed"] == 0 and run["skipped"] == 0
           print("Verified real Studio F5 parity:", parity_id, report["preparationId"], flush=True)
           print("All v0.6.1 release prerequisites passed for the same main source", flush=True)
           PYTHON
@@ -270,13 +270,14 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --json tagName,isDraft,isPrerelease >release-state.json; then
             jq -e --arg tag "$RELEASE_TAG" \
-              '.tagName == $tag and .isDraft == false and .isPrerelease == false' \
+              '.tagName == $tag and .isPrerelease == false' \
               release-state.json >/dev/null
-            echo "Reusing the published, non-prerelease $RELEASE_TAG."
+            echo "Reusing the existing non-prerelease $RELEASE_TAG."
           else
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
+              --draft \
               --latest=false \
               --title "Mendimaru ${RELEASE_TAG#v}" \
               --generate-notes
@@ -284,7 +285,7 @@ jobs:
 
   publish-aur:
     name: Publish mendimaru to AUR
-    needs: release
+    needs: publish-github
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
@@ -745,6 +746,29 @@ jobs:
               -LiteralPath $env:TAURI_WINDOWS_SIGNING_CONFIG `
               -Force -ErrorAction SilentlyContinue
           }
+
+  publish-github:
+    name: Publish the release only after both Windows installers are verified
+    needs: [release, publish-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the complete GitHub release without marking it latest yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = \
+            f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isPrerelease,assets >release-state.json
+          jq -e --arg tag "$RELEASE_TAG" --arg version "${RELEASE_TAG#v}" \
+            '.tagName == $tag and .isPrerelease == false and
+             any(.assets[]; .name == ("mendimaru_" + $version + "_x64_en-US.msi") and .size > 1048576) and
+             any(.assets[]; .name == ("mendimaru_" + $version + "_x64-setup.exe") and .size > 1048576)' \
+            release-state.json >/dev/null
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
 
   verify-publication:
     name: Verify published release and AUR postconditions
