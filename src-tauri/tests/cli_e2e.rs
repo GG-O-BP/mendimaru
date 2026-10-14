@@ -133,7 +133,16 @@ fn studio_start_rejects_keeper_socket_failures_before_guest_access() {
     )
     .unwrap();
     fs::set_permissions(&docker, fs::Permissions::from_mode(0o700)).unwrap();
-    let config = serde_json::to_vec(&fixture_config(root.path())).unwrap();
+    let freerdp = bin.join("xfreerdp3");
+    fs::write(
+        &freerdp,
+        "#!/bin/sh\nif [ \"$1\" = /version ]; then echo 'FreeRDP version 3.32.2'; else exit 1; fi\n",
+    )
+    .unwrap();
+    fs::set_permissions(&freerdp, fs::Permissions::from_mode(0o700)).unwrap();
+    let mut app_config = fixture_config(root.path());
+    app_config.freerdp_binary = freerdp.to_string_lossy().into_owned();
+    let config = serde_json::to_vec(&app_config).unwrap();
     fs::write(root.path().join("config.json"), &config).unwrap();
     let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
