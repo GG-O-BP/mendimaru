@@ -1,7 +1,7 @@
 {
   "name": "mendimaru",
   "private": true,
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Manage Mendix Studio Pro natively on Windows or through WinBoat on Linux",
   "engines": {
     "node": ">=22.22.2"
@@ -19,7 +19,7 @@
     "test:e2e:coverage": "node scripts/verify-e2e-coverage.mjs",
     "test:e2e:windows:helpers": "node --test scripts/e2e/windows-native-helpers.node-test.mjs",
     "test:e2e:studio-parity": "node --test scripts/e2e/studio-f5-parity-gate.node-test.mjs",
-    "test:e2e:windows:powershell": "pwsh -NoLogo -NoProfile -NonInteractive -File scripts/e2e/windows-bundle-smoke.test.ps1",
+    "test:e2e:windows:powershell": "pwsh -NoLogo -NoProfile -NonInteractive -File scripts/e2e/windows-bundle-smoke.test.ps1 && pwsh -NoLogo -NoProfile -NonInteractive -File scripts/test-studio-probe.ps1",
     "test:e2e:windows": "npm run test:e2e:windows:build && node scripts/e2e/windows-native.mjs",
     "test:e2e:windows:build": "cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --features e2e",
     "test:perf": "node scripts/ci/node-test-suite.mjs scripts/perf",

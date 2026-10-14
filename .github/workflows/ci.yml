@@ -455,7 +455,9 @@ jobs:
 
       - name: Test authenticated Studio stop window handoffs
         shell: powershell
-        run: ./scripts/test-studio-stop.ps1
+        run: |
+          ./scripts/test-studio-stop.ps1
+          ./scripts/test-studio-probe.ps1
 
   security:
     name: Dependency security audit

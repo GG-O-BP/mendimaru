@@ -353,6 +353,17 @@ fn normalize_sessions(
     studios: &[StudioVersion],
     sessions: Vec<WindowsStudioSessionReport>,
 ) -> Result<Vec<StudioSessionStatus>, WindowsOperationFailure> {
+    let normalized = validate_sessions(config, studios, sessions)?;
+    let identifiers = normalized.iter().map(|s| s.session_id.clone()).collect();
+    project_access::retain_live_protected_sessions(config, &identifiers).map_err(failure)?;
+    Ok(normalized)
+}
+
+fn validate_sessions(
+    config: &AppConfig,
+    studios: &[StudioVersion],
+    sessions: Vec<WindowsStudioSessionReport>,
+) -> Result<Vec<StudioSessionStatus>, WindowsOperationFailure> {
     if sessions.len() > 64 {
         return Err(failure("Windows returned too many Studio Pro sessions"));
     }
@@ -419,7 +430,6 @@ fn normalize_sessions(
             reconnect_unavailable,
         });
     }
-    project_access::retain_live_protected_sessions(config, &identifiers).map_err(failure)?;
     normalized.sort_by_key(|session| std::cmp::Reverse(session.started_at));
     Ok(normalized)
 }
@@ -636,6 +646,46 @@ pub(crate) async fn observed_session(
     crate::cli::keeper_session(&paths, session_id)
         .await
         .map_err(|error| error.message)
+}
+
+/// A new launch may inspect an orphan's exact Windows identity. Polling never
+/// enters this path, and a retained owner (even an unknown/disconnected one)
+/// must not be replaced by a second RDP connection.
+#[cfg(target_os = "linux")]
+pub(super) async fn session_for_launch(
+    config: &AppConfig,
+    session_id: &str,
+) -> Result<Option<StudioSessionStatus>, WindowsOperationFailure> {
+    let identity = parse_session_id(session_id)?;
+    if let Some(session) = observed_session(session_id).await.map_err(failure)? {
+        return Ok(Some(session));
+    }
+    let paths = crate::app_paths::AppPaths::discover_for_cli().map_err(failure)?;
+    if !registered_client_sessions().is_empty()
+        || !crate::cli::session_keepers_absent_for_launch(&paths)
+            .await
+            .map_err(|error| failure(error.message))?
+    {
+        return Err(failure("another Studio owner prevents orphan inspection"));
+    }
+    let studios = installed_versions_cached(config).await?;
+    let execution = execute(
+        config,
+        &studios,
+        StudioSessionScriptMode::Probe {
+            process_id: identity.process_id,
+            started_ticks: identity.started_ticks,
+        },
+        "Verify previous Studio Pro session",
+        false,
+    )
+    .await?;
+    // A targeted probe is not an enumeration of all protected sessions.
+    let mut sessions = validate_sessions(config, &studios, execution.outcome.report.sessions)?;
+    if sessions.len() > 1 || sessions.first().is_some_and(|s| s.session_id != session_id) {
+        return Err(failure("Windows returned a different Studio Pro session"));
+    }
+    Ok(sessions.pop())
 }
 
 fn read_session_active(control: &mut RegisteredControl) -> Result<bool, String> {
@@ -1218,6 +1268,18 @@ mod tests {
             &lease,
         )
         .expect("protected metadata");
+
+        assert!(
+            super::validate_sessions(&config, &[studio("11.13.0")], Vec::new())
+                .expect("an absent target is valid")
+                .is_empty()
+        );
+        assert!(
+            super::project_access::protected_session_ids(&config)
+                .unwrap()
+                .contains(&session_id),
+            "targeted probing pruned another protected session"
+        );
 
         let sessions = normalize_sessions(
             &config,
