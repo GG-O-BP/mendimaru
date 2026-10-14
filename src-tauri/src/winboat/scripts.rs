@@ -10,6 +10,7 @@ const ABORT_STUDIO_LAUNCH_TEMPLATE: &str = include_str!("../../scripts/abort_stu
 const INSTALL_STUDIO_TEMPLATE: &str = include_str!("../../scripts/install_studio.ps1");
 const UNINSTALL_STUDIO_TEMPLATE: &str = include_str!("../../scripts/uninstall_studio.ps1");
 const STUDIO_SESSIONS_TEMPLATE: &str = include_str!("../../scripts/studio_sessions.ps1");
+const STUDIO_PROBE_PREAMBLE: &str = include_str!("../../scripts/studio_probe.ps1");
 const OPERATION_SECURITY_PREAMBLE: &str = include_str!("../../scripts/operation_security.ps1");
 
 use crate::models::StudioVersion;
@@ -101,8 +102,19 @@ pub(super) fn uninstall_script(
 #[derive(Debug, Clone, Copy)]
 pub(super) enum StudioSessionScriptMode {
     Query,
-    Reconnect { process_id: u32, started_ticks: i64 },
-    Stop { process_id: u32, started_ticks: i64 },
+    #[cfg(target_os = "linux")]
+    Probe {
+        process_id: u32,
+        started_ticks: i64,
+    },
+    Reconnect {
+        process_id: u32,
+        started_ticks: i64,
+    },
+    Stop {
+        process_id: u32,
+        started_ticks: i64,
+    },
 }
 
 pub(super) fn studio_sessions_script(
@@ -130,6 +142,11 @@ pub(super) fn studio_sessions_script(
     let known = BASE64_STANDARD.encode(known);
     let (mode, process_id, started_ticks) = match mode {
         StudioSessionScriptMode::Query => ("query", 0, 0),
+        #[cfg(target_os = "linux")]
+        StudioSessionScriptMode::Probe {
+            process_id,
+            started_ticks,
+        } => ("probe", process_id, started_ticks),
         StudioSessionScriptMode::Reconnect {
             process_id,
             started_ticks,
@@ -144,6 +161,7 @@ pub(super) fn studio_sessions_script(
         .replace("__TARGET_PROCESS_ID__", &process_id.to_string())
         .replace("__TARGET_STARTED_TICKS__", &started_ticks.to_string())
         .replace("__KNOWN_STUDIOS_BASE64__", &known)
+        .replace("__STUDIO_PROBE_PREAMBLE__", STUDIO_PROBE_PREAMBLE)
         .replace("__RESULT_PATH__", &powershell_literal(windows_report_path))
         .replace(
             "__CONTROL_PATH__",
@@ -411,6 +429,8 @@ mod tests {
         assert!(script.contains("$targetStartedTicks = [long]638908128000000000"));
         assert!(script.contains("ProcessSecurity]::IsCurrentUser"));
         assert!(script.contains("return $sessions.ToArray()"));
+        assert!(script.contains("function Get-MendimaruExactStudioProcess"));
+        assert!(script.contains("'probe' {"));
         assert!(script.contains("Assert-MendimaruTrustedExecutable"));
         assert!(script.contains("CloseMainWindow()"));
         assert!(script.contains("function Invoke-MendimaruPendingStudioStop"));

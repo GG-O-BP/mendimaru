@@ -112,6 +112,24 @@ keeper IPC; unavailable metadata means `unknown`, not `stopped`. The legacy
 `runtime_not_listening` and `runtime_firewall_blocked` codes remain readable in
 existing records, but current readiness checks do not emit them.
 
+## Launch recovery after application restart
+
+A new Studio launch can recover a Runtime whose previous Studio owner is gone.
+It first observes the registered owner or keeper. A live or disconnected owner
+is preserved; polling never opens RDP to resolve unavailable metadata.
+
+When ownership is absent and no other keeper or local owner is present, the
+explicit launch performs one authenticated Windows probe of the previous PID and
+start time. Only a missing PID, observed process exit, or a different start time
+proves that exact identity ended. Access failures, invalid reports and unavailable
+keepers preserve the Runtime and return a retryable diagnostic with recovery
+instructions. An observed live identity remains a port conflict.
+
+After confirmed exit, launch clears only the stale Studio link and reuses the
+existing Runtime forwarding. It does not recreate Compose for this recovery.
+The targeted probe does not prune other protected-project metadata. The public
+record layout and schema version are unchanged.
+
 ## Stop and exposure boundary
 
 `runtime stop` uses VM-wide port ownership. While another Runtime is active,

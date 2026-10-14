@@ -287,3 +287,22 @@ launch, reconnect and standalone stop embed this helper without replacing the
 existing authenticated control validation. No save dialog is automatically
 answered and no Studio process is force-killed. See
 [`issue-234-resolution.md`](issue-234-resolution.md).
+
+## Orphaned Studio launch recovery (#242)
+
+The ordinary Rust suite runs new application subprocesses against a persisted,
+linked Runtime with no owner. The real launch preparation, guest transport checks,
+X.224 readiness, per-attempt certificate confirmation and authenticated operation
+runner use local Docker/RDP stand-ins. Authenticated absence clears only the stale
+link and reuses the same Runtime; a second application process needs no probe.
+Live, failed, tampered and wrong-identity responses preserve the original record.
+Certificate rejection keeps its typed nonretryable trust verdict.
+Retained live/unknown keepers block recovery without opening another RDP connection.
+These cases assert unchanged Compose and zero recreations.
+
+`scripts/test-studio-probe.ps1` executes the production guest identity helper:
+exact live process, absent PID, PID reuse, observed exit, lookup failure and refresh
+failure. Windows CI runs it under Windows PowerShell 5.1; release verification also
+runs it through the PowerShell helper test command. Observation failures never
+establish absence. Runtime status/wait/browser observation remains covered by the
+existing #148 no-RDP/no-recreation tests.

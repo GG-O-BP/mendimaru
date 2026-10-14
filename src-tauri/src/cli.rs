@@ -1936,6 +1936,34 @@ async fn keeper_sessions(
     Ok(sessions)
 }
 
+/// A recovery probe must not displace any responding keeper, including one
+/// whose metadata is unavailable. Unlike listing, an incomplete scan is failure.
+#[cfg(target_os = "linux")]
+pub(crate) async fn session_keepers_absent_for_launch(
+    paths: &AppPaths,
+) -> Result<bool, CommandError> {
+    let directory = ensure_session_socket_directory(paths).map_err(keeper_command_error)?;
+    let entries = std::fs::read_dir(directory).map_err(|_| {
+        keeper_command_error("the session keeper directory could not be read".into())
+    })?;
+    for (index, entry) in entries.enumerate() {
+        if index >= 64 {
+            return Err(keeper_command_error(
+                "too many session keeper entries to verify".into(),
+            ));
+        }
+        let entry = entry
+            .map_err(|_| keeper_command_error("a session keeper entry could not be read".into()))?;
+        if request_session_keeper(&entry.path(), "status")
+            .await?
+            .is_some()
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) async fn keeper_session(
     paths: &AppPaths,
@@ -3065,6 +3093,13 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
         error.capability,
         error.message.as_str(),
     ) {
+        #[cfg(target_os = "linux")]
+        (
+            BackendErrorCode::PreconditionFailed,
+            Some(BackendId::LinuxWinboat),
+            Some(CapabilityId::RuntimeStatus | CapabilityId::StudioStart),
+            crate::winboat::runtime::STUDIO_SESSION_UNVERIFIED,
+        ) => crate::winboat::runtime::STUDIO_SESSION_UNVERIFIED,
         (
             BackendErrorCode::PreconditionFailed,
             Some(BackendId::LinuxWinboat),
@@ -3533,6 +3568,29 @@ mod tests {
                 safe_error_message(BackendErrorCode::PreconditionFailed)
             );
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn studio_recovery_diagnostic_survives_only_its_exact_launch_and_status_allowlist() {
+        let message = crate::winboat::runtime::STUDIO_SESSION_UNVERIFIED;
+        for capability in [CapabilityId::StudioStart, CapabilityId::RuntimeStatus] {
+            let mut error = BackendError::operation(BackendId::LinuxWinboat, capability, message);
+            error.code = BackendErrorCode::PreconditionFailed;
+            error.retryable = true;
+            let sanitized = sanitize_backend_error(error.clone());
+            assert_eq!(sanitized.message, message);
+            assert!(sanitized.retryable);
+            error.message.push_str(" /private/token=secret");
+            assert_eq!(
+                sanitize_backend_error(error).message,
+                safe_error_message(BackendErrorCode::PreconditionFailed)
+            );
+        }
+        let mut error =
+            BackendError::operation(BackendId::LinuxWinboat, CapabilityId::BrowserTest, message);
+        error.code = BackendErrorCode::PreconditionFailed;
+        assert_ne!(sanitize_backend_error(error).message, message);
     }
 
     #[test]

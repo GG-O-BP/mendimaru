@@ -15,6 +15,7 @@ $knownStudios = $knownStudiosJson | ConvertFrom-Json
 __SECURITY_PREAMBLE__
 __UI_PREAMBLE__
 __STUDIO_STOP_PREAMBLE__
+__STUDIO_PROBE_PREAMBLE__
 
 if (-not ('Mendimaru.ProcessSecurity' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -198,6 +199,32 @@ function Get-TargetProcess {
 
 try {
     switch ($mode) {
+        'probe' {
+            $native = Get-MendimaruExactStudioProcess `
+                -ExpectedProcessId $targetProcessId -ExpectedStartedTicks $targetStartedTicks
+            $sessions = @()
+            if ($null -ne $native) {
+                $executablePath = [string]$native.Path
+                $known = @($knownStudios | Where-Object {
+                    $_.path.Equals($executablePath, [StringComparison]::OrdinalIgnoreCase)
+                })
+                if ($native.ProcessName -ne 'studiopro' -or $known.Count -ne 1 -or
+                    -not [Mendimaru.ProcessSecurity]::IsCurrentUser([int]$native.Id)) {
+                    throw 'MENDIMARU_STUDIO_SESSION_QUERY_FAILED'
+                }
+                $null = Assert-MendimaruTrustedExecutable -Path $executablePath -Root $installRoot
+                $sessions = @([ordered]@{
+                    sessionId = 'studio-{0}-{1}' -f @($native.Id, $targetStartedTicks)
+                    version = [string]$known[0].version
+                    processId = [int]$native.Id
+                    startedAt = $native.StartTime.ToUniversalTime().ToString('o')
+                    projectName = $null
+                    hasWindow = $native.MainWindowHandle -ne [IntPtr]::Zero
+                })
+            }
+            Write-SessionResult 'succeeded' 'Previous Studio Pro session inspected.' $null $sessions
+            exit 0
+        }
         'query' {
             try {
                 $sessions = @(Get-StudioSessions)

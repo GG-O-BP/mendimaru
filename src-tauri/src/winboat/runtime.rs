@@ -36,6 +36,8 @@ const DEFAULT_GUEST_PORT: u16 = 8080;
 const HTTP_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const WAIT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
+pub(crate) const STUDIO_SESSION_UNVERIFIED: &str = "The previous Studio Pro session could not be verified. Refresh Studio sessions and retry, or explicitly stop its Runtime session to recover.";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SessionRecord {
@@ -734,7 +736,7 @@ async fn start_with_lease(
     Ok(status_from_record(&record))
 }
 
-pub(super) async fn prepare_studio_session(
+pub(crate) async fn prepare_studio_session(
     config: &AppConfig,
     project_mpr_path: Option<&str>,
     readiness_timeout_seconds: u64,
@@ -785,18 +787,13 @@ async fn prepare_studio_session_with_lease(
         active_runtime_session(config, guest_port, CapabilityId::RuntimeStatus)?
     {
         if record.studio_session_id.is_some() {
-            observe_studio(config, &mut record).await;
+            reconcile_studio_for_launch(config, &mut record).await?;
             match existing_studio_runtime_disposition(&record) {
                 ExistingStudioRuntimeDisposition::Conflict => {
                     return Err(previous_session_conflict_error(CapabilityId::RuntimeStatus));
                 }
                 ExistingStudioRuntimeDisposition::Ambiguous => {
-                    return Err(runtime_error(
-                        CapabilityId::RuntimeStatus,
-                        BackendErrorCode::PreconditionFailed,
-                        false,
-                        Some(record.log_artifact.artifact_id.clone()),
-                    ));
+                    return Err(unverified_studio_error(&record));
                 }
                 ExistingStudioRuntimeDisposition::ClearStaleLink => {
                     record.studio_session_id = None;
@@ -1626,6 +1623,56 @@ async fn observe_studio(_config: &AppConfig, record: &mut SessionRecord) {
         record.studio_state = StudioProcessState::Unknown;
         record.studio_process_id = None;
     }
+}
+
+async fn reconcile_studio_for_launch(
+    config: &AppConfig,
+    record: &mut SessionRecord,
+) -> BackendResult<()> {
+    let Some(session_id) = record.studio_session_id.as_deref() else {
+        return Ok(());
+    };
+    let session = super::sessions::session_for_launch(config, session_id)
+        .await
+        .map_err(|error| {
+            // Preserve typed transport/trust verdicts and their retry policy.
+            // In particular, a rejected certificate must never become retryable.
+            if let Some(code) = error.backend_error_code {
+                let mut failure = runtime_error(
+                    CapabilityId::RuntimeStatus,
+                    code,
+                    error.retryable,
+                    Some(record.log_artifact.artifact_id.clone()),
+                );
+                failure.message = error.message;
+                failure
+            } else {
+                unverified_studio_error(record)
+            }
+        })?;
+    match session {
+        Some(session) => {
+            record.studio_state = session.state;
+            record.studio_process_id = session.process_id;
+        }
+        None => {
+            // Only the authenticated, exact-identity probe may establish absence.
+            record.studio_state = StudioProcessState::Stopped;
+            record.studio_process_id = None;
+        }
+    }
+    Ok(())
+}
+
+fn unverified_studio_error(record: &SessionRecord) -> BackendError {
+    let mut error = runtime_error(
+        CapabilityId::RuntimeStatus,
+        BackendErrorCode::PreconditionFailed,
+        true,
+        Some(record.log_artifact.artifact_id.clone()),
+    );
+    error.message = STUDIO_SESSION_UNVERIFIED.to_string();
+    error
 }
 
 async fn diagnose_unready_runtime(config: &AppConfig, record: &SessionRecord) -> BackendErrorCode {

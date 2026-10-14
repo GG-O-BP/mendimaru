@@ -74,6 +74,12 @@ impl Fixture {
                     .unwrap();
                 let mut request = [0; 2048];
                 let _ = stream.read(&mut request);
+                if request.starts_with(&[3, 0, 0, 19]) {
+                    let _ = stream.write_all(&[
+                        3, 0, 0, 19, 14, 208, 0, 0, 18, 52, 0, 2, 31, 8, 0, 1, 0, 0, 0,
+                    ]);
+                    continue;
+                }
                 if request.starts_with(b"GET /hold HTTP/")
                     || (frontend_hold.exists()
                         && String::from_utf8_lossy(&request).contains("HeadlessChrome"))
@@ -201,6 +207,7 @@ esac
                 .env("MENDIMARU_STOP_FIXTURE_ROOT", self.root.path())
                 .env("MENDIMARU_CONFIG_DIR", self.root.path())
                 .env("MENDIMARU_CACHE_DIR", self.path("cache"))
+                .env("XDG_CONFIG_HOME", self.path("xdg-config"))
                 .env("PATH", path)
                 .stdin(Stdio::null())
                 .process_group(0)
@@ -244,6 +251,74 @@ esac
                 "action":"expectText", "locator":{"by":"text","value":"ok","exact":true}, "value":"ok"
             }]}]
         }"#).unwrap();
+    }
+
+    fn prepare_launch_recovery(&self, outcome: &str) {
+        self.prepare_browser();
+        let mut config: crate::models::AppConfig =
+            serde_json::from_slice(&fs::read(self.path("config.json")).unwrap()).unwrap();
+        config.freerdp_binary = self.path("bin/xfreerdp3").to_string_lossy().into_owned();
+        fs::write(
+            self.path("config.json"),
+            serde_json::to_vec(&config).unwrap(),
+        )
+        .unwrap();
+        let mut inspection: Value =
+            serde_json::from_slice(&fs::read(self.path("inspect.json")).unwrap()).unwrap();
+        for port in ["3389/tcp", "7148/tcp"] {
+            inspection[0]["NetworkSettings"]["Ports"][port] = json!([{
+                "HostIp": "127.0.0.1", "HostPort": self.health_address.port().to_string()
+            }]);
+        }
+        fs::write(
+            self.path("inspect.json"),
+            serde_json::to_vec(&inspection).unwrap(),
+        )
+        .unwrap();
+        let docker = self.path("bin/docker");
+        let script = fs::read_to_string(&docker).unwrap().replace(
+            "if [ \"$2\" = --format ]; then python3",
+            "if [ \"$2\" = --format ] && [ \"$3\" = '{{range .Config.Env}}{{println .}}{{end}}' ]; then printf 'USERNAME=fixture\\nPASSWORD=fixture\\n'; elif [ \"$2\" = --format ]; then python3",
+        );
+        fs::write(docker, script).unwrap();
+        fs::write(self.path("probe-outcome"), outcome).unwrap();
+        fs::write(self.path("bin/xfreerdp3"), r#"#!/usr/bin/env python3
+import base64, datetime, hashlib, hmac, json, os, pathlib, re, sys, time
+root = pathlib.Path(os.environ['MENDIMARU_STOP_FIXTURE_ROOT'])
+args = sys.stdin.read().splitlines()
+(root / 'probe-entered').touch()
+bootstrap = pathlib.Path(next(a.split(',', 1)[1] for a in args if a.startswith('/drive:MendimaruAuth,'))) / 'bootstrap.ps1'
+launcher = bootstrap.read_text()
+def field(name, text=launcher):
+    return re.search(r'\$' + name + r"\s*=\s*'([^']*)'", text).group(1)
+source = root / '.mendimaru/commands' / field('source').split('\\')[-1]
+script = source.read_text()
+assert field('mode', script) == 'probe'
+assert '$targetProcessId = [int]4242' in script
+assert '$targetStartedTicks = [long]638908128000000000' in script
+report = root / '.mendimaru/operations' / field('resultPath', script).split('\\')[-1]
+outcome = (root / 'probe-outcome').read_text()
+if outcome == 'certificate-rejected':
+    print('certificate not trusted', file=sys.stderr, flush=True)
+    time.sleep(15)
+    sys.exit(1)
+sessions = []
+if outcome in ['live', 'wrong-identity']:
+    pid = 4242 if outcome == 'live' else 4343
+    sessions = [dict(sessionId=f'studio-{pid}-638908128000000000', version='11.12.3', processId=pid, startedAt='2025-08-15T00:00:00Z', hasWindow=True)]
+payload = dict(state='failed' if outcome == 'failed' else 'succeeded', timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(), sessions=sessions)
+encoded = base64.b64encode(json.dumps(payload).encode()).decode()
+request, nonce, key = field('requestId'), field('nonce'), base64.b64decode(field('key'))
+mac = hmac.new(key, f'{request}\n{nonce}\n1\n{encoded}'.encode(), hashlib.sha256).hexdigest()
+if outcome == 'tampered': mac = '0' * 64
+host = next(a[3:] for a in args if a.startswith('/v:'))
+port = next(a[6:] for a in args if a.startswith('/port:'))
+pin = pathlib.Path(os.environ['XDG_CONFIG_HOME']) / 'freerdp/server' / f'{host}_{port}.pem'
+pin.write_text('-----BEGIN CERTIFICATE-----\nbWVuZGltYXJ1\n-----END CERTIFICATE-----\n')
+pin.chmod(0o600)
+report.write_text(json.dumps(dict(schemaVersion=1, requestId=request, nonce=nonce, sequence=1, payload=encoded, mac=mac)))
+time.sleep(15)
+"#).unwrap();
     }
 
     fn studio_status(&self) -> crate::contracts::StudioSessionStatus {
@@ -306,7 +381,33 @@ fn isolated_runtime_stop_process() {
     };
     let root = PathBuf::from(std::env::var_os("MENDIMARU_STOP_FIXTURE_ROOT").unwrap());
     crate::i18n::initialize("en-US").unwrap();
-    if mode == "lock-owner" {
+    if mode == "launch-prepare" {
+        let paths = AppPaths::discover_for_cli().unwrap();
+        let config = crate::application::load_config(&paths).unwrap();
+        crate::winboat::seed_installed_versions_cache(
+            &config,
+            &[crate::models::StudioVersion {
+                version: "11.12.3".into(),
+                display_name: "Studio Pro 11.12.3".into(),
+                executable_path: r"C:\Program Files\Mendix\11.12.3\modeler\studiopro.exe".into(),
+                install_root: r"C:\Program Files\Mendix\11.12.3".into(),
+                source: "fixture".into(),
+                removable: true,
+            }],
+        );
+        let result = tauri::async_runtime::block_on(
+            crate::winboat::runtime::prepare_studio_session(&config, None, 3600),
+        );
+        let document = match result {
+            Ok(id) => json!({"ok": true, "runtimeSessionId": id}),
+            Err(error) => json!({"ok": false, "error": sanitize_backend_error(error)}),
+        };
+        fs::write(
+            root.join("launch-prepare.json"),
+            serde_json::to_vec(&document).unwrap(),
+        )
+        .unwrap();
+    } else if mode == "lock-owner" {
         let file = fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -1078,5 +1179,156 @@ fn external_environment_changes_preserve_browser_evidence() {
         fixture.confirm_studio_exit();
         keeper.finish();
         fixture.assert_stopped(1);
+    }
+}
+
+#[test]
+fn studio_launch_after_owner_loss_reuses_only_an_authoritatively_ended_identity() {
+    for outcome in [
+        "absent",
+        "live",
+        "failed",
+        "tampered",
+        "wrong-identity",
+        "certificate-rejected",
+    ] {
+        let fixture = Fixture::new();
+        fixture.prepare_launch_recovery(outcome);
+        let compose = fs::read(fixture.path("compose.yml")).unwrap();
+        let record_path = fixture.path(&format!(
+            "cache/winboat-runtime/sessions/{RUNTIME_ID}/session.json"
+        ));
+        let previous = fs::read(&record_path).unwrap();
+        fixture.spawn("launch-prepare").finish();
+        let result = fixture.result("launch-prepare");
+        assert!(
+            fixture.path("probe-entered").exists(),
+            "{outcome}: probe was not attempted: {result}"
+        );
+        assert_eq!(fixture.calls(), 0, "orphan inspection recreated Compose");
+        assert_eq!(fs::read(fixture.path("compose.yml")).unwrap(), compose);
+        if outcome == "absent" {
+            assert_eq!(result["ok"], true, "{result}");
+            assert_eq!(result["runtimeSessionId"], RUNTIME_ID);
+            let record: Value = serde_json::from_slice(&fs::read(&record_path).unwrap()).unwrap();
+            assert!(record["studioSessionId"].is_null());
+            assert!(
+                fs::read_to_string(record_path.parent().unwrap().join("runtime.log"))
+                    .unwrap()
+                    .contains("Stale Studio link cleared")
+            );
+            // The next application process reuses the recovered record without
+            // performing another guest probe or allocating a new Runtime.
+            fs::remove_file(fixture.path("probe-entered")).unwrap();
+            fixture.spawn("launch-prepare").finish();
+            assert_eq!(
+                fixture.result("launch-prepare")["runtimeSessionId"],
+                RUNTIME_ID
+            );
+            assert!(!fixture.path("probe-entered").exists());
+        } else {
+            assert_eq!(result["ok"], false, "{result}");
+            assert_eq!(fs::read(&record_path).unwrap(), previous);
+            if outcome == "live" {
+                assert_eq!(result["error"]["code"], "runtime_port_conflict");
+            } else if outcome == "certificate-rejected" {
+                assert_eq!(
+                    result["error"]["code"],
+                    "remote_desktop_certificate_mismatch"
+                );
+                assert_eq!(result["error"]["retryable"], false);
+            } else {
+                assert_eq!(result["error"]["code"], "precondition_failed");
+                assert_eq!(result["error"]["retryable"], true);
+                assert_eq!(
+                    result["error"]["message"],
+                    crate::winboat::runtime::STUDIO_SESSION_UNVERIFIED
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn studio_launch_preserves_a_retained_owner_without_opening_another_rdp_connection() {
+    let fixture = Fixture::new();
+    fixture.prepare_launch_recovery("absent");
+    let mut keeper = fixture.spawn("keeper-observe");
+    until(|| fixture.path("keeper-ready").exists());
+    let record = fixture.path(&format!(
+        "cache/winboat-runtime/sessions/{RUNTIME_ID}/session.json"
+    ));
+    let before = fs::read(&record).unwrap();
+    fixture.spawn("launch-prepare").finish();
+    assert_eq!(
+        fixture.result("launch-prepare")["error"]["code"],
+        "runtime_port_conflict"
+    );
+    // A retained disconnected owner with an unreadable report remains unknown.
+    fs::remove_file(fixture.path("client-report.json")).unwrap();
+    fixture.spawn("launch-prepare").finish();
+    assert_eq!(
+        fixture.result("launch-prepare")["error"]["code"],
+        "precondition_failed"
+    );
+    assert!(!fixture.path("probe-entered").exists());
+    assert_eq!(fs::read(record).unwrap(), before);
+    assert_eq!(fixture.calls(), 0);
+    fixture.confirm_studio_exit();
+    keeper.finish();
+}
+
+#[test]
+fn studio_orphan_probe_refuses_other_or_unverifiable_keeper_owners() {
+    use std::os::unix::net::UnixListener;
+    for kind in ["responding", "untrusted", "incomplete"] {
+        let fixture = Fixture::new();
+        fixture.prepare_launch_recovery("absent");
+        let directory = fixture.path("cache/cli-sessions");
+        fs::create_dir_all(&directory).unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let other_socket = directory.join(session_socket_name("studio-4343-638908128000000000"));
+        let server = if kind == "responding" {
+            let listener = UnixListener::bind(&other_socket).unwrap();
+            Some(thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut request = [0; 32];
+                assert!(stream.read(&mut request).unwrap() > 0);
+                // A responding owner with unavailable metadata must still block RDP.
+                stream
+                    .write_all(b"{\"ok\":false,\"session\":null}\n")
+                    .unwrap();
+            }))
+        } else {
+            if kind == "untrusted" {
+                fs::write(other_socket, b"preserve untrusted entry").unwrap();
+            } else {
+                for index in 0..65 {
+                    let socket = directory.join(format!("s-{index:032x}.sock"));
+                    drop(UnixListener::bind(socket).unwrap());
+                }
+            }
+            None
+        };
+        let record = fixture.path(&format!(
+            "cache/winboat-runtime/sessions/{RUNTIME_ID}/session.json"
+        ));
+        let before = fs::read(&record).unwrap();
+        fixture.spawn("launch-prepare").finish();
+        if let Some(server) = server {
+            server.join().unwrap();
+        }
+        let result = fixture.result("launch-prepare");
+        assert_eq!(
+            result["error"]["code"], "precondition_failed",
+            "{kind}: {result}"
+        );
+        assert_eq!(result["error"]["retryable"], true);
+        assert!(!fixture.path("probe-entered").exists());
+        assert_eq!(fs::read(record).unwrap(), before);
+        assert_eq!(fixture.calls(), 0);
     }
 }
