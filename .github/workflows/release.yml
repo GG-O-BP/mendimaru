@@ -128,14 +128,18 @@ jobs:
         env:
           MENDIMARU_STUDIO_PARITY_BINARY: ${{ github.workspace }}/src-tauri/target/release/mendimaru
           MENDIMARU_STUDIO_PARITY_SUITE: ${{ vars.STUDIO_F5_PARITY_SUITE }}
-        run: node scripts/e2e/studio-f5-parity-gate.mjs
+        run: |
+          xvfb-run -a -s "-screen 0 1920x1080x24" \
+            python3 -u scripts/e2e/prepare-studio-f5-release.py
 
       - name: Upload parity evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: mendimaru-studio-f5-parity-evidence
-          path: artifacts/e2e/studio-f5-parity.json
+          path: |
+            artifacts/e2e/studio-f5-parity.json
+            artifacts/e2e/release-studio-login.png
           if-no-files-found: warn
 
   release:
@@ -190,13 +194,14 @@ jobs:
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
+              --draft \
               --title "Mendimaru ${RELEASE_TAG#v}" \
               --generate-notes
           fi
 
   publish-aur:
     name: Publish mendimaru to AUR
-    needs: release
+    needs: publish-release
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
@@ -657,3 +662,31 @@ jobs:
               -LiteralPath $env:TAURI_WINDOWS_SIGNING_CONFIG `
               -Force -ErrorAction SilentlyContinue
           }
+
+  publish-release:
+    name: Publish the complete verified release
+    needs: [release, publish-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Verify both Windows installers before making the release public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets > "$RUNNER_TEMP/release-assets.json"
+          python3 - <<'PYTHON'
+          import json
+          import os
+          from pathlib import Path
+          version = os.environ["RELEASE_TAG"].removeprefix("v")
+          assets = json.loads((Path(os.environ["RUNNER_TEMP"]) / "release-assets.json").read_text())["assets"]
+          for name in [f"mendimaru_{version}_x64_en-US.msi", f"mendimaru_{version}_x64-setup.exe"]:
+              matches = [asset for asset in assets if asset["name"] == name and asset["state"] == "uploaded" and asset["size"] > 0]
+              assert len(matches) == 1, f"Missing verified installer: {name}"
+          PYTHON
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --draft=false --latest
