@@ -1,353 +1,225 @@
-name: Release Windows installers and publish AUR package
+name: Publish verified v0.6.1 release recovery
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing v-prefixed release tag
+        description: Verified release tag
+        required: true
+        default: v0.6.1
+        type: string
+      parity_run:
+        description: Successful immutable-source Studio F5 parity self-test run ID
         required: true
         type: string
       publish:
-        description: Push the generated package to AUR
+        description: Publish the verified AUR package
         required: true
-        default: false
+        default: true
         type: boolean
       initialize_empty:
-        description: Allow the first commit to an empty AUR repository
+        description: Allow initialization of an empty AUR repository
         required: true
         default: false
         type: boolean
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: release-${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+  RELEASE_TAG: ${{ inputs.tag }}
 
 jobs:
-  verify-aur:
-    uses: ./.github/workflows/aur-package.yml
-    with:
-      ref: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
-
-  dependency-audit:
-    name: Dependency security audit
+  verify-evidence:
+    name: Verify all existing checks against the same release source
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
     steps:
-      - name: Check out release tag
+      - name: Check out the verified release source and workflow history
         uses: actions/checkout@v6
         with:
           ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Run dependency audit action
-        uses: ./actions/dependency-audit
-
-  verify-windows:
-    name: Verify Windows release candidate
-    needs: dependency-audit
-    runs-on: windows-latest
-    timeout-minutes: 60
-    steps:
-      - name: Check out release tag
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-          persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22.22.2
-          cache: npm
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy,rustfmt
-
-      - name: Cache Rust build outputs
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Run lint, formatting, builds, and tests
-        run: |
-          npm run check:portable
-          npm run test:e2e:windows:powershell
-          npm run lint:rust:all-features
-
-      - name: Run actual Tauri, WebView2, IPC, Windows, and performance E2E
-        run: npm run test:e2e:windows
+      - name: Verify main CI, release candidate checks, and real Studio F5 evidence
         env:
-          MENDIMARU_E2E_MAX_STARTUP_MS: 180000
-
-      - name: Upload native E2E diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: mendimaru-release-windows-native-e2e
-          path: artifacts/e2e
-          if-no-files-found: warn
-
-  studio-f5-parity:
-    name: Studio F5 to Linux Chrome parity gate
-    needs: dependency-audit
-    runs-on: [self-hosted, linux, winboat-studio]
-    timeout-minutes: 45
-    steps:
-      - name: Check out release tag
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-          persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22.22.2
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Build the Linux release binary
-        run: cargo build --release --locked --manifest-path src-tauri/Cargo.toml
-
-      - name: Run the shared-project Studio F5 parity gate
-        env:
-          MENDIMARU_STUDIO_PARITY_BINARY: ${{ github.workspace }}/src-tauri/target/release/mendimaru
-          MENDIMARU_STUDIO_PARITY_SUITE: ${{ vars.STUDIO_F5_PARITY_SUITE }}
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_PARITY_RUN: ${{ inputs.parity_run }}
         run: |
-          xvfb-run -a -s "-screen 0 1920x1080x24" python3 -u - <<'PYTHON'
-          import hashlib
+          python3 -u - <<'PYTHON'
+          import io
           import json
           import os
           import re
           import subprocess
-          import sys
           import time
+          import urllib.error
+          import urllib.parse
           import urllib.request
-          from pathlib import Path
+          import zipfile
 
-          binary = os.environ["MENDIMARU_STUDIO_PARITY_BINARY"]
-          workspace = Path(os.environ["GITHUB_WORKSPACE"])
-          studio_id = None
-          shared_id = None
-          watcher = None
-          watcher_log = None
+          REPOSITORY = "GG-O-BP/mendimaru"
+          SOURCE = "f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b"
+          CANDIDATE_SOURCE = "b910fe6f4d0c5b2c68f0de172ad52dc9acf6662c"
+          PARITY_SOURCE = "9de5ac7fd692f21ec36680d850cca6238a4a2c8f"
+          BINARY_SHA256 = "6572308a01b2e765ab180eed6e20add5cdcaf41db714edcd580d1e3caa0f281b"
+          SUITE_SHA256 = "2c76345af2701103b9e778d7cb89a010c3f6bf3a64cb52695b2c7b144114523c"
+
+          tag = os.environ["RELEASE_TAG"]
+          assert tag == "v0.6.1", "This recovery publishes only the verified v0.6.1 tag"
+          token = os.environ.get("GH_TOKEN")
+          if not token:
+              token = subprocess.check_output(["gh", "auth", "token"], text=True).strip()
 
 
-          def cli(*args, timeout=150):
-              print("CLI:", " ".join(args), flush=True)
-              p = subprocess.run(
-                  [binary, *args, "--json"],
-                  text=True, capture_output=True, timeout=timeout,
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+
+          def api_bytes(path):
+              url = f"https://api.github.com/repos/{REPOSITORY}/{path}"
+              request = urllib.request.Request(
+                  url,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "mendimaru-release-recovery",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
               )
-              try:
-                  envelope = json.loads(p.stdout)
-              except ValueError as error:
-                  raise RuntimeError(
-                      f"{args[:2]} returned no JSON: exit={p.returncode}, "
-                      f"stderr={p.stderr[:1200]}"
-                  ) from error
-              if p.returncode != 0 or not envelope.get("ok"):
-                  raise RuntimeError(f"{args[:2]} failed: {envelope.get('error')}")
-              return envelope
-
-
-          def build_generation(project):
-              generation = hashlib.sha256()
-              count = 0
-              for root in [project / "deployment/web", project / "deployment/model"]:
-                  if not root.is_dir():
-                      continue
-                  for p in sorted(root.rglob("*")):
-                      if not p.is_file() or p.is_symlink():
-                          continue
-                      stat = p.stat()
-                      generation.update(
-                          f"{p.relative_to(project)}:{stat.st_size}:{stat.st_mtime_ns}\n".encode()
-                      )
-                      count += 1
-              assert count > 0, "Studio has no generated build files"
-              return generation.hexdigest()
-
-
-          try:
-              existing = cli("studio", "status", "--refresh", "--timeout-seconds", "90")
-              assert not existing["data"], "The release fixture already has an active Studio owner"
-              projects = cli("project", "list")["data"]
-              matches = [p for p in projects if p["name"] == "IronCalcSpreadUIShowcase"]
-              assert len(matches) == 1, "The configured release project must be unique"
-              project = matches[0]
-              assert project["requiredVersion"] == "11.12.3", "Unexpected release fixture version"
-              assert any(p["version"] == project["requiredVersion"] for p in cli("studio", "list")["data"])
-              config = json.loads((Path.home() / ".config/com.ggobp.mendimaru/config.json").read_text())
-              assert config["containerName"] == "WinBoat", "Unexpected release VM"
-              share = Path(config["sharedDirectory"])
-              candidates = []
-              for root, dirs, files in os.walk(share):
-                  depth = len(Path(root).relative_to(share).parts)
-                  dirs[:] = [
-                      d for d in dirs if depth < 5
-                      and d not in [".git", "node_modules", "deployment", "target", ".gradle"]
-                  ]
-                  if "IronCalcSpreadUIShowcase.mpr" in files:
-                      candidates.append(Path(root))
-              assert len(candidates) == 1, "The release project's build tree must be unique"
-              project_directory = candidates[0]
-
-              # The documented UNC repair changes only generated bundler inputs. The
-              # actual release decision still requires an unmodified Chromium pass.
-              watcher_log = (workspace / "artifacts/e2e/release-asset-watcher.ndjson")
-              watcher_log.parent.mkdir(parents=True, exist_ok=True)
-              watcher_output = watcher_log.open("w")
-              watcher = subprocess.Popen(
-                  [binary, "assets", "watch", "--project-id", project["projectId"],
-                   "--rewrite-generated-assets"],
-                  stdout=watcher_output, stderr=subprocess.STDOUT,
-              )
-              time.sleep(1)
-              assert watcher.poll() is None, "The generated-asset watcher failed to start"
-
-              launched = cli(
-                  "studio", "start", "--version", project["requiredVersion"],
-                  "--project-id", project["projectId"], "--timeout-seconds", "360",
-                  timeout=390,
-              )
-              studio_id = launched.get("studioSessionId")
-              assert studio_id and re.fullmatch(r"studio-\d+-\d{18}", studio_id)
-              print("Owned Studio:", studio_id, flush=True)
-
-              # This exact fixture uses Studio 11.12.3. Its UIA adapter is not enabled,
-              # so send the ordinary F5 key to its visible, uniquely named RemoteApp.
-              window = None
-              deadline = time.monotonic() + 180
-              while time.monotonic() < deadline:
-                  p = subprocess.run(
-                      ["xdotool", "search", "--onlyvisible", "--name", "IronCalcSpreadUIShowcase"],
-                      text=True, capture_output=True, timeout=10,
-                  )
-                  observed = []
-                  for wid in p.stdout.splitlines():
-                      title = subprocess.check_output(
-                          ["xdotool", "getwindowname", wid], text=True, timeout=10,
-                      ).strip()
-                      if "IronCalcSpreadUIShowcase" in title and "Studio Pro" in title:
-                          observed.append((wid, title))
-                  if len(observed) == 1:
-                      window, title = observed[0]
-                      print("Studio project window:", title, flush=True)
-                      break
-                  print("Waiting for the selected project window", flush=True)
-                  time.sleep(5)
-              assert window, "The exact project's visible RemoteApp window did not appear"
-              print("Allowing project load to settle before F5", flush=True)
-              time.sleep(30)
-              subprocess.run(["xdotool", "windowfocus", "--sync", window], check=True, timeout=15)
-              subprocess.run(["xdotool", "key", "--clearmodifiers", "F5"], check=True, timeout=15)
-              print("Delivered ordinary Studio F5", flush=True)
-
-              runtime = cli(
-                  "runtime", "start", "--mode", "studio-run-locally",
-                  "--studio-session-id", studio_id, "--timeout-seconds", "600",
-                  timeout=630,
-              )
-              runtime_id = runtime["runtimeSessionId"]
-              ready = cli(
-                  "runtime", "wait", "--session-id", runtime_id,
-                  "--timeout-seconds", "600", timeout=630,
-              )["data"]
-              # runtime.wait exposes the RuntimeStatus directly.
-              if "runtime" in ready:
-                  ready = ready["runtime"]
-              assert ready["state"] == "ready" and ready["httpReady"]
-              print("Studio Runtime is HTTP-ready:", runtime_id, flush=True)
-              with urllib.request.urlopen(ready["url"], timeout=30) as response:
-                  assert response.status < 500
-                  response.read()
-
-              previous = None
-              stable_since = None
-              deadline = time.monotonic() + 240
-              while time.monotonic() < deadline:
-                  assert watcher.poll() is None, "The generated-asset watcher stopped"
-                  current = build_generation(project_directory)
-                  if current != previous:
-                      previous = current
-                      stable_since = time.monotonic()
-                  elif time.monotonic() - stable_since >= 20:
-                      break
-                  print("Waiting for generated build files to settle", flush=True)
-                  time.sleep(5)
-              else:
-                  raise RuntimeError("Studio's generated files did not stabilize")
-              marker = Path(os.environ["RUNNER_TEMP"]) / "mendimaru-v061-build-generation"
-              marker.write_text(previous + "\n")
-              descriptor = cli(
-                  "browser", "session", "prepare", "--runtime-session-id", runtime_id,
-                  "--build-marker", str(marker),
-              )["data"]
-              shared_id = descriptor["sessionId"]
-              assert descriptor["state"] == "ready"
-              assert descriptor["preparation"]["comparable"] is True
-              print("Prepared comparable shared session:", shared_id, flush=True)
-              gate_env = os.environ.copy()
-              gate_env["MENDIMARU_STUDIO_PARITY_SHARED_SESSION_ID"] = shared_id
-              subprocess.run(
-                  ["node", "scripts/e2e/studio-f5-parity-gate.mjs"],
-                  env=gate_env, check=True, timeout=1320,
-              )
-              assert build_generation(project_directory) == previous, "The build changed during parity verification"
-          finally:
-              primary_failure = sys.exc_info()[0] is not None
-              cleanup_failures = []
-              if shared_id:
+              for attempt in range(3):
                   try:
-                      cli("browser", "session", "finalize", "--shared-session-id", shared_id)
-                  except Exception as error:
-                      cleanup_failures.append(error)
-              if studio_id:
-                  try:
-                      cli("studio", "stop", "--session-id", studio_id, "--timeout-seconds", "120", timeout=150)
-                  except Exception as error:
-                      cleanup_failures.append(error)
-              if watcher is not None:
-                  try:
-                      watcher.terminate()
-                      watcher.wait(timeout=20)
-                      watcher_output.close()
-                      print("Generated-asset watcher stopped", flush=True)
-                  except Exception as error:
-                      cleanup_failures.append(error)
-              for error in cleanup_failures:
-                  print("Owner cleanup error:", error, flush=True)
-              if cleanup_failures and not primary_failure:
-                  raise cleanup_failures[0]
+                      try:
+                          response = urllib.request.build_opener(NoRedirect).open(request, timeout=45)
+                      except urllib.error.HTTPError as error:
+                          if error.code not in [301, 302, 303, 307, 308]:
+                              raise
+                          location = error.headers["Location"]
+                          assert urllib.parse.urlparse(location).scheme == "https"
+                          # Signed log/artifact downloads do not receive the API token.
+                          response = urllib.request.urlopen(location, timeout=45)
+                      with response:
+                          return response.read(64 * 1024 * 1024)
+                  except (urllib.error.URLError, TimeoutError):
+                      if attempt == 2:
+                          raise
+                      time.sleep(3)
+
+
+          def api(path):
+              return json.loads(api_bytes(path))
+
+
+          def run_id(name, default):
+              value = os.environ.get(name, default)
+              assert re.fullmatch(r"[1-9][0-9]*", value), f"Invalid evidence run ID: {name}"
+              return value
+
+
+          def completed_run(identifier, source, workflow):
+              run = api(f"actions/runs/{identifier}")
+              assert run["status"] == "completed", f"Evidence run {identifier} is unfinished"
+              assert run["head_sha"] == source, "The evidence workflow revision changed"
+              assert run["path"] == workflow, "The evidence came from the wrong workflow"
+              return run
+
+
+          assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == SOURCE
+          assert subprocess.check_output(["git", "rev-parse", f"{tag}^{{}}"], text=True).strip() == SOURCE
+          assert api("git/ref/heads/main")["object"]["sha"] == SOURCE, "main advanced after verification"
+          remote_tag = api(f"git/ref/tags/{tag}")["object"]
+          while remote_tag["type"] == "tag":
+              remote_tag = api(f"git/tags/{remote_tag['sha']}")["object"]
+          assert remote_tag["type"] == "commit" and remote_tag["sha"] == SOURCE, "The remote release tag moved"
+
+          ci_id = run_id("VERIFIED_MAIN_CI_RUN", "38332533693")
+          candidate_id = run_id("VERIFIED_CANDIDATE_RUN", "38359419382")
+          # 38365734858 (the last attempt before the interruption) FAILED at the
+          # Studio login dialog, so there is no default: a new successful run is required.
+          parity_id = run_id("VERIFIED_PARITY_RUN", "")
+
+          ci = completed_run(ci_id, SOURCE, ".github/workflows/ci.yml")
+          assert ci["conclusion"] == "success", "The main CI checks did not all pass"
+          print("Verified complete main CI:", ci_id, SOURCE, flush=True)
+
+          candidate = completed_run(candidate_id, CANDIDATE_SOURCE, ".github/workflows/release.yml")
+          assert candidate["event"] == "workflow_dispatch"
+          subprocess.run(
+              ["git", "diff", "--exit-code", SOURCE, CANDIDATE_SOURCE,
+               "--", ".", ":(exclude).github/workflows"],
+              check=True, capture_output=True,
+          )
+          jobs = api(f"actions/runs/{candidate_id}/jobs?filter=latest&per_page=100")["jobs"]
+          for name in [
+              "Dependency security audit",
+              "Verify Windows release candidate",
+              "verify-aur / Build and smoke installed AUR package",
+          ]:
+              passed = [job for job in jobs if job["name"] == name and job["conclusion"] == "success"]
+              assert passed, f"The required release check did not pass: {name}"
+              log = api_bytes(f"actions/jobs/{passed[-1]['id']}/logs").decode("utf-8", "replace")
+              assert f"HEAD is now at {SOURCE[:7]}" in log, f"The check tested a different source: {name}"
+              print("Verified release candidate check:", name, flush=True)
+
+          parity = completed_run(parity_id, PARITY_SOURCE, ".github/workflows/studio-parity-selftest.yml")
+          assert parity["event"] == "workflow_dispatch"
+          subprocess.run(
+              ["git", "diff", "--exit-code", SOURCE, PARITY_SOURCE,
+               "--", ".", ":(exclude).github/workflows"],
+              check=True, capture_output=True,
+          )
+          assert parity["conclusion"] == "success", "The real Studio F5 preparation failed"
+          parity_jobs = api(f"actions/runs/{parity_id}/jobs?per_page=100")["jobs"]
+          assert parity_jobs and all(job["conclusion"] == "success" for job in parity_jobs)
+          log = api_bytes(f"actions/jobs/{parity_jobs[0]['id']}/logs").decode("utf-8", "replace")
+          assert f"Verified release source: {SOURCE}" in log
+          assert f"Release binary SHA-256: {BINARY_SHA256}" in log
+
+          artifacts = api(f"actions/runs/{parity_id}/artifacts")["artifacts"]
+          matches = [
+              artifact for artifact in artifacts
+              if artifact["name"] == "mendimaru-studio-f5-parity-evidence" and not artifact["expired"]
+          ]
+          assert len(matches) == 1, "The verified parity evidence is missing or ambiguous"
+          archive = api_bytes(f"actions/artifacts/{matches[0]['id']}/zip")
+          with zipfile.ZipFile(io.BytesIO(archive)) as evidence:
+              matches = [
+                  info for info in evidence.infolist()
+                  if info.filename.rsplit("/", 1)[-1] == "studio-f5-parity.json"
+              ]
+              assert len(matches) == 1 and matches[0].file_size <= 512 * 1024
+              report = json.loads(evidence.read(matches[0]))
+          assert report["issue"] == 141 and report["outcome"] == "passed"
+          assert report["suiteSha256"] == SUITE_SHA256
+          assert re.fullmatch(r"runtime_[a-f0-9]{32}", report["runtimeSessionId"])
+          assert re.fullmatch(r"shared_[a-f0-9]{32}", report["sharedSessionId"])
+          assert re.fullmatch(r"preparation_[a-f0-9]{32}", report["preparationId"])
+          for name, mode, applied in [("unmodified", "unmodified", False), ("assisted", "assisted", True)]:
+              run = report["runs"][name]
+              assert run["browserParity"] == mode
+              correction = [
+                  entry for entry in run["corrections"] if entry["kind"] == "host-lan-asset-mirror"
+              ]
+              assert len(correction) == 1 and correction[0]["applied"] is applied
+              assert run["environment"]["comparable"] is True
+              assert run["environment"]["preparationId"] == report["preparationId"]
+              if name == "unmodified":
+                  assert run["outcome"] == "passed"
+                  assert run["passed"] > 0 and run["failed"] == 0 and run["skipped"] == 0
+          print("Verified real Studio F5 parity:", parity_id, report["preparationId"], flush=True)
+          print("All v0.6.1 release prerequisites passed for the same main source", flush=True)
           PYTHON
-
-      - name: Upload parity evidence
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: mendimaru-studio-f5-parity-evidence
-          path: artifacts/e2e/studio-f5-parity.json
-          if-no-files-found: warn
 
   release:
     name: Create GitHub release
-    needs: [verify-windows, verify-aur, studio-f5-parity]
+    needs: verify-evidence
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -362,6 +234,7 @@ jobs:
       - name: Verify release versions
         shell: bash
         run: |
+          test "$(git rev-parse HEAD)" = f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
           version="${RELEASE_TAG#v}"
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+(\.[0-9]+){2}$ ]]; then
             echo "::error::Release tags must use v-prefixed semantic versions."
@@ -369,6 +242,8 @@ jobs:
           fi
 
           package_version="$(jq -r '.version' package.json)"
+          lock_version="$(jq -r '.version' package-lock.json)"
+          lock_root_version="$(jq -r '.packages[""].version' package-lock.json)"
           tauri_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
           cargo_version="$(
             sed -n -E 's/^version = "([^"]+)"$/\1/p' \
@@ -377,6 +252,8 @@ jobs:
 
           for declared in \
             "$package_version" \
+            "$lock_version" \
+            "$lock_root_version" \
             "$tauri_version" \
             "$cargo_version"; do
             if [[ "$declared" != "$version" ]]; then
@@ -391,19 +268,25 @@ jobs:
         shell: bash
         run: |
           if gh release view "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "GitHub release $RELEASE_TAG already exists."
+            --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isDraft,isPrerelease >release-state.json; then
+            jq -e --arg tag "$RELEASE_TAG" \
+              '.tagName == $tag and .isPrerelease == false' \
+              release-state.json >/dev/null
+            echo "Reusing the existing non-prerelease $RELEASE_TAG."
           else
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
+              --draft \
+              --latest=false \
               --title "Mendimaru ${RELEASE_TAG#v}" \
               --generate-notes
           fi
 
   publish-aur:
     name: Publish mendimaru to AUR
-    needs: release
+    needs: publish-github
     runs-on: ubuntu-latest
     timeout-minutes: 20
     container:
@@ -425,7 +308,9 @@ jobs:
           persist-credentials: false
 
       - name: Prepare non-root build user
-        run: install -d -o aurbuild -g aurbuild "$RUNNER_TEMP/aur"
+        run: |
+          test "$(git rev-parse HEAD)" = f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
+          install -d -o aurbuild -g aurbuild "$RUNNER_TEMP/aur"
 
       - name: Configure AUR identity
         if: env.SHOULD_PUBLISH == 'true'
@@ -532,6 +417,14 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
+
+      - name: Verify the exact release source before building installers
+        shell: pwsh
+        run: |
+          $commit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $commit -ne "f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b") {
+            throw "The Windows release checkout no longer identifies the verified main source."
+          }
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -864,3 +757,118 @@ jobs:
               -LiteralPath $env:TAURI_WINDOWS_SIGNING_CONFIG `
               -Force -ErrorAction SilentlyContinue
           }
+
+  publish-github:
+    name: Publish the release only after both Windows installers are verified
+    needs: [release, publish-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the complete GitHub release without marking it latest yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = \
+            f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
+          object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)"
+          type="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.type)"
+          while [[ "$type" == tag ]]; do
+            tag="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object")"
+            object="$(jq -r .object.sha <<<"$tag")"
+            type="$(jq -r .object.type <<<"$tag")"
+          done
+          test "$type" = commit
+          test "$object" = f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isPrerelease,assets >release-state.json
+          jq -e --arg tag "$RELEASE_TAG" --arg version "${RELEASE_TAG#v}" \
+            '.tagName == $tag and .isPrerelease == false and
+             any(.assets[]; .name == ("mendimaru_" + $version + "_x64_en-US.msi") and .size > 1048576) and
+             any(.assets[]; .name == ("mendimaru_" + $version + "_x64-setup.exe") and .size > 1048576)' \
+            release-state.json >/dev/null
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
+
+  verify-publication:
+    name: Verify published release and AUR postconditions
+    needs: [publish-aur, publish-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Verify the release tag still identifies the registered main source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source=f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$source"
+          type="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.type)"
+          commit="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq .object.sha)"
+          if [[ "$type" == tag ]]; then
+            commit="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$commit" --jq .object.sha)"
+          fi
+          test "$commit" = "$source"
+
+      - name: Verify both Windows installers and the signing disclosure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isDraft,isPrerelease,assets,body >release-state.json
+          python3 - <<'PYTHON'
+          import json
+          import os
+          release = json.load(open("release-state.json"))
+          tag = os.environ["RELEASE_TAG"]
+          assert release["tagName"] == tag and not release["isDraft"] and not release["isPrerelease"]
+          assets = {asset["name"]: asset for asset in release["assets"]}
+          assert len(assets) == len(release["assets"]), "Ambiguous release assets"
+          for name in [f"mendimaru_{tag[1:]}_x64_en-US.msi", f"mendimaru_{tag[1:]}_x64-setup.exe"]:
+              assert name in assets and assets[name]["size"] > 1024 * 1024, f"Missing/empty installer: {name}"
+          notice = "WINDOWS-BUILDS-UNSIGNED.txt"
+          if notice in assets:
+              assert assets[notice]["size"] > 0
+              assert "<!-- mendimaru-unsigned-windows-builds -->" in release["body"]
+              assert "not" in release["body"] and "Authenticode signed" in release["body"]
+          print("Verified published MSI, NSIS and signing disclosure")
+          PYTHON
+
+      - name: Verify the AUR master branch actually contains this release
+        if: inputs.publish
+        run: |
+          checkout="$RUNNER_TEMP/aur-publication-verification"
+          git clone --depth 1 --branch master \
+            https://aur.archlinux.org/mendimaru.git "$checkout"
+          python3 - "$checkout" <<'PYTHON'
+          import os
+          import re
+          import sys
+          from pathlib import Path
+          checkout = Path(sys.argv[1])
+          version = os.environ["RELEASE_TAG"][1:]
+          metadata = (checkout / ".SRCINFO").read_text()
+          package = (checkout / "PKGBUILD").read_text()
+          assert re.search(r"(?m)^\s*pkgname = mendimaru$", metadata)
+          assert re.search(rf"(?m)^\s*pkgver = {re.escape(version)}$", metadata)
+          assert re.search(rf"(?m)^pkgver=['\"]?{re.escape(version)}['\"]?$", package)
+          expected_source = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/archive/refs/tags/v{version}.tar.gz"
+          assert expected_source in metadata, "AUR is not packaging this repository's release tag"
+          print("Verified public AUR master metadata:", version)
+          PYTHON
+
+      - name: Mark only the fully verified release as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --latest
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" = "$RELEASE_TAG"
+          {
+            echo "## Release registration completed"
+            echo "- Tag: $RELEASE_TAG"
+            echo "- Source: f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b (verified main)"
+            echo "- Windows MSI and NSIS: published and verified"
+            echo "- AUR publication requested: ${{ inputs.publish }}"
+            echo "- GitHub latest release: verified"
+          } >>"$GITHUB_STEP_SUMMARY"
