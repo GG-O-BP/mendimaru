@@ -309,7 +309,10 @@ jobs:
 
       - name: Prepare non-root build user
         run: |
-          test "$(git rev-parse HEAD)" = f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
+          # The Arch container runs as root over a runner-owned checkout; trust
+          # only this workspace for the read-only source identity check.
+          test "$(git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD)" = \
+            f47dcfd6a593e6cd6ea74a50d7c46f66066afc3b
           install -d -o aurbuild -g aurbuild "$RUNNER_TEMP/aur"
 
       - name: Configure AUR identity
