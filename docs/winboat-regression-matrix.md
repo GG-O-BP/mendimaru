@@ -296,6 +296,7 @@ X.224 readiness, per-attempt certificate confirmation and authenticated operatio
 runner use local Docker/RDP stand-ins. Authenticated absence clears only the stale
 link and reuses the same Runtime; a second application process needs no probe.
 Live, failed, tampered and wrong-identity responses preserve the original record.
+Certificate rejection keeps its typed nonretryable trust verdict.
 Retained live/unknown keepers block recovery without opening another RDP connection.
 These cases assert unchanged Compose and zero recreations.
 

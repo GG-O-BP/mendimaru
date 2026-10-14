@@ -1,0 +1,16 @@
+{
+  "issue": 242,
+  "version": "0.6.3",
+  "platform": "linux-winboat",
+  "studioVersion": "11.12.6",
+  "recoveredExistingRuntime": true,
+  "newStudioLinked": true,
+  "containerUnchanged": true,
+  "composeUnchanged": true,
+  "staleLinkCleared": true,
+  "studioLaunch": true,
+  "verification": "working-tree release build; pre-release live smoke",
+  "binarySha256": "e23bb585bed74ac82091a883c6a60e122d11cc1add9bdc53a11e340189adc947",
+  "verifiedAt": "2026-10-14T23:27:00Z",
+  "normalStudioStop": true
+}

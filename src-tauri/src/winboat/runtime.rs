@@ -1634,7 +1634,22 @@ async fn reconcile_studio_for_launch(
     };
     let session = super::sessions::session_for_launch(config, session_id)
         .await
-        .map_err(|_| unverified_studio_error(record))?;
+        .map_err(|error| {
+            // Preserve typed transport/trust verdicts and their retry policy.
+            // In particular, a rejected certificate must never become retryable.
+            if let Some(code) = error.backend_error_code {
+                let mut failure = runtime_error(
+                    CapabilityId::RuntimeStatus,
+                    code,
+                    error.retryable,
+                    Some(record.log_artifact.artifact_id.clone()),
+                );
+                failure.message = error.message;
+                failure
+            } else {
+                unverified_studio_error(record)
+            }
+        })?;
     match session {
         Some(session) => {
             record.studio_state = session.state;

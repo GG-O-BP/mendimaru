@@ -298,6 +298,10 @@ assert '$targetProcessId = [int]4242' in script
 assert '$targetStartedTicks = [long]638908128000000000' in script
 report = root / '.mendimaru/operations' / field('resultPath', script).split('\\')[-1]
 outcome = (root / 'probe-outcome').read_text()
+if outcome == 'certificate-rejected':
+    print('certificate not trusted', file=sys.stderr, flush=True)
+    time.sleep(15)
+    sys.exit(1)
 sessions = []
 if outcome in ['live', 'wrong-identity']:
     pid = 4242 if outcome == 'live' else 4343
@@ -1180,7 +1184,14 @@ fn external_environment_changes_preserve_browser_evidence() {
 
 #[test]
 fn studio_launch_after_owner_loss_reuses_only_an_authoritatively_ended_identity() {
-    for outcome in ["absent", "live", "failed", "tampered", "wrong-identity"] {
+    for outcome in [
+        "absent",
+        "live",
+        "failed",
+        "tampered",
+        "wrong-identity",
+        "certificate-rejected",
+    ] {
         let fixture = Fixture::new();
         fixture.prepare_launch_recovery(outcome);
         let compose = fs::read(fixture.path("compose.yml")).unwrap();
@@ -1220,6 +1231,12 @@ fn studio_launch_after_owner_loss_reuses_only_an_authoritatively_ended_identity(
             assert_eq!(fs::read(&record_path).unwrap(), previous);
             if outcome == "live" {
                 assert_eq!(result["error"]["code"], "runtime_port_conflict");
+            } else if outcome == "certificate-rejected" {
+                assert_eq!(
+                    result["error"]["code"],
+                    "remote_desktop_certificate_mismatch"
+                );
+                assert_eq!(result["error"]["retryable"], false);
             } else {
                 assert_eq!(result["error"]["code"], "precondition_failed");
                 assert_eq!(result["error"]["retryable"], true);
@@ -1279,7 +1296,7 @@ fn studio_orphan_probe_refuses_other_or_unverifiable_keeper_owners() {
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
                 let mut request = [0; 32];
-                stream.read(&mut request).unwrap();
+                assert!(stream.read(&mut request).unwrap() > 0);
                 // A responding owner with unavailable metadata must still block RDP.
                 stream
                     .write_all(b"{\"ok\":false,\"session\":null}\n")
