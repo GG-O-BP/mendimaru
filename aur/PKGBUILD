@@ -10,7 +10,7 @@ license=('MIT')
 depends=(
   'cairo'
   'dbus'
-  'freerdp'
+  'freerdp>=3.24'
   'gdk-pixbuf2'
   'glib2'
   'glibc'
