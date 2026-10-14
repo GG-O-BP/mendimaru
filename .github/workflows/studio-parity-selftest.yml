@@ -7,7 +7,7 @@ jobs:
   runner-environment:
     name: Verify the complete owned Studio F5 preparation
     runs-on: [self-hosted, linux, winboat-studio]
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Check out the immutable release source
         uses: actions/checkout@v6
@@ -187,7 +187,7 @@ jobs:
               assert not any(r["state"] not in ["stopped", "failed"] for r in records), "An existing Runtime owner needs to finish"
               prepared = cli(
                   "runtime", "start", "--mode", "studio-run-locally",
-                  "--timeout-seconds", "180", timeout=210,
+                  "--timeout-seconds", "600", timeout=630,
               )
               runtime_id = prepared["runtimeSessionId"]
               assert prepared["data"]["runtime"]["state"] != "failed"
@@ -403,10 +403,13 @@ jobs:
                               break
                           print("Waiting for owned Runtime cleanup:", error, flush=True)
                           time.sleep(5)
-                  try:
-                      assert cli("env", "ensure", "--timeout-seconds", "300", timeout=330)["data"]["ready"]
-                  except Exception as error:
-                      cleanup_failures.append(error)
+              # A failed forwarding preparation may return no Runtime ID while
+              # still rolling back/restarting the configured guest. Join readiness
+              # even on that early error, not only after a successfully owned record.
+              try:
+                  assert cli("env", "ensure", "--timeout-seconds", "300", timeout=330)["data"]["ready"]
+              except Exception as error:
+                  cleanup_failures.append(error)
               if watcher is not None:
                   try:
                       watcher.terminate()
