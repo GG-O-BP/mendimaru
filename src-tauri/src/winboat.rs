@@ -2,8 +2,10 @@ mod asset_mirror;
 #[cfg(target_os = "linux")]
 pub(crate) mod asset_normalizer;
 mod client;
+pub(crate) mod clock;
 mod container;
 mod freerdp;
+pub(crate) use freerdp::supported_version as freerdp_version_supported;
 pub(crate) mod maintenance;
 #[cfg(target_os = "linux")]
 pub(crate) mod nvram;

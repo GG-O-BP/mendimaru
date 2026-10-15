@@ -142,6 +142,18 @@ describe("useEnvironment initialization", () => {
     await act(() => result.current.copyDiagnosticReport());
     await act(() => result.current.exportDiagnosticReport());
 
+    const details = document.createElement("details");
+    const input = document.createElement("input");
+    input.id = "advanced-freerdpBinary-input";
+    details.append(input);
+    document.body.append(details);
+    await act(() =>
+      result.current.runDiagnosticAction("open-settings", "freerdp"),
+    );
+    expect(details.open).toBe(true);
+    expect(input).toHaveFocus();
+    details.remove();
+
     expect(api.startWinBoatWindows).toHaveBeenCalledOnce();
     expect(api.openWinBoat).toHaveBeenCalledOnce();
     expect(writeText).toHaveBeenCalledWith('{"schemaVersion":"1.0.0"}');

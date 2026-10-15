@@ -48,6 +48,9 @@ enum CliCommand {
     },
     EnvironmentStatus,
     EnvironmentEnsure,
+    EnvironmentRepairClock {
+        rtc_base: String,
+    },
     StudioList,
     StudioInstall {
         version: String,
@@ -153,6 +156,7 @@ impl CliCommand {
             Self::Ui { request, .. } => request.operation.name(),
             Self::EnvironmentStatus => "env.status",
             Self::EnvironmentEnsure => "env.ensure",
+            Self::EnvironmentRepairClock { .. } => "env.repair-clock",
             Self::StudioList => "studio.list",
             Self::StudioInstall { .. } => "studio.install",
             Self::StudioUninstall { .. } => "studio.uninstall",
@@ -471,7 +475,15 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
              \n\
              Commands:\n\
                status   Report dependency, container, guest, and shared-directory status\n\
-               ensure   Ensure required environment dependencies are ready",
+               ensure   Ensure required environment dependencies are ready\n\
+               repair-clock --rtc-base utc|local   Repair the Windows RTC/time service explicitly",
+        ),
+        (Some("env"), Some("repair-clock")) => Some(
+            "Usage: mendimaru env repair-clock --rtc-base utc|local\n\
+             Close all Studio sessions first. Inspect QEMU RTC basis and container timezone\n\
+             before choosing utc or local (see docs/winboat-clock-sync.md). This writes\n\
+             RealTimeIsUniversal, enables Windows Time, then checks guest skew. The result reports clockVerified and rebootRequired.\n\
+             Normal env status never changes time.",
         ),
         (Some("env"), Some("status")) => Some(
             "Usage: mendimaru env status\n\
@@ -716,6 +728,7 @@ Commands:
                                     Normalize generated UNC widget imports until Ctrl+C (Linux)
   env status                       Report the current environment status
   env ensure                       Ensure required environment dependencies are ready
+  env repair-clock --rtc-base BASE    Repair guest RTC/time service (utc or local)
   studio list                      List installed Studio Pro versions
   studio install --version VERSION Install an exact Studio Pro version
   studio uninstall --version VERSION
@@ -919,6 +932,9 @@ async fn run_command(
         }
         CliCommand::EnvironmentEnsure => {
             CommandOutput::data(crate::application::ensure_environment(&config, timeout).await?)
+        }
+        CliCommand::EnvironmentRepairClock { rtc_base } => {
+            CommandOutput::data(crate::winboat::clock::repair(&paths, &config, rtc_base).await?)
         }
         CliCommand::StudioList => {
             CommandOutput::data(crate::application::installed_versions(&config).await?)
@@ -2193,8 +2209,18 @@ fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
         Some("env") => match values.get(1).map(String::as_str) {
             Some("status") if values.len() == 2 => Ok(CliCommand::EnvironmentStatus),
             Some("ensure") if values.len() == 2 => Ok(CliCommand::EnvironmentEnsure),
+            Some("repair-clock") => {
+                let (options, _) = parse_options(&values[2..], &["--rtc-base"], &[])?;
+                let rtc_base = required_map_option(&options, "--rtc-base")?;
+                if !matches!(rtc_base.as_str(), "utc" | "local") {
+                    return Err(BackendError::invalid_request(
+                        "RTC base must be utc or local",
+                    ));
+                }
+                Ok(CliCommand::EnvironmentRepairClock { rtc_base })
+            }
             _ => Err(BackendError::invalid_request(
-                "expected env status or env ensure",
+                "expected env status, env ensure, or env repair-clock --rtc-base utc|local",
             )),
         },
         Some("studio") => parse_studio_command(&values[1..]),
@@ -2225,6 +2251,27 @@ fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
             "capabilities does not accept positional arguments",
         )),
         _ => Err(BackendError::invalid_request("unknown headless command")),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn clock_repair_requires_an_explicit_valid_rtc_basis() {
+    let values = |items: &[&str]| items.iter().map(|v| (*v).to_string()).collect::<Vec<_>>();
+    for basis in ["utc", "local"] {
+        assert_eq!(
+            parse_command(&values(&["env", "repair-clock", "--rtc-base", basis])).unwrap(),
+            CliCommand::EnvironmentRepairClock {
+                rtc_base: basis.into()
+            }
+        );
+    }
+    for items in [
+        vec!["env", "repair-clock"],
+        vec!["env", "repair-clock", "--rtc-base", "guess"],
+        vec!["env", "repair-clock", "--rtc-base", "utc", "--force"],
+    ] {
+        assert!(parse_command(&values(&items)).is_err());
     }
 }
 
@@ -3093,6 +3140,13 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
         error.capability,
         error.message.as_str(),
     ) {
+        #[cfg(target_os = "linux")]
+        (
+            BackendErrorCode::PreconditionFailed,
+            Some(BackendId::LinuxWinboat),
+            Some(CapabilityId::EnvironmentConfigure),
+            message @ (crate::winboat::clock::CLOSE_STUDIO | crate::winboat::clock::REPAIR_FAILED),
+        ) => message,
         #[cfg(target_os = "linux")]
         (
             BackendErrorCode::PreconditionFailed,

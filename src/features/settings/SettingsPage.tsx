@@ -624,6 +624,7 @@ function AdvancedSettingInput({
       <span>{label}</span>
       <div>
         <input
+          id={`advanced-${field}-input`}
           type={numeric ? "number" : "text"}
           value={value}
           min={numeric ? 1 : undefined}

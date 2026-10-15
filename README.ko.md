@@ -170,6 +170,8 @@ Linux의 `browser test`는 명시적 URL, Portable Runtime 세션 또는 WinBoat
 
 필수 환경은 Node.js 22.22.2 이상, Rust와 호스트 플랫폼용 Tauri 시스템 의존성입니다. Linux 통합에는 WinBoat, Docker 또는 Podman, FreeRDP 3.24+ (3.x), Chrome/Chromium이 추가로 필요하며 Windows 목록 조회에는 Edge 또는 Chrome을 사용합니다.
 
+지원 정책과 Debian 3.15.0 화면 정지 재현, 검증된 3.32.2 복구 방법은 [FreeRDP 호환성과 실행 파일 선택](docs/winboat-freerdp.md)을 참고하세요. 게스트 시간은 [RTC 기준](docs/winboat-clock-sync.md)을 확인한 뒤 `env repair-clock --rtc-base utc|local`로 명시적으로 복구할 수 있습니다.
+
 ```bash
 npm install
 npm run tauri dev

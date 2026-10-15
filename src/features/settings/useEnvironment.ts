@@ -45,6 +45,8 @@ export function useEnvironment(dependencies: EnvironmentDependencies) {
       if (action === "open-winboat") return winBoat.openWinBoat();
 
       const target = document.getElementById(diagnosticTarget(diagnosticId));
+      const details = target?.closest("details");
+      if (details) details.open = true;
       target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
       if (target instanceof HTMLElement) target.focus({ preventScroll: true });
       return Promise.resolve();

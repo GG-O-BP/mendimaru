@@ -22,6 +22,7 @@
         "env",
         "env.status",
         "env.ensure",
+        "env.repair-clock",
         "studio",
         "studio.list",
         "studio.install",

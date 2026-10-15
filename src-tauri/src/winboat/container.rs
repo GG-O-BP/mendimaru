@@ -469,7 +469,7 @@ fn observed_guest_clock(state: &LinuxDiagnosticState) -> Option<String> {
 }
 
 fn guest_clock_action(state: &LinuxDiagnosticState) -> Option<EnvironmentDiagnosticAction> {
-    use EnvironmentDiagnosticAction::{OpenWinboat, Redetect, StartWinboat};
+    use EnvironmentDiagnosticAction::{OpenWinboat, StartWinboat};
 
     if !state.guest_online {
         return Some(if state.container_status.is_running() {
@@ -478,7 +478,7 @@ fn guest_clock_action(state: &LinuxDiagnosticState) -> Option<EnvironmentDiagnos
             StartWinboat
         });
     }
-    (guest_clock_status(state) != EnvironmentDiagnosticStatus::Success).then_some(Redetect)
+    (guest_clock_status(state) != EnvironmentDiagnosticStatus::Success).then_some(OpenWinboat)
 }
 
 fn guest_clock_error_code(state: &LinuxDiagnosticState) -> Option<EnvironmentDiagnosticErrorCode> {
@@ -1386,7 +1386,7 @@ mod tests {
         assert_eq!(diagnostic.status, EnvironmentDiagnosticStatus::Warning);
         assert_eq!(
             diagnostic.action,
-            Some(EnvironmentDiagnosticAction::Redetect)
+            Some(EnvironmentDiagnosticAction::OpenWinboat)
         );
         assert_eq!(diagnostic.error_code, None);
         assert!(

@@ -1,0 +1,101 @@
+{
+  "issues": [245, 246],
+  "date": "2026-10-15",
+  "platform": "Debian 13, X11, WinBoat 0.9.2, dockur/windows 6.05",
+  "studioVersion": "11.12.6",
+  "freerdp": {
+    "systemPackage": "3.15.0+dfsg-2.1+deb13u3",
+    "systemExecutableSha256": "f111a291be5177344a4a20182c7865fca7c142537acc021168b4c40a3c4c8b2b",
+    "trials": [
+      {
+        "client": "3.15.0",
+        "options": "production defaults; diagnostic minimum-version bypass only",
+        "processAndWindowReady": true,
+        "visibleSurface": "stale Windows Welcome despite Sign In window title",
+        "input": "Tab did not update the surface",
+        "clockAfterRepair": {
+          "phase": "315-client-trial-after-persistent-clock-repair",
+          "guestDate": "Thu, 15 Oct 2026 01:35:40 GMT",
+          "skewSeconds": -1.536
+        },
+        "normalStop": true
+      },
+      {
+        "client": "3.15.0",
+        "options": "production defaults plus /gfx",
+        "processAndWindowReady": true,
+        "visibleSurface": "stale Windows Welcome",
+        "normalStop": true
+      },
+      {
+        "client": "3.32.2",
+        "options": "production defaults",
+        "processAndWindowReady": true,
+        "visibleSurface": "Sign In, then Select App",
+        "input": "Sign In Later click and Tab focus succeeded",
+        "normalStop": true
+      }
+    ],
+    "boundary": "3.24 remains a conservative support policy; this comparison does not isolate the minimum working version or exact upstream patch",
+    "aptInstalled": false
+  },
+  "clock": {
+    "containerTimezone": "UTC",
+    "qemuRtc": "base=localtime",
+    "windowsTimezone": "Pacific Standard Time",
+    "activeOffsetMinutes": -420,
+    "initialRealTimeIsUniversal": null,
+    "initialServiceStart": "Manual",
+    "initialSkewApproxSeconds": 25200,
+    "repairedRealTimeIsUniversal": 1,
+    "repairedServiceStart": "Automatic",
+    "restartFirstHealth": {
+      "hostUtc": "2026-10-15T01:30:33.309451+00:00",
+      "containerStartedAt": "2026-10-15T01:30:21.635923372Z",
+      "guestDate": "Thu, 15 Oct 2026 01:30:32 GMT",
+      "skewSeconds": -1.308,
+      "latencyMs": 2.07,
+      "phase": "first-health-after-rtc-repair-restart"
+    },
+    "recreationFirstHealth": {
+      "hostUtc": "2026-10-15T01:33:22.000145+00:00",
+      "containerStartedAt": "2026-10-15T01:32:58.245114889Z",
+      "guestDate": "Thu, 15 Oct 2026 01:33:21 GMT",
+      "skewSeconds": -0.995,
+      "latencyMs": 11.08,
+      "phase": "first-health-after-container-recreation"
+    },
+    "productionRepairCommand": {
+      "command": "env repair-clock --rtc-base utc",
+      "ok": true,
+      "clockVerified": true,
+      "rebootRequired": false,
+      "readiness": {
+        "blockingChecks": [],
+        "installation": true,
+        "projects": true,
+        "runtimeStart": true,
+        "runtimeStop": true,
+        "studioLaunch": true,
+        "uninstallation": true
+      },
+      "clockDiagnostic": {
+        "id": "guest-clock",
+        "observed": "skew=-2s; host-clocksource=tsc",
+        "status": "success"
+      }
+    },
+    "activeSessionRepairRefusal": "precondition_failed",
+    "windowsPowerShellFixture": {
+      "runtime": "5.1.26100.7920",
+      "result": "passed"
+    }
+  },
+  "ownedWindowCaptureSha256": {
+    "315-clock-fixed.png": "8659016b0e60dae972bb2b74cfd22ca31efb99dc215253d1feb6713bf3bd7fc6",
+    "gfx-315.png": "2aeb0e476e241b24b0c01a79175d8c0cb9e7ac5d93fc0d9bd45151163c84c211",
+    "latest-signin.png": "0cbbf069d556e7e406496adb0b3b3f3450dd938f2b15f9d54a06d423e46bde6f",
+    "latest-select-app.png": "681420eaabbd3a5385582d256e8774b3f1fd82f4368da9ce84a54db289d3db7a"
+  },
+  "privacy": "Only owned RemoteApp windows were captured; screenshots remain local. No credentials, user project, container environment, or host desktop are included."
+}

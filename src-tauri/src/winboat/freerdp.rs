@@ -5,10 +5,11 @@ use crate::models::AppConfig;
 use crate::process::{self, CommandPolicy};
 use tokio::process::Command;
 
-// Older X11 clients can report a live Studio window while its RemoteApp
-// surface is frozen at Welcome. FreeRDP 3.24 includes the upstream RAIL
-// window-locking/timer fixes. A successful /version alone is not readiness.
-pub(super) fn supported_version(version: &str) -> bool {
+// This is a support policy, not proof that every older build fails. Debian's
+// patched 3.15.0 reproduced stale Welcome pixels despite a live Sign In window;
+// 3.32.2 rendered correctly. 3.24 includes upstream RAIL/timer fixes, but that
+// individual boundary was not isolated by the live comparison. See #245.
+pub(crate) fn supported_version(version: &str) -> bool {
     let mut components = version.split('.');
     let major = components
         .next()
