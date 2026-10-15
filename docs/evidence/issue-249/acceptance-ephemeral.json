@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "acceptance": {
+    "connection": "8.4.11|READ-COMMITTED|ROW|2026-01-01 09:00:00|InnoDB",
+    "writeReadCommit": true,
+    "errorRollback": true,
+    "invalidDbAuthenticationRejected": true
+  },
+  "boundary": "Windows loopback HTTP -> exact Studio Run Locally -> managed TLS relay -> Linux loopback MySQL",
+  "runtimeWorkingSetBytes": 367288320,
+  "driverWorkingSetBytes": 88133632,
+  "guestRelayWorkingSetBytes": 197726208
+}

@@ -265,6 +265,7 @@ try {
                     continue
                 }
                 if ($ended) {
+                    Close-MendimaruHostService
                     Close-MendimaruUi
                     Write-SessionResult 'succeeded' 'Studio Pro session closed.' $null @()
                     exit 0
@@ -290,6 +291,7 @@ try {
                 if ($stopStatus -eq 'identity-mismatch') { throw 'MENDIMARU_STUDIO_SESSION_ENDED' }
                 if ($stopStatus -eq 'expired') { $pendingStop = $null }
                 if ($stopStatus -eq 'ended') {
+                    Close-MendimaruHostService
                     Close-MendimaruUi
                     Write-SessionResult 'succeeded' 'Studio Pro session closed.' $null @()
                     exit 0

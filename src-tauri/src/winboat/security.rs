@@ -22,7 +22,46 @@ pub(crate) struct OperationSecurity {
     script_sha256: String,
 }
 
+impl Drop for OperationSecurity {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.key.zeroize();
+    }
+}
+
 impl OperationSecurity {
+    #[cfg(target_os = "linux")]
+    pub(crate) fn bootstrap_key_text(&self) -> zeroize::Zeroizing<String> {
+        zeroize::Zeroizing::new(BASE64_STANDARD.encode(self.key))
+    }
+
+    // UI 입력만 별도 키로 암호화한다. 공유 mailbox의 기존 HMAC이 IV와
+    // 암호문까지 먼저 인증하므로 게스트는 인증 전 복호화하지 않는다.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn seal_ui_value(&self, value: &str) -> Result<serde_json::Value, String> {
+        use aes::cipher::{block_padding::Pkcs7, BlockEncryptMut, KeyIvInit};
+        let mut mac = HmacSha256::new_from_slice(&self.key).expect("fixed HMAC key");
+        mac.update(b"mendimaru-ui-value-v1");
+        let key = zeroize::Zeroizing::new(<[u8; 32]>::from(mac.finalize().into_bytes()));
+        let mut iv = [0u8; 16];
+        getrandom::fill(&mut iv).map_err(|_| "UI encryption unavailable")?;
+        let mut buffer = zeroize::Zeroizing::new(vec![0u8; value.len() + 16]);
+        buffer[..value.len()].copy_from_slice(value.as_bytes());
+        let ciphertext = cbc::Encryptor::<aes::Aes256>::new((&*key).into(), (&iv).into())
+            .encrypt_padded_mut::<Pkcs7>(&mut buffer, value.len())
+            .map_err(|_| "UI encryption unavailable")?;
+        Ok(
+            serde_json::json!({"version":1,"iv":BASE64_STANDARD.encode(iv),"ciphertext":BASE64_STANDARD.encode(ciphertext)}),
+        )
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn host_service_key(&self) -> [u8; 32] {
+        let mut mac = HmacSha256::new_from_slice(&self.key).expect("fixed HMAC key");
+        mac.update(b"mendimaru-host-service-v1");
+        mac.finalize().into_bytes().into()
+    }
+
     pub(crate) fn generate(script_sha256: &str) -> Result<Self, String> {
         if !is_lower_hex(script_sha256, 64) {
             return Err("the prepared script SHA-256 is invalid".to_string());
@@ -206,11 +245,16 @@ pub(crate) fn authenticate_bounded_report(
 /// The RDP argument contains a digest and a fixed redirected path, never an
 /// operation key. The private bootstrap is read once into bounded memory,
 /// hash-checked before execution, then removed through the redirected drive.
+pub(crate) fn bootstrap_drive_name(source: &[u8]) -> String {
+    format!("MxAuth{:.16}", format!("{:x}", Sha256::digest(source)))
+}
+
 pub(crate) fn redirected_bootstrap_launcher(source: &[u8]) -> String {
+    let drive = bootstrap_drive_name(source);
     let digest = format!("{:x}", Sha256::digest(source));
     format!(
         r#"$ErrorActionPreference='Stop'
-$p='\\tsclient\MendimaruAuth\bootstrap.ps1'
+$p='\\tsclient\{drive}\bootstrap.ps1'
 $t=[DateTime]::UtcNow.AddSeconds(60)
 while(-not (Test-Path -LiteralPath $p)){{if([DateTime]::UtcNow -ge $t){{throw 'MENDIMARU_BOOTSTRAP_UNAVAILABLE'}};Start-Sleep -Milliseconds 50}}
 $f=[IO.File]::OpenRead($p)
@@ -357,6 +401,37 @@ pub(crate) fn authenticated_report_fixture(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn confidential_ui_values_are_randomized_domain_separated_and_round_trip() {
+        use super::*;
+        use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
+        let security = OperationSecurity::fixture();
+        let secret = "test-only-비밀-with-punctuation!";
+        let first = security.seal_ui_value(secret).unwrap();
+        let second = security.seal_ui_value(secret).unwrap();
+        assert_ne!(first["iv"], second["iv"]);
+        assert_ne!(first["ciphertext"], second["ciphertext"]);
+        assert!(!first.to_string().contains(secret));
+        assert!(!first.to_string().contains(&BASE64_STANDARD.encode(secret)));
+        let mut mac = HmacSha256::new_from_slice(&security.key).unwrap();
+        mac.update(b"mendimaru-ui-value-v1");
+        let key: [u8; 32] = mac.finalize().into_bytes().into();
+        assert_ne!(key, security.host_service_key());
+        let iv: [u8; 16] = BASE64_STANDARD
+            .decode(first["iv"].as_str().unwrap())
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let mut ciphertext = BASE64_STANDARD
+            .decode(first["ciphertext"].as_str().unwrap())
+            .unwrap();
+        let plain = cbc::Decryptor::<aes::Aes256>::new((&key).into(), (&iv).into())
+            .decrypt_padded_mut::<Pkcs7>(&mut ciphertext)
+            .unwrap();
+        assert_eq!(plain, secret.as_bytes());
+    }
+
     use super::*;
 
     const PAYLOAD: &[u8] = br#"{"state":"succeeded","message":"ok","percentage":null,"estimated":false,"timestamp":"2026-08-14T00:00:00Z","exitCode":0,"executablePath":null,"error":null}"#;
@@ -465,14 +540,18 @@ mod tests {
         let arguments = redirected_bootstrap_launcher(private_source.as_bytes());
         for secret in [
             BASE64_STANDARD.encode(security.key),
-            security.nonce,
-            security.request_id,
+            security.nonce.clone(),
+            security.request_id.clone(),
         ] {
             assert!(!arguments.contains(&secret));
         }
         assert!(arguments.contains("MENDIMARU_BOOTSTRAP_INVALID"));
         assert!(arguments.contains("Remove-Item -LiteralPath $p -Force"));
         assert!(arguments.contains("$f.Length -gt 16384"));
+        let drive = bootstrap_drive_name(private_source.as_bytes());
+        assert!(arguments.contains(&format!(r"\\tsclient\{drive}\bootstrap.ps1")));
+        assert_ne!(drive, bootstrap_drive_name(b"another simultaneous session"));
+        assert!(drive.chars().all(|c| c.is_ascii_alphanumeric()));
         assert!(private_source.len() <= 16384);
     }
 

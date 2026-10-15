@@ -1,0 +1,6 @@
+Usage: mendimaru host-service start --service mysql --allow-host-port 3306 --runtime-session-id ID [--guest-port PORT]
+Usage: mendimaru host-service status|stop --session-id ID
+Usage: mendimaru host-service list
+Manages an authenticated TLS stream from Windows loopback to Linux 127.0.0.1:3306.
+Start returns the assigned guest port and TCP readiness; DB authentication is separate.
+Stop gracefully closes the linked Studio session before removing its connection.

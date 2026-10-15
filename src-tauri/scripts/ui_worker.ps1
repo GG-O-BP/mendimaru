@@ -76,7 +76,7 @@ function New-ObservationCache {
 $script:ObservationCache=New-ObservationCache
 function Observation($e) {
     $c=$e.Cached;$value=$null;$readOnly=$null;$modal=$false
-    if(-not $c.IsPassword -and [bool]$e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::IsValuePatternAvailableProperty)){
+    if(-not $c.IsPassword -and -not (Configuration-Editor $e) -and [bool]$e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::IsValuePatternAvailableProperty)){
         $value=$e.GetCachedPropertyValue([Windows.Automation.ValuePattern]::ValueProperty)
         $readOnly=$e.GetCachedPropertyValue([Windows.Automation.ValuePattern]::IsReadOnlyProperty)
     }
@@ -105,7 +105,7 @@ function Target {
     return $p
 }
 function Supported-Version {
-    if ($script:Identity.fileVersion -cnotin @('10.24.26.0','11.12.4.0')) { throw 'ui-unsupported-version' }
+    if ($script:Identity.fileVersion -cnotin @('10.24.26.0','11.12.4.0','11.12.6.0')) { throw 'ui-unsupported-version' }
 }
 function Root {
     $p = Target
@@ -139,7 +139,7 @@ function Register($element,$observation=$null) {
     $id = $script:Generation + ':' + $script:ElementSequence
     $observedValue=$null;$pattern=$null
     if($null -ne $observation){$observedValue=$observation.value}
-    elseif(-not $c.IsPassword -and $element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)){$observedValue=$pattern.Current.Value}
+    elseif(-not $c.IsPassword -and -not (Configuration-Editor $element) -and $element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)){$observedValue=$pattern.Current.Value}
     if ($script:Elements.Count -ge 4096 -and -not $script:Elements.ContainsKey($id)) { throw 'ui-tree-truncated' }
     $script:Elements[$id] = @{element=$element; rid=$rid; name=$c.Name; role=$c.ControlType.ProgrammaticName; password=$c.IsPassword; value=$observedValue}
     return $id
@@ -279,7 +279,7 @@ function Tree {
         $publicBounds=@(0,0,0,0);if(-not $bounds.IsEmpty){$publicBounds=@($bounds.X,$bounds.Y,$bounds.Width,$bounds.Height)}
         $patterns=@($node.observed.patterns)
         $value=$null;$readOnly=$null
-        if(-not $c.IsPassword -and $patterns -contains 'Value'){
+        if(-not $c.IsPassword -and -not (Configuration-Editor $e) -and $patterns -contains 'Value'){
             $value=Short $node.observed.value;$readOnly=$node.observed.readOnly
         }
         $nodes.Add(@{elementId=$node.id;parentId=$node.parent;depth=$node.depth;role=$c.ControlType.ProgrammaticName.Replace('ControlType.','');name=$(if($c.IsPassword){'[password-redacted]'}else{Short $c.Name});automationId=$(if($c.IsPassword){''}else{Short $c.AutomationId});framework=$c.FrameworkId;enabled=$c.IsEnabled;offscreen=$c.IsOffscreen;password=$c.IsPassword;focused=$c.HasKeyboardFocus;value=$value;readOnly=$readOnly;patterns=$patterns;bounds=$publicBounds})
@@ -290,7 +290,7 @@ function Tree {
         $windows.Add(@{elementId=(Register $root);handle=$h.ToInt64().ToString();name=(Short $root.Current.Name);modal=(Modal $root);minimized=[MendimaruUiNative]::IsIconic($h);foreground=([MendimaruUiNative]::GetForegroundWindow() -eq $h);dpi=[MendimaruUiNative]::GetDpiForWindow($h)})
     }
     $state=State $scan;$script:Revision++
-    return @{sessionId=$script:Identity.sessionId;revision=$script:Revision;root=@{schemaVersion='6.0.0';hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';adapter=$script:Identity.fileVersion;generation=$script:Generation;processId=$p.Id;startedTicks=$script:Identity.startedTicks;interactiveSessionId=$p.SessionId;helperProcessId=$PID;helperSessionId=(Get-Process -Id $PID).SessionId;foregroundWindow=[MendimaruUiNative]::GetForegroundWindow().ToInt64().ToString();state=$state.state;statusTexts=$state.statusTexts;dialogs=$state.dialogs;windows=$windows.ToArray();nodes=$nodes.ToArray();truncated=$scan.truncated;omittedDisabledWindows=$scan.omittedDisabledWindows;limits=@{nodes=3000;depth=48;windows=16};fallbacks=@{coordinates=$false;keyboard=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');setValue='Properties Name or unique Go To search editor'}}}
+    return @{sessionId=$script:Identity.sessionId;revision=$script:Revision;root=@{schemaVersion='7.0.0';hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';adapter=$script:Identity.fileVersion;generation=$script:Generation;processId=$p.Id;startedTicks=$script:Identity.startedTicks;interactiveSessionId=$p.SessionId;helperProcessId=$PID;helperSessionId=(Get-Process -Id $PID).SessionId;foregroundWindow=[MendimaruUiNative]::GetForegroundWindow().ToInt64().ToString();state=$state.state;statusTexts=$state.statusTexts;dialogs=$state.dialogs;windows=$windows.ToArray();nodes=$nodes.ToArray();truncated=$scan.truncated;omittedDisabledWindows=$scan.omittedDisabledWindows;limits=@{nodes=3000;depth=48;windows=16};fallbacks=@{coordinates=$false;keyboard=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');setValue='Properties Name or unique Go To search editor'}}}
 }
 function Input-Guard($e,[bool]$needsForeground) {
     $null=Target;Supported-Version
@@ -367,9 +367,16 @@ function GoTo-Editor($e) {
     }
     return $null -ne $found -and ($found.GetRuntimeId() -join '.') -ceq ($e.GetRuntimeId() -join '.')
 }
+function Configuration-Editor($e) {
+    if($e.Current.ControlType -ne [Windows.Automation.ControlType]::Edit){return $false}
+    $window=[Windows.Automation.AutomationElement]::FromHandle((Window-For $e))
+    return (Modal $window) -and $window.Current.Name -cin @('Edit Configuration','New Configuration','Configuration')
+}
+
 function Act($r) {
     Supported-Version
-    $e=Resolve $r.elementId;$h=Input-Guard $e ($r.action -in @('focus','keyboard-input'));$pattern=$null
+    $e=Resolve $r.elementId
+    $h=Input-Guard $e ($r.action -in @('focus','keyboard-input'));$pattern=$null
     $dispatchElement=Public-Element $e
     switch -CaseSensitive ($r.action) {
         'focus' {
@@ -382,10 +389,11 @@ function Act($r) {
             # caller must wait for the intended application state separately.
         }
         'set-value' {
-            if($r.value -cnotmatch '^[A-Za-z_][A-Za-z0-9_]{0,99}$' -or (-not (Name-Editor $e) -and -not (GoTo-Editor $e))){throw 'ui-unsupported-element'}
+            $identifier=($r.value -cmatch '^[A-Za-z_][A-Za-z0-9_]{0,99}$' -and ((Name-Editor $e) -or (GoTo-Editor $e)))
+            if(-not $identifier){throw 'ui-unsupported-element'}
             if(-not $e.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern) -or $pattern.Current.IsReadOnly){throw 'ui-unsupported-element'}
             $pattern.SetValue([string]$r.value)
-            if($pattern.Current.Value -cne $r.value){throw 'ui-effect-unverified'}
+            if(-not $e.Current.IsPassword -and $pattern.Current.Value -cne $r.value){throw 'ui-effect-unverified'}
         }
         'click' {
             # A semantic click selects a UIA SelectionItem and verifies its

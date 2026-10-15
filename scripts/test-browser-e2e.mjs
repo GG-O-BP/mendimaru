@@ -86,7 +86,7 @@ try {
   const missingBrowser = await invokeRunnerFailure(
     "run",
     {
-      schemaVersion: "6.0.0",
+      schemaVersion: "7.0.0",
       sessionId: `session_${randomBytes(16).toString("hex")}`,
       baseUrl,
       outputDirectory: missingOutput,
@@ -360,7 +360,7 @@ try {
   const successSummary = JSON.parse(
     await fs.readFile(path.join(portable.directory, "summary.json"), "utf8"),
   );
-  assert.equal(successSummary.schemaVersion, "6.0.0");
+  assert.equal(successSummary.schemaVersion, "7.0.0");
   assert.equal(successSummary.tests[0].completedSteps, 10);
   const html = await fs.readFile(
     path.join(portable.directory, "report.html"),
@@ -394,7 +394,7 @@ async function runCompressibleTraceRejection(baseUrl) {
   const directory = path.join(temporary, "compressible-trace");
   await fs.mkdir(directory, { mode: 0o700 });
   const request = {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     sessionId: `session_${randomBytes(16).toString("hex")}`,
     baseUrl,
     outputDirectory: directory,
@@ -1044,7 +1044,7 @@ async function runSuite({
   });
   const result = await invokeRunner("run", request);
   assert.equal(result.sessionId, request.sessionId);
-  assert.equal(result.schemaVersion, "6.0.0");
+  assert.equal(result.schemaVersion, "7.0.0");
   // These suites never pass an asset mirror URL, so the runner must report an
   // unmodified browser with an explicit, unused correction record (#141).
   assert.equal(result.browserParity, "unmodified");
@@ -1087,7 +1087,7 @@ async function prepareRun({
     ...policyOverrides,
   };
   const request = {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     sessionId,
     baseUrl,
     outputDirectory: directory,
@@ -1188,7 +1188,7 @@ async function verifyManifest(directory, mode, runtimePlatform) {
   const manifest = JSON.parse(
     await fs.readFile(path.join(directory, "artifact-manifest.json"), "utf8"),
   );
-  assert.equal(manifest.schemaVersion, "6.0.0");
+  assert.equal(manifest.schemaVersion, "7.0.0");
   assert.deepEqual(manifest.corrections, [
     { kind: "host-lan-asset-mirror", applied: false, interceptedRequests: 0 },
   ]);

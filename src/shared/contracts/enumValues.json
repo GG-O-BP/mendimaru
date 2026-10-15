@@ -72,7 +72,10 @@
     "ui.screenshot": true,
     "browser.test": true,
     "browser.artifacts": true,
-    "environment.configure": true
+    "environment.configure": true,
+    "host-service.start": true,
+    "host-service.status": true,
+    "host-service.stop": true
   },
   "capabilityStatus": {
     "supported": true,

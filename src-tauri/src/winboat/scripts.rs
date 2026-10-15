@@ -2,7 +2,16 @@ const STUDIO_STOP_PREAMBLE: &str = include_str!("../../scripts/studio_stop.ps1")
 const UI_SUPERVISOR: &str = include_str!("../../scripts/ui_supervisor.ps1");
 const UI_WORKER: &str = include_str!("../../scripts/ui_worker.ps1");
 fn ui_preamble() -> String {
-    UI_SUPERVISOR.replace("__UI_WORKER_BASE64__", &BASE64_STANDARD.encode(UI_WORKER))
+    UI_SUPERVISOR
+        .replace("__UI_WORKER_BASE64__", &BASE64_STANDARD.encode(UI_WORKER))
+        .replace(
+            "__HOST_SERVICE_SUPERVISOR__",
+            include_str!("../../scripts/host_service_supervisor.ps1"),
+        )
+        .replace(
+            "__HOST_SERVICE_SOURCE_BASE64__",
+            &BASE64_STANDARD.encode(include_str!("../../scripts/host_service.cs")),
+        )
 }
 
 const LAUNCH_STUDIO_TEMPLATE: &str = include_str!("../../scripts/launch_studio.ps1");

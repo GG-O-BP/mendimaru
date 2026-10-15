@@ -41,6 +41,16 @@ enum OutputFormat {
 
 #[derive(Debug, PartialEq, Eq)]
 enum CliCommand {
+    HostServiceStart {
+        request: crate::host_service::StartRequest,
+    },
+    HostServiceStatus {
+        session_id: String,
+    },
+    HostServiceStop {
+        session_id: String,
+    },
+    HostServiceList,
     Capabilities,
     Ui {
         request: crate::ui_automation::Request,
@@ -152,6 +162,10 @@ enum CliCommand {
 impl CliCommand {
     fn name(&self) -> &'static str {
         match self {
+            Self::HostServiceStart { .. } => "host-service.start",
+            Self::HostServiceStatus { .. } => "host-service.status",
+            Self::HostServiceStop { .. } => "host-service.stop",
+            Self::HostServiceList => "host-service.list",
             Self::Capabilities => "capabilities",
             Self::Ui { request, .. } => request.operation.name(),
             Self::EnvironmentStatus => "env.status",
@@ -300,6 +314,8 @@ struct SessionKeeperIpcResponse {
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     session: Option<crate::contracts::StudioSessionStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    error: Option<BackendError>,
 }
 
 /// Runs a recognized headless command before Tauri is initialized. Returning
@@ -326,6 +342,12 @@ pub fn dispatch_from_env() -> Option<i32> {
     #[cfg(target_os = "linux")]
     if arguments.first().and_then(|value| value.to_str()) == Some("__session-keeper") {
         return Some(session_keeper_dispatch(&arguments[1..]));
+    }
+    #[cfg(target_os = "linux")]
+    if arguments.first().and_then(|value| value.to_str()) == Some("__host-service-keeper") {
+        return Some(crate::winboat::host_service::keeper_dispatch(
+            &arguments[1..],
+        ));
     }
     let execution = execute(&arguments)?;
     if !execution.stdout.is_empty() {
@@ -535,6 +557,14 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
              \n\
              Stops the selected Studio session through its verified process identity.",
         ),
+        (Some("host-service"), _) => Some(
+            "Usage: mendimaru host-service start --service mysql --allow-host-port 3306 --runtime-session-id ID [--guest-port PORT]\n\
+             Usage: mendimaru host-service status|stop --session-id ID\n\
+             Usage: mendimaru host-service list\n\
+             Manages an authenticated TLS stream from Windows loopback to Linux 127.0.0.1:3306.\n\
+             Start returns the assigned guest port and TCP readiness; DB authentication is separate.\n\
+             Stop gracefully closes the linked Studio session before removing its connection.",
+        ),
         (Some("runtime"), None) => Some(
             "Usage: mendimaru runtime COMMAND\n\
              \n\
@@ -724,6 +754,7 @@ Usage: mendimaru [--json | --ndjson] [--backend ID] [--timeout-seconds SECONDS] 
 Commands:
   ui                               Inspect and control a selected Studio session
   capabilities                     Print the backend capability snapshot
+  host-service start|status|stop   Manage a session MySQL connection from WinBoat
   assets watch --project-id ID --rewrite-generated-assets
                                     Normalize generated UNC widget imports until Ctrl+C (Linux)
   env status                       Report the current environment status
@@ -785,6 +816,10 @@ async fn run_command(
         return CommandOutput::data(capability_snapshot);
     }
     let browser_capability = match command {
+        CliCommand::HostServiceStart { .. } => Some(CapabilityId::HostServiceStart),
+        CliCommand::HostServiceStatus { .. } => Some(CapabilityId::HostServiceStatus),
+        CliCommand::HostServiceList => Some(CapabilityId::HostServiceStatus),
+        CliCommand::HostServiceStop { .. } => Some(CapabilityId::HostServiceStop),
         CliCommand::BrowserDoctor
         | CliCommand::BrowserInstallChromium
         | CliCommand::BrowserTest { .. }
@@ -905,6 +940,18 @@ async fn run_command(
     let config = crate::application::load_config(&paths)?;
     match command {
         CliCommand::Capabilities => unreachable!("handled without configuration"),
+        CliCommand::HostServiceStart { request } => {
+            CommandOutput::data(crate::host_service::start(&config, request).await?)
+        }
+        CliCommand::HostServiceStatus { session_id } => {
+            CommandOutput::data(crate::host_service::inspect(&config, session_id, false).await?)
+        }
+        CliCommand::HostServiceList => {
+            CommandOutput::data(crate::host_service::list(&config).await?)
+        }
+        CliCommand::HostServiceStop { session_id } => {
+            CommandOutput::data(crate::host_service::inspect(&config, session_id, true).await?)
+        }
         CliCommand::Ui {
             request,
             read_value,
@@ -1443,7 +1490,7 @@ fn finish_session_keeper_launch(mut response: SessionKeeperResponse) -> i32 {
         ));
     }
     let serialized = serde_json::to_vec(&response).unwrap_or_else(|_| {
-        br#"{"ok":false,"error":{"schemaVersion":"6.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
+        br#"{"ok":false,"error":{"schemaVersion":"7.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
     });
     let written = std::io::stdout()
         .write_all(&serialized)
@@ -1846,11 +1893,22 @@ async fn serve_session_keeper(
                         return;
                     }
                     drop(reservation);
+                    if matches!(read, Ok(Ok(count)) if count > 0) && request.starts_with("host-service ") {
+                        let packet = serde_json::from_str::<crate::winboat::host_service::studio::Launch>(request.trim_end().strip_prefix("host-service ").unwrap_or(""));
+                        let result = match packet {
+                            Ok(packet) => crate::winboat::host_service::studio::launch(&session, packet).await,
+                            Err(_) => Err(BackendError::invalid_request("invalid host-service launch")),
+                        };
+                        let response = SessionKeeperIpcResponse { ok: result.is_ok(), session: None, error: result.err() };
+                        if let Ok(mut payload) = serde_json::to_vec(&response) { payload.push(b'\n'); let _ = write_half.write_all(&payload).await; }
+                        return;
+                    }
                     let mut should_stop = false;
                     let response = if matches!(read, Ok(Ok(count)) if count > 0)
                         && request.trim_end() == "status"
                     {
                         SessionKeeperIpcResponse {
+                            error: None,
                             ok: true,
                             session: crate::winboat::registered_client_sessions()
                                 .into_iter()
@@ -1863,11 +1921,13 @@ async fn serve_session_keeper(
                             .await
                             .unwrap_or(false);
                         SessionKeeperIpcResponse {
+                            error: None,
                             ok: should_stop,
                             session: None,
                         }
                     } else {
                         SessionKeeperIpcResponse {
+                            error: None,
                             ok: false,
                             session: None,
                         }
@@ -2004,7 +2064,38 @@ pub(crate) async fn keeper_session(
 }
 
 #[cfg(target_os = "linux")]
-async fn request_keeper_stop(paths: &AppPaths, session_id: &str) -> Result<bool, CommandError> {
+pub(crate) async fn request_keeper_host_service(
+    paths: &AppPaths,
+    session: &str,
+    packet: &crate::winboat::host_service::studio::Launch,
+) -> Result<(), BackendError> {
+    let failure = || {
+        crate::host_service::failure(
+            crate::contracts::CapabilityId::HostServiceStart,
+            "host-service requires the connected Studio keeper; restart Studio with this version",
+        )
+    };
+    let directory = ensure_session_socket_directory(paths).map_err(|_| failure())?;
+    let socket = directory.join(session_socket_name(session));
+    let request = zeroize::Zeroizing::new(format!(
+        "host-service {}",
+        serde_json::to_string(packet).map_err(|_| failure())?
+    ));
+    match request_session_keeper(&socket, &request)
+        .await
+        .map_err(|_| failure())?
+    {
+        Some(response) if response.ok && response.session.is_none() => Ok(()),
+        Some(response) if response.error.is_some() => Err(response.error.unwrap()),
+        _ => Err(failure()),
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) async fn request_keeper_stop(
+    paths: &AppPaths,
+    session_id: &str,
+) -> Result<bool, CommandError> {
     let directory = ensure_session_socket_directory(paths).map_err(keeper_command_error)?;
     let socket_path = directory.join(session_socket_name(session_id));
     let Some(response) = request_session_keeper(&socket_path, "stop").await? else {
@@ -2093,6 +2184,8 @@ async fn request_session_keeper(
 fn keeper_response_timeout(request: &str) -> Duration {
     if request == "stop" {
         Duration::from_secs(90)
+    } else if request.starts_with("host-service ") {
+        Duration::from_secs(35)
     } else {
         Duration::from_secs(2)
     }
@@ -2224,6 +2317,7 @@ fn parse_command(values: &[String]) -> Result<CliCommand, BackendError> {
             )),
         },
         Some("studio") => parse_studio_command(&values[1..]),
+        Some("host-service") => parse_host_service_command(&values[1..]),
         Some("runtime") => parse_runtime_command(&values[1..]),
         Some("browser") => parse_browser_command(&values[1..]),
         Some("project") => match values.get(1).map(String::as_str) {
@@ -2596,6 +2690,59 @@ fn parse_browser_command(values: &[String]) -> Result<CliCommand, BackendError> 
         }
         _ => Err(BackendError::invalid_request(
             "expected browser doctor, install chromium, frontend-health, test, or artifacts",
+        )),
+    }
+}
+
+fn parse_host_service_command(values: &[String]) -> Result<CliCommand, BackendError> {
+    match values.first().map(String::as_str) {
+        Some("list") if values.len() == 1 => Ok(CliCommand::HostServiceList),
+        Some("start") => {
+            let (options, _) = parse_options(
+                &values[1..],
+                &[
+                    "--service",
+                    "--allow-host-port",
+                    "--runtime-session-id",
+                    "--guest-port",
+                ],
+                &[],
+            )?;
+            let port = |name| {
+                options
+                    .get(name)
+                    .map(|v| {
+                        v.parse::<u16>()
+                            .map_err(|_| BackendError::invalid_request("invalid host-service port"))
+                    })
+                    .transpose()
+            };
+            let request = crate::host_service::StartRequest {
+                runtime_session_id: required_map_option(&options, "--runtime-session-id")?,
+                service: required_map_option(&options, "--service")?,
+                allow_host_port: port("--allow-host-port")?.ok_or_else(|| {
+                    BackendError::invalid_request("--allow-host-port is required")
+                })?,
+                guest_port: port("--guest-port")?.unwrap_or(0),
+            };
+            request.validate()?;
+            Ok(CliCommand::HostServiceStart { request })
+        }
+        Some("status" | "stop") => {
+            let session_id = required_option(&values[1..], "--session-id")?;
+            if !crate::host_service::valid_id(&session_id, "hostsvc_") {
+                return Err(BackendError::invalid_request(
+                    "invalid host-service session ID",
+                ));
+            }
+            if values[0] == "stop" {
+                Ok(CliCommand::HostServiceStop { session_id })
+            } else {
+                Ok(CliCommand::HostServiceStatus { session_id })
+            }
+        }
+        _ => Err(BackendError::invalid_request(
+            "expected host-service start, status, stop, or list",
         )),
     }
 }
@@ -3140,6 +3287,21 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
         error.capability,
         error.message.as_str(),
     ) {
+        (
+            BackendErrorCode::OperationFailed,
+            Some(BackendId::LinuxWinboat),
+            Some(CapabilityId::HostServiceStart),
+            message @ ("host-service already owns a different guest port for this Runtime"
+            | "host-service requires the connected Studio keeper; restart Studio with this version"
+            | "host-service Studio helper refused startup"
+            | "Studio monitor still owns the previous host-service helper; retry after control cleanup"),
+        ) => message,
+        (
+            BackendErrorCode::OperationFailed,
+            Some(BackendId::LinuxWinboat),
+            Some(CapabilityId::HostServiceStop),
+            message @ "dependent Studio session did not confirm graceful exit; host-service preserved",
+        ) => message,
         #[cfg(target_os = "linux")]
         (
             BackendErrorCode::PreconditionFailed,
@@ -3381,6 +3543,7 @@ fn is_headless_command(argument: Option<&OsString>) -> bool {
                 | "env"
                 | "studio"
                 | "runtime"
+                | "host-service"
                 | "browser"
                 | "project"
                 | "operation"
@@ -3573,6 +3736,29 @@ mod tests {
             "off",
         ]))
         .is_err());
+    }
+
+    #[test]
+    fn host_service_diagnostics_allow_only_exact_static_causes() {
+        for (capability, message) in [
+            (CapabilityId::HostServiceStart, "host-service already owns a different guest port for this Runtime"),
+            (CapabilityId::HostServiceStart, "host-service requires the connected Studio keeper; restart Studio with this version"),
+            (CapabilityId::HostServiceStart, "host-service Studio helper refused startup"),
+            (CapabilityId::HostServiceStart, "Studio monitor still owns the previous host-service helper; retry after control cleanup"),
+            (CapabilityId::HostServiceStop, "dependent Studio session did not confirm graceful exit; host-service preserved"),
+        ] {
+            let error = BackendError::operation(BackendId::LinuxWinboat, capability, message);
+            assert_eq!(sanitize_backend_error(error.clone()).message, message);
+            let mut changed = error.clone();
+            changed.message.push_str(" /private/password=secret");
+            assert_ne!(sanitize_backend_error(changed).message, message);
+            let mut changed = error.clone();
+            changed.capability = Some(CapabilityId::HostServiceStatus);
+            assert_ne!(sanitize_backend_error(changed).message, message);
+            let mut changed = error;
+            changed.backend = Some(BackendId::WindowsNative);
+            assert_ne!(sanitize_backend_error(changed).message, message);
+        }
     }
 
     #[test]

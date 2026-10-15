@@ -1,0 +1,93 @@
+{
+  "boundary": "same final source; baseline uses two TLS writes, candidate coalesces frame header and payload",
+  "profile": "debug, identical lock, helper, machine, application and data",
+  "binaries": {
+    "baseline": "8eb5867669441bd7f02110228f5e7d3b0abf6be5ce1b1d12ae04092a828a5275",
+    "candidate": "875eb08da3bede9f5f877eb69f29dfc61d31f8f88208bc230c13e80874274465"
+  },
+  "candidateTransportSha256": "6800a741fe1017333df6a70fe2b691e6a592e18a3af6b8774f440867d4391c9d",
+  "guestHelperSha256": "f4628bcb5a6cd7743f49ad091cfefbc52c51da32a3c033fb22ebf60ab6bbf01d",
+  "workloadSha256": "61acb8d7905c18a746ddfaa5abaf999a20bbfa0df79c81ddfc8fbd3ab32b76ae",
+  "order": [
+    "baseline-sampled-1",
+    "candidate-sampled-1",
+    "candidate-sampled-2",
+    "baseline-sampled-2"
+  ],
+  "budgetPercent": 10,
+  "metrics": {
+    "meanMs": {
+      "baseline": 15.76259864583332,
+      "candidate": 15.026293329166663,
+      "regressionPercent": -4.671217818905083
+    },
+    "p50Ms": {
+      "baseline": 13.63655,
+      "candidate": 12.834900000000001,
+      "regressionPercent": -5.878686324620219
+    },
+    "p95Ms": {
+      "baseline": 30.94665,
+      "candidate": 30.53355,
+      "regressionPercent": -1.3348779270131006
+    },
+    "p99Ms": {
+      "baseline": 48.03435,
+      "candidate": 46.62485,
+      "regressionPercent": -2.9343584330796646
+    },
+    "requestsPerSecond": {
+      "baseline": 231.78791547896932,
+      "candidate": 242.4139532986691,
+      "regressionPercent": -4.584379559970597
+    },
+    "runtimeMeanBytes": {
+      "baseline": 468267568.0717255,
+      "candidate": 473159352.3763764,
+      "regressionPercent": 1.0446557989900462
+    },
+    "runtimePeakBytes": {
+      "baseline": 501039104,
+      "candidate": 501616640,
+      "regressionPercent": 0.1152676498479499
+    },
+    "guestRelayMeanBytes": {
+      "baseline": 185187837.93086633,
+      "candidate": 180861776.0800801,
+      "regressionPercent": -2.336039936057377
+    },
+    "guestRelayPeakBytes": {
+      "baseline": 193470464,
+      "candidate": 189808640,
+      "regressionPercent": -1.8927044078418054
+    },
+    "linuxRelayMeanRssBytes": {
+      "baseline": 89673282.0770177,
+      "candidate": 89784212.56155817,
+      "regressionPercent": 0.12370516833006828
+    },
+    "linuxRelayPeakRssBytes": {
+      "baseline": 90284032,
+      "candidate": 90947584,
+      "regressionPercent": 0.7349605298974771
+    }
+  },
+  "passed": true,
+  "aggregation": {
+    "latency": "arithmetic mean of trial summaries",
+    "throughput": "total measured requests / total measured seconds",
+    "memoryMean": "arithmetic mean of trial sample means",
+    "memoryPeak": "maximum sampled peak across trials per arm",
+    "endpointWorkingSet": "retained in raw reports; the full measurement-window mean and peak are gated"
+  },
+  "pointSampleComparison": {
+    "runtimeWorkingSetBytes": {
+      "baseline": 465559552.0,
+      "candidate": 473595904.0
+    },
+    "guestRelayWorkingSetBytes": {
+      "baseline": 185180160.0,
+      "candidate": 180850688.0
+    }
+  }
+}

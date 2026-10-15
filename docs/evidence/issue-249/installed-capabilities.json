@@ -1,0 +1,484 @@
+{
+  "schemaVersion": "7.0.0",
+  "command": "capabilities",
+  "ok": true,
+  "platform": "linux",
+  "backend": "linux-winboat",
+  "sessionId": "session_68e0712869105f16fe08025592318b22",
+  "capabilitySnapshot": {
+    "schemaVersion": "7.0.0",
+    "snapshotId": "cap_b8f6872dc7041f6d3b41726846308f7a",
+    "capturedAt": "2026-10-15T08:35:04.202611721Z",
+    "manifest": {
+      "schemaVersion": "7.0.0",
+      "backend": "linux-winboat",
+      "hostPlatform": "linux",
+      "studioPlatform": "windows",
+      "runtimePlatform": "linux",
+      "runtimeModes": ["portable", "studio-run-locally"],
+      "architecture": "x86_64",
+      "capabilities": [
+        {
+          "id": "host-service.start",
+          "status": "supported",
+          "requiredPermissions": [
+            "private-cache",
+            "winboat-interactive-session",
+            "private-vm-bridge-bind",
+            "loopback-connect"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "host-service.status",
+          "status": "supported",
+          "requiredPermissions": [
+            "private-cache",
+            "winboat-interactive-session",
+            "private-vm-bridge-bind",
+            "loopback-connect"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "host-service.stop",
+          "status": "supported",
+          "requiredPermissions": [
+            "private-cache",
+            "winboat-interactive-session",
+            "private-vm-bridge-bind",
+            "loopback-connect"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "environment.configure",
+          "status": "supported",
+          "requiredPermissions": [],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "studio.detect",
+          "status": "supported",
+          "requiredPermissions": ["winboat-guest-online"],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "studio.install",
+          "status": "supported",
+          "requiredPermissions": [
+            "winboat-interactive-session",
+            "windows-administrator"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "studio.uninstall",
+          "status": "supported",
+          "requiredPermissions": [
+            "winboat-interactive-session",
+            "windows-administrator"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "studio.start",
+          "status": "supported",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "studio.status",
+          "status": "supported",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "studio.stop",
+          "status": "supported",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "runtime.build",
+          "status": "supported",
+          "requiredPermissions": [
+            "network-access",
+            "java-runtime",
+            "private-cache"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "runtime.start",
+          "status": "supported",
+          "requiredPermissions": [
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "runtime.status",
+          "status": "supported",
+          "requiredPermissions": [
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "runtime.wait",
+          "status": "supported",
+          "requiredPermissions": [
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "runtime.url",
+          "status": "supported",
+          "requiredPermissions": [
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "runtime.stop",
+          "status": "supported",
+          "requiredPermissions": [
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "runtime.logs",
+          "status": "supported",
+          "requiredPermissions": [
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "ui.capabilities",
+          "status": "supported",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "ui.tree",
+          "status": "supported",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "ui.find",
+          "status": "supported",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "ui.action",
+          "status": "supported",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "ui.wait",
+          "status": "supported",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "ui.screenshot",
+          "status": "supported",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "browser.test",
+          "status": "supported",
+          "requiredPermissions": [
+            "network-access",
+            "node-runtime",
+            "private-cache",
+            "playwright-chromium"
+          ],
+          "fallbackAllowed": false
+        },
+        {
+          "id": "browser.artifacts",
+          "status": "supported",
+          "requiredPermissions": ["private-cache"],
+          "fallbackAllowed": false
+        }
+      ]
+    }
+  },
+  "data": {
+    "capturedAt": "2026-10-15T08:35:04.202611721Z",
+    "manifest": {
+      "architecture": "x86_64",
+      "backend": "linux-winboat",
+      "capabilities": [
+        {
+          "fallbackAllowed": false,
+          "id": "host-service.start",
+          "requiredPermissions": [
+            "private-cache",
+            "winboat-interactive-session",
+            "private-vm-bridge-bind",
+            "loopback-connect"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "host-service.status",
+          "requiredPermissions": [
+            "private-cache",
+            "winboat-interactive-session",
+            "private-vm-bridge-bind",
+            "loopback-connect"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "host-service.stop",
+          "requiredPermissions": [
+            "private-cache",
+            "winboat-interactive-session",
+            "private-vm-bridge-bind",
+            "loopback-connect"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "environment.configure",
+          "requiredPermissions": [],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "studio.detect",
+          "requiredPermissions": ["winboat-guest-online"],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "studio.install",
+          "requiredPermissions": [
+            "winboat-interactive-session",
+            "windows-administrator"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "studio.uninstall",
+          "requiredPermissions": [
+            "winboat-interactive-session",
+            "windows-administrator"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "studio.start",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "studio.status",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "studio.stop",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "runtime.build",
+          "requiredPermissions": [
+            "network-access",
+            "java-runtime",
+            "private-cache"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "runtime.start",
+          "requiredPermissions": [
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "runtime.status",
+          "requiredPermissions": [
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "runtime.wait",
+          "requiredPermissions": [
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "runtime.url",
+          "requiredPermissions": [
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "runtime.stop",
+          "requiredPermissions": [
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "runtime.logs",
+          "requiredPermissions": [
+            "loopback-bind",
+            "java-runtime",
+            "private-cache",
+            "winboat-guest-online",
+            "compose-write",
+            "container-recreate"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "ui.capabilities",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "ui.tree",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "ui.find",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "ui.action",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "ui.wait",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "ui.screenshot",
+          "requiredPermissions": ["winboat-interactive-session"],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "browser.test",
+          "requiredPermissions": [
+            "network-access",
+            "node-runtime",
+            "private-cache",
+            "playwright-chromium"
+          ],
+          "status": "supported"
+        },
+        {
+          "fallbackAllowed": false,
+          "id": "browser.artifacts",
+          "requiredPermissions": ["private-cache"],
+          "status": "supported"
+        }
+      ],
+      "hostPlatform": "linux",
+      "runtimeModes": ["portable", "studio-run-locally"],
+      "runtimePlatform": "linux",
+      "schemaVersion": "7.0.0",
+      "studioPlatform": "windows"
+    },
+    "schemaVersion": "7.0.0",
+    "snapshotId": "cap_b8f6872dc7041f6d3b41726846308f7a"
+  }
+}

@@ -262,8 +262,10 @@ fn read_record(directory: &cap_std::fs::Dir, name: &str) -> Result<Descriptor, &
 }
 
 fn validate_descriptor(descriptor: &Descriptor) -> Result<(), &'static str> {
-    if !matches!(descriptor.schema_version.as_str(), "5.0.0" | "6.0.0")
-        || !valid_session_id(&descriptor.session_id)
+    if !matches!(
+        descriptor.schema_version.as_str(),
+        "5.0.0" | "6.0.0" | "7.0.0"
+    ) || !valid_session_id(&descriptor.session_id)
         || descriptor.vm_key.len() != 64
         || !descriptor.vm_key.bytes().all(|b| b.is_ascii_hexdigit())
         || !descriptor.runtime_session_id.starts_with("runtime_")

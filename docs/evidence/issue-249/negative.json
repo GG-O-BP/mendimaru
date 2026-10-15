@@ -1,0 +1,24 @@
+{
+  "reuse": {
+    "ok": true,
+    "sameSession": true,
+    "errorCode": null
+  },
+  "incompatibleGuestPort": {
+    "ok": false,
+    "sameSession": false,
+    "errorCode": "operation_failed"
+  },
+  "wrongDestination": {
+    "ok": false,
+    "sameSession": false,
+    "errorCode": "invalid_request"
+  },
+  "wrongAllowedPort": {
+    "ok": false,
+    "sameSession": false,
+    "errorCode": "invalid_request"
+  },
+  "unauthenticatedTlsRejected": true,
+  "authenticatedOwnerPreserved": true
+}

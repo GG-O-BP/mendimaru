@@ -104,7 +104,16 @@ pub(crate) async fn request(
         }
     }
     let deadline = chrono::Utc::now().timestamp_millis() + request.timeout_ms as i64;
-    let payload = serde_json::to_vec(&json!({"id":id,"expiresAt":deadline,"request":request}))
+    let mut wire_request =
+        serde_json::to_value(request).map_err(|_| error(op, "ui-invalid-request"))?;
+    if request.action == Some(crate::contracts::UiActionKind::SetValue) {
+        let sealed = security
+            .seal_ui_value(request.value.as_deref().unwrap_or_default())
+            .map_err(|_| error(op, "ui-invalid-request"))?;
+        wire_request.as_object_mut().unwrap().remove("value");
+        wire_request["sealedValue"] = sealed;
+    }
+    let payload = serde_json::to_vec(&json!({"id":id,"expiresAt":deadline,"request":wire_request}))
         .map_err(|_| error(op, "ui-invalid-request"))?;
     let envelope = authenticated_envelope(&security, sequence, &payload)
         .map_err(|_| error(op, "ui-invalid-request"))?;

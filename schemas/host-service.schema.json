@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/host-service.schema.json",
+  "title": "WinBoat session host-service contracts",
+  "$defs": {
+    "startRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtimeSessionId", "service", "allowHostPort", "guestPort"],
+      "properties": {
+        "runtimeSessionId": {
+          "type": "string",
+          "pattern": "^runtime_[0-9a-f]{32}$"
+        },
+        "service": {
+          "const": "mysql"
+        },
+        "allowHostPort": {
+          "const": 3306
+        },
+        "guestPort": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      }
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "sessionId",
+        "runtimeSessionId",
+        "backend",
+        "service",
+        "state",
+        "guestHost",
+        "guestPort",
+        "targetHost",
+        "targetPort",
+        "guestListenerVerified",
+        "targetTcpVerified",
+        "mysqlHandshakeVerified",
+        "databaseAuthenticationVerified",
+        "encrypted",
+        "activeConnections"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "7.0.0"
+        },
+        "sessionId": {
+          "type": "string",
+          "pattern": "^hostsvc_[0-9a-f]{32}$"
+        },
+        "runtimeSessionId": {
+          "type": "string",
+          "pattern": "^runtime_[0-9a-f]{32}$"
+        },
+        "backend": {
+          "const": "linux-winboat"
+        },
+        "service": {
+          "const": "mysql"
+        },
+        "state": {
+          "enum": ["ready", "stopped", "interrupted"]
+        },
+        "guestHost": {
+          "const": "127.0.0.1"
+        },
+        "guestPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "targetHost": {
+          "const": "127.0.0.1"
+        },
+        "targetPort": {
+          "const": 3306
+        },
+        "guestListenerVerified": {
+          "type": "boolean"
+        },
+        "targetTcpVerified": {
+          "type": "boolean"
+        },
+        "mysqlHandshakeVerified": {
+          "type": "boolean"
+        },
+        "databaseAuthenticationVerified": {
+          "const": false
+        },
+        "encrypted": {
+          "const": true
+        },
+        "activeConnections": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "ready"
+              }
+            },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": {
+              "guestListenerVerified": {
+                "const": true
+              },
+              "targetTcpVerified": {
+                "const": true
+              },
+              "mysqlHandshakeVerified": {
+                "const": true
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "guestListenerVerified": {
+                "const": false
+              },
+              "targetTcpVerified": {
+                "const": false
+              },
+              "mysqlHandshakeVerified": {
+                "const": false
+              },
+              "activeConnections": {
+                "const": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

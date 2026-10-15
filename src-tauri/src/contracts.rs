@@ -5,12 +5,12 @@ use std::fmt;
 /// Contract versions follow semantic versioning. Changes accepted by the
 /// current closed schemas may increment the minor version; serialized fields,
 /// enum variants, capability IDs, or semantics require a major version.
-pub const CONTRACT_SCHEMA_VERSION: &str = "6.0.0";
+pub const CONTRACT_SCHEMA_VERSION: &str = "7.0.0";
 
-/// UI commands added in v5 do not change persisted v4 Runtime/build/browser
-/// records. Read both without rewriting old snapshots or artifact descriptors.
+/// UI/coordination/host-service commands in v5–v7 retain the v4 Runtime/build/
+/// browser record layout. Preserve prior snapshots and artifact descriptors.
 pub(crate) fn compatible_record_schema(version: &str) -> bool {
-    matches!(version, "4.0.0" | "5.0.0" | "6.0.0")
+    matches!(version, "4.0.0" | "5.0.0" | "6.0.0" | "7.0.0")
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -85,6 +85,12 @@ pub enum RuntimeMode {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CapabilityId {
+    #[serde(rename = "host-service.start")]
+    HostServiceStart,
+    #[serde(rename = "host-service.status")]
+    HostServiceStatus,
+    #[serde(rename = "host-service.stop")]
+    HostServiceStop,
     #[serde(rename = "environment.configure")]
     EnvironmentConfigure,
     #[serde(rename = "studio.detect")]
@@ -132,7 +138,10 @@ pub enum CapabilityId {
 }
 
 impl CapabilityId {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 25] = [
+        Self::HostServiceStart,
+        Self::HostServiceStatus,
+        Self::HostServiceStop,
         Self::EnvironmentConfigure,
         Self::StudioDetect,
         Self::StudioInstall,
@@ -159,6 +168,9 @@ impl CapabilityId {
 
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::HostServiceStart => "host-service.start",
+            Self::HostServiceStatus => "host-service.status",
+            Self::HostServiceStop => "host-service.stop",
             Self::EnvironmentConfigure => "environment.configure",
             Self::StudioDetect => "studio.detect",
             Self::StudioInstall => "studio.install",
@@ -1361,7 +1373,7 @@ mod tests {
             if name == "artifact" {
                 assert_eq!(
                     schema["properties"]["schemaVersion"]["enum"],
-                    serde_json::json!(["4.0.0", "5.0.0", CONTRACT_SCHEMA_VERSION])
+                    serde_json::json!(["4.0.0", "5.0.0", "6.0.0", CONTRACT_SCHEMA_VERSION])
                 );
             } else {
                 assert_eq!(

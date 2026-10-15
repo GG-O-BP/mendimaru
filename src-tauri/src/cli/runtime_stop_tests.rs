@@ -287,7 +287,7 @@ import base64, datetime, hashlib, hmac, json, os, pathlib, re, sys, time
 root = pathlib.Path(os.environ['MENDIMARU_STOP_FIXTURE_ROOT'])
 args = sys.stdin.read().splitlines()
 (root / 'probe-entered').touch()
-bootstrap = pathlib.Path(next(a.split(',', 1)[1] for a in args if a.startswith('/drive:MendimaruAuth,'))) / 'bootstrap.ps1'
+bootstrap = pathlib.Path(next(a.split(',', 1)[1] for a in args if a.startswith('/drive:MxAuth'))) / 'bootstrap.ps1'
 launcher = bootstrap.read_text()
 def field(name, text=launcher):
     return re.search(r'\$' + name + r"\s*=\s*'([^']*)'", text).group(1)
