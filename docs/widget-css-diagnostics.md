@@ -34,7 +34,11 @@ Do not create an empty `widgets.css`, concatenate arbitrary package files, or
 turn off error policies as a repair. Those approaches cannot prove correct
 styles, asset URL resolution, or cascade order.
 
-## Upstream report: Studio Pro 11.12.3 UNC imports
+## Historical upstream report: Studio Pro 11.12.3 UNC imports
+
+The application and version below identify a retained reproduction. They are
+not prerequisites for Mendimaru or its release validation. Use the affected
+installation and your own application when investigating another environment.
 
 **Owner:** Mendix Studio Pro's generated web-client imports and bundler
 integration. Mendimaru owns the diagnostic/support boundary. The observed MPKs
@@ -62,10 +66,13 @@ Run [repro-widget-css.mjs](../scripts/repro-widget-css.mjs) on Windows using the
 the installation's Node tools directory, an existing local parent directory,
 and an existing writable UNC parent directory:
 
+Set `MENDIX_STUDIO_HOME` to the affected installation's root directory:
+
 ```powershell
-& 'C:\Program Files\Mendix\11.12.3\modeler\tools\node\win-x64\node.exe' `
+$nodeTools = Join-Path $env:MENDIX_STUDIO_HOME 'modeler\tools\node'
+& (Join-Path $nodeTools 'win-x64\node.exe') `
   .\scripts\repro-widget-css.mjs `
-  'C:\Program Files\Mendix\11.12.3\modeler\tools\node' `
+  $nodeTools `
   $env:TEMP '\\host.lan\Data'
 ```
 

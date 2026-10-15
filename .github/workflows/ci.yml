@@ -254,6 +254,9 @@ jobs:
           npm run test:ci:gates
           npm run test:perf
 
+      - name: Test generic Studio release gate orchestration
+        run: npm run test:e2e:studio-parity
+
       - name: Run strict Playwright browser E2E
         run: |
           npm run test:browser

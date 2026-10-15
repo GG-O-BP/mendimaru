@@ -81,7 +81,7 @@ test(
               sessionId: studioId,
               processId: 4242,
               startedAt: "2025-08-15T00:00:00Z",
-              version: "11.12.3",
+              version: "11.12.6",
               state: "running",
               connection: "connected",
               projectName: "private-project-canary",

@@ -378,8 +378,11 @@ builds the Linux release binary, starts a real shared-project Studio Run
 Locally Runtime, and requires the suite to pass with `--asset-mirror off` —
 unmodified Chromium, no fake fixture, no Portable Runtime substitute. An
 assisted (`--asset-mirror auto`) run is executed afterwards purely as
-comparison evidence and can never satisfy the gate. The gate script is
-`scripts/e2e/studio-f5-parity-gate.mjs` and is driven by:
+comparison evidence and can never satisfy the gate. The gate selects an
+operator-configured MPR path and derives the exact Studio
+version from its discovered metadata. Setup and preflight are described in
+[generic Studio release validation](studio-release-validation.md).
+The gate script is `scripts/e2e/studio-f5-parity-gate.mjs` and is driven by:
 
 - `MENDIMARU_STUDIO_PARITY_BINARY` — absolute path to the release binary,
 - `MENDIMARU_STUDIO_PARITY_SUITE` — absolute path to the parity suite,

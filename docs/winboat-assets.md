@@ -19,8 +19,9 @@ mendimaru assets watch --project-id project_REPLACE_WITH_ID --rewrite-generated-
 ```
 
 In another terminal, open the **same selected project** normally with
-`studio start --version 11.12.3 --project-id ...` (or the desktop application),
-prepare Runtime forwarding as usual, and use Studio's Run Locally/F5 action.
+`studio start --version VERSION --project-id ...` (or the desktop application),
+using the selected project's required `VERSION`. Prepare Runtime forwarding as
+usual, and use Studio's Run Locally/F5 action.
 Wait for Rspack's build to complete, then open the ordinary Runtime URL in Chrome.
 If the watcher reports `normalized`, wait for Rspack's subsequent successful
 build before reloading a page. If the inputs are already relative, no repair

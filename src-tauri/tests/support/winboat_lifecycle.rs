@@ -144,7 +144,7 @@ impl WinBoatLifecycleFixture {
     }
 
     pub(crate) fn write_dead_lock(&self, process_id: u32) -> PathBuf {
-        let lock = self.workspace.join("IronCalcSpreadUIShowcase.mpr.lock");
+        let lock = self.workspace.join("SampleApplication.mpr.lock");
         fs::write(
             &lock,
             format!(
