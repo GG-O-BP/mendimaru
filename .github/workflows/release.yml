@@ -127,6 +127,8 @@ jobs:
       - name: Run the shared-project Studio F5 parity gate
         env:
           MENDIMARU_STUDIO_PARITY_BINARY: ${{ github.workspace }}/src-tauri/target/release/mendimaru
+          MENDIMARU_STUDIO_PARITY_PROJECT_PATH: ${{ vars.STUDIO_F5_PARITY_PROJECT_PATH }}
+          MENDIMARU_STUDIO_PARITY_VERSION: ${{ vars.STUDIO_F5_PARITY_VERSION }}
           MENDIMARU_STUDIO_PARITY_SUITE: ${{ vars.STUDIO_F5_PARITY_SUITE }}
         run: |
           xvfb-run -a -s "-screen 0 1920x1080x24" \
@@ -137,9 +139,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: mendimaru-studio-f5-parity-evidence
-          path: |
-            artifacts/e2e/studio-f5-parity.json
-            artifacts/e2e/release-studio-login.png
+          path: artifacts/e2e/studio-f5-parity.json
           if-no-files-found: warn
 
   release:

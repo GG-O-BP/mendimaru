@@ -117,44 +117,27 @@ borrowed Runtime, even after a failed assertion; the owner handles cleanup.
 Its existing suite requirement for a state change and a value assertion still
 applies. Omitting the setting retains the original standalone gate flow.
 
-## Stateful operator fixture
+## Application-specific assertions
 
-The companion [IronCalc driver](../scripts/spikes/issue149-workbook-live.py)
-exercises actual cell input, calculation, committed workbook-state restoration,
-download, file-chooser import, and invalid-import preservation. It uses the
-installed package's Playwright and ordinary sandboxed Chromium. It reserves
-shared VM use plus exclusive app-data use for the complete scenario, including
-inherited kernel descriptors in the browser driver. It does not start or stop
-Studio/Runtime and requires a new private evidence directory.
+Shared sessions and the release gate accept operator-supplied browser suites.
+Use the selected application's real controls and assert the resulting state.
+No third-party widget, project name, workbook format, or fixed Studio version
+is required. Suites must declare their data effects and isolation policy as
+described in [browser testing](browser-testing.md).
 
-```bash
-# Use the same installed binary, config, cache and verified snapshot as above.
-MENDIMARU_E2E_ALLOW_MUTATION=1 \
-MENDIMARU_E2E_DISPOSABLE_SNAPSHOT=verified-restorable-snapshot-id \
-MENDIMARU_CONFIG_DIR=/absolute/lab/config \
-MENDIMARU_CACHE_DIR=/absolute/lab/cache \
-MENDIMARU_E2E_BINARY=/absolute/installed/usr/bin/mendimaru \
-MENDIMARU_E2E_SHARED_SESSION_ID=shared_<id> \
-MENDIMARU_E2E_WORKBOOK_EVIDENCE=/absolute/new-evidence-directory \
-  python3 scripts/spikes/issue149-workbook-live.py
-```
+For stateful coverage, exercise an input change, persistence through a fresh
+page, and the application's own error behavior. File import/export checks belong
+to an application-specific operator harness when its UI needs operations outside
+the declarative suite API; they are not prerequisites of Mendimaru itself.
 
-This is an operator fixture for the existing `IronCalcSpreadUIShowcase` app,
-not a new file-upload command in the declarative browser-suite API. Inputs use
-browser keyboard/form controls. The canvas calculation assertion only reads the
-mounted IronCalc model; it does not set model values or invoke calculations.
-The saved workbook is loaded again through a fresh page before being exported
-and imported into the empty-workbook example.
-
-**Write-back boundary:** Mendix documents `ListAttributeValue.get()` values as
-[always read-only](https://docs.mendix.com/apidocs-mxsdk/apidocs/pluggable-widgets-client-apis-list-values/).
-The fixture therefore verifies the supported `WorkbookState` attribute commit
-and read-back: edited quantities/prices/formulas survive a fresh page. Its
-individual datasource row attributes remain unchanged, and the driver asserts
-that boundary. It does not claim per-row list-attribute write-back. Resetting
-the fixture is followed by a fresh page to fetch the current row mapping.
+The release configuration and preflight procedure are documented in
+[generic Studio release validation](studio-release-validation.md).
 
 ## Recorded verification
+
+The following records describe a historical lab run, not required release
+projects or Studio versions. Application-specific spike drivers from that run
+are retired; the retained evidence remains an account of what was tested.
 
 The [2026-09-24 evidence](issue-149-live-evidence.json) separates ordinary
 Rust/CLI/Chromium fixtures from the installed, real Studio F5 checks. The live

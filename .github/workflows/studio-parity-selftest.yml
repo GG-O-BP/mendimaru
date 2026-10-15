@@ -20,19 +20,14 @@ jobs:
         with:
           node-version: 22.22.2
 
-      - name: Verify toolchain, Docker, and the parity suite
+      - name: Verify toolchain and the configured parity fixture
         env:
-          STUDIO_F5_PARITY_SUITE: ${{ vars.STUDIO_F5_PARITY_SUITE }}
+          MENDIMARU_STUDIO_PARITY_PROJECT_PATH: ${{ vars.STUDIO_F5_PARITY_PROJECT_PATH }}
+          MENDIMARU_STUDIO_PARITY_VERSION: ${{ vars.STUDIO_F5_PARITY_VERSION }}
+          MENDIMARU_STUDIO_PARITY_SUITE: ${{ vars.STUDIO_F5_PARITY_SUITE }}
         run: |
-          test -x /usr/bin/cargo
+          command -v cargo
           cargo --version
-          docker ps --format '{{.Names}}'
-          test -n "$STUDIO_F5_PARITY_SUITE"
-          test -f "$STUDIO_F5_PARITY_SUITE"
-          SUITE="$STUDIO_F5_PARITY_SUITE" node --input-type=module -e '
-            import { readFile } from "node:fs/promises";
-            import { validateSuiteShape } from "./scripts/e2e/studio-f5-parity-gate.mjs";
-            const suite = JSON.parse(await readFile(process.env.SUITE, "utf8"));
-            validateSuiteShape(suite, process.env.SUITE);
-            console.log("parity suite validation: OK");
-          '
+          command -v xvfb-run
+          command -v xdotool
+          python3 scripts/e2e/prepare-studio-f5-release.py --check-fixture
