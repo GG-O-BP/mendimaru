@@ -1,4 +1,4 @@
-﻿{
+{
   "ok": true,
   "proof": "PASS: production helper compiles, loopback ownership, independent listeners, port reuse, half-close response and bounded cleanup"
 }
