@@ -458,6 +458,7 @@ jobs:
         run: |
           ./scripts/test-studio-stop.ps1
           ./scripts/test-studio-probe.ps1
+          ./scripts/test-guest-clock.ps1
 
   security:
     name: Dependency security audit

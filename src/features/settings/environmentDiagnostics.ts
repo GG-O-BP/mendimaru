@@ -38,7 +38,7 @@ const DIAGNOSTIC_MESSAGES: Record<
   freerdp: {
     title: "diagnostic-freerdp-title",
     recovery: "diagnostic-freerdp-recovery",
-    target: "environment-settings-heading",
+    target: "advanced-freerdpBinary-input",
   },
   "shared-directory": {
     title: "diagnostic-shared-directory-title",

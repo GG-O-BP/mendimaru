@@ -307,3 +307,20 @@ install-to-delete boundary.
 The UI capability IDs are implemented for keeper-owned Studio sessions. See
 [commands, limits, ownership, and error semantics](winboat-ui-automation.md).
 Windows native UI remains deferred; its capabilities are unsupported.
+
+## Explicit WinBoat clock recovery
+
+`mendimaru env repair-clock --rtc-base utc|local` is an explicit Linux WinBoat
+maintenance operation under `environment.configure`. The RTC basis is required
+and must be established from QEMU and its container timezone first. It uses
+the existing loopback-only, hash-pinned, authenticated one-shot RemoteApp
+transport and exclusive VM coordination. It refuses active Studio clients and
+keeper sockets and the guest refuses any Studio process before writing the RTC
+interpretation or Windows Time service settings. Success returns `{status, clockVerified, rebootRequired}`: the regular
+`EnvironmentStatus` DTO and explicit current-clock/reboot outcomes. `ok: true`
+confirms settings application; only `clockVerified: true` confirms current skew
+passes. A timezone-sized error can require reboot after changing the RTC
+interpretation. Normal
+`env status` and redetection do not synchronize time. See
+[clock recovery](winboat-clock-sync.md) for prerequisites, partial-failure
+semantics, and reboot verification.

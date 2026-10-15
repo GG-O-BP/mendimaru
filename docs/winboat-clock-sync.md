@@ -39,92 +39,97 @@ negative skew means the Windows guest clock is behind the Linux host.
 The diagnostic report export keeps the existing allowlist and does not include
 observed values, credentials, or configuration paths.
 
-## Host clock source
+## RTC interpretation and boot-time skew
 
-WinBoat's container logs have reported:
-
-```text
-unsupported clock source detected: 'hpet'. Please set host clock source to 'tsc'.
-```
-
-Check the current source:
+Inspect the **running** QEMU command line, the container timezone/UTC offset,
+and the Windows timezone and registry before changing clock settings. Avoid
+exporting the complete container configuration: it contains Windows credentials.
+For a Docker container named `WinBoat`:
 
 ```bash
-cat /sys/devices/system/clocksource/clocksource0/current_clocksource
-cat /sys/devices/system/clocksource/clocksource0/available_clocksource
+docker exec WinBoat date '+%Y-%m-%dT%H:%M:%S%z %Z'
+docker exec WinBoat sh -c 'tr "\000" " " < /proc/$(pidof qemu-system-x86_64)/cmdline'
 ```
 
-Prefer `tsc` on bare-metal Intel/AMD hosts:
-
-```bash
-# Inspect the current kernel command line
-cat /proc/cmdline
-```
-
-Add `clocksource=tsc` to the kernel command line through your boot loader (for
-example `/etc/kernel/cmdline` with `sbctl` or the distribution's GRUB
-configuration), then reboot and verify:
-
-```bash
-cat /sys/devices/system/clocksource/clocksource0/current_clocksource
-```
-
-Do not force `tsc` on a host where it is not stable. On virtual machines,
-`kvm-clock` or the hypervisor-provided source can be the correct choice.
-Confirming the causal relationship between `hpet` and guest drift requires a
-controlled A/B reproduction on the same VM; the diagnostic provides the
-measurement, not that conclusion.
-
-## QEMU RTC options
-
-WinBoat launches QEMU internally. When QEMU is configured directly, prefer:
-
-```text
--rtc base=localtime,clock=host,driftfix=slew
-```
-
-- `clock=host` keeps the RTC aligned with the host monotonic progression.
-- `driftfix=slew` slews guest time instead of jumping when interrupts are
-  delayed.
-- Keep changes coordinated with WinBoat's managed configuration so container
-  recreation does not discard them.
-
-## Windows guest time synchronization
-
-Inside the Windows guest, resynchronize explicitly after fixing the host:
+In the guest (administrator PowerShell):
 
 ```powershell
-w32tm /resync /force
+[DateTime]::UtcNow
+Get-TimeZone
+Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\TimeZoneInformation' `
+  -Name RealTimeIsUniversal -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Service -Filter "Name='W32Time'" | Select-Object State,StartMode
 w32tm /query /status
 ```
 
-Keep the Windows Time service enabled so the guest re-converges after
-sleep or pause:
+QEMU's `base=localtime` uses the **QEMU process/container timezone**, which can
+be UTC even when the Linux desktop uses KST. It does not mean Windows local
+time. The interpretation must match the actual RTC values:
 
-```powershell
-Get-Service W32Time | Set-Service -StartupType Automatic
-Start-Service W32Time
+| Actual RTC values                                                 | Windows `RealTimeIsUniversal` | CLI option         |
+| ----------------------------------------------------------------- | ----------------------------- | ------------------ |
+| UTC (`base=utc`, or `base=localtime` in a UTC container)          | DWORD `1`                     | `--rtc-base utc`   |
+| Windows local time (container and guest timezone/DST rules agree) | DWORD `0`                     | `--rtc-base local` |
+
+See [QEMU RTC options](https://www.qemu.org/docs/master/system/invocation.html).
+Do not add a second `-rtc` option to WinBoat's managed command line. `clock=host`
+and `driftfix=slew` do not fix a timezone interpretation mismatch.
+
+Issue #246 reproduced UTC-valued `base=localtime` in a UTC container, a Pacific
+Windows guest (UTC−07 on the observation date), and an absent
+`RealTimeIsUniversal`. Windows initially interpreted UTC as Pacific local time,
+so guest UTC was **seven hours ahead**. Windows Time eventually corrected it,
+but the next container recreation repeated the boot error. Merely running
+`w32tm /resync` once does not repair that RTC interpretation.
+
+## Explicit persistent recovery
+
+Close all Studio sessions and start Windows. After establishing the RTC basis
+above, run one explicit repair (example for the observed UTC container):
+
+```bash
+mendimaru env repair-clock --rtc-base utc --timeout-seconds 120
+mendimaru env status
 ```
 
-Mendimaru never writes the guest clock itself and never rewrites Studio
-timestamps. Session timestamps remain guest-reported values; the Guest clock
-diagnostic explains how to interpret them.
+This authenticated one-shot WinBoat operation sets only `RealTimeIsUniversal`,
+sets Windows Time (`W32Time`) to automatic startup, and starts it. It preserves
+the Windows timezone and NTP peers and does not copy an old host timestamp into
+the guest. It requires an administrator guest token, refuses active Mendimaru
+keepers/connected clients, and checks for any Studio process before changing
+the guest. VM coordination prevents another cooperating lifecycle operation
+from interleaving with repair.
 
-## Boot-time skew after container recreation
+`ok: true` means the RTC/service settings were applied through an authenticated
+operation. The returned `data` contains `status` (the usual environment status),
+`clockVerified` and `rebootRequired`. Only `clockVerified: true` confirms the
+current clock is within five seconds of the host. If `rebootRequired: true`,
+restart Windows to apply the RTC interpretation and check again; the command
+does not claim that writing the registry alone changed the current time.
+If repair fails or times out, changes may already have applied. Check guest
+administrator permissions and the RTC basis before retrying.
 
-Recreating the WinBoat container (for example when Mendimaru applies or rolls
-back runtime port forwarding) boots Windows fresh, and a guest that reads the
-QEMU real-time clock as local time comes up exactly one timezone off (−9 h on
-a KST guest). Setting the guest registry value below once makes every later
-boot read the RTC as UTC; observed boot skew then stays within about a second:
+Windows Time retains its existing synchronization policy. The explicit
+`w32tm /resync /rediscover` command may be used separately inside Windows when
+needed; it is not a prerequisite for applying persistent RTC recovery.
 
-```powershell
-New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\TimeZoneInformation' `
-  -Name 'RealTimeIsUniversal' -PropertyType DWord -Value 1 -Force
-```
+Reboot Windows or recreate the WinBoat container with no active work, then
+check `env status` as soon as the Guest API returns, **before waiting for NTP**.
+Check again after another restart and after steady operation. The registry and
+service startup setting are on the Windows disk and survive recreation.
 
-This is a guest operating-system change, not a Mendimaru feature; apply it on
-disposable lab VMs and keep the Guest clock diagnostic as the source of truth.
+Normal `env status`, refresh, and redetection remain read-only with respect to
+the guest clock. Session timestamps remain guest-reported values. Select
+`--rtc-base local` only for verified Windows-local RTC values; guessing from the
+literal word `localtime` can create another timezone-sized error.
+
+## Host clock source
+
+The observed host clock source is supporting context. QEMU may warn about HPET,
+but that warning alone does not establish that HPET caused a fixed, exact
+seven-hour offset. Check the RTC/timezone pairing and Windows Time first.
+Change kernel clock sources only after establishing a separate host timing
+problem; a controlled comparison is needed to attribute drift to a clock source.
 
 ## Request deadlines and bounded clock difference
 

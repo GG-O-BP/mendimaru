@@ -175,6 +175,8 @@ On Linux, `browser test` runs the same declarative Playwright/Chromium suite aga
 
 Development requires Node.js 22.22.2 or later, Rust, and the Tauri system dependencies for the host platform. Linux integration additionally requires WinBoat, Docker or Podman, FreeRDP 3.24+ (3.x), and Chrome or Chromium. Native Windows catalog discovery uses Edge or Chrome.
 
+See [FreeRDP compatibility and executable selection](docs/winboat-freerdp.md) for the support policy, the Debian 3.15.0 rendering reproduction, and the verified 3.32.2 recovery. Guest time can be repaired explicitly with `env repair-clock --rtc-base utc|local` after checking the [RTC basis](docs/winboat-clock-sync.md).
+
 ```bash
 npm install
 npm run tauri dev

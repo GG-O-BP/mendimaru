@@ -169,6 +169,8 @@ Linux の `browser test` は、明示 URL、Portable Runtime session、または
 
 開発には Node.js 22.22.2 以降、Rust、ホスト向け Tauri システム依存パッケージが必要です。Linux 統合には WinBoat、Docker または Podman、FreeRDP 3.24+（3.x）、Chrome／Chromium が追加で必要で、Windows の一覧取得には Edge または Chrome を使用します。
 
+対応方針、Debian 3.15.0 の画面停止再現、検証済みの 3.32.2 による復旧は [FreeRDP の互換性と実行ファイル選択](docs/winboat-freerdp.md)を参照してください。ゲスト時刻は [RTC の基準](docs/winboat-clock-sync.md)を確認した後、`env repair-clock --rtc-base utc|local` で明示的に修復できます。
+
 ```bash
 npm install
 npm run tauri dev
