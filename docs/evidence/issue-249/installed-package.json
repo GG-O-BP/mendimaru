@@ -1,0 +1,8 @@
+{
+  "packageVersion": "0.7.0",
+  "packageSha256": "3f07d97adc5768a331e591ab3bc425a9223ce70e02aad5605034f3fdf04655f8",
+  "installedBinarySha256": "64c35360ed9ff50096444f19f4cc6564f358a4f65a18e7d4e83979f031b7c79d",
+  "installation": "user-local extraction of the built Debian package; original system package preserved",
+  "helpPassed": true,
+  "capabilitiesPassed": true
+}

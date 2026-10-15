@@ -1,0 +1,65 @@
+{
+  "boundary": "same final source, baseline uses two TLS writes, candidate coalesces frame header and payload",
+  "profile": "debug, identical lock, helper, machine, application and data",
+  "binaries": {
+    "baseline": "720ef8245fc72d6b548eaaccea8f7378dc4906566141b6e1e499636c78f4fca5",
+    "candidate": "17583a3fd973169b0521cffd35feb638d25ec4ddb485cda1ea7c80638c7babb9"
+  },
+  "candidateTransportSha256": "c14a54391dd2f2b007dce5855827c81f287ecf01803974938f26be235eac8392",
+  "guestHelperSha256": "f4628bcb5a6cd7743f49ad091cfefbc52c51da32a3c033fb22ebf60ab6bbf01d",
+  "order": [
+    "baseline-final-1",
+    "candidate-final-1",
+    "candidate-final-2",
+    "baseline-final-2"
+  ],
+  "budgetPercent": 10,
+  "metrics": {
+    "meanMs": {
+      "baseline": 15.83957481249998,
+      "candidate": 15.018985770833343,
+      "regressionPercent": -5.180625435848563
+    },
+    "p50Ms": {
+      "baseline": 13.7605,
+      "candidate": 12.91905,
+      "regressionPercent": -6.1149667526616
+    },
+    "p95Ms": {
+      "baseline": 31.366100000000003,
+      "candidate": 30.201750000000004,
+      "regressionPercent": -3.7121286994557745
+    },
+    "p99Ms": {
+      "baseline": 46.91420000000001,
+      "candidate": 47.0548,
+      "regressionPercent": 0.2996960408575555
+    },
+    "requestsPerSecond": {
+      "baseline": 231.38991374374058,
+      "candidate": 243.61437393992733,
+      "regressionPercent": -5.283056637345518
+    },
+    "runtimeWorkingSetBytes": {
+      "baseline": 430415872.0,
+      "candidate": 485482496.0,
+      "regressionPercent": 12.793818161055182
+    },
+    "guestRelayWorkingSetBytes": {
+      "baseline": 194480128.0,
+      "candidate": 199827456.0,
+      "regressionPercent": 2.749549815187291
+    },
+    "linuxRelayRssPeakBytes": {
+      "baseline": 89747456.0,
+      "candidate": 89829376.0,
+      "regressionPercent": 0.09127835333850864
+    }
+  },
+  "passed": false,
+  "subsequentProductChanges": [
+    "CLI allowlists only exact static, path-free host-service errors",
+    "Admission also bounds completed JoinSet metadata to 65; measured workload stays below this limit"
+  ],
+  "finalTransportSha256": "6800a741fe1017333df6a70fe2b691e6a592e18a3af6b8774f440867d4391c9d"
+}

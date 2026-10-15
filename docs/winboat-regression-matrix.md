@@ -1,5 +1,27 @@
 # WinBoat lifecycle regression matrix
 
+## Session MySQL host service (#249, contract v7)
+
+The ordinary Rust suite verifies loopback-only destination validation, explicit
+MySQL port allowance, dynamic private bridge/subnet validation, per-connection
+challenge/HMAC rejection of foreign keys, replay and channel substitution,
+bounded/truncated binary frames, large binary streaming and independent EOF/
+half-close, private record VM/session identity, symlink/hardlink/permission/size
+rejection, and exclusive Runtime locks with kernel release on descriptor close.
+The exact v6 Runtime shape remains discoverable without rewriting its record;
+v4/v5/v6 compatibility and all current creation/list/forget, authenticated
+post-success recovery, Compose rollback, maintenance/stop locks and keeper IPC
+remain in the normal suite. Existing incompatible v3 audit invalidation is kept.
+
+`live_mysql_greeting_ownership_and_control_loss_cleanup` explicitly selects an
+existing Runtime and connects the real Windows helper through TLS to Linux
+MySQL. It tests the MySQL greeting through guest loopback, collision with an
+owned guest port, control-channel loss and owned port reuse, and verifies
+unchanged Compose bytes. It starts no app, changes no DB data and restarts no VM.
+See [the live gate and remaining app acceptance](winboat-host-services.md).
+This transport evidence does not claim exact-version app/build provenance, DB
+authentication, application transactions or representative workload performance.
+
 ## Startup and disposable UEFI recovery (#129–134)
 
 | Boundary                                                                        | Automated scenarios                                                                                                                                                                                                                 |

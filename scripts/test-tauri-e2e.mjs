@@ -265,7 +265,7 @@ try {
       .catch((error) => done({ ok: false, error: String(error) }));
   `);
   assert.equal(capabilities.ok, true, capabilities.error);
-  assert.equal(capabilities.value.schemaVersion, "6.0.0");
+  assert.equal(capabilities.value.schemaVersion, "7.0.0");
   assert.equal(capabilities.value.manifest.hostPlatform, "linux");
   assert.equal(capabilities.value.manifest.backend, "linux-winboat");
 

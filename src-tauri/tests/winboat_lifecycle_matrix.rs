@@ -88,7 +88,7 @@ fn winboat_upgrade_and_orphan_lifecycle_matrix_stays_secret_free() {
             .expect("legacy invalidation marker"),
     )
     .expect("legacy invalidation JSON");
-    assert_eq!(marker["schemaVersion"], "6.0.0");
+    assert_eq!(marker["schemaVersion"], "7.0.0");
     assert_eq!(marker["reason"], "schema_version_mismatch");
     assert_eq!(legacy["sessionId"], LEGACY_SESSION_ID);
 

@@ -78,6 +78,7 @@ fn real_binary_prints_subcommand_help_without_machine_readable_errors() {
         "studio status",
         "browser install",
         "operation retry",
+        "host-service start",
     ] {
         let mut arguments = command.split(' ').collect::<Vec<_>>();
         arguments.push("--help");
@@ -94,6 +95,48 @@ fn real_binary_prints_subcommand_help_without_machine_readable_errors() {
         assert!(!stdout.contains("schemaVersion"));
         assert!(!stdout.contains("snapshotId"));
     }
+}
+
+#[test]
+fn host_service_rejects_credentials_remote_targets_and_ambiguous_options_without_echo() {
+    let runtime = format!("runtime_{}", "a".repeat(32));
+    let base = [
+        "host-service",
+        "start",
+        "--service",
+        "mysql",
+        "--allow-host-port",
+        "3306",
+        "--runtime-session-id",
+        &runtime,
+    ];
+    for extra in [
+        vec!["--password", "secret-never-echo"],
+        vec!["--host", "remote-never-echo"],
+        vec!["--allow-host-port", "22"],
+        vec!["--guest-port", "65536"],
+    ] {
+        let mut arguments = base.to_vec();
+        arguments.extend(extra);
+        arguments.push("--json");
+        let output = run(&arguments);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        let json: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(json["error"]["code"], "invalid_request");
+        let text = String::from_utf8_lossy(&output.stderr);
+        assert!(!text.contains("secret-never-echo"));
+        assert!(!text.contains("remote-never-echo"));
+    }
+    let output = run(&[
+        "host-service",
+        "status",
+        "--session-id",
+        "../foreign",
+        "--json",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("../foreign"));
 }
 
 #[test]
@@ -117,7 +160,7 @@ fn real_binary_emits_a_complete_platform_neutral_capability_snapshot() {
     let stdout = String::from_utf8(output.stdout).expect("stdout is UTF-8");
     assert_eq!(stdout.lines().count(), 1);
     let json: Value = serde_json::from_str(&stdout).expect("stdout is one JSON document");
-    assert_eq!(json["schemaVersion"], "6.0.0");
+    assert_eq!(json["schemaVersion"], "7.0.0");
     assert_eq!(json["command"], "capabilities");
     assert_eq!(json["ok"], true);
     assert_eq!(json["data"]["manifest"]["backend"], current_backend());
@@ -141,7 +184,7 @@ fn real_binary_emits_a_complete_platform_neutral_capability_snapshot() {
     let capabilities = manifest["capabilities"]
         .as_array()
         .expect("capabilities is an array");
-    assert_eq!(capabilities.len(), 22);
+    assert_eq!(capabilities.len(), 25);
     let ids = capabilities
         .iter()
         .map(|capability| {

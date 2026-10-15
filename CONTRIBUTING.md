@@ -14,3 +14,8 @@ fixture for the prior public record shape and prove that current-session
 creation, discovery, explicit invalidation, post-success recovery, Compose
 rollback, lock cleanup, and keeper cleanup all remain coherent. Do not remove a
 security or compatibility assertion merely to make a legacy fixture parse.
+
+The v7 host-service API keeps v4/v5/v6 Runtime records readable and introduces
+an independent version 1 host-service record. Changes to its VM identity,
+private files, IPC ownership, or stream framing must retain the security and
+lifecycle cases in [the host-service guide](docs/winboat-host-services.md).

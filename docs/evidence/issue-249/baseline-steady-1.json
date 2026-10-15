@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "acceptance": {
+    "connection": "8.4.11|READ-COMMITTED|ROW|2026-01-01 09:00:00|InnoDB",
+    "writeReadCommit": true,
+    "errorRollback": true,
+    "invalidDbAuthenticationRejected": true
+  },
+  "boundary": "Windows loopback HTTP -> exact Studio Run Locally -> managed TLS relay -> Linux loopback MySQL",
+  "seed": 10000,
+  "startedAt": "2026-10-15T07:48:32.2239233+00:00",
+  "workload": {
+    "lanes": 4,
+    "iterationsPerLane": 1000,
+    "requests": 12000,
+    "seconds": 53.4886097,
+    "requestsPerSecond": 224.34682948956888,
+    "meanMs": 16.224644983333377,
+    "p50Ms": 14.180000000000001,
+    "p95Ms": 31.3991,
+    "p99Ms": 44.5508
+  },
+  "finishedAt": "2026-10-15T07:49:25.7373635+00:00",
+  "runtimeWorkingSetBytes": 507437056,
+  "driverWorkingSetBytes": 89251840,
+  "guestRelayWorkingSetBytes": 188895232,
+  "linuxRelayRssBytes": {
+    "peak": 89874432,
+    "mean": 89420917.38303821,
+    "samples": 1073
+  }
+}

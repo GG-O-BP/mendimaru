@@ -15,7 +15,8 @@ use tauri::AppHandle;
 
 const HISTORY_FILE_NAME: &str = "operation-history.json";
 const HISTORY_SCHEMA_VERSION: &str = "1.0.0";
-const LEGACY_RECORD_SCHEMA_VERSIONS: &[&str] = &["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0"];
+const LEGACY_RECORD_SCHEMA_VERSIONS: &[&str] =
+    &["1.0.0", "2.0.0", "3.0.0", "4.0.0", "5.0.0", "6.0.0"];
 const MAX_HISTORY_BYTES: u64 = 512 * 1024;
 const MAX_RECORDS: usize = 250;
 const MAX_IDENTIFIER_BYTES: usize = 160;
@@ -1369,7 +1370,7 @@ mod tests {
         .expect("finish operation");
 
         let history = history_path(&config);
-        for legacy_version in ["3.0.0", "4.0.0"] {
+        for legacy_version in ["3.0.0", "4.0.0", "5.0.0", "6.0.0"] {
             let mut legacy: serde_json::Value =
                 serde_json::from_slice(&fs::read(&history).expect("read history"))
                     .expect("parse history");

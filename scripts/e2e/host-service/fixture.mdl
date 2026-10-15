@@ -1,0 +1,105 @@
+mdl 1;
+CREATE ENTITY MyFirstModule.RelayRow (
+    Sequence: Integer,
+    Payload: String(1024),
+    Balance: Decimal
+);
+CREATE JAVA ACTION MyFirstModule.ConnectionEvidence() RETURNS String AS $$
+return com.mendix.core.Core.dataStorage().executeWithConnection(getContext(), connection -> {
+    try (java.sql.Statement statement = connection.createStatement();
+         java.sql.ResultSet result = statement.executeQuery("SELECT VERSION(), @@session.transaction_isolation, @@session.binlog_format, CONVERT_TZ('2026-01-01 00:00:00','UTC','Asia/Seoul'), (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND engine IS NOT NULL AND engine <> 'InnoDB')")) {
+        result.next();
+        if (!"READ-COMMITTED".equals(result.getString(2)) || !"ROW".equals(result.getString(3)) || result.getString(4) == null || result.getInt(5) != 0) throw new RuntimeException("app connection preconditions failed");
+        return result.getString(1)+"|"+result.getString(2)+"|"+result.getString(3)+"|"+result.getString(4)+"|InnoDB";
+    } catch (java.sql.SQLException e) { throw new RuntimeException("app connection evidence failed"); }
+});
+$$;
+CREATE MICROFLOW MyFirstModule.ACT_Evidence () RETURNS String AS $Evidence
+BEGIN
+    $Evidence = CALL JAVA ACTION MyFirstModule.ConnectionEvidence();
+    RETURN $Evidence;
+END;
+CREATE MICROFLOW MyFirstModule.ACT_Write ($Sequence: Integer) RETURNS Integer AS $Result
+BEGIN
+    $Row = CREATE MyFirstModule.RelayRow (Sequence = $Sequence, Payload = 'relay acceptance payload', Balance = 100.25);
+    COMMIT $Row;
+    CHANGE $Row (Balance = 101.25);
+    COMMIT $Row;
+    RETURN $Sequence;
+END;
+CREATE MICROFLOW MyFirstModule.ACT_Read ($Sequence: Integer) RETURNS Integer AS $Count
+BEGIN
+    RETRIEVE $Rows FROM MyFirstModule.RelayRow WHERE Sequence = $Sequence;
+    $Count = COUNT($Rows);
+    RETURN $Count;
+END;
+CREATE PUBLISHED REST SERVICE MyFirstModule.RelayAPI (
+    Path: 'rest/relay', Version: '1.0.0', ServiceName: 'Relay acceptance', Authentication: none
+) {
+    RESOURCE 'evidence' { GET '' MICROFLOW MyFirstModule.ACT_Evidence; }
+    RESOURCE 'rows' { POST '' MICROFLOW MyFirstModule.ACT_Write; GET '' MICROFLOW MyFirstModule.ACT_Read; }
+};
+
+CREATE JAVA ACTION MyFirstModule.IntentionalFailure() RETURNS Boolean AS $$
+throw new RuntimeException("intentional relay acceptance rollback");
+$$;
+CREATE MICROFLOW MyFirstModule.ACT_Rollback ($Sequence: Integer) RETURNS Integer AS $Result
+BEGIN
+    $Row = CREATE MyFirstModule.RelayRow (Sequence = $Sequence, Payload = 'rollback probe', Balance = 999.25);
+    COMMIT $Row;
+    $Fail = CALL JAVA ACTION MyFirstModule.IntentionalFailure();
+    RETURN $Sequence;
+END;
+CREATE MICROFLOW MyFirstModule.ACT_Balance ($Sequence: Integer) RETURNS Decimal AS $Balance
+BEGIN
+    RETRIEVE $Row FROM MyFirstModule.RelayRow WHERE Sequence = $Sequence FIRST;
+    RETURN $Row/Balance;
+END;
+ALTER PUBLISHED REST SERVICE MyFirstModule.RelayAPI ADD RESOURCE 'rollback' { POST '' MICROFLOW MyFirstModule.ACT_Rollback; };
+ALTER PUBLISHED REST SERVICE MyFirstModule.RelayAPI ADD RESOURCE 'balance' { GET '' MICROFLOW MyFirstModule.ACT_Balance; };
+
+CREATE JAVA ACTION MyFirstModule.ResetRows(Count: Integer NOT NULL) RETURNS Integer AS $$
+if (Count < 0 || Count > 100000) throw new IllegalArgumentException("bounded fixture size required");
+com.mendix.core.Core.delete(getContext(), com.mendix.core.Core.createXPathQuery("//MyFirstModule.RelayRow").execute(getContext()));
+String payload = "x".repeat(1024);
+java.util.List<com.mendix.systemwideinterfaces.core.IMendixObject> rows = new java.util.ArrayList<>();
+for (long i=0; i<Count; i++) {
+    com.mendix.systemwideinterfaces.core.IMendixObject row = com.mendix.core.Core.instantiate(getContext(), "MyFirstModule.RelayRow");
+    row.setValue(getContext(), "Sequence", i);
+    row.setValue(getContext(), "Payload", payload);
+    row.setValue(getContext(), "Balance", new java.math.BigDecimal("101.25"));
+    rows.add(row);
+    if (rows.size()==1000) { com.mendix.core.Core.commit(getContext(), rows); rows.clear(); }
+}
+if (!rows.isEmpty()) com.mendix.core.Core.commit(getContext(), rows);
+return Count;
+$$;
+CREATE MICROFLOW MyFirstModule.ACT_Reset ($Count: Integer) RETURNS Integer AS $Result
+BEGIN
+    $Result = CALL JAVA ACTION MyFirstModule.ResetRows(Count = $Count);
+    RETURN $Result;
+END;
+CREATE MICROFLOW MyFirstModule.ACT_Update ($Sequence: Integer) RETURNS Decimal AS $Balance
+BEGIN
+    RETRIEVE $Row FROM MyFirstModule.RelayRow WHERE Sequence = $Sequence FIRST;
+    CHANGE $Row (Balance = $Row/Balance + 1);
+    COMMIT $Row;
+    RETURN $Row/Balance;
+END;
+ALTER PUBLISHED REST SERVICE MyFirstModule.RelayAPI ADD RESOURCE 'reset' { POST '' MICROFLOW MyFirstModule.ACT_Reset; };
+ALTER PUBLISHED REST SERVICE MyFirstModule.RelayAPI ADD RESOURCE 'update' { POST '' MICROFLOW MyFirstModule.ACT_Update; };
+
+CREATE CONSTANT MyFirstModule.GuestDriverPath (Type: String, DefaultValue: '');
+CREATE JAVA ACTION MyFirstModule.StartGuestDriver(Path: String NOT NULL) RETURNS Boolean AS $$
+if (Path.isBlank()) return true;
+if (!java.nio.file.Files.isRegularFile(java.nio.file.Paths.get(Path))) throw new IllegalArgumentException("fixture guest driver missing");
+new ProcessBuilder("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Path, "-RuntimePid", Long.toString(ProcessHandle.current().pid()))
+    .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+return true;
+$$;
+CREATE MICROFLOW MyFirstModule.ASU_GuestDriver () RETURNS Boolean AS $Started
+BEGIN
+    $Started = CALL JAVA ACTION MyFirstModule.StartGuestDriver(Path = @MyFirstModule.GuestDriverPath);
+    RETURN $Started;
+END;
+ALTER SETTINGS RUNTIME (AfterStartupMicroflow: 'MyFirstModule.ASU_GuestDriver');

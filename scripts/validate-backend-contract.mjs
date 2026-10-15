@@ -16,6 +16,7 @@ const schemaFiles = [
   "schemas/frontend-health.schema.json",
   "schemas/startup.schema.json",
   "schemas/environment-assessment.schema.json",
+  "schemas/host-service.schema.json",
 ];
 const schemas = schemaFiles.map((path) =>
   JSON.parse(fs.readFileSync(path, "utf8")),
@@ -27,7 +28,60 @@ for (const schema of schemas) ajv.addSchema(schema);
 const startupSchema = schemas.find((schema) =>
   schema.$id.endsWith("/startup.schema.json"),
 ).$id;
-const assessmentSchema = schemas.at(-1).$id;
+const assessmentSchema = schemas.find((schema) =>
+  schema.$id.endsWith("/environment-assessment.schema.json"),
+).$id;
+const hostServiceSchema = schemas.at(-1).$id;
+const hostService = {
+  schemaVersion: "7.0.0",
+  sessionId: `hostsvc_${"a".repeat(32)}`,
+  runtimeSessionId: `runtime_${"b".repeat(32)}`,
+  backend: "linux-winboat",
+  service: "mysql",
+  state: "ready",
+  guestHost: "127.0.0.1",
+  guestPort: 33306,
+  targetHost: "127.0.0.1",
+  targetPort: 3306,
+  guestListenerVerified: true,
+  targetTcpVerified: true,
+  mysqlHandshakeVerified: true,
+  databaseAuthenticationVerified: false,
+  encrypted: true,
+  activeConnections: 0,
+};
+validate(
+  `${hostServiceSchema}#/$defs/status`,
+  hostService,
+  "host-service status",
+);
+for (const invalid of [
+  { password: "not-accepted" },
+  { targetHost: "192.0.2.1" },
+  { guestHost: "0.0.0.0" },
+  { databaseAuthenticationVerified: true },
+  { encrypted: false },
+  { activeConnections: 65 },
+  { mysqlHandshakeVerified: false },
+]) {
+  if (
+    ajv.validate(`${hostServiceSchema}#/$defs/status`, {
+      ...hostService,
+      ...invalid,
+    })
+  )
+    throw new Error("host-service schema accepted an unsafe status");
+}
+validate(
+  `${hostServiceSchema}#/$defs/startRequest`,
+  {
+    runtimeSessionId: hostService.runtimeSessionId,
+    service: "mysql",
+    allowHostPort: 3306,
+    guestPort: 0,
+  },
+  "host-service start request",
+);
 for (const blocking of [false, true]) {
   const assessment = {
     connectivity: true,
@@ -98,7 +152,7 @@ const sessionId = `session_${"ab".repeat(16)}`;
 validate(
   schemas[2].$id,
   {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     sessionId,
     createdAt: snapshot.capturedAt,
     state: "created",
@@ -109,7 +163,7 @@ validate(
 validate(
   schemas[3].$id,
   {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     artifactId: `artifact_${"cd".repeat(16)}`,
     sessionId,
     backend: manifest.backend,
@@ -121,7 +175,7 @@ validate(
 validate(
   schemas[1].$id,
   {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     code: "unsupported_capability",
     message: "runtime.url is not implemented by this backend",
     backend: manifest.backend,
@@ -139,7 +193,7 @@ const parseErrorEnvelope = {
   command: "studio",
   ok: false,
   error: {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     code: "invalid_request",
     message: "the command request is invalid",
     backend: manifest.backend,
@@ -153,7 +207,7 @@ const stopErrorEnvelope = {
   command: "studio.stop",
   ok: false,
   error: {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     code: "precondition_failed",
     message: "a required precondition was not satisfied",
     backend: manifest.backend,
@@ -170,7 +224,7 @@ validate(schemas[4].$id, stopErrorEnvelope, "CLI Studio stop error envelope");
 validate(
   schemas[4].$id,
   {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     command: "unknown",
     ok: false,
     platform: manifest.hostPlatform,
@@ -178,7 +232,7 @@ validate(
     sessionId: "session_unavailable",
     capabilitySnapshot: null,
     error: {
-      schemaVersion: "6.0.0",
+      schemaVersion: "7.0.0",
       code: "operation_failed",
       message: "the command could not be completed",
       backend: manifest.backend,
@@ -201,7 +255,7 @@ validate(
 validate(
   schemas[5].$id,
   {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     command: "studio.install",
     event: "progress",
     sessionId,
@@ -220,7 +274,7 @@ validate(
 const runtimeSessionId = `runtime_${"12".repeat(16)}`;
 const runtimeBuildSessionId = `session_${"56".repeat(16)}`;
 const runtimeLogArtifact = {
-  schemaVersion: "6.0.0",
+  schemaVersion: "7.0.0",
   artifactId: `artifact_${"34".repeat(16)}`,
   sessionId: runtimeSessionId,
   backend: manifest.backend,
@@ -230,7 +284,7 @@ const runtimeLogArtifact = {
   location: `mendimaru-cache://artifact_${"34".repeat(16)}`,
 };
 const buildArtifact = (suffix, kind, mediaType) => ({
-  schemaVersion: "6.0.0",
+  schemaVersion: "7.0.0",
   artifactId: `artifact_${suffix.repeat(16)}`,
   sessionId: runtimeBuildSessionId,
   backend: manifest.backend,
@@ -266,7 +320,7 @@ validate(
 validate(
   schemas[6].$id,
   {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     sessionId: runtimeSessionId,
     backend: manifest.backend,
     mode: "portable",
@@ -283,7 +337,7 @@ validate(
 validate(
   schemas[6].$id,
   {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     sessionId: runtimeSessionId,
     backend: "linux-winboat",
     mode: "studio-run-locally",
@@ -311,7 +365,7 @@ validate(
 
 const browserSessionId = `session_${"90".repeat(16)}`;
 const browserArtifact = {
-  schemaVersion: "6.0.0",
+  schemaVersion: "7.0.0",
   artifactId: `artifact_${"91".repeat(16)}`,
   sessionId: browserSessionId,
   backend: manifest.backend,
@@ -325,7 +379,7 @@ const browserArtifact = {
 validate(
   `${schemas[8].$id}#/$defs/doctor`,
   {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     runnerVersion: "1.0.0",
     ready: true,
     nodeVersion: "22.22.2",
@@ -398,7 +452,7 @@ reject(
 validate(
   `${schemas[8].$id}#/$defs/summary`,
   {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     sessionId: browserSessionId,
     outcome: "passed",
     passed: 1,
@@ -424,7 +478,7 @@ validate(
 validate(
   `${schemas[8].$id}#/$defs/manifest`,
   {
-    schemaVersion: "6.0.0",
+    schemaVersion: "7.0.0",
     sessionId: browserSessionId,
     createdAt: snapshot.capturedAt,
     hostPlatform: "linux",
@@ -487,6 +541,12 @@ const expectedIds = new Set([
   "browser.artifacts",
 ]);
 const actualIds = new Set(manifest.capabilities.map(({ id }) => id));
+for (const id of [
+  "host-service.start",
+  "host-service.status",
+  "host-service.stop",
+])
+  expectedIds.add(id);
 assert(actualIds.size === expectedIds.size, "capability IDs must be unique");
 for (const id of expectedIds) {
   assert(actualIds.has(id), `missing capability: ${id}`);

@@ -2,7 +2,8 @@ use super::operation::WindowsOperationFailure;
 use super::project_access::ProjectAccessLease;
 use super::rdp_trust::TrustAttempt;
 use super::security::{
-    redirected_bootstrap_launcher, secure_powershell_launcher, OperationSecurity,
+    bootstrap_drive_name, redirected_bootstrap_launcher, secure_powershell_launcher,
+    OperationSecurity,
 };
 use crate::models::AppConfig;
 use crate::process::{self, CommandPolicy};
@@ -212,6 +213,7 @@ pub(super) fn spawn_powershell_file(
         Some(&arguments),
         label,
         project_access,
+        &bootstrap_drive_name(launcher.as_bytes()),
         bootstrap,
     )
 }
@@ -243,6 +245,7 @@ fn spawn_remote_app(
     app_arguments: Option<&str>,
     label: &str,
     project_access: Option<&ProjectAccessLease>,
+    bootstrap_drive: &str,
     bootstrap: tempfile::TempDir,
 ) -> Result<RemoteAppProcess, WindowsOperationFailure> {
     let (username, password) = container_credentials(config)?;
@@ -287,7 +290,7 @@ fn spawn_remote_app(
         .to_str()
         .filter(|p| !p.chars().any(|c| c.is_control() || c == ',' || c == '"'))
         .ok_or_else(|| "private RemoteApp bootstrap unavailable".to_string())?;
-    arguments.push(format!("/drive:MendimaruAuth,{bootstrap_path}"));
+    arguments.push(format!("/drive:{bootstrap_drive},{bootstrap_path}"));
     arguments.push(remote_app);
 
     // FreeRDP 3 can parse one argument per line from stdin. This keeps the

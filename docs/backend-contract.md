@@ -215,7 +215,7 @@ launcher details remain private. See
 
 ## Compatibility and versioning
 
-The current schema version is `6.0.0` and follows semantic versioning. Version
+The current schema version is `7.0.0` and follows semantic versioning. Version
 2 added multi-mode capability discovery, explicit Runtime backend/readiness,
 WinBoat Run Locally status fields, and its distinct failure codes. Version 3
 adds the first supported browser-test contract and optional Runtime version
@@ -228,7 +228,17 @@ readiness while retaining unchanged v4/v5 persisted Runtime and artifact reads. 
 build, and browser readers also accept unchanged v4 persisted records, retaining
 original artifact/snapshot versions. These are major
 versions because they add serialized fields or enum values and, for version 3,
-give the previously unsupported browser result a complete shape:
+give the previously unsupported browser result a complete shape.
+
+Version 7 adds `host-service.start`, `host-service.status`, and
+`host-service.stop` (Linux + WinBoat only), the `host-service list` CLI command,
+and the closed [host-service schema](../schemas/host-service.schema.json).
+Existing v4/v5/v6 Runtime, build, artifact, and shared-browser descriptors remain
+readable; their original snapshots are preserved. The new private host-service
+record has its own version 1 and binds its status to the VM management identity.
+See [session host-service connections](winboat-host-services.md) for readiness,
+security, limits, shutdown and recovery. The new capability enum values require
+a major contract version under the policy below.
 
 - Patch: documentation or validation corrections that do not change accepted
   data or meaning.

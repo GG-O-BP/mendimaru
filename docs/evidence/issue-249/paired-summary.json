@@ -1,0 +1,59 @@
+{
+  "boundary": "same production streaming relay; baseline writes TLS frame header and payload separately, candidate coalesces them",
+  "profile": "debug, identical dependency lock and machine",
+  "binaries": {
+    "baseline": "a79317232904fe959c489de47499ff744baa53e6bbdc931fb4798f403a28ebe6",
+    "candidate": "fb89cbdbc6400165a32c58ad0f28ef845d9f127f2e1b05f5f14e168347857ee6"
+  },
+  "candidateTransportSha256": "c14a54391dd2f2b007dce5855827c81f287ecf01803974938f26be235eac8392",
+  "order": [
+    "baseline-steady-1",
+    "candidate-steady-1",
+    "candidate-steady-2",
+    "baseline-steady-2"
+  ],
+  "budgetPercent": 10,
+  "metrics": {
+    "meanMs": {
+      "baseline": 16.21931559166669,
+      "candidate": 15.67049749999996,
+      "regressionPercent": -3.3837315055926576
+    },
+    "p50Ms": {
+      "baseline": 14.17735,
+      "candidate": 13.8948,
+      "regressionPercent": -1.9929676561557752
+    },
+    "p95Ms": {
+      "baseline": 31.2845,
+      "candidate": 30.023450000000004,
+      "regressionPercent": -4.030909875497446
+    },
+    "p99Ms": {
+      "baseline": 43.8684,
+      "candidate": 42.82985,
+      "regressionPercent": -2.367421652031987
+    },
+    "requestsPerSecond": {
+      "baseline": 224.27940680653685,
+      "candidate": 233.96364279274457,
+      "regressionPercent": -4.1392055067232985
+    },
+    "runtimeWorkingSetBytes": {
+      "baseline": 476868608.0,
+      "candidate": 452014080.0,
+      "regressionPercent": -5.2120285510595
+    },
+    "guestRelayWorkingSetBytes": {
+      "baseline": 184676352.0,
+      "candidate": 185763840.0,
+      "regressionPercent": 0.5888615343668802
+    },
+    "linuxRelayRssPeakBytes": {
+      "baseline": 89733120.0,
+      "candidate": 89368576.0,
+      "regressionPercent": -0.40625356613032126
+    }
+  },
+  "passed": true
+}

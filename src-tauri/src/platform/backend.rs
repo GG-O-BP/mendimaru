@@ -247,6 +247,24 @@ pub fn manifest_for(backend: BackendId, architecture: &str) -> CapabilityManifes
 }
 
 fn capability_for(backend: BackendId, id: CapabilityId, architecture: &str) -> Capability {
+    if backend == BackendId::LinuxWinboat
+        && matches!(
+            id,
+            CapabilityId::HostServiceStart
+                | CapabilityId::HostServiceStatus
+                | CapabilityId::HostServiceStop
+        )
+    {
+        return Capability::supported(
+            id,
+            &[
+                "private-cache",
+                "winboat-interactive-session",
+                "private-vm-bridge-bind",
+                "loopback-connect",
+            ],
+        );
+    }
     let architecture_supported =
         backend != BackendId::WindowsNative || matches!(architecture, "x86_64" | "aarch64");
     if matches!(backend, BackendId::LinuxWinboat | BackendId::WindowsNative)
@@ -1250,6 +1268,9 @@ mod tests {
                     && matches!(
                         capability,
                         CapabilityId::BrowserTest
+                            | CapabilityId::HostServiceStart
+                            | CapabilityId::HostServiceStatus
+                            | CapabilityId::HostServiceStop
                             | CapabilityId::BrowserArtifacts
                             | CapabilityId::UiCapabilities
                             | CapabilityId::UiTree

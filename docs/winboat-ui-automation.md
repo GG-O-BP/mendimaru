@@ -11,8 +11,8 @@ Studio evidence.
 
 ## Supported surface
 
-The initial adapters are pinned to Studio **10.24.26.0** and **11.12.4.0**, the
-file versions investigated in [#16](winboat-studio-uia-spike.md). Other versions
+The initial adapters are pinned to Studio **10.24.26.0**, **11.12.4.0**, and **11.12.6.0**, the
+first two file versions investigated in [#16](winboat-studio-uia-spike.md) and the MySQL acceptance adapter for #249. Other versions
 fail with `unsupported_capability` / `ui-unsupported-version`. This implements
 the bounded helper decision; it does not enable arbitrary canvas/widget editing.
 
@@ -67,8 +67,13 @@ mendimaru ui wait --session-id SESSION --condition running --timeout-ms 60000 --
 ```
 
 Values enter through stdin, never `--value` or an arbitrary PowerShell expression.
-Password elements are excluded from lookup/input and their names/values are
-redacted in trees. Editor readback does not mean the model has been saved: commit
+Password elements are excluded from lookup/input. Enter database credentials
+through the supported Studio configuration UI. Password names and configuration
+editor values are redacted in trees and replies. Existing supported `set-value`
+inputs are encrypted with a separate AES-256-CBC key and random IV inside the
+authenticated envelope; the supervisor verifies the HMAC before decrypting and
+forwards plaintext only through its private pipe. Password readback is never
+attempted. Editor readback does not mean the model has been saved: commit
 focus changes and save explicitly, then verify the intended application result.
 The Go To search permits document names such as `Home_Web`; it does not accept arbitrary text or paths. Multiple writable editors, an unrelated dialog, and stale value handles are rejected. A delivered shortcut or selected preview outline alone is not success evidence.
 
@@ -156,8 +161,8 @@ The existing `studio status` command remains the process/session inventory.
 
 ## Errors and versioning
 
-The outer contract is **5.0.0** because the closed CLI command enum and supported
-UI result semantics changed. Persisted v4 Runtime/build/browser records remain
+The outer contract is **7.0.0** after the closed host-service command additions
+in #249. Persisted v4/v5/v6 Runtime/build/browser records remain
 readable without rewriting original snapshots or artifact descriptors. Older,
 incompatible Runtime records retain the existing quarantine/forget behavior.
 

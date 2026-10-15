@@ -14,6 +14,8 @@ $script:UiSequence = [long]0
 $script:UiVerified = $false
 $script:UiClosed = $false
 
+__HOST_SERVICE_SUPERVISOR__
+
 function Start-MendimaruUiProcess($Process) {
     # .NET Framework constructs StandardInput with Console.InputEncoding and
     # AutoFlush during Start(), which can emit a BOM before our UTF-8 bytes.
@@ -123,6 +125,7 @@ function Write-MendimaruUiResult($Response) {
     $script:UiPending=$null;$script:UiTask=$null
 }
 function Service-MendimaruUi {
+    Service-MendimaruHostService
     if($null -eq $script:UiIdentity){return}
     $closePath=$controlPath+'.ui.close'
     if(Test-Path -LiteralPath $closePath){
@@ -174,6 +177,32 @@ function Service-MendimaruUi {
             if($auth.Sequence -le $script:UiSequence){throw 'replayed-request'}
             $message=$auth.Json|ConvertFrom-Json
             if($message.id -cnotmatch '^ui_[0-9a-f]{32}$' -or $message.request.sessionId -cne $script:UiIdentity.sessionId){throw 'invalid-identity'}
+            if($message.request.action -ceq 'set-value'){
+                # 기존 envelope HMAC 검증이 성공한 뒤에만 AES-CBC를 복호화한다.
+                # 허용된 UI 입력값도 공유 파일에 평문/base64로 남기지 않는다.
+                $sealed=$message.request.sealedValue
+                if($null -ne $message.request.value -or $sealed.version -ne 1 -or
+                    (@($sealed.PSObject.Properties.Name|Sort-Object) -join ',') -cne 'ciphertext,iv,version'){throw 'invalid-confidential-value'}
+                $iv=[Convert]::FromBase64String([string]$sealed.iv)
+                $cipher=[Convert]::FromBase64String([string]$sealed.ciphertext)
+                if($iv.Length -ne 16 -or $cipher.Length -lt 16 -or $cipher.Length -gt 272 -or $cipher.Length % 16 -ne 0){throw 'invalid-confidential-value'}
+                $aes=[Security.Cryptography.Aes]::Create()
+                $plain=$null;$valueKey=$null;$decryptor=$null
+                try {
+                    $valueKey=$script:MendimaruHmac.ComputeHash([Text.Encoding]::ASCII.GetBytes('mendimaru-ui-value-v1'))
+                    $aes.Key=$valueKey;$aes.IV=$iv;$aes.Mode=[Security.Cryptography.CipherMode]::CBC;$aes.Padding=[Security.Cryptography.PaddingMode]::PKCS7
+                    $decryptor=$aes.CreateDecryptor()
+                    $plain=$decryptor.TransformFinalBlock($cipher,0,$cipher.Length)
+                    $value=(New-Object Text.UTF8Encoding($false,$true)).GetString($plain)
+                    if($plain.Length -gt 256 -or $value -match '[\x00-\x1f\x7f]'){throw 'invalid-confidential-value'}
+                    $message.request.PSObject.Properties.Remove('sealedValue')
+                    $message.request|Add-Member -NotePropertyName value -NotePropertyValue $value
+                }finally{
+                    if($null -ne $plain){[Array]::Clear($plain,0,$plain.Length)}
+                    if($null -ne $valueKey){[Array]::Clear($valueKey,0,$valueKey.Length)}
+                    if($null -ne $decryptor){$decryptor.Dispose()};$aes.Dispose()
+                }
+            }elseif($null -ne $message.request.sealedValue){throw 'invalid-confidential-value'}
             $script:UiSequence=$auth.Sequence
             Remove-Item -LiteralPath $requestPath -Force
             $script:UiPending=$message
@@ -192,7 +221,7 @@ function Service-MendimaruUi {
         }
         if($message.request.operation -cnotin @('capabilities','tree','find','action','wait','screenshot')){Write-MendimaruUiResult @{ok=$false;reason='ui-invalid-request'};return}
         Start-MendimaruUi
-        Send-MendimaruUiLine $script:UiWorker $auth.Json
+        Send-MendimaruUiLine $script:UiWorker (ConvertTo-Json -InputObject $message -Depth 16 -Compress)
         $script:UiTask=$script:UiWorker.StandardOutput.ReadLineAsync()
     }catch{
         Stop-MendimaruUi

@@ -2514,6 +2514,28 @@ mod tests {
     }
 
     #[test]
+    fn v6_runtime_remains_discoverable_after_additive_host_service_contract() {
+        // 7.0의 새 API는 기존 Runtime 레코드나 snapshot을 바꾸지 않는다.
+        let temporary = tempfile::tempdir().unwrap();
+        let sessions = temporary.path().join("sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        let (directory, id) = write_runtime_fixture(
+            &sessions,
+            &format!("runtime_{}", "f".repeat(32)),
+            "6.0.0",
+            RuntimeState::Starting,
+            8080,
+        );
+        let original = fs::read(directory.join("session.json")).unwrap();
+        let (_, record) = active_runtime_session_in_root(&sessions, 8080)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.session_id, id);
+        assert_eq!(record.schema_version, "6.0.0");
+        assert_eq!(fs::read(directory.join("session.json")).unwrap(), original);
+    }
+
+    #[test]
     fn v4_runtime_is_reused_without_rewriting_its_snapshot_or_record() {
         let temporary = tempfile::tempdir().unwrap();
         let sessions = temporary.path().join("sessions");

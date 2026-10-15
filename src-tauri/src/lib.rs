@@ -12,6 +12,7 @@ pub mod contracts;
 mod downloads;
 #[cfg(feature = "e2e")]
 mod e2e;
+pub mod host_service;
 mod i18n;
 mod install_queue_host;
 mod marketplace;

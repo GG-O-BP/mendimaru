@@ -169,6 +169,9 @@ The installed `mendimaru` executable can inspect or ensure the environment, list
 
 Linux headless sessions can also prepare Studio Pro Run Locally forwarding with `runtime start --mode studio-run-locally`, then use the common `wait`, `url`, `status`, `logs`, and `stop` commands. See the [WinBoat Run Locally guide](docs/winboat-run-locally.md) for the loopback-only exposure and recovery boundary.
 
+For a Run Locally app that uses MySQL on the Linux host, see [session host-service connections](docs/winboat-host-services.md). The `host-service` commands manage an authenticated TLS relay from Windows loopback to the explicitly allowed Linux loopback endpoint.
+
+
 On Linux, `browser test` runs the same declarative Playwright/Chromium suite against an explicit URL, a Portable Runtime session, or a WinBoat Run Locally session. Browser downloads are explicit, and failed runs retain masked HTML, DOM/accessibility, screenshot, trace, console, and network evidence under bounded retention. See the [browser testing guide](docs/browser-testing.md).
 
 ## Development

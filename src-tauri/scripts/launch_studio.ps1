@@ -359,6 +359,7 @@ try {
         if ($stopStatus -eq 'identity-mismatch') { throw 'MENDIMARU_STUDIO_SESSION_ENDED' }
         Start-Sleep -Milliseconds 50
     }
+    Close-MendimaruHostService
     Close-MendimaruUi
     Write-LaunchResult 'succeeded' 'Studio Pro session closed.' $null $executable $null @()
     exit 0
@@ -374,6 +375,7 @@ try {
             # The authenticated host-side abort path owns forced cleanup.
         }
     }
+    Close-MendimaruHostService
     Close-MendimaruUi
     Write-LaunchResult 'failed' 'Studio Pro failed to start.' $exitCode $executable $_.Exception.Message @()
     exit 1

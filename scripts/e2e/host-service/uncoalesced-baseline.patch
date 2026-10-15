@@ -1,0 +1,12 @@
+--- a/src-tauri/src/winboat/host_service/transport.rs
++++ b/src-tauri/src/winboat/host_service/transport.rs
+@@ -133,7 +133,8 @@
+         // 작은 SQL 응답마다 4-byte 헤더가 별도 TLS 레코드가 되지 않게 합친다.
+         buffer[..4].copy_from_slice(&(count as u32).to_be_bytes());
+         tokio::time::timeout(IDLE_TIMEOUT, async {
+-            destination.write_all(&buffer[..count + 4]).await?;
++            destination.write_all(&(count as u32).to_be_bytes()).await?;
++            destination.write_all(&buffer[4..count + 4]).await?;
+             destination.flush().await
+         })
+         .await??;
