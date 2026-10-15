@@ -121,6 +121,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Build frontend assets for the Linux release binary
+        run: npm run build
+
       - name: Build the Linux release binary
         run: cargo build --release --locked --manifest-path src-tauri/Cargo.toml
 
