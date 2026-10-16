@@ -121,19 +121,12 @@ test("multiple holds are listed in issue order", () => {
   );
 });
 
-test("ci.yml runs the hold as its own reported check", () => {
+test("CI does not hold functional checks for performance regression issues", () => {
   const workflow = readFileSync(
     path.join(repository, ".github", "workflows", "ci.yml"),
     "utf8",
   );
-  assert.match(workflow, /^ {2}perf-regression-hold:$/m);
-  assert.ok(workflow.includes("Post-merge performance hold"));
-  assert.ok(workflow.includes("scripts/ci/regression-hold.mjs"));
-  assert.ok(workflow.includes(`--label "${regressionLabel}"`));
-  assert.ok(workflow.includes(`--label "${revertCandidateLabel}"`));
-  assert.ok(workflow.includes("--limit 1000"));
-  // Must not depend on the relevance classifier: a hold that a path filter can
-  // skip is not a hold.
-  const job = workflow.slice(workflow.indexOf("  perf-regression-hold:"));
-  assert.ok(!job.includes("needs: changes"));
+  assert.doesNotMatch(workflow, /^ {2}perf-regression-hold:$/m);
+  assert.ok(!workflow.includes("Post-merge performance hold"));
+  assert.ok(!workflow.includes("scripts/ci/regression-hold.mjs"));
 });

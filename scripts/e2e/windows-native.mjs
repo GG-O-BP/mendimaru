@@ -11,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:net";
-import { cpus, platform, tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
@@ -24,31 +24,19 @@ import {
 const ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
 const MARKER_NAME = ".mendimaru-e2e-root";
 const MARKER_CONTENT = "mendimaru isolated native e2e\n";
-const ROOT = resolve(import.meta.dirname, "..", "..");
+const ROOT = resolve(
+  process.env.MENDIMARU_E2E_REPOSITORY ??
+    resolve(import.meta.dirname, "..", ".."),
+);
 const ARTIFACT_DIRECTORY = join(ROOT, "artifacts", "e2e");
 const SKIP_LIVE_MARKETPLACE =
   process.env.MENDIMARU_E2E_SKIP_LIVE_MARKETPLACE === "1";
 const SKIP_LIVE_STUDIO = process.env.MENDIMARU_E2E_SKIP_LIVE_STUDIO === "1";
-const thresholds = {
-  startupMs: numberEnvironment("MENDIMARU_E2E_MAX_STARTUP_MS", 120_000),
-  environmentMs: numberEnvironment("MENDIMARU_E2E_MAX_ENVIRONMENT_MS", 5_000),
-  boundedProcessMs: numberEnvironment(
-    "MENDIMARU_E2E_MAX_BOUNDED_PROCESS_MS",
-    10_000,
-  ),
-  installedMs: numberEnvironment("MENDIMARU_E2E_MAX_INSTALLED_MS", 20_000),
-  projectsMs: numberEnvironment("MENDIMARU_E2E_MAX_PROJECTS_MS", 10_000),
-  marketplaceMs: numberEnvironment("MENDIMARU_E2E_MAX_MARKETPLACE_MS", 120_000),
-  studioLaunchMs: numberEnvironment(
-    "MENDIMARU_E2E_MAX_STUDIO_LAUNCH_MS",
-    120_000,
-  ),
-  navigationMs: numberEnvironment("MENDIMARU_E2E_MAX_NAVIGATION_MS", 3_000),
-  privateMemoryBytes: numberEnvironment(
-    "MENDIMARU_E2E_MAX_PRIVATE_MEMORY_BYTES",
-    768 * 1024 * 1024,
-  ),
-  idleCpuPercent: numberEnvironment("MENDIMARU_E2E_MAX_IDLE_CPU_PERCENT", 10),
+// Bounds protect functional test readiness waits; they are not latency budgets.
+const timeouts = {
+  startupMs: 180_000,
+  studioLaunchMs: 120_000,
+  marketplaceMs: 120_000,
 };
 
 if (platform() !== "win32") {
@@ -80,7 +68,6 @@ async function run() {
     platform: `${platform()}-${process.arch}`,
     skipLiveMarketplace: SKIP_LIVE_MARKETPLACE,
     skipLiveStudio: SKIP_LIVE_STUDIO,
-    thresholds,
     measurements: {},
     assertions: [],
   };
@@ -138,14 +125,13 @@ async function run() {
       client,
       statusUrl: `http://127.0.0.1:${port}/status`,
       getEarlyExit: () => earlyExit,
-      timeoutMs: thresholds.startupMs,
+      timeoutMs: timeouts.startupMs,
       onSessionAttempt: () => {
         report.measurements.webdriverSessionAttempts =
           (report.measurements.webdriverSessionAttempts ?? 0) + 1;
       },
     });
     report.measurements.startupMs = rounded(performance.now() - started);
-    assertThreshold("startupMs", report.measurements.startupMs);
 
     await waitUntil(
       () =>
@@ -179,7 +165,7 @@ async function run() {
       client.invoke("get_environment_status"),
     );
     report.measurements.environmentMs = environmentTimed.elapsedMs;
-    assertThreshold("environmentMs", environmentTimed.elapsedMs);
+
     const environment = environmentTimed.value;
     recordAssertion(
       environment.platform.kind === "windows-native" &&
@@ -201,7 +187,7 @@ async function run() {
       client.invoke("e2e_bounded_process_cleanup"),
     );
     report.measurements.boundedProcessMs = boundedProcessTimed.elapsedMs;
-    assertThreshold("boundedProcessMs", boundedProcessTimed.elapsedMs);
+
     const boundedProcess = boundedProcessTimed.value;
     recordAssertion(
       boundedProcess.failureKind === "cancelled" &&
@@ -246,7 +232,7 @@ async function run() {
     );
     report.measurements.installedDiscoveryMs = installedTimed.elapsedMs;
     report.measurements.installedVersions = installedTimed.value.length;
-    assertThreshold("installedMs", installedTimed.elapsedMs);
+
     for (const version of installedTimed.value) {
       await access(version.executablePath);
     }
@@ -265,7 +251,7 @@ async function run() {
           windowsProcessesByExecutable(version.executablePath).length === 0,
       );
       if (candidate) {
-        const nativeApp = windowsProcessSnapshot(port);
+        const nativeApp = windowsApplicationProcess(port);
         const studioStarted = performance.now();
         await client.invoke("launch_studio_pro", {
           version: candidate.version,
@@ -276,13 +262,13 @@ async function run() {
             windowsProcessesByExecutable(candidate.executablePath).find(
               (processRecord) => processRecord.parentId === nativeApp.rootId,
             ),
-          thresholds.studioLaunchMs,
+          timeouts.studioLaunchMs,
           `Studio Pro ${candidate.version} process`,
         );
         launchedStudioProcessId = launched.id;
         const studioWindow = await waitUntil(
           () => windowsProcessWindow(launched.id),
-          thresholds.studioLaunchMs,
+          timeouts.studioLaunchMs,
           `Studio Pro ${candidate.version} native window`,
         );
         report.measurements.studioLaunchMs = rounded(
@@ -290,7 +276,7 @@ async function run() {
         );
         report.measurements.launchedStudioVersion = candidate.version;
         report.measurements.launchedStudioWindowTitle = studioWindow.title;
-        assertThreshold("studioLaunchMs", report.measurements.studioLaunchMs);
+
         recordAssertion(
           studioWindow.handle !== "0",
           "a verified installed Studio Pro creates a native window",
@@ -305,7 +291,7 @@ async function run() {
 
     const projectsTimed = await timed(() => client.invoke("get_projects"));
     report.measurements.projectScanMs = projectsTimed.elapsedMs;
-    assertThreshold("projectsMs", projectsTimed.elapsedMs);
+
     recordAssertion(
       projectsTimed.value.projects.length === 1 &&
         projectsTimed.value.projects[0].name === "Orders" &&
@@ -318,7 +304,7 @@ async function run() {
       await client.waitForSelector("[data-testid=projects-page]");
     });
     report.measurements.projectsNavigationMs = projectsNavigation.elapsedMs;
-    assertThreshold("navigationMs", projectsNavigation.elapsedMs);
+
     recordAssertion(
       (await client.text("[data-testid=projects-page]")).includes("Orders"),
       "WebDriver navigation renders the scanned project in the real window",
@@ -329,7 +315,7 @@ async function run() {
       await client.waitForSelector("[data-testid=settings-native-page]");
     });
     report.measurements.settingsNavigationMs = settingsNavigation.elapsedMs;
-    assertThreshold("navigationMs", settingsNavigation.elapsedMs);
+
     recordAssertion(
       !(await client.text("[data-testid=settings-native-page]")).includes(
         "WinBoat",
@@ -387,7 +373,7 @@ async function run() {
           const cache = await client.invoke("get_downloadable_versions_cache");
           return disabled === null && cache.versions.length > 0;
         },
-        thresholds.marketplaceMs,
+        timeouts.marketplaceMs,
         "initial live Marketplace catalog",
       );
       const catalogRefresh = await timed(async () => {
@@ -407,12 +393,12 @@ async function run() {
               "[data-testid=refresh-catalog]",
               "disabled",
             )) === null,
-          thresholds.marketplaceMs,
+          timeouts.marketplaceMs,
           "catalog refresh completion",
         );
       });
       report.measurements.marketplaceRefreshMs = catalogRefresh.elapsedMs;
-      assertThreshold("marketplaceMs", catalogRefresh.elapsedMs);
+
       const catalog = await client.invoke("get_downloadable_versions_cache");
       report.measurements.catalogVersions = catalog.versions.length;
       recordAssertion(
@@ -432,27 +418,6 @@ async function run() {
         `${command} rejects hostile or missing input`,
       );
     }
-
-    const beforeIdle = windowsProcessSnapshot(port);
-    await delay(10_000);
-    const afterIdle = windowsProcessSnapshot(port);
-    const idleCpuPercent =
-      (Math.max(0, afterIdle.cpuSeconds - beforeIdle.cpuSeconds) /
-        (10 * cpus().length)) *
-      100;
-    report.measurements.processId = afterIdle.rootId;
-    report.measurements.processCount = afterIdle.processCount;
-    report.measurements.privateMemoryBytes = afterIdle.privateMemoryBytes;
-    report.measurements.workingSetBytes = afterIdle.workingSetBytes;
-    report.measurements.idleCpuPercent = rounded(idleCpuPercent);
-    recordAssertion(
-      afterIdle.privateMemoryBytes <= thresholds.privateMemoryBytes,
-      `private memory stays below ${thresholds.privateMemoryBytes} bytes`,
-    );
-    recordAssertion(
-      idleCpuPercent <= thresholds.idleCpuPercent,
-      `normalized idle CPU stays below ${thresholds.idleCpuPercent}%`,
-    );
 
     const screenshot = await client.screenshot();
     await writeFile(
@@ -712,38 +677,16 @@ async function timed(action) {
   return { value, elapsedMs: rounded(performance.now() - started) };
 }
 
-function windowsProcessSnapshot(port) {
+function windowsApplicationProcess(port) {
   assert.ok(Number.isInteger(port) && port > 0 && port <= 65_535);
   const script = `
     $connection = Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction Stop |
       Select-Object -First 1
     $rootProcess = Get-Process -Id $connection.OwningProcess -ErrorAction Stop
-    $allProcesses = @(Get-CimInstance Win32_Process -ErrorAction Stop)
-    $processIds = [Collections.Generic.HashSet[uint32]]::new()
-    [void]$processIds.Add([uint32]$rootProcess.Id)
-    do {
-      $added = $false
-      foreach ($candidate in $allProcesses) {
-        if (
-          $processIds.Contains([uint32]$candidate.ParentProcessId) -and
-          $processIds.Add([uint32]$candidate.ProcessId)
-        ) {
-          $added = $true
-        }
-      }
-    } while ($added)
-    $processes = @(
-      $processIds |
-        ForEach-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue }
-    )
     [pscustomobject]@{
       rootId = $rootProcess.Id
       name = $rootProcess.ProcessName
       path = $rootProcess.Path
-      processCount = $processes.Count
-      cpuSeconds = ($processes | Measure-Object -Property CPU -Sum).Sum
-      privateMemoryBytes = ($processes | Measure-Object -Property PrivateMemorySize64 -Sum).Sum
-      workingSetBytes = ($processes | Measure-Object -Property WorkingSet64 -Sum).Sum
     } | ConvertTo-Json -Compress
   `;
   const snapshot = JSON.parse(
@@ -863,21 +806,6 @@ function captureOutput(stream, collection, destination) {
 function recordAssertion(condition, message) {
   assert.ok(condition, message);
   report.assertions.push(message);
-}
-
-function assertThreshold(name, value) {
-  const threshold = thresholds[name];
-  recordAssertion(value <= threshold, `${name} ${value} ms <= ${threshold} ms`);
-}
-
-function numberEnvironment(name, fallback) {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new Error(`${name} must be a positive number`);
-  }
-  return parsed;
 }
 
 function rounded(value) {

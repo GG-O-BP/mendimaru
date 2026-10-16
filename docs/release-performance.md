@@ -1,4 +1,16 @@
-# Release performance contract
+# Manual performance diagnostics
+
+PR and release validation no longer run performance checks or enforce performance
+budgets. The `Release performance` workflow has only a manual `workflow_dispatch`
+trigger. Default `npm test`, desktop E2E, installer lifecycle checks, and coverage
+verification do not require performance results. Installer sampling requires an
+explicit `-Performance` switch, which the CI and release workflows never pass.
+Functional readiness deadlines remain so stalled tests still terminate.
+
+The post-merge performance hold has been removed. Open performance issues do not
+block PR validation. The sections below document the retained manual measurement
+implementation and historical operating policy; their references to automatic
+PR, push, or scheduled measurements and merge holds no longer apply.
 
 Mendimaru keeps functional development E2E and release performance as separate
 signals. The existing Linux debug/Vite and Windows `tauri dev` reports remain

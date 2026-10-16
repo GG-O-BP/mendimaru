@@ -1,5 +1,10 @@
 # Post-merge performance safety net
 
+This safety net is retired. Performance measurement is manual-only and CI no
+longer queries performance issues or reports a `Post-merge performance hold`
+check. Performance issues do not block PR or release validation. The remaining
+text records the earlier design for historical context.
+
 The [split measurement SLA](release-performance.md#split-measurement-sla) moved
 the 300-second idle phase and the whole `installed-bundle` suite off the
 pull-request path so that pull-request checks finish inside ten minutes. That
