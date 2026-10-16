@@ -245,8 +245,8 @@ try {
             }
             $process = Get-Process -Id ([int]$session.processId) -ErrorAction Stop
             $process.Refresh()
-            Write-SessionResult 'succeeded' 'Studio Pro session is ready to reconnect.' $null @($session)
             Initialize-MendimaruUi $process $session.sessionId
+            Write-SessionResult 'succeeded' 'Studio Pro session is ready to reconnect.' $null @($session)
             $lastControlSequence = [long]0
             $pendingStop = $null
             while ($true) {

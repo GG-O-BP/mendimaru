@@ -55,3 +55,27 @@ There was no need to install packages because a working 3.32.2 build already
 existed locally. Other environments should use their distribution's supported,
 patched client where available; this investigation does not prescribe mixing
 distribution repositories or disabling certificate validation.
+
+## Cold connection recovery (#257)
+
+A later cold-session investigation reproduced a FreeRDP 3.32.2 abort in
+`xfAppWindowsLockFrom`: the HiDef RemoteApp repaint path acquired an already-held
+RAIL window lock. The Studio process survived the lost transport. Querying with
+ordinary RemoteApp windows (`/app:...,hidef:off`) returned its exact live identity
+and distinguished an older stopped identity. Mendimaru now uses that option for
+all authenticated RemoteApp operations, retaining GFX for the desktop stream.
+Disabling the entire GFX pipeline is not the recovery path.
+
+Studio start initializes its monitor before the guest success report and then
+requires an authenticated UI capabilities response before the host reports
+success. UI reconnect also verifies that channel within its request budget.
+A failed readiness check is a non-retryable start failure; it does not replay the
+launch. The keeper and Runtime link remain available for supported status,
+reconnect and stop, and unverified identities must be inspected with `studio status --refresh` before another start.
+
+Public `studio stop` can retire an unreachable keeper after authoritative
+absence of its exact Windows PID/start identity. Guest query failure or a live
+identity preserves ownership. Older keepers without the retirement protocol are
+retired only through a same-user IPC peer pinned with a Linux pidfd, after its
+session identity is verified; PID reuse and a wrong-session reply cannot select
+another process. No guest force-kill or direct lock deletion is required.

@@ -310,7 +310,6 @@ try {
         projectName = $projectName
         hasWindow = $true
     }
-    Write-LaunchResult 'succeeded' 'Studio Pro window is ready.' $null $executable $null @($session)
 
     # Keep the RemoteApp host bound to this exact PID and start time. Stop
     # requests use this same connection so a second RDP client cannot replace
@@ -318,6 +317,7 @@ try {
     $readyProcessId = [int]$readyProcess.Id
     $readyStartedTicks = [long]$readyProcess.StartTime.ToUniversalTime().Ticks
     Initialize-MendimaruUi $readyProcess $sessionId
+    Write-LaunchResult 'succeeded' 'Studio Pro window is ready.' $null $executable $null @($session)
     $lastControlSequence = [long]0
     $pendingStop = $null
     while ($true) {

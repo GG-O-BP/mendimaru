@@ -20,7 +20,15 @@ struct Process(Child);
 
 impl Process {
     fn finish(&mut self) {
-        until(|| self.0.try_wait().unwrap().is_some());
+        self.finish_with_timeout(Duration::from_secs(15));
+    }
+
+    fn finish_with_timeout(&mut self, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while self.0.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < deadline, "fixture process timed out");
+            thread::sleep(Duration::from_millis(25));
+        }
         assert!(self.0.wait().unwrap().success());
     }
 }
@@ -209,7 +217,11 @@ esac
                 .env("MENDIMARU_CACHE_DIR", self.path("cache"))
                 .env("XDG_CONFIG_HOME", self.path("xdg-config"))
                 .env("PATH", path)
-                .stdin(Stdio::null())
+                .stdin(if mode == "keeper-readiness-failed" {
+                    Stdio::piped()
+                } else {
+                    Stdio::null()
+                })
                 .process_group(0)
                 .spawn()
                 .unwrap(),
@@ -382,7 +394,7 @@ fn isolated_runtime_stop_process() {
     };
     let root = PathBuf::from(std::env::var_os("MENDIMARU_STOP_FIXTURE_ROOT").unwrap());
     crate::i18n::initialize("en-US").unwrap();
-    if mode == "launch-prepare" || mode.starts_with("studio-status") {
+    if mode == "launch-prepare" || mode.starts_with("studio-status") || mode == "studio-stop" {
         let paths = AppPaths::discover_for_cli().unwrap();
         let config = crate::application::load_config(&paths).unwrap();
         crate::winboat::seed_installed_versions_cache(
@@ -396,12 +408,22 @@ fn isolated_runtime_stop_process() {
                 removable: true,
             }],
         );
-        if mode.starts_with("studio-status") {
-            let mut args = vec!["studio", "status", "--json", "--timeout-seconds", "15"];
-            if !mode.ends_with("cached") {
+        if mode.starts_with("studio-status") || mode == "studio-stop" {
+            let mut args = vec![
+                "studio",
+                if mode == "studio-stop" {
+                    "stop"
+                } else {
+                    "status"
+                },
+                "--json",
+                "--timeout-seconds",
+                "90",
+            ];
+            if mode != "studio-stop" && !mode.ends_with("cached") {
                 args.push("--refresh");
             }
-            if mode.contains("exact") {
+            if mode == "studio-stop" || mode.contains("exact") {
                 args.extend(["--session-id", STUDIO_ID]);
             }
             if mode.contains("orphans") {
@@ -522,7 +544,34 @@ fn isolated_runtime_stop_process() {
         drop(listener);
         drop(guard);
         assert!(!socket.exists());
-    } else if mode == "keeper" || mode == "keeper-observe" {
+    } else if mode.starts_with("legacy-keeper") {
+        use std::os::unix::net::UnixListener;
+        let paths = AppPaths::discover_for_cli().unwrap();
+        let directory = ensure_session_socket_directory(&paths).unwrap();
+        let socket = directory.join(session_socket_name(STUDIO_ID));
+        let listener = UnixListener::bind(&socket).unwrap();
+        fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(root.join("keeper-ready"), b"ready").unwrap();
+        loop {
+            let (mut peer, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            use std::io::BufRead;
+            std::io::BufReader::new(peer.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            let response = if line.trim() == "status" {
+                json!({"ok":true,"session":{
+                    "schemaVersion":CONTRACT_SCHEMA_VERSION,
+                    "sessionId":if mode.ends_with("wrong-session") { "studio-9999-638908128000000000" } else { STUDIO_ID },
+                    "version":"11.12.3","state":"unknown","processId":4242,
+                    "connection":"disconnected","reconnectable":false
+                }})
+            } else {
+                json!({"ok":false,"session":null})
+            };
+            writeln!(peer, "{response}").unwrap();
+        }
+    } else if mode == "keeper" || mode == "keeper-observe" || mode == "keeper-readiness-failed" {
         let config =
             crate::application::load_config(&AppPaths::discover_for_cli().unwrap()).unwrap();
         let client = Command::new("sh")
@@ -553,9 +602,25 @@ fn isolated_runtime_stop_process() {
             });
         }
         assert_eq!(crate::winboat::registered_client_sessions().len(), 1);
-        let (listener, guard, session_id) = prepare_session_keeper(STUDIO_ID).unwrap();
-        fs::write(root.join("keeper-ready"), b"ready").unwrap();
-        tauri::async_runtime::block_on(serve_session_keeper(listener, guard, &session_id));
+        if mode == "keeper-readiness-failed" {
+            assert_eq!(
+                finish_session_keeper_launch(SessionKeeperResponse {
+                    ok: false,
+                    operation_id: None,
+                    studio_session_id: Some(STUDIO_ID.into()),
+                    error: Some(BackendError::operation(
+                        BackendId::LinuxWinboat,
+                        CapabilityId::StudioStart,
+                        crate::winboat::STUDIO_UI_UNAVAILABLE,
+                    )),
+                }),
+                EXIT_OK
+            );
+        } else {
+            let (listener, guard, session_id) = prepare_session_keeper(STUDIO_ID).unwrap();
+            fs::write(root.join("keeper-ready"), b"ready").unwrap();
+            tauri::async_runtime::block_on(serve_session_keeper(listener, guard, &session_id));
+        }
         assert!(crate::winboat::registered_client_sessions().is_empty());
         fs::write(root.join("keeper-finished"), b"finished").unwrap();
     } else if mode == "runtime-start" {
@@ -1428,4 +1493,96 @@ fn studio_refresh_queries_guest_with_keeper_and_preserves_ownership() {
         fixture.confirm_studio_exit();
         keeper.finish();
     }
+}
+
+#[test]
+fn public_stop_retires_a_disconnected_keeper_only_after_authoritative_absence() {
+    for outcome in ["absent", "live", "failed"] {
+        let fixture = Fixture::new();
+        fixture.prepare_launch_recovery(outcome);
+        let mut keeper = fixture.spawn("keeper-observe");
+        until(|| fixture.path("keeper-ready").exists());
+        fs::write(fixture.path("client-disconnected"), b"disconnected").unwrap();
+        fs::remove_file(fixture.path("client-report.json")).unwrap();
+        until(|| {
+            fixture.studio_status().connection
+                == crate::contracts::StudioConnectionState::Disconnected
+        });
+        fixture
+            .spawn("studio-stop")
+            .finish_with_timeout(Duration::from_secs(90));
+        let result = fixture.result("studio-stop");
+        assert_eq!(result["ok"], outcome == "absent", "{outcome}: {result}");
+        if outcome == "absent" {
+            keeper.finish();
+            assert!(!fixture
+                .path("cache/cli-sessions")
+                .join(session_socket_name(STUDIO_ID))
+                .exists());
+            fixture.assert_stopped(1);
+        } else {
+            assert!(keeper.0.try_wait().unwrap().is_none());
+            assert_eq!(fixture.calls(), 0);
+            fixture.confirm_studio_exit();
+            keeper.finish();
+        }
+    }
+}
+
+#[test]
+fn stopped_legacy_keeper_retirement_pins_the_verified_ipc_peer() {
+    use std::os::unix::process::ExitStatusExt;
+    for mode in ["legacy-keeper", "legacy-keeper-wrong-session"] {
+        let fixture = Fixture::new();
+        fixture.prepare_launch_recovery("absent");
+        let mut keeper = fixture.spawn(mode);
+        until(|| fixture.path("keeper-ready").exists());
+        fixture
+            .spawn("studio-stop")
+            .finish_with_timeout(Duration::from_secs(90));
+        let result = fixture.result("studio-stop");
+        if mode == "legacy-keeper" {
+            assert_eq!(result["ok"], true, "{result}");
+            until(|| keeper.0.try_wait().unwrap().is_some());
+            assert_eq!(keeper.0.wait().unwrap().signal(), Some(libc::SIGTERM));
+            assert!(!fixture
+                .path("cache/cli-sessions")
+                .join(session_socket_name(STUDIO_ID))
+                .exists());
+            fixture.assert_stopped(1);
+        } else {
+            assert_eq!(result["ok"], false, "{result}");
+            assert!(keeper.0.try_wait().unwrap().is_none());
+            assert_eq!(fixture.calls(), 0);
+        }
+    }
+}
+
+#[test]
+fn failed_ui_readiness_keeps_acknowledged_owner_and_runtime_until_confirmed_exit() {
+    let fixture = Fixture::new();
+    let compose = fs::read(fixture.path("compose.yml")).unwrap();
+    let mut keeper = fixture.spawn("keeper-readiness-failed");
+    keeper
+        .0
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"accept\n")
+        .unwrap();
+    until(|| {
+        fixture
+            .path(&format!(
+                "cache/cli-sessions/{}",
+                session_socket_name(STUDIO_ID)
+            ))
+            .exists()
+    });
+    assert!(keeper.0.try_wait().unwrap().is_none());
+    assert_eq!(fixture.studio_status().session_id, STUDIO_ID);
+    assert_eq!(fs::read(fixture.path("compose.yml")).unwrap(), compose);
+    assert_eq!(fixture.calls(), 0);
+    fixture.confirm_studio_exit();
+    keeper.finish();
+    fixture.assert_stopped(1);
 }

@@ -253,7 +253,11 @@ fn spawn_remote_app(
         .chars()
         .filter(|character| !matches!(character, ',' | '\'' | '"'))
         .collect();
-    let mut remote_app = format!("/app:program:{executable_path},name:{safe_label}");
+    // HiDef maps each RemoteApp window to a GFX surface. FreeRDP 3.32.2
+    // recursively takes the RAIL window lock while repainting those surfaces
+    // (xf_rail_window_common -> xf_AppWindowRepaintFromSurface), then aborts.
+    // Keep GFX available for the desktop stream but use ordinary RAIL windows.
+    let mut remote_app = format!("/app:program:{executable_path},name:{safe_label},hidef:off");
     if let Some(arguments) = app_arguments.filter(|arguments| !arguments.is_empty()) {
         remote_app.push_str(",cmd:");
         remote_app.push_str(arguments);

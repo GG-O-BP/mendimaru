@@ -352,3 +352,13 @@ and absence, a different PID, failed guest queries, and the orphan filter with
 refresh. Failed queries remain errors; absent owned identities become stopped
 summaries without changing keeper ownership, Runtime records or Compose. These
 fixtures do not claim an actual Windows guest run.
+
+## Cold Studio UI and stopped keeper recovery (#257)
+
+The ordinary Rust suite checks an authenticated ready UI response, unavailable
+helper, mismatched request ID, and exited transport before accepting launch
+readiness. Real CLI/keeper fixtures require authoritative absence before public
+stop retires an unreachable owner, preserve live/unverified owners, and cover
+legacy IPC retirement with a pidfd and rejection of a wrong-session response.
+Runtime cleanup and Compose restoration remain covered. Actual Studio, MySQL,
+web and login evidence is recorded separately from these guest stand-ins.
