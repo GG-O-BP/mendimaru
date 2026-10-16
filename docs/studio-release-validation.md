@@ -67,7 +67,12 @@ paths, not repository variables or committed suites.
 The workflow verifies the immutable release tag and builds its Linux binary.
 It prepares owned Runtime forwarding, launches the selected project with its
 exact installed Studio version, locates that version's unambiguous project
-window, and delivers ordinary Studio F5. A missing or ambiguous window fails;
+window, and warms generated bundler inputs with F5 in that same owned Studio
+session. A cold UNC build can fail before the generated-asset watcher repairs
+its inputs; Studio retains that first failure even after Rspack rebuilds.
+The gate waits at least 75 seconds and for stable generated files, then delivers
+the ordinary F5 used for validation. Warm-up alone never passes the gate.
+A missing or ambiguous window fails;
 login or conversion dialogs are not dismissed automatically.
 
 The gate still requires HTTP readiness from that Studio-linked Runtime, stable
@@ -81,6 +86,11 @@ cancellation never authorizes stopping an unrelated session. The release owner
 finalizes its shared preparation and cleans up only its own Studio, Runtime,
 and generated-asset watcher. Release publication continues only after this gate
 and the Windows and AUR verification jobs succeed.
+
+Validation tools come from the workflow revision, separately from the immutable
+application tag, as with Windows release checks. To apply an orchestration fix
+to an existing tag, dispatch the release workflow from the reviewed revision;
+the application source and Linux binary still come from the unchanged tag.
 
 Historical reports under `docs/issue-*-evidence*` describe the applications and
 versions used at the time. They do not define release prerequisites. Retired

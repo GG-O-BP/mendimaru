@@ -110,6 +110,39 @@ def build_generation(project):
     return generation.hexdigest()
 
 
+def deliver_f5(window):
+    subprocess.run(["xdotool", "windowfocus", "--sync", window], check=True, timeout=15)
+    subprocess.run(["xdotool", "key", "--clearmodifiers", "alt+f"], check=True, timeout=15)
+    time.sleep(0.5)
+    subprocess.run(["xdotool", "key", "--clearmodifiers", "Escape"], check=True, timeout=15)
+    subprocess.run(["xdotool", "key", "--clearmodifiers", "F5"], check=True, timeout=15)
+
+
+def wait_for_generated_build(project, watcher, minimum_seconds=0):
+    previous = None
+    stable_since = None
+    started = time.monotonic()
+    deadline = started + 240
+    while time.monotonic() < deadline:
+        assert watcher.poll() is None, "The generated-asset watcher stopped"
+        try:
+            current = build_generation(project)
+        except (FileNotFoundError, AssertionError):
+            # A real Studio rebuild may replace the generated directories.
+            previous = stable_since = None
+            time.sleep(5)
+            continue
+        now = time.monotonic()
+        if current != previous:
+            previous = current
+            stable_since = now
+        elif now - stable_since >= 20 and now - started >= minimum_seconds:
+            return current
+        print("Waiting for generated build files to settle", flush=True)
+        time.sleep(5)
+    raise RuntimeError("Studio's generated files did not stabilize")
+
+
 def main():
     global binary, workspace
     fixture = load_fixture(os.environ)
@@ -213,12 +246,14 @@ def main():
                         "on the runner before retrying; the gate never guesses dialog coordinates.")
         print("Allowing project load to settle before F5", flush=True)
         time.sleep(45)
-        subprocess.run(["xdotool", "windowfocus", "--sync", window], check=True, timeout=15)
-        # Acquire native menu focus rather than leaving F5 in a WebView.
-        subprocess.run(["xdotool", "key", "--clearmodifiers", "alt+f"], check=True, timeout=15)
-        time.sleep(0.5)
-        subprocess.run(["xdotool", "key", "--clearmodifiers", "Escape"], check=True, timeout=15)
-        subprocess.run(["xdotool", "key", "--clearmodifiers", "F5"], check=True, timeout=15)
+        # On a cold shared project, Studio can retain the initial UNC bundle
+        # failure even after the watcher has repaired inputs and Rspack rebuilt.
+        # Warm that same owned session, then issue the F5 used for validation.
+        # Neither this warm-up nor an assisted browser run satisfies the gate.
+        deliver_f5(window)
+        print("Warming generated bundler inputs before release F5", flush=True)
+        wait_for_generated_build(project_directory, watcher, minimum_seconds=75)
+        deliver_f5(window)
         print("Delivered ordinary Studio F5", flush=True)
 
         # studio.start already calls link_studio_runtime_session. Starting
@@ -245,21 +280,7 @@ def main():
             assert response.status < 500
             response.read()
 
-        previous = None
-        stable_since = None
-        deadline = time.monotonic() + 240
-        while time.monotonic() < deadline:
-            assert watcher.poll() is None, "The generated-asset watcher stopped"
-            current = build_generation(project_directory)
-            if current != previous:
-                previous = current
-                stable_since = time.monotonic()
-            elif time.monotonic() - stable_since >= 20:
-                break
-            print("Waiting for generated build files to settle", flush=True)
-            time.sleep(5)
-        else:
-            raise RuntimeError("Studio's generated files did not stabilize")
+        previous = wait_for_generated_build(project_directory, watcher)
         marker = Path(os.environ["RUNNER_TEMP"]) / "mendimaru-release-build-generation"
         marker.write_text(previous + "\n")
         print("Owned Studio keeper status before preparation:", json.dumps(
@@ -309,7 +330,7 @@ def main():
         gate_env = os.environ.copy()
         gate_env["MENDIMARU_STUDIO_PARITY_SHARED_SESSION_ID"] = shared_id
         subprocess.run(
-            ["node", "scripts/e2e/studio-f5-parity-gate.mjs"],
+            ["node", str(Path(__file__).with_name("studio-f5-parity-gate.mjs"))],
             env=gate_env, check=True, timeout=1320,
         )
         assert build_generation(project_directory) == previous, "The build changed during parity verification"
