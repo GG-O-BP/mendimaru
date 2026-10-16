@@ -256,7 +256,8 @@ fn spawn_remote_app(
     // HiDef maps each RemoteApp window to a GFX surface. FreeRDP 3.32.2
     // recursively takes the RAIL window lock while repainting those surfaces
     // (xf_rail_window_common -> xf_AppWindowRepaintFromSurface), then aborts.
-    // Keep GFX available for the desktop stream but use ordinary RAIL windows.
+    // Pair ordinary RAIL with the bitmap pipeline: GFX without HiDef leaves
+    // the X11 window pixmaps unpainted.
     let mut remote_app = format!("/app:program:{executable_path},name:{safe_label},hidef:off");
     if let Some(arguments) = app_arguments.filter(|arguments| !arguments.is_empty()) {
         remote_app.push_str(",cmd:");
@@ -277,6 +278,8 @@ fn spawn_remote_app(
         "/microphone:sys:pulse".to_string(),
         "/floatbar".to_string(),
         "/compression".to_string(),
+        "/network:lan".to_string(),
+        "/tune:SupportGraphicsPipeline:FALSE".to_string(),
         "/sec:tls".to_string(),
         "-wallpaper".to_string(),
         "/scale-desktop:100".to_string(),

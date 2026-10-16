@@ -62,9 +62,12 @@ A later cold-session investigation reproduced a FreeRDP 3.32.2 abort in
 `xfAppWindowsLockFrom`: the HiDef RemoteApp repaint path acquired an already-held
 RAIL window lock. The Studio process survived the lost transport. Querying with
 ordinary RemoteApp windows (`/app:...,hidef:off`) returned its exact live identity
-and distinguished an older stopped identity. Mendimaru now uses that option for
-all authenticated RemoteApp operations, retaining GFX for the desktop stream.
-Disabling the entire GFX pipeline is not the recovery path.
+and distinguished an older stopped identity. Mendimaru pairs that option with `/network:lan` and
+`/tune:SupportGraphicsPipeline:FALSE` for authenticated RemoteApp operations.
+The explicit network mode prevents FreeRDP from re-enabling GFX through its
+automatic connection defaults after argument parsing. HiDef off with GFX still
+enabled avoids the abort but leaves X11 window pixmaps unpainted; transport and
+guest UIA success alone are therefore insufficient validation.
 
 Studio start initializes its monitor before the guest success report and then
 requires an authenticated UI capabilities response before the host reports
