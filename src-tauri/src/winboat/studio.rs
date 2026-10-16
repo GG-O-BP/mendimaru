@@ -20,6 +20,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+#[cfg(target_os = "linux")]
+pub(crate) const STUDIO_UI_UNAVAILABLE: &str = "Studio UI readiness was not confirmed; inspect studio status --refresh before starting another session";
+
 const STUDIO_LAUNCH_TIMEOUT_SECONDS: u64 = 5 * 60;
 const STUDIO_LAUNCH_ATTEMPTS: usize = 2;
 const STUDIO_LAUNCH_RETRY_DELAY_SECONDS: u64 = 2;
@@ -350,6 +353,24 @@ async fn launch_studio_with_lease(
         let mut error = WindowsOperationFailure::from(error);
         error.retryable = recovery.retryable();
         return Err(error);
+    }
+    #[cfg(target_os = "linux")]
+    if crate::ui_automation::verify_owned_session(&studio_session.session_id, 30_000)
+        .await
+        .is_err()
+    {
+        // Retain this exact owner and its Runtime link. A helper failure is
+        // not evidence of Studio exit and must never authorize another launch.
+        return Err(crate::contracts::BackendError {
+            code: crate::contracts::BackendErrorCode::PreconditionFailed,
+            retryable: false,
+            ..crate::contracts::BackendError::operation(
+                crate::contracts::BackendId::LinuxWinboat,
+                crate::contracts::CapabilityId::StudioStart,
+                STUDIO_UI_UNAVAILABLE,
+            )
+        }
+        .into());
     }
     Ok(())
 }

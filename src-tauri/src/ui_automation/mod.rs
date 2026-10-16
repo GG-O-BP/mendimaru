@@ -342,6 +342,18 @@ pub(crate) async fn linux_request(
     }
 }
 
+/// The launch already holds the exclusive VM lease and owns this exact client.
+/// Verify its authenticated UI channel before reporting a completed start.
+#[cfg(target_os = "linux")]
+pub(crate) async fn verify_owned_session(
+    session_id: &str,
+    timeout_ms: u64,
+) -> Result<(), BackendError> {
+    let mut request = Request::new(session_id, Operation::Capabilities);
+    request.timeout_ms = timeout_ms;
+    bridge::request(&request, None).await.map(|_| ())
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) async fn owned_request(
     config: &crate::models::AppConfig,
@@ -354,10 +366,15 @@ pub(crate) async fn owned_request(
     if cancellation.is_some_and(|c| c.is_cancelled()) {
         return Err(error(request.operation, "ui-cancelled"));
     }
+    let deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_millis(request.timeout_ms);
     let current = crate::winboat::registered_client_sessions()
         .into_iter()
         .find(|s| s.session_id == request.session_id);
     if current.is_some_and(|s| s.connection == crate::contracts::StudioConnectionState::Connected) {
+        let mut probe = request.clone();
+        probe.operation = Operation::Capabilities;
+        bridge::request(&probe, cancellation).await?;
         return Ok(serde_json::json!({"sessionId":request.session_id,"reconnected":false}));
     }
     // Retain the disconnected owner's authenticated monitor and project lease
@@ -370,6 +387,16 @@ pub(crate) async fn owned_request(
         crate::platform::reconnect_studio_session(config, &request.session_id),
     )
     .await?;
+    let remaining = deadline
+        .saturating_duration_since(tokio::time::Instant::now())
+        .as_millis() as u64;
+    if remaining < 100 {
+        return Err(error(Operation::Reconnect, "ui-helper-timeout"));
+    }
+    let mut probe = request.clone();
+    probe.operation = Operation::Capabilities;
+    probe.timeout_ms = remaining;
+    bridge::request(&probe, cancellation).await?;
     Ok(serde_json::json!({"sessionId":request.session_id,"reconnected":true}))
 }
 

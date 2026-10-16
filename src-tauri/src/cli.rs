@@ -1114,7 +1114,19 @@ async fn run_command(
         }
         CliCommand::StudioStop { session_id } => {
             #[cfg(target_os = "linux")]
-            let stopped_by_keeper = request_keeper_stop(&paths, session_id).await?;
+            let stopped_by_keeper = match request_keeper_stop(&paths, session_id).await {
+                Ok(stopped) => stopped,
+                Err(error) => {
+                    let sessions = crate::platform::authoritative_studio_sessions(&config)
+                        .await
+                        .map_err(CommandError::from);
+                    complete_stopped_session_if_absent(error, sessions, &config, session_id)?;
+                    // A failed transport cannot confirm exit, but an exact
+                    // authoritative absence can retire that stale owner safely.
+                    retire_absent_keeper(&paths, session_id).await?;
+                    true
+                }
+            };
             #[cfg(not(target_os = "linux"))]
             let stopped_by_keeper = false;
             if !stopped_by_keeper {
@@ -1476,13 +1488,9 @@ async fn start_with_session_keeper(
             "the session keeper returned an invalid handshake".to_string(),
         )
     })?;
-    if response.ok {
-        let operation_id = response.operation_id.ok_or_else(|| {
-            CommandError::new(
-                CommandErrorCode::OperationFailed,
-                "the session keeper omitted the operation ID".to_string(),
-            )
-        })?;
+    // A launch can fail UI readiness while still owning a live Studio. Keep
+    // that owner available for status/reconnect/stop even though start failed.
+    if response.studio_session_id.is_some() {
         stdin.write_all(b"accept\n").await.map_err(|_| {
             CommandError::new(
                 CommandErrorCode::OperationFailed,
@@ -1493,6 +1501,14 @@ async fn start_with_session_keeper(
             CommandError::new(
                 CommandErrorCode::OperationFailed,
                 "the session keeper acknowledgement failed".to_string(),
+            )
+        })?;
+    }
+    if response.ok {
+        let operation_id = response.operation_id.ok_or_else(|| {
+            CommandError::new(
+                CommandErrorCode::OperationFailed,
+                "the session keeper omitted the operation ID".to_string(),
             )
         })?;
         Ok((operation_id, response.studio_session_id))
@@ -1522,7 +1538,7 @@ fn finish_session_keeper_launch(mut response: SessionKeeperResponse) -> i32 {
     // Keep launch identities even when listener preparation or registration fails.
     let completed_operation_id = response.operation_id.clone();
     let launched_session_id = response.studio_session_id.clone();
-    let prepared = if response.ok {
+    let prepared = if response.ok || launched_session_id.is_some() {
         response
             .studio_session_id
             .as_deref()
@@ -1532,7 +1548,7 @@ fn finish_session_keeper_launch(mut response: SessionKeeperResponse) -> i32 {
         Err("the Studio session keeper launch failed".to_string())
     };
     if let Err(message) = &prepared {
-        if response.ok {
+        if response.ok || launched_session_id.is_some() {
             response = keeper_error(BackendError::operation(
                 BackendId::LinuxWinboat,
                 CapabilityId::StudioStart,
@@ -1540,7 +1556,7 @@ fn finish_session_keeper_launch(mut response: SessionKeeperResponse) -> i32 {
             ));
         }
     }
-    let successful = response.ok;
+    let successful = prepared.is_ok();
     if !successful {
         tauri::async_runtime::block_on(cleanup_unaccepted_keeper_launch(
             completed_operation_id.as_deref(),
@@ -1673,7 +1689,15 @@ fn session_keeper_response(arguments: &[OsString]) -> SessionKeeperResponse {
                 error: None,
             }
         }
-        Err(error) => keeper_error(command_error_to_backend(error, BackendId::LinuxWinboat)),
+        Err(error) => {
+            let mut response =
+                keeper_error(command_error_to_backend(error, BackendId::LinuxWinboat));
+            let sessions = crate::winboat::registered_client_sessions();
+            if sessions.len() == 1 {
+                response.studio_session_id = Some(sessions[0].session_id.clone());
+            }
+            response
+        }
     }
 }
 
@@ -1973,6 +1997,15 @@ async fn serve_session_keeper(
                                 .find(|registered| registered.session_id == session),
                         }
                     } else if matches!(read, Ok(Ok(count)) if count > 0)
+                        && request.trim_end() == "retire-absent"
+                    {
+                        // Only the public stop path sends this after an
+                        // authoritative exact-identity absence. Retire the
+                        // channel without issuing any guest close request.
+                        crate::winboat::disconnect_client(&session);
+                        should_stop = true;
+                        SessionKeeperIpcResponse { error: None, ok: true, session: None }
+                    } else if matches!(read, Ok(Ok(count)) if count > 0)
                         && request.trim_end() == "stop"
                     {
                         should_stop = crate::winboat::stop_registered_client(&session)
@@ -2166,6 +2199,119 @@ pub(crate) async fn request_keeper_stop(
             "the session keeper did not confirm Studio stopped".to_string(),
         ))
     }
+}
+
+#[cfg(target_os = "linux")]
+async fn retire_absent_keeper(paths: &AppPaths, session_id: &str) -> Result<(), CommandError> {
+    let directory = ensure_session_socket_directory(paths).map_err(keeper_command_error)?;
+    let response = request_session_keeper(
+        &directory.join(session_socket_name(session_id)),
+        "retire-absent",
+    )
+    .await?;
+    match response {
+        None => Ok(()),
+        Some(response) if response.ok && response.session.is_none() => Ok(()),
+        _ => {
+            retire_legacy_absent_keeper(
+                &directory.join(session_socket_name(session_id)),
+                session_id,
+            )
+            .await
+        }
+    }
+}
+
+/// Pre-upgrade keepers do not implement retire-absent. Pin the connected IPC
+/// peer with a pidfd before verifying its session, so PID reuse cannot redirect
+/// retirement. The caller has already established authoritative guest absence.
+#[cfg(target_os = "linux")]
+async fn retire_legacy_absent_keeper(
+    socket: &std::path::Path,
+    session_id: &str,
+) -> Result<(), CommandError> {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    let failure = || keeper_command_error("the absent Studio keeper could not be retired".into());
+    let metadata = std::fs::symlink_metadata(socket).map_err(|_| failure())?;
+    if !metadata.file_type().is_socket() || metadata.uid() != unsafe { libc::geteuid() } {
+        return Err(failure());
+    }
+    let mut peer = tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio::net::UnixStream::connect(socket),
+    )
+    .await
+    .map_err(|_| failure())?
+    .map_err(|_| failure())?;
+    let credentials = peer.peer_cred().map_err(|_| failure())?;
+    let pid = credentials
+        .pid()
+        .filter(|pid| *pid > 0 && *pid != std::process::id() as i32)
+        .ok_or_else(failure)?;
+    if credentials.uid() != unsafe { libc::geteuid() } {
+        return Err(failure());
+    }
+    let raw = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+    if raw < 0 {
+        return Err(failure());
+    }
+    let pinned = unsafe { OwnedFd::from_raw_fd(raw as i32) };
+    peer.write_all(b"status\n").await.map_err(|_| failure())?;
+    let mut line = String::new();
+    let count = tokio::time::timeout(
+        Duration::from_secs(2),
+        BufReader::new(peer).take(64 * 1024).read_line(&mut line),
+    )
+    .await
+    .map_err(|_| failure())?
+    .map_err(|_| failure())?;
+    if count == 0 || !line.ends_with('\n') {
+        return Err(failure());
+    }
+    let response: SessionKeeperIpcResponse = serde_json::from_str(&line).map_err(|_| failure())?;
+    if !response.ok
+        || !response
+            .session
+            .is_some_and(|session| session.session_id == session_id)
+    {
+        return Err(failure());
+    }
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            pinned.as_raw_fd(),
+            libc::SIGTERM,
+            std::ptr::null::<libc::siginfo_t>(),
+            0,
+        )
+    };
+    if result < 0 && std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH) {
+        return Err(failure());
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        let mut poll = libc::pollfd {
+            fd: pinned.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        if unsafe { libc::poll(&mut poll, 1, 0) } > 0 {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(failure());
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    if let Ok(current) = std::fs::symlink_metadata(socket) {
+        if current.dev() == metadata.dev() && current.ino() == metadata.ino() {
+            std::fs::remove_file(socket).map_err(|_| failure())?;
+        }
+    }
+    cleanup_linked_runtimes(session_id).await;
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -3386,6 +3532,13 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
             Some(CapabilityId::StudioStart),
             KEEPER_SOCKET_UNAVAILABLE,
         ) => KEEPER_SOCKET_UNAVAILABLE,
+        #[cfg(target_os = "linux")]
+        (
+            BackendErrorCode::PreconditionFailed,
+            Some(BackendId::LinuxWinboat),
+            Some(CapabilityId::StudioStart),
+            crate::winboat::STUDIO_UI_UNAVAILABLE,
+        ) => crate::winboat::STUDIO_UI_UNAVAILABLE,
         (
             BackendErrorCode::PreconditionFailed,
             Some(BackendId::LinuxWinboat | BackendId::WindowsNative),

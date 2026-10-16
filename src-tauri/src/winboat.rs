@@ -57,6 +57,8 @@ pub(crate) use sessions::{
 pub(crate) use sessions::{observed_session, registered_session_ended};
 pub(crate) use staging::stage_installer;
 pub(crate) use startup::ensure_guest_online;
+#[cfg(target_os = "linux")]
+pub(crate) use studio::STUDIO_UI_UNAVAILABLE;
 pub use studio::{install_studio, launch_studio, launch_uninstaller, open_linux_folder};
 
 pub(crate) fn seed_installed_versions_cache(config: &AppConfig, versions: &[StudioVersion]) {

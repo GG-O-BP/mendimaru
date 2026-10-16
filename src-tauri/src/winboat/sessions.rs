@@ -1131,6 +1131,8 @@ mod tests {
         authenticate_report, authenticated_report_fixture, OperationSecurity,
     };
     use chrono::{TimeZone, Utc};
+    #[cfg(target_os = "linux")]
+    use std::time::Duration;
 
     fn studio(version: &str) -> StudioVersion {
         StudioVersion {
@@ -1537,6 +1539,106 @@ mod tests {
             !retired,
             "failed reconnect retired a still-needed guest monitor"
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn launch_readiness_requires_an_authenticated_live_ui_channel() {
+        use crate::contracts::{
+            StudioConnectionState, StudioProcessState, StudioSessionStatus, CONTRACT_SCHEMA_VERSION,
+        };
+        for outcome in ["ready", "unavailable", "wrong-request", "disconnected"] {
+            let workspace = tempfile::tempdir().unwrap();
+            let session_id = "studio-747474-638915148000000000";
+            let security = OperationSecurity::fixture();
+            let payload =
+                br#"{"state":"succeeded","timestamp":"2026-08-23T03:00:00Z","sessions":[]}"#;
+            let envelope = authenticated_report_fixture(&security, 1, payload);
+            let report_path = workspace.path().join("launch.json");
+            std::fs::write(&report_path, &envelope).unwrap();
+            let control_path = workspace.path().join("control.json");
+            let mut child = std::process::Command::new("sh")
+                .args([
+                    "-c",
+                    if outcome == "disconnected" {
+                        "exit 0"
+                    } else {
+                        "sleep 20"
+                    },
+                ])
+                .spawn()
+                .unwrap();
+            if outcome == "disconnected" {
+                child.wait().unwrap();
+            }
+            super::register_client(
+                session_id,
+                super::RemoteAppProcess::from_test_child(child),
+                StudioSessionStatus {
+                    schema_version: CONTRACT_SCHEMA_VERSION.into(),
+                    session_id: session_id.into(),
+                    version: "11.12.6".into(),
+                    state: StudioProcessState::Running,
+                    process_id: Some(747474),
+                    started_at: Some(Utc.with_ymd_and_hms(2026, 8, 23, 3, 0, 0).unwrap()),
+                    project_name: None,
+                    connection: StudioConnectionState::Connected,
+                    reconnectable: false,
+                    reconnect_unavailable: None,
+                },
+                RegisteredControl {
+                    report_path,
+                    control_path: control_path.clone(),
+                    security: security.clone(),
+                    previous_report: authenticate_report(envelope.as_bytes(), &security).unwrap(),
+                    next_sequence: 1,
+                    cleanup_report: true,
+                },
+                None,
+            )
+            .unwrap();
+            let respond = async {
+                if outcome == "disconnected" {
+                    return;
+                }
+                let request_path = workspace.path().join("control.json.ui.request");
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+                while !request_path.exists() {
+                    assert!(tokio::time::Instant::now() < deadline);
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                let wire = std::fs::read(&request_path).unwrap();
+                let wire = authenticate_report(&wire, &security).unwrap();
+                let request: serde_json::Value = serde_json::from_slice(&wire.payload).unwrap();
+                assert_eq!(request["request"]["operation"], "capabilities");
+                assert_eq!(request["request"]["sessionId"], session_id);
+                let response = serde_json::json!({
+                    "id": if outcome == "wrong-request" { serde_json::json!("ui_00000000000000000000000000000000") } else { request["id"].clone() },
+                    "ok": outcome == "ready", "data": {"sessionId": session_id},
+                    "reason": "ui-no-interactive-desktop"
+                });
+                std::fs::write(
+                    workspace.path().join("control.json.ui.report"),
+                    authenticated_report_fixture(
+                        &security,
+                        2,
+                        &serde_json::to_vec(&response).unwrap(),
+                    ),
+                )
+                .unwrap();
+            };
+            let (result, ()) = tokio::join!(
+                crate::ui_automation::verify_owned_session(session_id, 100),
+                respond
+            );
+            // Readiness observes only: it never starts a replacement or closes
+            // the registered Studio when the helper or transport is unavailable.
+            let retained = super::clients().unwrap().contains_key(session_id);
+            let stopped = control_path.exists();
+            super::disconnect_client(session_id);
+            assert_eq!(result.is_ok(), outcome == "ready", "{outcome}: {result:?}");
+            assert!(retained && !stopped);
+        }
     }
 
     #[test]
