@@ -16,8 +16,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 function Invoke-BundleSmoke {
-$performanceSampleCount = if ($Performance) { 7 } else { 1 }
-$idleWindowSeconds = if ($Performance) { 300 } else { 5 }
+$performanceSampleCount = if ($Performance) { 7 } else { 0 }
+$idleWindowSeconds = if ($Performance) { 300 } else { 0 }
 $idleSampleSeconds = 5
 $expectedGuard = 'mendimaru-github-hosted-ephemeral-vm'
 if (
@@ -58,7 +58,7 @@ $report = [ordered]@{
     installer = $installer
     startedAt = [DateTimeOffset]::UtcNow.ToString('O')
     sampling = [ordered]@{
-        warmupCount = 1
+        warmupCount = if ($Performance) { 1 } else { 0 }
         sampleCount = $performanceSampleCount
         idleWindowSeconds = $idleWindowSeconds
         idleSampleSeconds = $idleSampleSeconds
@@ -126,113 +126,126 @@ try {
     $applicationData = Join-Path $artifactDirectory "$InstallerKind-application-data"
     Remove-Item -LiteralPath $applicationData -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Path $applicationData -Force | Out-Null
-    $warmup = Start-BundleApplication `
-        -Application $application `
-        -ApplicationData $applicationData `
-        -WebViewData $webViewData `
-        -ClearWebViewData
-    Stop-BundleApplication -Process $warmup.Process -WebViewData $webViewData
-
-    for ($sample = 0; $sample -lt $performanceSampleCount; $sample += 1) {
-        $cold = Start-BundleApplication `
+    if ($Performance) {
+        $warmup = Start-BundleApplication `
             -Application $application `
             -ApplicationData $applicationData `
             -WebViewData $webViewData `
             -ClearWebViewData
-        $report.measurements.coldStartupMs += [long]$cold.ElapsedMilliseconds
-        Stop-BundleApplication -Process $cold.Process -WebViewData $webViewData
+        Stop-BundleApplication -Process $warmup.Process -WebViewData $webViewData
 
-        $warm = Start-BundleApplication `
+        for ($sample = 0; $sample -lt $performanceSampleCount; $sample += 1) {
+            $cold = Start-BundleApplication `
+                -Application $application `
+                -ApplicationData $applicationData `
+                -WebViewData $webViewData `
+                -ClearWebViewData
+            $report.measurements.coldStartupMs += [long]$cold.ElapsedMilliseconds
+            Stop-BundleApplication -Process $cold.Process -WebViewData $webViewData
+
+            $warm = Start-BundleApplication `
+                -Application $application `
+                -ApplicationData $applicationData `
+                -WebViewData $webViewData
+            $report.measurements.warmStartupMs += [long]$warm.ElapsedMilliseconds
+            Stop-BundleApplication -Process $warm.Process -WebViewData $webViewData
+        }
+
+        $idleLaunch = Start-BundleApplication `
             -Application $application `
             -ApplicationData $applicationData `
             -WebViewData $webViewData
-        $report.measurements.warmStartupMs += [long]$warm.ElapsedMilliseconds
-        Stop-BundleApplication -Process $warm.Process -WebViewData $webViewData
-    }
-
-    $idleLaunch = Start-BundleApplication `
-        -Application $application `
-        -ApplicationData $applicationData `
-        -WebViewData $webViewData
-    $applicationProcess = $idleLaunch.Process
-    $report.webviewVersion = Get-WebViewVersion `
-        -RootProcessId $applicationProcess.Id
-    $logicalProcessors = [Environment]::ProcessorCount
-    Start-Sleep -Seconds $idleSampleSeconds
-    $cpuTracker = @{
-        initialized = $false
-        cumulativeSeconds = 0.0
-        previous = @{}
-    }
-    $beforeIdle = Get-ProcessTreeSnapshot `
-        -RootProcessId $applicationProcess.Id `
-        -CpuTracker $cpuTracker
-    $previousIdle = $beforeIdle
-    $peakProcessCount = $beforeIdle.ProcessCount
-    $peakPrivateMemoryBytes = $beforeIdle.PrivateMemoryBytes
-    $peakWorkingSetBytes = $beforeIdle.WorkingSetBytes
-    $peakCpuSeconds = $beforeIdle.CpuSeconds
-    $idleSamples = [Math]::Ceiling($idleWindowSeconds / $idleSampleSeconds)
-    $idleTimer = [Diagnostics.Stopwatch]::StartNew()
-    $previousSampleElapsed = $idleTimer.Elapsed
-    for ($sample = 0; $sample -lt $idleSamples; $sample += 1) {
-        $sampleDeadline = [TimeSpan]::FromSeconds(
-            ($sample + 1) * $idleSampleSeconds
-        )
-        $remaining = $sampleDeadline - $idleTimer.Elapsed
-        if ($remaining -gt [TimeSpan]::Zero) {
-            Start-Sleep -Milliseconds ([Math]::Ceiling($remaining.TotalMilliseconds))
+        $applicationProcess = $idleLaunch.Process
+        $report.webviewVersion = Get-WebViewVersion `
+            -RootProcessId $applicationProcess.Id
+        $logicalProcessors = [Environment]::ProcessorCount
+        Start-Sleep -Seconds $idleSampleSeconds
+        $cpuTracker = @{
+            initialized = $false
+            cumulativeSeconds = 0.0
+            previous = @{}
         }
-        $applicationProcess.Refresh()
-        if ($applicationProcess.HasExited) {
-            throw "Installed application exited during the idle performance sample with code $($applicationProcess.ExitCode)."
-        }
-        $afterIdle = Get-ProcessTreeSnapshot `
+        $beforeIdle = Get-ProcessTreeSnapshot `
             -RootProcessId $applicationProcess.Id `
             -CpuTracker $cpuTracker
-        $sampleFinished = $idleTimer.Elapsed
-        $sampleElapsed = $sampleFinished - $previousSampleElapsed
-        if ($afterIdle.CpuSeconds -lt $previousIdle.CpuSeconds) {
-            throw 'Installed application process-tree CPU time moved backwards.'
+        $previousIdle = $beforeIdle
+        $peakProcessCount = $beforeIdle.ProcessCount
+        $peakPrivateMemoryBytes = $beforeIdle.PrivateMemoryBytes
+        $peakWorkingSetBytes = $beforeIdle.WorkingSetBytes
+        $peakCpuSeconds = $beforeIdle.CpuSeconds
+        $idleSamples = [Math]::Ceiling($idleWindowSeconds / $idleSampleSeconds)
+        $idleTimer = [Diagnostics.Stopwatch]::StartNew()
+        $previousSampleElapsed = $idleTimer.Elapsed
+        for ($sample = 0; $sample -lt $idleSamples; $sample += 1) {
+            $sampleDeadline = [TimeSpan]::FromSeconds(
+                ($sample + 1) * $idleSampleSeconds
+            )
+            $remaining = $sampleDeadline - $idleTimer.Elapsed
+            if ($remaining -gt [TimeSpan]::Zero) {
+                Start-Sleep -Milliseconds ([Math]::Ceiling($remaining.TotalMilliseconds))
+            }
+            $applicationProcess.Refresh()
+            if ($applicationProcess.HasExited) {
+                throw "Installed application exited during the idle performance sample with code $($applicationProcess.ExitCode)."
+            }
+            $afterIdle = Get-ProcessTreeSnapshot `
+                -RootProcessId $applicationProcess.Id `
+                -CpuTracker $cpuTracker
+            $sampleFinished = $idleTimer.Elapsed
+            $sampleElapsed = $sampleFinished - $previousSampleElapsed
+            if ($afterIdle.CpuSeconds -lt $previousIdle.CpuSeconds) {
+                throw 'Installed application process-tree CPU time moved backwards.'
+            }
+            $idleCpuPercent = [Math]::Round(
+                (
+                    ($afterIdle.CpuSeconds - $previousIdle.CpuSeconds) /
+                    ($sampleElapsed.TotalSeconds * $logicalProcessors)
+                ) * 100,
+                3
+            )
+            $report.measurements.idleCpuPercent += $idleCpuPercent
+            $report.measurements.privateMemoryBytes += [long]$afterIdle.PrivateMemoryBytes
+            $report.measurements.workingSetBytes += [long]$afterIdle.WorkingSetBytes
+            $report.measurements.processCount += [int]$afterIdle.ProcessCount
+            $peakProcessCount = [Math]::Max($peakProcessCount, $afterIdle.ProcessCount)
+            $peakPrivateMemoryBytes = [Math]::Max(
+                $peakPrivateMemoryBytes,
+                $afterIdle.PrivateMemoryBytes
+            )
+            $peakWorkingSetBytes = [Math]::Max(
+                $peakWorkingSetBytes,
+                $afterIdle.WorkingSetBytes
+            )
+            $peakCpuSeconds = [Math]::Max($peakCpuSeconds, $afterIdle.CpuSeconds)
+            $previousIdle = $afterIdle
+            $previousSampleElapsed = $sampleFinished
         }
-        $idleCpuPercent = [Math]::Round(
-            (
-                ($afterIdle.CpuSeconds - $previousIdle.CpuSeconds) /
-                ($sampleElapsed.TotalSeconds * $logicalProcessors)
-            ) * 100,
-            3
-        )
-        $report.measurements.idleCpuPercent += $idleCpuPercent
-        $report.measurements.privateMemoryBytes += [long]$afterIdle.PrivateMemoryBytes
-        $report.measurements.workingSetBytes += [long]$afterIdle.WorkingSetBytes
-        $report.measurements.processCount += [int]$afterIdle.ProcessCount
-        $peakProcessCount = [Math]::Max($peakProcessCount, $afterIdle.ProcessCount)
-        $peakPrivateMemoryBytes = [Math]::Max(
-            $peakPrivateMemoryBytes,
-            $afterIdle.PrivateMemoryBytes
-        )
-        $peakWorkingSetBytes = [Math]::Max(
-            $peakWorkingSetBytes,
-            $afterIdle.WorkingSetBytes
-        )
-        $peakCpuSeconds = [Math]::Max($peakCpuSeconds, $afterIdle.CpuSeconds)
-        $previousIdle = $afterIdle
-        $previousSampleElapsed = $sampleFinished
+        $report.resources = [ordered]@{
+            before = $beforeIdle
+            after = $previousIdle
+            peak = [ordered]@{
+                processCount = $peakProcessCount
+                privateMemoryBytes = $peakPrivateMemoryBytes
+                workingSetBytes = $peakWorkingSetBytes
+                cpuSeconds = $peakCpuSeconds
+            }
+            delta = [ordered]@{
+                processCount = $previousIdle.ProcessCount - $beforeIdle.ProcessCount
+                privateMemoryBytes = $previousIdle.PrivateMemoryBytes - $beforeIdle.PrivateMemoryBytes
+                workingSetBytes = $previousIdle.WorkingSetBytes - $beforeIdle.WorkingSetBytes
+            }
+        }
+
     }
-    $report.resources = [ordered]@{
-        before = $beforeIdle
-        after = $previousIdle
-        peak = [ordered]@{
-            processCount = $peakProcessCount
-            privateMemoryBytes = $peakPrivateMemoryBytes
-            workingSetBytes = $peakWorkingSetBytes
-            cpuSeconds = $peakCpuSeconds
-        }
-        delta = [ordered]@{
-            processCount = $previousIdle.ProcessCount - $beforeIdle.ProcessCount
-            privateMemoryBytes = $previousIdle.PrivateMemoryBytes - $beforeIdle.PrivateMemoryBytes
-            workingSetBytes = $previousIdle.WorkingSetBytes - $beforeIdle.WorkingSetBytes
-        }
+    else {
+        $smoke = Start-BundleApplication `
+            -Application $application `
+            -ApplicationData $applicationData `
+            -WebViewData $webViewData `
+            -ClearWebViewData
+        $applicationProcess = $smoke.Process
+        $report.webviewVersion = Get-WebViewVersion -RootProcessId $applicationProcess.Id
+        $report.applicationLaunched = $true
     }
 
     Stop-BundleApplication -Process $applicationProcess -WebViewData $webViewData

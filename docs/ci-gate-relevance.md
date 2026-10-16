@@ -1,5 +1,9 @@
 # CI gate relevance
 
+PR and release gates validate functionality, packaging, formatting, and security.
+Performance measurements, budget comparisons, and post-merge performance holds
+are excluded. `Release performance` is available only through manual dispatch.
+
 Four expensive `ci.yml` gates are relevance-classified so that a change which
 cannot affect them does not pay for them:
 

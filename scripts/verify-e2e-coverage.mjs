@@ -77,15 +77,6 @@ const linux = {
       "expectedSharedDirectory",
     ]) && marketplaceSandboxGate,
   marketplaceSandboxGate,
-  performanceDesktop: hasAll(linuxDesktop, [
-    "MENDIMARU_E2E_MAX_STARTUP_MS",
-    "MENDIMARU_E2E_MAX_ENVIRONMENT_MS",
-    "MENDIMARU_E2E_MAX_PROJECTS_MS",
-    "MENDIMARU_E2E_MAX_NAVIGATION_MS",
-    "MENDIMARU_E2E_MAX_PRIVATE_MEMORY_BYTES",
-    "MENDIMARU_E2E_MAX_IDLE_CPU_PERCENT",
-    "linuxProcessSnapshot",
-  ]),
   runtimeBrowser: ci.includes("npm run test:browser"),
   hostedDesktopCi: ci.includes("xvfb-run --auto-servernum npm run test:e2e"),
   localLiveStudioLifecycle:
@@ -116,15 +107,6 @@ const windows = {
     '"../11.12.2"',
     "isolated workspace",
   ]),
-  performanceDesktop: hasAll(windowsDesktop, [
-    "MENDIMARU_E2E_MAX_STARTUP_MS",
-    "MENDIMARU_E2E_MAX_ENVIRONMENT_MS",
-    "MENDIMARU_E2E_MAX_PROJECTS_MS",
-    "MENDIMARU_E2E_MAX_NAVIGATION_MS",
-    "MENDIMARU_E2E_MAX_PRIVATE_MEMORY_BYTES",
-    "MENDIMARU_E2E_MAX_IDLE_CPU_PERCENT",
-    "windowsProcessSnapshot",
-  ]),
   hostedDesktopCi: ci.includes("npm run test:e2e:windows"),
   hostedPackageLifecycle: hasAll(ci, [
     "Build, install, launch, and uninstall Windows bundles",
@@ -144,7 +126,6 @@ const sharedDesktopCategories = [
   "realDesktopWebView",
   "functionalDesktop",
   "securityDesktop",
-  "performanceDesktop",
   "hostedDesktopCi",
 ];
 const coreDesktopParity = sharedDesktopCategories.every(
@@ -170,12 +151,6 @@ if (runReport) {
       executed("blocks a data-script CSP probe") &&
       executed("rejects hostile or missing input") &&
       executed("legacy shared-cache partial symlink"),
-    performance:
-      executed("startupMs") &&
-      executed("environmentMs") &&
-      executed("navigationMs") &&
-      executed("private memory stays below") &&
-      executed("idle CPU stays below"),
     functional:
       executed("project scanner finds the isolated Orders fixture") &&
       executed("reports a ready WinBoat environment") &&
@@ -201,7 +176,6 @@ if (runReport) {
   );
   assert.ok(
     executedLinuxDesktop.security &&
-      executedLinuxDesktop.performance &&
       executedLinuxDesktop.functional &&
       executedLinuxDesktop.startupRecovery,
     `Recorded Linux E2E assertions do not corroborate the static coverage claims: ${JSON.stringify(

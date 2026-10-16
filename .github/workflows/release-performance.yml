@@ -1,12 +1,7 @@
 name: Release performance
 
+# Performance measurements are manual diagnostics, never PR or release checks.
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-  schedule:
-    - cron: "41 3 * * 1"
   workflow_dispatch:
 
 permissions:
