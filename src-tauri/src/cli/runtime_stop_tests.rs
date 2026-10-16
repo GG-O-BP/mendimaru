@@ -293,9 +293,10 @@ def field(name, text=launcher):
     return re.search(r'\$' + name + r"\s*=\s*'([^']*)'", text).group(1)
 source = root / '.mendimaru/commands' / field('source').split('\\')[-1]
 script = source.read_text()
-assert field('mode', script) == 'probe'
-assert '$targetProcessId = [int]4242' in script
-assert '$targetStartedTicks = [long]638908128000000000' in script
+assert field('mode', script) in ['probe', 'query']
+if field('mode', script) == 'probe':
+    assert '$targetProcessId = [int]4242' in script
+    assert '$targetStartedTicks = [long]638908128000000000' in script
 report = root / '.mendimaru/operations' / field('resultPath', script).split('\\')[-1]
 outcome = (root / 'probe-outcome').read_text()
 if outcome == 'certificate-rejected':
@@ -381,7 +382,7 @@ fn isolated_runtime_stop_process() {
     };
     let root = PathBuf::from(std::env::var_os("MENDIMARU_STOP_FIXTURE_ROOT").unwrap());
     crate::i18n::initialize("en-US").unwrap();
-    if mode == "launch-prepare" {
+    if mode == "launch-prepare" || mode.starts_with("studio-status") {
         let paths = AppPaths::discover_for_cli().unwrap();
         let config = crate::application::load_config(&paths).unwrap();
         crate::winboat::seed_installed_versions_cache(
@@ -395,6 +396,30 @@ fn isolated_runtime_stop_process() {
                 removable: true,
             }],
         );
+        if mode.starts_with("studio-status") {
+            let mut args = vec!["studio", "status", "--json", "--timeout-seconds", "15"];
+            if !mode.ends_with("cached") {
+                args.push("--refresh");
+            }
+            if mode.contains("exact") {
+                args.extend(["--session-id", STUDIO_ID]);
+            }
+            if mode.contains("orphans") {
+                args.push("--orphans");
+            }
+            let execution =
+                execute(&args.into_iter().map(OsString::from).collect::<Vec<_>>()).unwrap();
+            fs::write(
+                root.join(format!("{mode}.json")),
+                if execution.exit_code == EXIT_OK {
+                    execution.stdout
+                } else {
+                    execution.stderr
+                },
+            )
+            .unwrap();
+            return;
+        }
         let result = tauri::async_runtime::block_on(
             crate::winboat::runtime::prepare_studio_session(&config, None, 3600),
         );
@@ -1330,5 +1355,77 @@ fn studio_orphan_probe_refuses_other_or_unverifiable_keeper_owners() {
         assert!(!fixture.path("probe-entered").exists());
         assert_eq!(fs::read(record).unwrap(), before);
         assert_eq!(fixture.calls(), 0);
+    }
+}
+
+#[test]
+fn studio_refresh_queries_guest_with_keeper_and_preserves_ownership() {
+    for outcome in ["absent", "live", "failed", "wrong-identity"] {
+        let fixture = Fixture::new();
+        fixture.prepare_launch_recovery(outcome);
+        let mut keeper = fixture.spawn("keeper-observe");
+        until(|| fixture.path("keeper-ready").exists());
+        // Disconnect the retained transport and remove the observation report:
+        // the keeper must return unknown until an explicit guest refresh.
+        fs::write(fixture.path("client-disconnected"), b"disconnected").unwrap();
+        fs::remove_file(fixture.path("client-report.json")).unwrap();
+        fixture.spawn("studio-status-cached").finish();
+        assert!(!fixture.path("probe-entered").exists());
+        assert_eq!(
+            fixture.result("studio-status-cached")["data"][0]["state"],
+            "unknown"
+        );
+        let compose = fs::read(fixture.path("compose.yml")).unwrap();
+        for mode in [
+            "studio-status",
+            "studio-status-exact",
+            "studio-status-orphans",
+        ] {
+            fixture.spawn(mode).finish();
+            let result = fixture.result(mode);
+            assert!(
+                fixture.path("probe-entered").exists(),
+                "{outcome}: {result}"
+            );
+            fs::remove_file(fixture.path("probe-entered")).unwrap();
+            if outcome == "failed" {
+                assert_eq!(result["ok"], false, "{result}");
+                assert_eq!(result["error"]["capability"], "studio.status");
+            } else {
+                assert_eq!(result["ok"], true, "{outcome}: {result}");
+                if mode.ends_with("orphans") {
+                    assert_eq!(
+                        result["data"].as_array().unwrap().len(),
+                        usize::from(outcome == "wrong-identity")
+                    );
+                } else {
+                    let status = if mode.ends_with("exact") {
+                        &result["data"]
+                    } else {
+                        result["data"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .find(|s| s["sessionId"] == STUDIO_ID)
+                            .unwrap()
+                    };
+                    assert_eq!(
+                        status["state"],
+                        if outcome == "live" {
+                            "running"
+                        } else {
+                            "stopped"
+                        }
+                    );
+                    assert_eq!(status["connection"], "disconnected");
+                    assert_eq!(status["reconnectable"], outcome == "live");
+                }
+            }
+            assert!(keeper.0.try_wait().unwrap().is_none());
+            assert_eq!(fs::read(fixture.path("compose.yml")).unwrap(), compose);
+            assert_eq!(fixture.calls(), 0);
+        }
+        fixture.confirm_studio_exit();
+        keeper.finish();
     }
 }

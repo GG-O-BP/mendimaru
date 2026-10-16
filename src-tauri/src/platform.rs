@@ -112,6 +112,25 @@ pub async fn studio_sessions(config: &AppConfig) -> BackendResult<Vec<StudioSess
     backend::active_backend(config, None)?.sessions().await
 }
 
+pub(crate) async fn authoritative_studio_sessions(
+    config: &AppConfig,
+) -> BackendResult<Vec<StudioSessionStatus>> {
+    #[cfg(target_os = "linux")]
+    {
+        crate::winboat::authoritative_studio_sessions(config)
+            .await
+            .map_err(|error| {
+                backend::winboat_operation_error(
+                    BackendId::LinuxWinboat,
+                    CapabilityId::StudioStatus,
+                    error,
+                )
+            })
+    }
+    #[cfg(not(target_os = "linux"))]
+    studio_sessions(config).await
+}
+
 pub async fn studio_session_status(
     config: &AppConfig,
     session_id: &str,
@@ -209,7 +228,7 @@ pub async fn browser_artifacts(
         .await
 }
 
-fn validate_studio_session_id(session_id: &str) -> Result<(), String> {
+pub(crate) fn validate_studio_session_id(session_id: &str) -> Result<(), String> {
     const WINDOWS_EPOCH_TICKS: u64 = 621_355_968_000_000_000;
     if session_id.len() > 48 {
         return Err("the Studio Pro session identifier is invalid".to_string());

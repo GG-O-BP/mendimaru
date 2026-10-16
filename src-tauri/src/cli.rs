@@ -1050,13 +1050,46 @@ async fn run_command(
             refresh,
             orphan_filter,
         } => {
-            if *orphan_filter {
+            if let Some(session_id) = session_id {
+                crate::platform::validate_studio_session_id(session_id)
+                    .map_err(BackendError::invalid_request)?;
+            }
+            if *refresh || *orphan_filter {
                 #[cfg(target_os = "linux")]
                 let owned = keeper_sessions(&paths).await?;
                 #[cfg(not(target_os = "linux"))]
                 let owned = Vec::new();
-                let sessions = crate::application::studio_sessions(&config).await?;
-                return CommandOutput::data(orphan_studio_sessions(sessions, &owned));
+                // Never turn an unavailable guest into a successful stale read.
+                let authoritative = crate::platform::authoritative_studio_sessions(&config).await?;
+                let sessions = if *orphan_filter {
+                    orphan_studio_sessions(authoritative, &owned)
+                } else {
+                    #[cfg(target_os = "linux")]
+                    {
+                        reconcile_studio_sessions(authoritative, owned)
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        authoritative
+                    }
+                };
+                if let Some(session_id) = session_id {
+                    let backend = crate::platform::capability_manifest(None)?.backend;
+                    let session = sessions
+                        .into_iter()
+                        .find(|session| session.session_id == *session_id)
+                        .ok_or_else(|| {
+                            BackendError::operation(
+                                backend,
+                                CapabilityId::StudioStatus,
+                                crate::tr!("error-script-studio-session-ended"),
+                            )
+                        })?;
+                    let mut output = CommandOutput::data(&session)?;
+                    output.studio_session_id = Some(session.session_id);
+                    return Ok(output);
+                }
+                return CommandOutput::data(sessions);
             }
             #[cfg(target_os = "linux")]
             {
@@ -1067,14 +1100,9 @@ async fn run_command(
                         return Ok(output);
                     }
                 } else {
-                    let sessions = keeper_sessions(&paths).await?;
-                    if !sessions.is_empty() || !*refresh {
-                        return CommandOutput::data(sessions);
-                    }
+                    return CommandOutput::data(keeper_sessions(&paths).await?);
                 }
             }
-            #[cfg(not(target_os = "linux"))]
-            let _ = refresh;
             if let Some(session_id) = session_id {
                 let session = crate::application::studio_session(&config, session_id).await?;
                 let mut output = CommandOutput::data(&session)?;
@@ -1302,6 +1330,36 @@ async fn run_command(
             })
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn reconcile_studio_sessions(
+    mut authoritative: Vec<crate::contracts::StudioSessionStatus>,
+    owned: Vec<crate::contracts::StudioSessionStatus>,
+) -> Vec<crate::contracts::StudioSessionStatus> {
+    use crate::contracts::{StudioConnectionState, StudioProcessState, StudioReconnectUnavailable};
+    for mut keeper in owned {
+        if let Some(current) = authoritative
+            .iter_mut()
+            .find(|session| session.session_id == keeper.session_id)
+        {
+            // Guest evidence determines process liveness; only its owner knows
+            // whether the retained RemoteApp transport is still connected.
+            if keeper.connection == StudioConnectionState::Connected {
+                current.connection = keeper.connection;
+                current.reconnectable = false;
+                current.reconnect_unavailable = Some(StudioReconnectUnavailable::AlreadyConnected);
+            }
+        } else {
+            keeper.state = StudioProcessState::Stopped;
+            keeper.connection = StudioConnectionState::Disconnected;
+            keeper.reconnectable = false;
+            keeper.reconnect_unavailable = Some(StudioReconnectUnavailable::WindowUnavailable);
+            authoritative.push(keeper);
+        }
+    }
+    authoritative.sort_by_key(|session| std::cmp::Reverse(session.started_at));
+    authoritative
 }
 
 fn orphan_studio_sessions(

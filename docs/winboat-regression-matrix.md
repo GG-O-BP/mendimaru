@@ -342,3 +342,13 @@ failure. Windows CI runs it under Windows PowerShell 5.1; release verification a
 runs it through the PowerShell helper test command. Observation failures never
 establish absence. Runtime status/wait/browser observation remains covered by the
 existing #148 no-RDP/no-recreation tests.
+
+## Authoritative Studio refresh (#256)
+
+The ordinary Rust suite runs real CLI dispatch and a retained keeper against an
+authenticated guest stand-in. It covers default observation without RDP, global
+and exact-session refresh with unknown keeper metadata, authoritative presence
+and absence, a different PID, failed guest queries, and the orphan filter with
+refresh. Failed queries remain errors; absent owned identities become stopped
+summaries without changing keeper ownership, Runtime records or Compose. These
+fixtures do not claim an actual Windows guest run.
