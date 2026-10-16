@@ -141,6 +141,27 @@ public sealed class MendimaruHostService : IDisposable {
         }
     }
 
+    // 게스트의 localhost 전용 HTTP를 외부 NIC에 노출하지 않는다. 인증된
+    // outbound TLS 연결을 미리 열고, 호스트가 요청할 때만 고정 포트에 연결한다.
+    async Task Reverse(byte kind, int targetPort) {
+        while (!cancel.IsCancellationRequested) {
+            try {
+                using (var upstream = new TcpClient())
+                using (var client = new TcpClient())
+                using (cancel.Token.Register(() => { upstream.Close(); client.Close(); }))
+                using (var ssl = await Connect(upstream, kind).ConfigureAwait(false)) {
+                    byte[] ack = new byte[1];
+                    await Exact(ssl, ack, 1).ConfigureAwait(false);
+                    if (ack[0] != 1) throw new InvalidDataException();
+                    await client.ConnectAsync(IPAddress.Loopback, targetPort).ConfigureAwait(false);
+                    client.NoDelay = true;
+                    await Drain(Encode(client.GetStream(), ssl), Decode(ssl, client), client, upstream, 300000).ConfigureAwait(false);
+                }
+            } catch {}
+            if (!cancel.IsCancellationRequested) await Task.Delay(100, cancel.Token).ConfigureAwait(false);
+        }
+    }
+
     async Task Probe() {
         // 실제 게스트 loopback → TLS → 호스트 MySQL 경로를 확인한다.
         // 초기 greeting의 프로토콜 번호만 검사하며 DB 인증은 시도하지 않는다.
@@ -165,6 +186,10 @@ public sealed class MendimaruHostService : IDisposable {
                 }
                 using (var control = await opening.ConfigureAwait(false)) {
                     Task accepting = Accept();
+                    // HTTP keep-alive를 포함해 동시에 웹 16개, 관리 4개로 상한을 둔다.
+                    // 실행 목적지는 두 상수뿐이며 임의 주소/포트를 받지 않는다.
+                    for (int i = 0; i < 16; i++) { Task web = Reverse(2, 8080); }
+                    for (int i = 0; i < 4; i++) { Task admin = Reverse(3, 8090); }
                     Task probing = Probe();
                     if (await Task.WhenAny(probing, accepting, Task.Delay(10000)).ConfigureAwait(false) != probing) throw new TimeoutException();
                     await probing.ConfigureAwait(false);

@@ -37,7 +37,8 @@ mendimaru host-service start --service mysql --allow-host-port 3306 \
 Windows 운영체제가 빈 포트를 원자적으로 배정하게 한다.
 프로젝트의 `project-settings.user.json`을 일반 파일 도구로 읽거나 수정하지 않는다.
 중계 CLI는 DB 자격증명을 받지 않는다. 자격증명은 Studio 구성 UI에만
-입력하며, UI 자동화로 비밀번호 입력을 우회하거나 구성 파일을 편집하지 않는다.
+입력한다. 지원되는 UI 자동화는 알려진 구성 창의 필드에 암호화된 stdin으로
+입력하며, 비밀번호를 다시 읽거나 구성 파일을 직접 편집하지 않는다.
 
 Studio의 **Run Locally**로 앱을 실행한 다음:
 
@@ -56,7 +57,10 @@ mendimaru host-service list --json
 유지한다. 로그인·질의·앱 기동의 성공은 소비 앱의 별도 수용 증거여야 한다.
 
 같은 Runtime으로 다시 시작하면 살아 있는 연결을 재사용한다. 다른 게스트
-포트를 요구하면 거부한다. 각 Runtime은 별도 게스트 포트를 가진다.
+포트를 요구하면 거부한다. 각 Runtime은 별도 게스트 DB 포트를 가진다.
+HTTP 중계는 Linux loopback의 고정 포트 `18080`(웹), `18090`(관리)를
+사용하므로 한 호스트에서 동시에 하나만 시작할 수 있다. 기존 리스너가
+있으면 시작을 거부하며 다른 소유자의 포트를 정리하지 않는다.
 Windows 소켓의 exclusive bind가 캐시/작업 트리를 가로지르는 포트 충돌을
 판정하며 기존 사용자 리스너는 정리하거나 대체하지 않는다.
 고정 포트는 이전 TCP 연결의 OS 정리가 끝날 때까지 재사용이 거부될 수 있다.
@@ -64,6 +68,16 @@ Windows 소켓의 exclusive bind가 캐시/작업 트리를 가로지르는 포�
 갱신한다. [Windows exclusive bind 동작](https://learn.microsoft.com/en-us/windows/win32/winsock/so-exclusiveaddruse)에
 따라 임의 소켓을 덮어쓰는 reuse 옵션이나 응답을 잃을 수 있는 강제 reset을
 사용하지 않는다.
+
+## localhost HTTP 중계
+
+같은 인증된 TLS 전송에 Windows `127.0.0.1:8080`과 `:8090` 전용 reverse
+채널을 추가한다. Linux에서는 각각 `127.0.0.1:18080`과 `:18090`만 연다.
+`webHostPort`와 `adminHostPort`가 포트를 보고하며, Runtime의 URL과 HTTP
+readiness는 웹 중계를 사용한다. 이전 host-service 상태에는 이 두 필드가
+없을 수 있다. Docker NIC 매핑은 기존 소유권과 정리 절차를 위해 유지한다.
+웹 16개와 관리 4개의 사전 연결을 사용하고, 각 리스너의 활성 중계 작업은
+32개로 제한한다. 중계 종료 또는 인증된 제어 연결 손실 시 함께 닫힌다.
 
 ## 보안과 스트리밍
 
@@ -115,7 +129,8 @@ CLI 재실행은 중계를 유지하며, VM 재시작으로 끊어진 연결은 
 비공개 상태는 앱 캐시의 `host-services/`에 있다. 디렉터리는 `0700`, 파일과
 IPC 소켓은 `0600`이다. 버전 1 레코드는 VM identity와 세션 ID를 검증하며,
 간접 파일·다중 hardlink·과대 파일·다른 VM·다른 UID·공개 권한을 거부한다.
-레코드에는 비밀값이 없고 기존 Runtime 레코드 구조는 바뀌지 않는다.
+레코드에는 비밀값이 없다. Runtime의 선택 필드 `bridgeHostPort`는 실제
+HTTP 중계 포트를 저장하며, 이 필드가 없는 기존 레코드도 읽을 수 있다.
 
 캐시 손상 시 먼저 `list`/`status`로 관찰하고, 중계가 끝났음을 확인한 후
 해당 세션의 JSON/소켓만 별도 위치에 격리한다. 같은 Runtime의 `.lock` 파일은

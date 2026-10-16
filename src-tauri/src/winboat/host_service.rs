@@ -116,6 +116,8 @@ fn read_status(config: &AppConfig, root: &Path, id: &str) -> Result<Status, Back
         || !crate::host_service::valid_id(&state.runtime_session_id, "runtime_")
         || !state.encrypted
         || state.database_authentication_verified
+        || state.web_host_port.is_some_and(|p| p != 18080)
+        || state.admin_host_port.is_some_and(|p| p != 18090)
         || state.active_connections > 64
         || !matches!(state.state.as_str(), "ready" | "stopped" | "interrupted")
         || (state.state == "ready"
@@ -400,18 +402,33 @@ async fn keeper(config: &AppConfig, request: &StartRequest) -> Result<(), Backen
     }
     let prepared = prepare(config, request).await?;
     let (mut status, root, ipc, listener, acceptor, security, _cleanup) = prepared;
+    // Linux loopback에만 바인딩하며 Docker의 기존 NIC 전달과 포트를 분리한다.
+    // 점유된 포트는 탈취하지 않고 시작을 실패시킨다.
+    let web = TcpListener::bind((Ipv4Addr::LOCALHOST, 18080))
+        .await
+        .map_err(io_error)?;
+    let admin = TcpListener::bind((Ipv4Addr::LOCALHOST, 18090))
+        .await
+        .map_err(io_error)?;
+    let (web_tx, web_rx) = tokio::sync::mpsc::channel(16);
+    let (admin_tx, admin_rx) = tokio::sync::mpsc::channel(4);
     let key = Arc::new(zeroize::Zeroizing::new(security.host_service_key()));
     let target = SocketAddr::from((Ipv4Addr::LOCALHOST, 3306));
     let active = Arc::new(AtomicUsize::new(0));
     let mut streams = JoinSet::new();
     let (ready_tx, mut ready_rx) = tokio::sync::mpsc::channel(1);
     // 상위 JoinSet을 drop/종료하면 리스너와 하위 TLS 연결을 함께 취소한다.
-    streams.spawn(transport::serve(
+    streams.spawn(transport::serve_loopback(web, web_rx));
+    streams.spawn(transport::serve_loopback(admin, admin_rx));
+    streams.spawn(transport::serve_reverse(
         listener,
         acceptor,
         key,
         target,
-        ready_tx,
+        transport::Channels {
+            ready: ready_tx,
+            reverse: Some([web_tx, admin_tx]),
+        },
         active.clone(),
     ));
     status.guest_port = tokio::time::timeout(Duration::from_secs(20), ready_rx.recv())
@@ -425,6 +442,8 @@ async fn keeper(config: &AppConfig, request: &StartRequest) -> Result<(), Backen
     status.guest_listener_verified = true;
     status.target_tcp_verified = true;
     status.mysql_handshake_verified = true;
+    status.web_host_port = Some(18080);
+    status.admin_host_port = Some(18090);
     save(config, &root, &status)?;
     writeln!(
         std::io::stdout(),
@@ -494,7 +513,9 @@ fn mark_inactive(status: &mut Status, state: &str) {
 }
 
 async fn stop_dependency(config: &AppConfig, id: &str) -> Result<(), BackendError> {
-    let runtime = super::runtime::status(config, id).await?;
+    // readiness refresh는 host-service IPC를 조회하므로 이 keeper 안에서는 순환 대기가 된다.
+    // 저장된 세션 소유권을 읽고, 아래의 인증된 Studio 종료 확인은 그대로 수행한다.
+    let runtime = super::runtime::recorded_status_for_stop(id)?;
     // 정상 Studio 종료가 취소되거나 저장 대화상자가 남으면 DB 경로를 유지한다.
     if let Some(studio) = &runtime.studio_session_id {
         let paths = AppPaths::discover_for_cli().map_err(io_error)?;
@@ -600,6 +621,8 @@ async fn prepare(config: &AppConfig, request: &StartRequest) -> Result<Prepared,
             database_authentication_verified: false,
             encrypted: true,
             active_connections: 0,
+            web_host_port: None,
+            admin_host_port: None,
         },
         root,
         ipc,
@@ -698,6 +721,8 @@ mod tests {
             database_authentication_verified: false,
             encrypted: true,
             active_connections: 0,
+            web_host_port: None,
+            admin_host_port: None,
         }
     }
 
@@ -749,7 +774,7 @@ mod tests {
     fn records_reject_false_readiness_authentication_and_destination_claims() {
         let directory = tempfile::tempdir().unwrap();
         let config = config();
-        for change in 0..6 {
+        for change in 0..8 {
             let mut status = state();
             match change {
                 0 => status.runtime_session_id = "another-runtime".into(),
@@ -757,7 +782,9 @@ mod tests {
                 2 => status.database_authentication_verified = true,
                 3 => status.mysql_handshake_verified = false,
                 4 => status.state = "stopped".into(),
-                _ => status.target_host = "192.0.2.1".into(),
+                5 => status.target_host = "192.0.2.1".into(),
+                6 => status.web_host_port = Some(8080),
+                _ => status.admin_host_port = Some(8090),
             }
             save(&config, directory.path(), &status).unwrap();
             assert!(read_status(&config, directory.path(), &status.session_id).is_err());
@@ -767,6 +794,28 @@ mod tests {
         mark_inactive(&mut status, "stopped");
         save(&config, directory.path(), &status).unwrap();
         assert!(read_status(&config, directory.path(), &status.session_id).is_ok());
+    }
+
+    #[test]
+    fn legacy_host_service_records_and_reverse_http_ports_remain_readable() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = config();
+        let mut status = state();
+        save(&config, directory.path(), &status).unwrap();
+        let path = directory.path().join(format!("{}.json", status.session_id));
+        let original = std::fs::read(&path).unwrap();
+        let stored: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        assert!(stored["status"].get("webHostPort").is_none());
+        assert!(stored["status"].get("adminHostPort").is_none());
+        let restored = read_status(&config, directory.path(), &status.session_id).unwrap();
+        assert_eq!(restored.web_host_port, None);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        status.web_host_port = Some(18080);
+        status.admin_host_port = Some(18090);
+        save(&config, directory.path(), &status).unwrap();
+        let restored = read_status(&config, directory.path(), &status.session_id).unwrap();
+        assert_eq!(restored.web_host_port, Some(18080));
+        assert_eq!(restored.admin_host_port, Some(18090));
     }
 
     #[test]

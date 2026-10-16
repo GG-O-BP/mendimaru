@@ -49,13 +49,13 @@ An enabled modal itself is positive evidence for `wait --condition modal`;
 it does not require inspecting the disabled owner. A current Run Project status
 is likewise positive evidence for its semantic phase despite those omitted owners.
 
-| Action           | Preconditions and result                                                                                                                                            |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invoke`         | Requires the element's InvokePattern. A completed call confirms semantic dispatch; wait separately for the app effect.                                              |
-| `click`          | Uses SelectionItemPattern or TogglePattern and verifies the resulting state. Coordinate/canvas clicking is unsupported.                                             |
-| `focus`          | Requires a visible enabled element in the foreground owned window; verifies keyboard focus.                                                                         |
-| `set-value`      | Properties Name or the unique writable editor in the native Go To modal; accepts a Mendix identifier of at most 100 ASCII characters. Verifies editor readback.     |
-| `keyboard-input` | Only `Tab`, `F5`, `Ctrl+G`, `Ctrl+S`, `Enter`, `Right`, `Escape`, on a native WPF/WinForms/Win32 focus target. F5 additionally requires observed project readiness. |
+| Action           | Preconditions and result                                                                                                                                                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invoke`         | Requires the element's InvokePattern. A completed call confirms semantic dispatch; wait separately for the app effect.                                                                                                                         |
+| `click`          | Uses SelectionItemPattern or TogglePattern and verifies the resulting state. Coordinate/canvas clicking is unsupported.                                                                                                                        |
+| `focus`          | Requires a visible enabled element in the foreground owned window; verifies keyboard focus.                                                                                                                                                    |
+| `set-value`      | Properties Name or unique native Go To editor: Mendix identifier (100 ASCII characters). Configuration Database URL/name/user/password: explicitly labelled native fields only. Verifies non-password editor readback; password is write-only. |
+| `keyboard-input` | Only `Tab`, `F5`, `Ctrl+G`, `Ctrl+S`, `Enter`, `Right`, `Escape`, on a native WPF/WinForms/Win32 focus target. F5 additionally requires observed project readiness.                                                                            |
 
 ```sh
 mendimaru ui action --session-id SESSION --element-id ELEMENT --action focus --json
@@ -67,8 +67,17 @@ mendimaru ui wait --session-id SESSION --condition running --timeout-ms 60000 --
 ```
 
 Values enter through stdin, never `--value` or an arbitrary PowerShell expression.
-Password elements are excluded from lookup/input. Enter database credentials
-through the supported Studio configuration UI. Password names and configuration
+Password elements are excluded from lookup, focus, keyboard input and readback.
+Only the labelled Password field in the known configuration modal, and the
+Password field in the selected Administrator tab of App Security, accept encrypted
+stdin set-value input. The latter changes Studio app security settings and must
+be explicitly authorized by the caller; it is not a runtime-only password override. Database URL, database name and user name
+use the same encrypted input;
+the URL is restricted to loopback (optional valid TCP port), the database name
+to 1–64 ASCII letters/digits/underscores and the user name to 1–128 ASCII
+letters/digits/underscores/dots/@/hyphens. Password accepts a non-empty value of at most 256 UTF-8 bytes without control characters. It is never read
+back; verify it through an actual database connection.
+Password names and configuration
 editor values are redacted in trees and replies. Existing supported `set-value`
 inputs are encrypted with a separate AES-256-CBC key and random IV inside the
 authenticated envelope; the supervisor verifies the HMAC before decrypting and

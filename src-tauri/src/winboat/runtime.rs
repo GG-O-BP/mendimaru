@@ -51,6 +51,8 @@ struct SessionRecord {
     state: RuntimeState,
     http_ready: bool,
     host_port: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bridge_host_port: Option<u16>,
     guest_port: u16,
     started_at: DateTime<Utc>,
     readiness_timeout_seconds: u64,
@@ -1131,6 +1133,7 @@ async fn create_session(
         state: RuntimeState::Starting,
         http_ready: false,
         host_port: binding.host_port,
+        bridge_host_port: None,
         guest_port,
         started_at: Utc::now(),
         readiness_timeout_seconds,
@@ -1174,6 +1177,12 @@ pub(crate) fn observation(session_id: &str) -> Option<(String, Option<String>)> 
         ))
     );
     Some((identity, record.studio_session_id))
+}
+
+/// 중계 종료자는 자신의 IPC에 재진입하는 readiness refresh 없이 저장된 소유권만 읽는다.
+pub(super) fn recorded_status_for_stop(session_id: &str) -> BackendResult<RuntimeStatus> {
+    let (_, record) = load_session(session_id, CapabilityId::RuntimeStop)?;
+    Ok(status_from_record(&record))
 }
 
 pub(crate) async fn status(config: &AppConfig, session_id: &str) -> BackendResult<RuntimeStatus> {
@@ -1592,7 +1601,18 @@ async fn refresh(
         );
     }
 
-    let url = runtime_probe_url(record.host_port);
+    // Docker NIC 매핑은 수명/정리용으로 보존하고, 인증된 reverse TLS가
+    // 제공하는 실제 loopback HTTP 경로를 별도로 관찰한다.
+    record.bridge_host_port = super::host_service::list(config)
+        .await
+        .ok()
+        .and_then(|services| {
+            services
+                .into_iter()
+                .find(|s| s.runtime_session_id == record.session_id && s.state == "ready")
+        })
+        .and_then(|s| s.web_host_port);
+    let url = runtime_probe_url(record.bridge_host_port.unwrap_or(record.host_port));
     record.http_ready = http_ready(&url).await;
     apply_http_only_readiness(record);
     write_record(directory, record).map_err(|_| record_error(record, CapabilityId::RuntimeStatus))
@@ -1936,8 +1956,10 @@ fn status_from_record(record: &SessionRecord) -> RuntimeStatus {
         state: record.state,
         process_id: record.studio_process_id,
         started_at: Some(record.started_at),
-        url: record.http_ready.then(|| runtime_url(record.host_port)),
-        host_port: Some(record.host_port),
+        url: record
+            .http_ready
+            .then(|| runtime_url(record.bridge_host_port.unwrap_or(record.host_port))),
+        host_port: Some(record.bridge_host_port.unwrap_or(record.host_port)),
         guest_port: Some(record.guest_port),
         studio_session_id: record.studio_session_id.clone(),
         studio_state: Some(record.studio_state),
@@ -2391,12 +2413,14 @@ mod tests {
         active_runtime_session_in_root, append_failure_diagnostic, compose_baseline_diagnostic,
         existing_studio_runtime_disposition, forget_session_in_root, is_loopback_host,
         port_conflict_message, runtime_probe_url, runtime_url, session_summaries_in_root,
-        studio_launch_port, valid_studio_session_id, validate_runtime_session_id,
-        ComposeBaselineGuard, ComposeTransaction, ExistingStudioRuntimeDisposition, SessionRecord,
+        status_from_record, studio_launch_port, valid_studio_session_id,
+        validate_runtime_session_id, write_record, ComposeBaselineGuard, ComposeTransaction,
+        ExistingStudioRuntimeDisposition, SessionRecord,
     };
     use crate::contracts::CapabilityId;
     use crate::contracts::{
         ArtifactKind, BackendErrorCode, BackendId, RuntimeMode, RuntimeState, StudioProcessState,
+        CONTRACT_SCHEMA_VERSION,
     };
     #[cfg(unix)]
     use crate::models::{AppConfig, ContainerRuntime};
@@ -2527,12 +2551,47 @@ mod tests {
             8080,
         );
         let original = fs::read(directory.join("session.json")).unwrap();
+        assert!(serde_json::from_slice::<serde_json::Value>(&original)
+            .unwrap()
+            .get("bridgeHostPort")
+            .is_none());
         let (_, record) = active_runtime_session_in_root(&sessions, 8080)
             .unwrap()
             .unwrap();
         assert_eq!(record.session_id, id);
         assert_eq!(record.schema_version, "6.0.0");
+        assert_eq!(record.bridge_host_port, None);
         assert_eq!(fs::read(directory.join("session.json")).unwrap(), original);
+    }
+
+    #[test]
+    fn current_runtime_retains_docker_binding_and_reports_reverse_http_port() {
+        let temporary = tempfile::tempdir().unwrap();
+        let sessions = temporary.path().join("sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        let (directory, id) = write_runtime_fixture(
+            &sessions,
+            &format!("runtime_{}", "a".repeat(32)),
+            CONTRACT_SCHEMA_VERSION,
+            RuntimeState::Ready,
+            49152,
+        );
+        let (_, mut record) = active_runtime_session_in_root(&sessions, 49152)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.bridge_host_port, None);
+        record.bridge_host_port = Some(18080);
+        record.http_ready = true;
+        write_record(&directory, &record).unwrap();
+        let (_, restored) = active_runtime_session_in_root(&sessions, 49152)
+            .unwrap()
+            .unwrap();
+        assert_eq!(restored.session_id, id);
+        assert_eq!(restored.host_port, 49152);
+        assert_eq!(restored.bridge_host_port, Some(18080));
+        let status = status_from_record(&restored);
+        assert_eq!(status.host_port, Some(18080));
+        assert_eq!(status.url, Some(runtime_url(18080)));
     }
 
     #[test]
@@ -2740,6 +2799,7 @@ mod tests {
             state,
             http_ready: false,
             host_port: guest_port,
+            bridge_host_port: None,
             guest_port,
             started_at: Utc::now(),
             readiness_timeout_seconds: 3_600,
@@ -2812,6 +2872,7 @@ mod tests {
             state: RuntimeState::Starting,
             http_ready: false,
             host_port: 49152,
+            bridge_host_port: None,
             guest_port: 8080,
             started_at: Utc::now(),
             readiness_timeout_seconds: 5,
@@ -3376,6 +3437,7 @@ mod tests {
                 state: RuntimeState::Ready,
                 http_ready: true,
                 host_port: 8_080,
+                bridge_host_port: None,
                 guest_port: 8_080,
                 started_at: started(0),
                 readiness_timeout_seconds: 60,
