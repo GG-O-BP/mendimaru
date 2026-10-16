@@ -1869,8 +1869,8 @@ fn scan_trace_zip(
         ) {
             return Err(ArtifactScanError::ZipCompressionRatioLimit);
         }
-        let data_end = entry
-            .data_start()
+        let data_start = entry.data_start().ok_or(ArtifactScanError::ZipMalformed)?;
+        let data_end = data_start
             .checked_add(entry.compressed_size())
             .ok_or(ArtifactScanError::ZipMalformed)?;
         plans.push(ZipEntryScanPlan {
@@ -1881,7 +1881,7 @@ fn scan_trace_zip(
                 _ => return Err(ArtifactScanError::ZipUnsupportedEntry),
             },
             crc32: entry.crc32(),
-            data_start: entry.data_start(),
+            data_start,
             declared_bytes: entry.size(),
             data_end,
             central_header_start: entry.central_header_start(),
