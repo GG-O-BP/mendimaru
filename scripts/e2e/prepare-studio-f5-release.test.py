@@ -135,6 +135,24 @@ class GenericReleaseTests(unittest.TestCase):
             with self.subTest(version=version, browser_failure=browser_failure):
                 self.run_orchestration(version, browser_failure)
 
+    def test_warmup_waits_for_replaced_files_and_the_minimum_interval(self):
+        clock = [0]
+        watcher = Mock()
+        watcher.poll.return_value = None
+        generations = [FileNotFoundError(), "old", "new"] + ["new"] * 30
+        with patch.object(gate, "build_generation", side_effect=generations), \
+             patch.object(gate.time, "monotonic", side_effect=lambda: clock[0]), \
+             patch.object(gate.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
+             patch("sys.stdout", new=io.StringIO()):
+            self.assertEqual(gate.wait_for_generated_build(self.root, watcher, 75), "new")
+        self.assertGreaterEqual(clock[0], 75)
+
+    def test_warmup_rejects_a_failed_watcher_even_with_stable_files(self):
+        watcher = Mock()
+        watcher.poll.return_value = 1
+        with self.assertRaisesRegex(AssertionError, "watcher stopped"):
+            gate.wait_for_generated_build(self.root, watcher, 75)
+
     def run_orchestration(self, version, browser_failure):
         config_root = self.root / "config"
         config_root.mkdir(exist_ok=True)
@@ -160,7 +178,10 @@ class GenericReleaseTests(unittest.TestCase):
             if pair == ("runtime", "list"): return {"data": {"sessions": []}}
             if pair == ("runtime", "start"): return {"runtimeSessionId": runtime_id, "data": {"runtime": runtime}}
             if pair == ("studio", "start"): return {"studioSessionId": studio_id}
-            if pair in [("runtime", "status"), ("runtime", "wait")]: return {"data": runtime}
+            if pair in [("runtime", "status"), ("runtime", "wait")]:
+                # A warm-up F5 is never substituted for the validation F5.
+                self.assertEqual(run_calls.count(["xdotool", "key", "--clearmodifiers", "F5"]), 2)
+                return {"data": runtime}
             if args[:3] == ("browser", "session", "prepare"):
                 return {"data": {"sessionId": shared_id, "state": "ready", "preparation": {"comparable": True}}}
             if pair in [("studio", "stop"), ("runtime", "stop")] or args[:3] == ("browser", "session", "finalize"):
@@ -172,7 +193,7 @@ class GenericReleaseTests(unittest.TestCase):
             if args[:2] == ["xdotool", "search"]:
                 self.assertEqual(args[-1], gate.studio_window_class(version))
                 return subprocess.CompletedProcess(args, 0, stdout="123\n")
-            if args[:2] == ["node", "scripts/e2e/studio-f5-parity-gate.mjs"]:
+            if args[0] == "node" and Path(args[1]).name == "studio-f5-parity-gate.mjs":
                 self.assertEqual(kwargs["env"]["MENDIMARU_STUDIO_PARITY_SHARED_SESSION_ID"], shared_id)
                 if browser_failure: raise subprocess.CalledProcessError(1, args)
             return subprocess.CompletedProcess(args, 0)

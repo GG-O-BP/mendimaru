@@ -147,6 +147,17 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
 
+      - name: Load Studio release validation tools
+        shell: bash
+        env:
+          WORKFLOW_REVISION: ${{ github.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$WORKFLOW_REVISION"
+          checks="$RUNNER_TEMP/mendimaru-studio-release-checks"
+          mkdir -p "$checks"
+          git archive "$WORKFLOW_REVISION" scripts/e2e | tar -x -C "$checks"
+          echo "MENDIMARU_STUDIO_RELEASE_CHECKS=$checks" >> "$GITHUB_ENV"
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
@@ -169,7 +180,7 @@ jobs:
           MENDIMARU_STUDIO_PARITY_SUITE: ${{ vars.STUDIO_F5_PARITY_SUITE }}
         run: |
           xvfb-run -a -s "-screen 0 1920x1080x24" \
-            python3 -u scripts/e2e/prepare-studio-f5-release.py
+            python3 -u "$MENDIMARU_STUDIO_RELEASE_CHECKS/scripts/e2e/prepare-studio-f5-release.py"
 
       - name: Upload parity evidence
         if: always()
