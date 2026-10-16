@@ -3056,10 +3056,45 @@ mod tests {
         write_u32(&mut declared_small, local[0] + 22, 1);
         write_u32(&mut declared_small, central[0] + 24, 1);
         write_trace_fixture(temporary.path(), &declared_small);
+        // Stored entries require equal compressed/uncompressed sizes. zip 9
+        // rejects this inconsistent metadata before a streaming scan begins.
+        assert_eq!(
+            verify_secret_free_with_limits(temporary.path(), &[], test_scan_limits()),
+            Err(ArtifactScanError::ZipMalformed)
+        );
+
+        // Deflated size lies are also rejected by zip 9's bounded CRC reader
+        // before the scanner receives bytes beyond the declared length.
+        let mut declared_small =
+            zip_fixture(&[("payload.bin", &[b'x'; 2_048], CompressionMethod::Deflated)]);
+        let local = signature_offsets(&declared_small, [0x50, 0x4b, 0x03, 0x04]);
+        let central = signature_offsets(&declared_small, [0x50, 0x4b, 0x01, 0x02]);
+        assert_eq!((local.len(), central.len()), (1, 1));
+        write_u32(&mut declared_small, local[0] + 22, 1);
+        write_u32(&mut declared_small, central[0] + 24, 1);
+        write_trace_fixture(temporary.path(), &declared_small);
         let mut limits = test_scan_limits();
         limits.maximum_zip_entry_bytes = 1_024;
         assert_eq!(
             verify_secret_free_with_limits(temporary.path(), &[], limits),
+            Err(ArtifactScanError::ZipMalformed)
+        );
+        // Retain the scanner's own byte cap independently of ZIP metadata.
+        let mut payload = &[b'x'; 2_048][..];
+        let mut total = 0;
+        assert_eq!(
+            scan_stream(
+                &mut payload,
+                None,
+                Instant::now(),
+                limits.maximum_duration,
+                limits.maximum_zip_entry_bytes,
+                &mut total,
+                limits.maximum_zip_total_bytes,
+                ArtifactScanError::ZipEntrySizeLimit,
+                ArtifactScanError::ZipTotalSizeLimit,
+                ArtifactScanError::ZipMalformed,
+            ),
             Err(ArtifactScanError::ZipEntrySizeLimit)
         );
     }
