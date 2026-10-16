@@ -290,11 +290,11 @@ function Tree {
         $windows.Add(@{elementId=(Register $root);handle=$h.ToInt64().ToString();name=(Short $root.Current.Name);modal=(Modal $root);minimized=[MendimaruUiNative]::IsIconic($h);foreground=([MendimaruUiNative]::GetForegroundWindow() -eq $h);dpi=[MendimaruUiNative]::GetDpiForWindow($h)})
     }
     $state=State $scan;$script:Revision++
-    return @{sessionId=$script:Identity.sessionId;revision=$script:Revision;root=@{schemaVersion='7.0.0';hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';adapter=$script:Identity.fileVersion;generation=$script:Generation;processId=$p.Id;startedTicks=$script:Identity.startedTicks;interactiveSessionId=$p.SessionId;helperProcessId=$PID;helperSessionId=(Get-Process -Id $PID).SessionId;foregroundWindow=[MendimaruUiNative]::GetForegroundWindow().ToInt64().ToString();state=$state.state;statusTexts=$state.statusTexts;dialogs=$state.dialogs;windows=$windows.ToArray();nodes=$nodes.ToArray();truncated=$scan.truncated;omittedDisabledWindows=$scan.omittedDisabledWindows;limits=@{nodes=3000;depth=48;windows=16};fallbacks=@{coordinates=$false;keyboard=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');setValue='Properties Name or unique Go To search editor'}}}
+    return @{sessionId=$script:Identity.sessionId;revision=$script:Revision;root=@{schemaVersion='7.0.0';hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';adapter=$script:Identity.fileVersion;generation=$script:Generation;processId=$p.Id;startedTicks=$script:Identity.startedTicks;interactiveSessionId=$p.SessionId;helperProcessId=$PID;helperSessionId=(Get-Process -Id $PID).SessionId;foregroundWindow=[MendimaruUiNative]::GetForegroundWindow().ToInt64().ToString();state=$state.state;statusTexts=$state.statusTexts;dialogs=$state.dialogs;windows=$windows.ToArray();nodes=$nodes.ToArray();truncated=$scan.truncated;omittedDisabledWindows=$scan.omittedDisabledWindows;limits=@{nodes=3000;depth=48;windows=16};fallbacks=@{coordinates=$false;keyboard=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');setValue='Properties Name, unique Go To search, Configuration Database URL/name/user/password, or App Security Administrator password (encrypted stdin; passwords write-only)'}}}
 }
-function Input-Guard($e,[bool]$needsForeground) {
+function Input-Guard($e,[bool]$needsForeground,[bool]$allowConfigurationPassword=$false) {
     $null=Target;Supported-Version
-    if($e.Current.IsPassword -or $e.Current.IsOffscreen -or -not $e.Current.IsEnabled){throw 'ui-unsupported-element'}
+    if(($e.Current.IsPassword -and -not $allowConfigurationPassword) -or $e.Current.IsOffscreen -or -not $e.Current.IsEnabled){throw 'ui-unsupported-element'}
     $h=Window-For $e
     if([MendimaruUiNative]::IsIconic($h) -or -not [MendimaruUiNative]::IsWindowEnabled($h)){throw 'ui-modal-blocked'}
     foreach($other in @(Windows)){
@@ -373,10 +373,83 @@ function Configuration-Editor($e) {
     return (Modal $window) -and $window.Current.Name -cin @('Edit Configuration','New Configuration','Configuration')
 }
 
+function Labelled-InputField($e) {
+    # 중첩된 WPF 레이블은 같은 문자열을 두 번 노출할 수 있으므로 고유 이름만 비교한다.
+    $row=$walker.GetParent($e)
+    if($null -eq $row -or $row.Current.ControlType -ne [Windows.Automation.ControlType]::Pane){return ''}
+    $label=$walker.GetFirstChild($row)
+    if($null -eq $label -or $label.Current.ControlType -ne [Windows.Automation.ControlType]::Pane){return ''}
+    $queue=New-Object Collections.Generic.Queue[object];$queue.Enqueue(@{e=$label;depth=0})
+    $names=New-Object 'Collections.Generic.HashSet[string]';$count=0
+    while($queue.Count -gt 0){
+        Check-Deadline
+        if(++$count -gt 32){return ''}
+        $item=$queue.Dequeue();$node=$item.e
+        if($node.Current.ControlType -eq [Windows.Automation.ControlType]::Text -and $node.Current.Name){$null=$names.Add($node.Current.Name)}
+        if($item.depth -ge 4){continue}
+        $child=$walker.GetFirstChild($node)
+        while($null -ne $child){
+            if($count+$queue.Count -ge 32){return ''}
+            $queue.Enqueue(@{e=$child;depth=$item.depth+1});$child=$walker.GetNextSibling($child)
+        }
+    }
+    if($names.Count -ne 1){return ''}
+    $name=@($names)[0]
+    return $name
+}
+
+function Configuration-DatabaseField($e) {
+    # 알려진 구성 모달의 레이블과 암호 속성을 함께 확인한다.
+    if(-not (Configuration-Editor $e) -or $e.Current.FrameworkId -cne 'WPF'){return ''}
+    $name=Labelled-InputField $e
+    if($name -cnotin @('URL','Database name','User name','Password')){return ''}
+    if(($name -ceq 'Password') -ne [bool]$e.Current.IsPassword){return ''}
+    return $name
+}
+
+function Security-AdministratorPassword($e) {
+    # App Security의 Administrator 탭에 있는 Password만 허용한다. 다른 보안/로그인 창으로 확장하지 않는다.
+    if($e.Current.ControlType -ne [Windows.Automation.ControlType]::Edit -or
+        $e.Current.FrameworkId -cne 'WPF' -or -not $e.Current.IsPassword){return $false}
+    $window=[Windows.Automation.AutomationElement]::FromHandle((Window-For $e))
+    if(-not (Modal $window) -or $window.Current.Name -cne 'App Security' -or
+        (Labelled-InputField $e) -cne 'Password'){return $false}
+    $ancestor=$walker.GetParent($e)
+    for($depth=0;$depth -lt 16 -and $null -ne $ancestor;$depth++){
+        Check-Deadline
+        if($ancestor.Current.ControlType -eq [Windows.Automation.ControlType]::TabItem){
+            $pattern=$null
+            if(-not $ancestor.TryGetCurrentPattern([Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pattern) -or
+                -not $pattern.Current.IsSelected){return $false}
+            $condition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Text)
+            $labels=$ancestor.FindAll([Windows.Automation.TreeScope]::Children,$condition)
+            return $labels.Count -eq 1 -and $labels.Item(0).Current.Name -ceq 'Administrator'
+        }
+        $ancestor=$walker.GetParent($ancestor)
+    }
+    return $false
+}
+
+function Configuration-DatabaseValueAllowed([string]$field,[string]$value) {
+    # URL은 VM 내부 루프백 MySQL로 제한하고 식별자는 줄바꿈·공백·경로 입력을 허용하지 않는다.
+    switch -CaseSensitive ($field) {
+        'URL' {return $value -cmatch '^(127\.0\.0\.1|localhost)(:[1-9][0-9]{0,4})?$' -and ($value -notmatch ':' -or [int]($value.Split(':')[-1]) -le 65535)}
+        'Database name' {return $value -cmatch '^[A-Za-z0-9_]{1,64}$'}
+        'User name' {return $value -cmatch '^[A-Za-z0-9_.@-]{1,128}$'}
+        'Password' {return [Text.Encoding]::UTF8.GetByteCount($value) -ge 1 -and [Text.Encoding]::UTF8.GetByteCount($value) -le 256 -and $value -notmatch '[\x00-\x1f\x7f]'}
+        default {return $false}
+    }
+}
+
 function Act($r) {
     Supported-Version
     $e=Resolve $r.elementId
-    $h=Input-Guard $e ($r.action -in @('focus','keyboard-input'));$pattern=$null
+    $configurationField=''
+    if($r.action -ceq 'set-value'){$configurationField=Configuration-DatabaseField $e}
+    $administratorPassword=($r.action -ceq 'set-value' -and (Security-AdministratorPassword $e))
+    # 암호 필드의 focus/keyboard/readback은 계속 금지한다. 암호화된 set-value만 UIA에 전달한다.
+    $passwordInput=($r.action -ceq 'set-value' -and ($configurationField -ceq 'Password' -or $administratorPassword))
+    $h=Input-Guard $e ($r.action -in @('focus','keyboard-input')) $passwordInput;$pattern=$null
     $dispatchElement=Public-Element $e
     switch -CaseSensitive ($r.action) {
         'focus' {
@@ -389,8 +462,11 @@ function Act($r) {
             # caller must wait for the intended application state separately.
         }
         'set-value' {
-            $identifier=($r.value -cmatch '^[A-Za-z_][A-Za-z0-9_]{0,99}$' -and ((Name-Editor $e) -or (GoTo-Editor $e)))
-            if(-not $identifier){throw 'ui-unsupported-element'}
+            $identifier=(-not $e.Current.IsPassword -and $r.value -cmatch '^[A-Za-z_][A-Za-z0-9_]{0,99}$' -and ((Name-Editor $e) -or (GoTo-Editor $e)))
+            $database=$false
+            if(-not $identifier){$database=(Configuration-DatabaseValueAllowed $configurationField ([string]$r.value))}
+            $administrator=($administratorPassword -and (Configuration-DatabaseValueAllowed 'Password' ([string]$r.value)))
+            if(-not $identifier -and -not $database -and -not $administrator){throw 'ui-unsupported-element'}
             if(-not $e.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern) -or $pattern.Current.IsReadOnly){throw 'ui-unsupported-element'}
             $pattern.SetValue([string]$r.value)
             if(-not $e.Current.IsPassword -and $pattern.Current.Value -cne $r.value){throw 'ui-effect-unverified'}
@@ -449,7 +525,7 @@ function Execute($r) {
     $null=Target
     Supported-Version
     switch -CaseSensitive ($r.operation) {
-        'capabilities' {return @{sessionId=$r.sessionId;actions=@('invoke','click','focus','set-value','keyboard-input');adapter=$script:Identity.fileVersion;hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';coordinates=$false;setValue='Properties Name or unique Go To search editor';keys=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');conditions=@('project-ready','building','deploying','starting-runtime','running','modal')}}
+        'capabilities' {return @{sessionId=$r.sessionId;actions=@('invoke','click','focus','set-value','keyboard-input');adapter=$script:Identity.fileVersion;hostPlatform=$script:Identity.hostPlatform;studioPlatform='windows';coordinates=$false;setValue='Properties Name, unique Go To search, Configuration Database URL/name/user/password, or App Security Administrator password (encrypted stdin; passwords write-only)';keys=@('Tab','F5','Ctrl+G','Ctrl+S','Enter','Right','Escape');conditions=@('project-ready','building','deploying','starting-runtime','running','modal')}}
         'tree' {return Tree}
         'find' {return ,@(Find-Elements $r.selector | ForEach-Object { foreach($e in $_){Public-Element $e} })}
         'action' {return Act $r}

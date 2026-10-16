@@ -22,6 +22,20 @@ See [the live gate and remaining app acceptance](winboat-host-services.md).
 This transport evidence does not claim exact-version app/build provenance, DB
 authentication, application transactions or representative workload performance.
 
+## Loopback HTTP bridge (0.7.2)
+
+The ordinary Rust suite covers authenticated reverse TLS binary streaming,
+independent EOF, destination separation and listener reuse after cancellation.
+Host-service schema validation accepts the optional fixed `webHostPort=18080`
+and `adminHostPort=18090` fields and rejects other ports. Prior host-service
+records without those fields remain readable without rewriting. The exact v6
+Runtime fixture has no `bridgeHostPort`; discovery preserves its bytes. Current
+Runtime discovery retains the Docker binding for ownership while reporting the
+optional reverse HTTP port. The existing v4/v5/v6/current discovery, invalidation,
+Compose rollback, authenticated recovery, locks and keeper cases remain required
+in the ordinary suite. These fixtures do not claim live Studio app acceptance;
+the release workflow supplies the separate Studio F5 and browser gate.
+
 ## Startup and disposable UEFI recovery (#129–134)
 
 | Boundary                                                                        | Automated scenarios                                                                                                                                                                                                                 |

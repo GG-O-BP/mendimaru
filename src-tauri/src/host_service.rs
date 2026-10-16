@@ -53,6 +53,10 @@ pub struct Status {
     pub database_authentication_verified: bool,
     pub encrypted: bool,
     pub active_connections: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_host_port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admin_host_port: Option<u16>,
 }
 
 pub(crate) async fn start(

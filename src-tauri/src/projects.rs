@@ -27,6 +27,7 @@ const EXTERNAL_PROJECT_TOKEN_PREFIX: &str = "external-project_";
 
 static EXTERNAL_SELECTIONS: OnceLock<Mutex<Vec<(String, PathBuf)>>> = OnceLock::new();
 static SETTINGS_VERSION_REGEX: OnceLock<Regex> = OnceLock::new();
+static MPR_VERSION_REGEX: OnceLock<Regex> = OnceLock::new();
 
 #[derive(Clone, Copy)]
 struct ScanLimits {
@@ -190,14 +191,8 @@ fn scan_projects_with_limits(
         } else {
             linux_path_to_windows_share(workspace, mpr_path, &config.windows_shared_directory)?
         };
-        let (version, bytes_read) = extract_project_version_bounded(
-            &mpr_path
-                .parent()
-                .unwrap_or(mpr_path)
-                .join("project-settings.user.json"),
-            limits.max_settings_bytes,
-            &mut report,
-        );
+        let (version, bytes_read) =
+            discover_project_version(mpr_path, limits.max_settings_bytes, &mut report);
         report.settings_bytes_read += bytes_read;
         let project = project_with_version(
             mpr_path,
@@ -465,14 +460,7 @@ fn project_from_path(
     location: ProjectLocation,
 ) -> MendixProject {
     let mut report = ScanReport::default();
-    let (version, _) = extract_project_version_bounded(
-        &mpr_path
-            .parent()
-            .unwrap_or(mpr_path)
-            .join("project-settings.user.json"),
-        MAX_SETTINGS_BYTES,
-        &mut report,
-    );
+    let (version, _) = discover_project_version(mpr_path, MAX_SETTINGS_BYTES, &mut report);
     project_with_version(mpr_path, windows_path, location, version, None)
 }
 
@@ -510,11 +498,8 @@ fn project_with_version(
 
 fn external_project_from_selection(selection: &ProjectSelection, token: String) -> MendixProject {
     let mut report = ScanReport::default();
-    let (version, _) = extract_project_version_bounded(
-        &selection.directory().join("project-settings.user.json"),
-        MAX_SETTINGS_BYTES,
-        &mut report,
-    );
+    let (version, _) =
+        discover_project_version(selection.mpr_path(), MAX_SETTINGS_BYTES, &mut report);
     let modified = fs::metadata(selection.mpr_path())
         .ok()
         .and_then(|metadata| metadata.modified().ok());
@@ -627,6 +612,76 @@ fn extract_project_version(settings_path: &Path) -> Option<String> {
     }
 }
 
+/// 실제 MPR 메타데이터를 우선한다. 사용자 설정은 MPRv2에서 없거나 이전 버전일 수 있다.
+/// SQLite 파일은 읽기 전용으로 열며, 손상된 MPR을 사용자 설정으로 정상처럼 표시하지 않는다.
+fn discover_project_version(
+    mpr_path: &Path,
+    maximum_bytes: u64,
+    report: &mut ScanReport,
+) -> (Option<String>, u64) {
+    let mut header = [0u8; 16];
+    let sqlite = File::open(mpr_path)
+        .and_then(|mut file| file.read_exact(&mut header))
+        .is_ok()
+        && &header == b"SQLite format 3\0";
+    if sqlite {
+        return (read_mpr_product_version(mpr_path), 16);
+    }
+    extract_project_version_bounded(
+        &mpr_path
+            .parent()
+            .unwrap_or(mpr_path)
+            .join("project-settings.user.json"),
+        maximum_bytes,
+        report,
+    )
+}
+
+fn read_mpr_product_version(mpr_path: &Path) -> Option<String> {
+    use rusqlite::{limits::Limit, Connection, OpenFlags};
+    let metadata = fs::symlink_metadata(mpr_path).ok()?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return None;
+    }
+    let connection = Connection::open_with_flags(
+        mpr_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    connection.busy_timeout(Duration::ZERO).ok()?;
+    connection
+        .set_limit(Limit::SQLITE_LIMIT_LENGTH, 4096)
+        .ok()?;
+    connection
+        .set_limit(Limit::SQLITE_LIMIT_SQL_LENGTH, 4096)
+        .ok()?;
+    connection
+        .execute_batch("PRAGMA query_only=ON; PRAGMA trusted_schema=OFF;")
+        .ok()?;
+    // workspace 탐색 시 손상되거나 악의적인 DB 하나가 전체 탐색 시간을 점유하지 않게 제한한다.
+    let deadline = Instant::now() + Duration::from_millis(50);
+    connection
+        .progress_handler(1000, Some(move || Instant::now() >= deadline))
+        .ok()?;
+    let mut statement = connection
+        .prepare("SELECT _ProductVersion FROM _MetaData LIMIT 2")
+        .or_else(|_| connection.prepare("SELECT MendixVersion FROM _MetaData LIMIT 2"))
+        .ok()?;
+    let versions = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .ok()?
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    let version_regex = MPR_VERSION_REGEX.get_or_init(|| {
+        Regex::new(r"^\d+\.\d+\.\d+(?:\.\d+)?(?:-[A-Za-z0-9.-]+)?$")
+            .expect("valid MPR version regex")
+    });
+    if versions.len() != 1 || !version_regex.is_match(&versions[0]) {
+        return None;
+    }
+    Some(versions[0].clone())
+}
+
 fn extract_project_version_bounded(
     settings_path: &Path,
     maximum_bytes: u64,
@@ -723,6 +778,59 @@ mod tests {
     use crate::models::{AppConfig, ContainerRuntime, ProjectLocation};
     use std::fs;
     use std::sync::{atomic::AtomicBool, Arc};
+
+    #[test]
+    fn mpr_version_does_not_require_or_trust_user_settings() {
+        let temp = tempfile::tempdir().unwrap();
+        let mpr = temp.path().join("App.mpr");
+        let db = rusqlite::Connection::open(&mpr).unwrap();
+        db.execute_batch("CREATE TABLE _MetaData (_ProductVersion TEXT); INSERT INTO _MetaData VALUES ('11.12.6');").unwrap();
+        drop(db);
+        fs::write(
+            temp.path().join("project-settings.user.json"),
+            "invalid and deliberately unread",
+        )
+        .unwrap();
+        let before = fs::read(&mpr).unwrap();
+        let projects = scan_projects(&config_for(temp.path())).unwrap();
+        assert_eq!(projects[0].version.as_deref(), Some("11.12.6"));
+        assert_eq!(fs::read(&mpr).unwrap(), before);
+        assert!(!temp.path().join("App.mpr-journal").exists());
+    }
+
+    #[test]
+    fn mpr_metadata_supports_old_column_and_rejects_ambiguity() {
+        let temp = tempfile::tempdir().unwrap();
+        let mpr = temp.path().join("App.mpr");
+        let db = rusqlite::Connection::open(&mpr).unwrap();
+        db.execute_batch("CREATE TABLE _MetaData (MendixVersion TEXT); INSERT INTO _MetaData VALUES ('10.24.26.0');").unwrap();
+        assert_eq!(
+            super::read_mpr_product_version(&mpr).as_deref(),
+            Some("10.24.26.0")
+        );
+        db.execute("INSERT INTO _MetaData VALUES ('11.12.6')", [])
+            .unwrap();
+        assert_eq!(super::read_mpr_product_version(&mpr), None);
+    }
+
+    #[test]
+    fn malformed_mpr_metadata_fails_closed_without_sidecar_fallback() {
+        let temp = tempfile::tempdir().unwrap();
+        let mpr = temp.path().join("App.mpr");
+        let db = rusqlite::Connection::open(&mpr).unwrap();
+        db.execute_batch("CREATE TABLE unrelated (value TEXT);")
+            .unwrap();
+        drop(db);
+        fs::write(
+            temp.path().join("project-settings.user.json"),
+            r#"{"settingsParts":[{"type":"Mendix.Core, Version=11.12.6.0"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            scan_projects(&config_for(temp.path())).unwrap()[0].version,
+            None
+        );
+    }
 
     fn config_for(path: &std::path::Path) -> AppConfig {
         AppConfig {

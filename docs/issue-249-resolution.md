@@ -131,3 +131,18 @@ rollback·앱 pool 설정과 잘못된 DB 인증 거부를 다시 확인했다. 
 최종 소스로 [실제 WinBoat transport 게이트](evidence/issue-249/live-winboat-gate.txt)와
 [Windows 생산 helper의 포트·half-close 계약](evidence/issue-249/guest-helper-proof.json)도
 다시 통과했다. 일반 회귀에서 제외한 실제 환경 검사는 별도로 실행한 결과다.
+
+## Pantos localhost HTTP 중계 보완
+
+Studio의 localhost 전용 리스너는 그대로 유지한다. MySQL 세션의 기존 인증된
+TLS 채널에 웹/관리 전용 reverse 연결을 추가했다. 목적지는 게스트
+127.0.0.1:8080 및 :8090 두 개로 고정하며, Linux는 127.0.0.1:18080 및
+:18090에만 바인딩한다. 브라우저는 runtime url이 반환하는 :18080을 사용한다.
+방화벽이나 게스트 NIC 리스너를 추가하지 않는다. 세션 종료/인증된 control
+손실 때 HTTP 리스너와 연결도 함께 닫힌다. 웹 16개와 관리 4개의 사전 연결,
+32개 요청 상한, 고정 16KiB 프레임과 역압으로 메모리 사용을 제한한다.
+기존 Docker NIC 매핑은 소유권과 정리를 위해 보존하며, 실제 HTTP readiness와
+공개 URL/hostPort는 검증된 reverse 중계 경로를 관찰한다.
+
+Rust 회귀는 reverse TLS의 binary 응답, half-close, 목적지 분리와 포트 정리를
+포함한다. 실제 Studio/MySQL/브라우저 수용 결과는 하네스의 세션 증거에 둔다.

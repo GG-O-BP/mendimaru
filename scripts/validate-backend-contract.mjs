@@ -55,7 +55,14 @@ validate(
   hostService,
   "host-service status",
 );
+validate(
+  `${hostServiceSchema}#/$defs/status`,
+  { ...hostService, webHostPort: 18080, adminHostPort: 18090 },
+  "host-service reverse HTTP status",
+);
 for (const invalid of [
+  { webHostPort: 8080 },
+  { adminHostPort: 8090 },
   { password: "not-accepted" },
   { targetHost: "192.0.2.1" },
   { guestHost: "0.0.0.0" },

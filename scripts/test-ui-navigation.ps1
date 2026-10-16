@@ -32,6 +32,25 @@ $unknownReadiness=@{nodes=@(
     @{id='run';parent=$null;depth=1;observed=$runButton;omittedChildren=$false}
 );truncated=$false;omittedDisabledWindows=@()}
 if((State $unknownReadiness).state -ceq 'project-ready'){throw 'unrelated Chrome document falsely proved project openness'}
+# Exercise the production database input boundary before opening native windows.
+foreach($case in @(
+    @('URL','127.0.0.1:3306',$true), @('URL','localhost',$true),
+    @('URL','localhost:65535',$true), @('URL','localhost:65536',$false),
+    @('URL','localhost:0',$false), @('URL','192.0.2.1:3306',$false),
+    @('URL','localhost/path',$false), @('Database name','App_123',$true),
+    @('Database name','../App',$false), @('Database name',('a'*65),$false),
+    @('User name','user.name@example-host',$true), @('User name','user name',$false),
+    @('Password','write-only-password',$true), @('Password','',$false),
+    @('Password',('a'*256),$true), @('Password',('a'*257),$false),
+    @('Password',("secret"+[char]10),$false),
+    @('Password',(([string][char]0xac00)*85),$true),
+    @('Password',(([string][char]0xac00)*86),$false),
+    @('Unrelated','value',$false)
+)){
+    if((Configuration-DatabaseValueAllowed $case[0] $case[1]) -ne $case[2]){
+        throw ('database input validation mismatch for '+$case[0])
+    }
+}
 $lab=Join-Path $env:TEMP ('mendimaru-navigation-test-'+[Guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory -Path $lab
 $fixture=Join-Path $lab 'fixture.ps1'

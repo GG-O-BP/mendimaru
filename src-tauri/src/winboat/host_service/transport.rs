@@ -11,6 +11,7 @@ use tokio::task::JoinSet;
 use tokio_rustls::rustls::{self, pki_types::PrivatePkcs8KeyDer};
 use tokio_rustls::TlsAcceptor;
 
+#[cfg(test)]
 pub(super) async fn serve(
     listener: TcpListener,
     acceptor: TlsAcceptor,
@@ -19,17 +20,48 @@ pub(super) async fn serve(
     ready: tokio::sync::mpsc::Sender<u16>,
     active: Arc<AtomicUsize>,
 ) -> io::Result<()> {
-    let capacity = Arc::new(tokio::sync::Semaphore::new(65));
+    serve_reverse(
+        listener,
+        acceptor,
+        key,
+        target,
+        Channels {
+            ready,
+            reverse: None,
+        },
+        active,
+    )
+    .await
+}
+
+type Encrypted = tokio_rustls::server::TlsStream<TcpStream>;
+pub(super) type ReverseChannels = [tokio::sync::mpsc::Sender<Encrypted>; 2];
+
+pub(super) struct Channels {
+    pub ready: tokio::sync::mpsc::Sender<u16>,
+    pub reverse: Option<ReverseChannels>,
+}
+
+pub(super) async fn serve_reverse(
+    listener: TcpListener,
+    acceptor: TlsAcceptor,
+    key: Arc<zeroize::Zeroizing<[u8; 32]>>,
+    target: std::net::SocketAddr,
+    channels: Channels,
+    active: Arc<AtomicUsize>,
+) -> io::Result<()> {
+    let Channels { ready, reverse } = channels;
+    let capacity = Arc::new(tokio::sync::Semaphore::new(97));
     let data_capacity = Arc::new(tokio::sync::Semaphore::new(64));
     let control_taken = Arc::new(AtomicBool::new(false));
     let mut tasks = JoinSet::new();
     loop {
         tokio::select! {
-            // 완료됐지만 아직 join하지 않은 작업의 메타데이터까지 65개로 제한한다.
-            accepted = listener.accept(), if tasks.len() < 65 => {
+            // 완료됐지만 아직 join하지 않은 작업의 메타데이터까지 97개로 제한한다.
+            accepted = listener.accept(), if tasks.len() < 97 => {
                 let (socket, _) = accepted?;
                 let Ok(permit) = capacity.clone().try_acquire_owned() else { continue; };
-                let acceptor = acceptor.clone(); let key = key.clone(); let active = active.clone(); let ready = ready.clone(); let control_taken = control_taken.clone(); let data_capacity = data_capacity.clone();
+                let acceptor = acceptor.clone(); let key = key.clone(); let active = active.clone(); let ready = ready.clone(); let control_taken = control_taken.clone(); let data_capacity = data_capacity.clone(); let reverse = reverse.clone();
                 tasks.spawn(async move {
                     let _permit = permit;
                     let opened = tokio::time::timeout(CONNECT_TIMEOUT, async {
@@ -49,6 +81,12 @@ pub(super) async fn serve(
                             tokio::time::sleep(Duration::from_secs(2)).await;
                         }
                         let _ = ready.send(0).await;
+                    } else if kind >= 2 {
+                        if let Some(channels) = reverse {
+                            // 인증 뒤에도 채널은 고정 웹/관리 두 종류만 허용한다.
+                            // 가득 찬 큐는 즉시 닫아 DB 연결 처리의 역압과 분리한다.
+                            let _ = channels[(kind - 2) as usize].try_send(tls);
+                        }
                     } else {
                         let Ok(_data_permit) = data_capacity.try_acquire_owned() else { return; };
                         let Ok(Ok(db)) = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(target)).await else { return; };
@@ -72,7 +110,7 @@ pub(super) async fn authenticate<S: AsyncRead + AsyncWrite + Unpin>(
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
     let kind = stream.read_u8().await?;
-    if kind > 1 {
+    if kind > 3 {
         return Err(io::Error::other("invalid channel"));
     }
     let mut challenge = [0; 33];
@@ -87,6 +125,26 @@ pub(super) async fn authenticate<S: AsyncRead + AsyncWrite + Unpin>(
     mac.verify_slice(&proof)
         .map_err(|_| io::Error::other("authentication rejected"))?;
     Ok(kind)
+}
+
+pub(super) async fn serve_loopback(
+    listener: TcpListener,
+    mut pool: tokio::sync::mpsc::Receiver<Encrypted>,
+) -> io::Result<()> {
+    let mut tasks = JoinSet::new();
+    loop {
+        tokio::select! {
+            accepted = listener.accept(), if tasks.len() < 32 => {
+                let (client, _) = accepted?;
+                // TLS 핸드셰이크는 게스트가 미리 완료한다. 바이트는 공유 파일을 거치지 않는다.
+                let Ok(Some(mut wire)) = tokio::time::timeout(CONNECT_TIMEOUT, pool.recv()).await else { continue; };
+                tasks.spawn(async move {
+                    if wire.write_all(&[1]).await.is_ok() { let _ = relay(wire, client).await; }
+                });
+            }
+            _ = tasks.join_next(), if !tasks.is_empty() => {}
+        }
+    }
 }
 
 pub(super) const FRAME_BYTES: usize = 16 * 1024;
@@ -186,6 +244,100 @@ pub(super) async fn relay<S: AsyncRead + AsyncWrite + Unpin>(
 mod tests {
     use super::*;
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn reverse_tls_reaches_only_selected_loopback_and_preserves_binary_response() {
+        check_reverse_channel(2).await;
+        check_reverse_channel(3).await;
+    }
+
+    async fn check_reverse_channel(kind: u8) {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        let database = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let tls_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let tls_address = tls_listener.local_addr().unwrap();
+        let web = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let web_address = web.local_addr().unwrap();
+        let (acceptor, cert) = tls_identity().unwrap();
+        let (web_tx, web_rx) = tokio::sync::mpsc::channel(16);
+        let (admin_tx, admin_rx) = tokio::sync::mpsc::channel(4);
+        let (ready, _rx) = tokio::sync::mpsc::channel(1);
+        let server = tokio::spawn(serve_reverse(
+            tls_listener,
+            acceptor,
+            Arc::new(zeroize::Zeroizing::new([42; 32])),
+            database.local_addr().unwrap(),
+            Channels {
+                ready,
+                reverse: Some([web_tx, admin_tx]),
+            },
+            Arc::new(AtomicUsize::new(0)),
+        ));
+        let (selected_rx, mut other_rx) = if kind == 2 {
+            (web_rx, admin_rx)
+        } else {
+            (admin_rx, web_rx)
+        };
+        let proxy = tokio::spawn(serve_loopback(web, selected_rx));
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(cert).unwrap();
+        let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_protocol_versions(&[&rustls::version::TLS12])
+        .unwrap()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+        let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+        let guest = tokio::spawn(async move {
+            let name = rustls::pki_types::ServerName::try_from("mendimaru-host-service").unwrap();
+            let mut tls = connector
+                .connect(name, TcpStream::connect(tls_address).await.unwrap())
+                .await
+                .unwrap();
+            tls.write_u8(kind).await.unwrap();
+            let mut challenge = [kind; 33];
+            tls.read_exact(&mut challenge[..32]).await.unwrap();
+            let mut mac = Hmac::<Sha256>::new_from_slice(&[42; 32]).unwrap();
+            mac.update(&challenge);
+            tls.write_all(&mac.finalize().into_bytes()).await.unwrap();
+            assert_eq!(tls.read_u8().await.unwrap(), 1);
+            assert_eq!(tls.read_u32().await.unwrap(), 4);
+            let mut request = [0; 4];
+            tls.read_exact(&mut request).await.unwrap();
+            assert_eq!(&request, b"POST");
+            tls.write_u32(FRAME_BYTES as u32).await.unwrap();
+            tls.write_all(&vec![0xa5; FRAME_BYTES]).await.unwrap();
+            tls.write_u32(0).await.unwrap();
+            // 호스트가 요청의 EOF를 보낼 때까지 응답의 half-close를 보존한다.
+            assert_eq!(tls.read_u32().await.unwrap(), 0);
+        });
+        let mut client = TcpStream::connect(web_address).await.unwrap();
+        client.write_all(b"POST").await.unwrap();
+        let mut response = vec![0; FRAME_BYTES];
+        tokio::time::timeout(Duration::from_secs(5), client.read_exact(&mut response))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(response.iter().all(|b| *b == 0xa5));
+        client.shutdown().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), guest)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), database.accept())
+                .await
+                .is_err()
+        );
+        assert!(other_rx.try_recv().is_err());
+        proxy.abort();
+        server.abort();
+        let _ = proxy.await;
+        let _ = server.await;
+        assert!(std::net::TcpListener::bind(web_address).is_ok());
+    }
 
     #[tokio::test]
     async fn real_tls_rejects_untrusted_certificates_and_unauthenticated_database_access() {

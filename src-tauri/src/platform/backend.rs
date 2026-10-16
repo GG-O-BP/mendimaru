@@ -261,6 +261,7 @@ fn capability_for(backend: BackendId, id: CapabilityId, architecture: &str) -> C
                 "private-cache",
                 "winboat-interactive-session",
                 "private-vm-bridge-bind",
+                "loopback-bind",
                 "loopback-connect",
             ],
         );
