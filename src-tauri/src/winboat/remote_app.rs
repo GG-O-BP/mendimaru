@@ -279,7 +279,7 @@ fn spawn_remote_app(
         "/floatbar".to_string(),
         "/compression".to_string(),
         "/network:lan".to_string(),
-        "/tune:SupportGraphicsPipeline:FALSE".to_string(),
+        "/tune:FreeRDP_SupportGraphicsPipeline:FALSE".to_string(),
         "/sec:tls".to_string(),
         "-wallpaper".to_string(),
         "/scale-desktop:100".to_string(),

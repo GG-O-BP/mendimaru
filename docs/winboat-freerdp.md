@@ -63,7 +63,7 @@ A later cold-session investigation reproduced a FreeRDP 3.32.2 abort in
 RAIL window lock. The Studio process survived the lost transport. Querying with
 ordinary RemoteApp windows (`/app:...,hidef:off`) returned its exact live identity
 and distinguished an older stopped identity. Mendimaru pairs that option with `/network:lan` and
-`/tune:SupportGraphicsPipeline:FALSE` for authenticated RemoteApp operations.
+`/tune:FreeRDP_SupportGraphicsPipeline:FALSE` for authenticated RemoteApp operations.
 The explicit network mode prevents FreeRDP from re-enabling GFX through its
 automatic connection defaults after argument parsing. HiDef off with GFX still
 enabled avoids the abort but leaves X11 window pixmaps unpainted; transport and
