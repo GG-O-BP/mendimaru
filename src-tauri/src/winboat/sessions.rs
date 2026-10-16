@@ -83,6 +83,14 @@ pub(crate) async fn list(
         trace_session_query(started_at.elapsed(), registered.len(), true);
         return Ok(registered);
     }
+    list_authoritative(config).await
+}
+
+/// Query the guest even when this process retains a session owner.
+pub(crate) async fn list_authoritative(
+    config: &AppConfig,
+) -> Result<Vec<StudioSessionStatus>, WindowsOperationFailure> {
+    let started_at = Instant::now();
     ensure_guest_online(config).await?;
     let studios = installed_versions_cached(config).await?;
     let outcome = execute(

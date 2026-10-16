@@ -805,7 +805,7 @@ impl BrowserBackend for LinuxWinboatBackend<'_> {
 impl PlatformBackend for LinuxWinboatBackend<'_> {}
 
 #[cfg(target_os = "linux")]
-fn winboat_operation_error(
+pub(super) fn winboat_operation_error(
     backend: BackendId,
     capability: CapabilityId,
     error: crate::winboat::WindowsOperationFailure,

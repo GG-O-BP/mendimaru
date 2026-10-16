@@ -142,7 +142,12 @@ guest. Use `studio status --refresh` when an authoritative guest-wide query is
 required; that operation can take longer because it verifies exact installed
 versions and process identities. For a selected session, `studio status
 --session-id ID` checks the keeper first and falls back to an authoritative
-lookup only when that keeper record is unavailable.
+lookup only when that keeper record is unavailable. Adding `--refresh` always
+queries the guest, including with `--session-id`. Refresh preserves keeper
+ownership and reports an owned identity missing from the guest as `stopped` and
+`disconnected`; it does not stop the keeper, Studio, or Runtime. An unavailable
+guest returns an error rather than a successful stale summary. A live guest
+identity remains `running` even when its retained transport is disconnected.
 
 `studio status --orphans` performs the authoritative query and returns only
 Studio Pro sessions not owned by a Mendimaru keeper. Each returned opaque ID can
