@@ -14,7 +14,7 @@ try {
     $fixture=Join-Path $lab 'fixture.ps1'
     [IO.File]::WriteAllText($fixture,@'
 param($StatePath)
-Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName PresentationFramework
 Add-Type -TypeDefinition @"
 using System;
 using System.IO;
@@ -58,14 +58,15 @@ public static class ErrorFixture {
     }
 }
 "@
-$form=New-Object Windows.Forms.Form
-$form.Text='Mendimaru owned modal fixture'
-$button=New-Object Windows.Forms.Button
-$button.Text='Open Error'
-$button.Add_Click({[ErrorFixture]::Show($form.Handle)})
-$form.Controls.Add($button)
-$form.Add_Shown({[IO.File]::WriteAllText($StatePath,(@{button=$button.Handle.ToInt64()}|ConvertTo-Json -Compress))})
-[Windows.Forms.Application]::Run($form)
+$form=New-Object Windows.Window
+$form.Title='Mendimaru owned modal fixture'
+$form.Width=400;$form.Height=250
+$button=New-Object Windows.Controls.Button
+$button.Content='Open Error'
+$button.Add_Click({[ErrorFixture]::Show((New-Object Windows.Interop.WindowInteropHelper($form)).Handle)})
+$form.Content=$button
+$form.Add_ContentRendered({[IO.File]::WriteAllText($StatePath,(@{main=(New-Object Windows.Interop.WindowInteropHelper($form)).Handle.ToInt64()}|ConvertTo-Json -Compress))})
+$null=$form.ShowDialog()
 '@)
     $state=Join-Path $lab 'state.json'
     $process=Start-Process (Join-Path $PSHOME 'powershell.exe') -ArgumentList @('-NoProfile','-STA','-File',('"'+$fixture+'"'),('"'+$state+'"')) -PassThru
@@ -85,7 +86,10 @@ $form.Add_Shown({[IO.File]::WriteAllText($StatePath,(@{button=$button.Handle.ToI
         throw 'expected dialog effect was not observed'
     }
     $handles=[IO.File]::ReadAllText($state)|ConvertFrom-Json
-    $open=[Windows.Automation.AutomationElement]::FromHandle([IntPtr]$handles.button)
+    $main=[Windows.Automation.AutomationElement]::FromHandle([IntPtr]$handles.main)
+    $condition=New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::NameProperty,'Open Error')
+    $open=$main.FindFirst([Windows.Automation.TreeScope]::Descendants,$condition)
+    if($null -eq $open){throw 'fixture Invoke button missing'}
     $openId=Register $open
     $watch=[Diagnostics.Stopwatch]::StartNew()
     $null=Act @{elementId=$openId;action='invoke'}
