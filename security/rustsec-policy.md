@@ -5,7 +5,7 @@ entry, expired exception, and stale exception. `cargo audit --json` is parsed by
 `scripts/verify-rustsec-policy.mjs`; warnings never pass merely because
 cargo-audit exits zero.
 
-The current exception baseline is `security/rustsec-exceptions.json`. It was
+The original exception baseline is `security/rustsec-exceptions.json`. It was
 reviewed on 2026-10-13 against cargo-audit 0.22.2 and RustSec advisory database
 commit `57dcc0f2192e025138907a495c1ac9a7e1e3e123` (1,307 advisories, last
 updated 2026-10-12). Each exception records an owner, introducing dependency,
@@ -105,3 +105,19 @@ extends or edits an exception, and the full policy still fails on
 vulnerabilities, unknown warnings, expiry, package drift and yanked entries.
 The pruned manifest is committed with the lockfile so the owner reviews both in
 the same PR.
+
+## 2026-10-19 zbus dependency review
+
+The October 17 informational deprecations RUSTSEC-2026-0370/0371/0372 apply
+to zvariant 5.15.0, zbus_names 4.3.4 and zvariant_derive 5.15.0, introduced by
+the locked tauri-plugin-opener 2.5.5 -> zbus 5.19.0 chain. These crates were
+merged into zbus 6; the advisories report no vulnerability and no patched
+standalone version. The current stable opener 2.7.2 still requires zbus 5.9,
+so updating opener cannot remove them. See the
+[upstream migration](https://github.com/z-galaxy/zbus/issues/2043) and
+[stable opener manifest](https://github.com/tauri-apps/plugins-workspace/blob/opener-v2.7.2/Cargo.toml).
+
+The three exact-version, owned unmaintained exceptions expire on 2026-11-18
+and require rechecking opener's zbus 6 support by that date. No vulnerability
+exception was added; vulnerability, unknown warning, stale/version-drift and
+expiry checks remain in force. Existing exception expiries are unchanged.
