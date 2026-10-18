@@ -229,8 +229,10 @@ provider cannot block the worker needed to inspect and close it.
 For an enabled Win32 `Error`/`오류` window in the exact validated Studio process,
 the tree supplements UIA with at most 128 visible native child HWNDs. Only
 Text, Edit and Button controls are exposed; password controls are excluded.
-Read-only diagnostic Edit values are bounded to 8192 characters. All normal
-identity, stale-element, enabled-state and modal ownership guards still apply.
+Read-only diagnostic Edit values are bounded to 8192 characters. Only an observed standard Win32 Button named Details >>, Details << or Close
+(and the listed Korean equivalents) can use semantic BM_CLICK when its UIA
+provider lacks InvokePattern. All normal identity, stale-element, enabled-state
+and modal ownership guards still apply.
 An already foreground native error Window supports Tab, Enter and Escape
 without requiring a provider SetFocus call on that Window. Every keystroke
 still requires the exact owned top-level HWND to be foreground immediately
