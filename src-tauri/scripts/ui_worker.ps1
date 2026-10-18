@@ -124,6 +124,7 @@ function New-ObservationCache {
 $script:ObservationCache=New-ObservationCache
 function Observation($e) {
     $c=$e.Cached;$value=$null;$readOnly=$null;$modal=$false
+    if($null -eq $c.ControlType){throw 'ui-stale-element'}
     $native=Native-Observation $e $c
     if(-not ($c.IsPassword -or ($native -and $native.password)) -and -not (Configuration-Editor $e) -and [bool]$e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::IsValuePatternAvailableProperty)){
         $value=$e.GetCachedPropertyValue([Windows.Automation.ValuePattern]::ValueProperty)
@@ -377,7 +378,9 @@ function Tree {
     $p=Target;$scan=Scan;$nodes=New-Object Collections.Generic.List[object]
     foreach($node in $scan.nodes){
         Check-Deadline
-        $e=$node.e;$c=$node.observed.c;$bounds=$c.BoundingRectangle
+        $e=$node.e;$c=$node.observed.c
+        if($null -eq $c.ControlType){throw 'ui-stale-element'}
+        $bounds=$c.BoundingRectangle
         $publicBounds=@(0,0,0,0);if(-not $bounds.IsEmpty){$publicBounds=@($bounds.X,$bounds.Y,$bounds.Width,$bounds.Height)}
         $patterns=@($node.observed.patterns)
         $value=$null;$readOnly=$null

@@ -83,7 +83,11 @@ $null=$form.ShowDialog()
     function Supported-Version {}
     function Await-Tree($Predicate) {
         $until=[DateTime]::UtcNow.AddSeconds(10)
-        do {$tree=Tree;if(& $Predicate $tree){return $tree};Start-Sleep -Milliseconds 50}while([DateTime]::UtcNow -lt $until)
+        do {
+            try {$tree=Tree;if(& $Predicate $tree){return $tree}}
+            catch {if($_.Exception.Message -cne 'ui-stale-element' -and $_.Exception.GetBaseException() -isnot [Windows.Automation.ElementNotAvailableException]){throw}}
+            Start-Sleep -Milliseconds 50
+        }while([DateTime]::UtcNow -lt $until)
         throw 'expected dialog effect was not observed'
     }
     $handles=[IO.File]::ReadAllText($state)|ConvertFrom-Json
