@@ -97,6 +97,9 @@ $null=$form.ShowDialog()
     $null=Act @{elementId=$openId;action='invoke'}
     if($watch.ElapsedMilliseconds -gt 1500){throw 'modal Invoke blocked the worker'}
     $tree=Await-Tree {param($t) @($t.root.nodes|Where-Object{$_.name -ceq 'Details >>'}).Count -eq 1}
+    $staleRejected=$false
+    try {$null=Act @{elementId=$openId;action='invoke'}}catch{$staleRejected=$_.Exception.Message -ceq 'ui-stale-element'}
+    if(-not $staleRejected){throw 'lost Invoke response could replay an old observed element'}
     $details=@($tree.root.nodes|Where-Object{$_.name -ceq 'Details >>'})[0]
     $detailsElement=Resolve $details.elementId
     $detailsWindow=Window-For $detailsElement
@@ -107,7 +110,7 @@ $null=$form.ShowDialog()
     if(($tree | ConvertTo-Json -Depth 16) -like '*FIXTURE-PASSWORD-MUST-NOT-LEAK*'){throw 'native password leaked into public tree'}
     $errorWindow=@($tree.root.windows|Where-Object{$_.name -ceq 'Error'})[0]
     $root=Resolve $errorWindow.elementId
-    $null=[MendimaruUiNative]::SetForegroundWindow([IntPtr]$errorWindow.handle)
+    $null=[MendimaruUiNative]::SetForegroundWindow([IntPtr][long]$errorWindow.handle)
     $null=Act @{elementId=$errorWindow.elementId;action='keyboard-input';value='Tab'}
     # The original owner remains disabled: no second invocation may cross it.
     $rejected=$false

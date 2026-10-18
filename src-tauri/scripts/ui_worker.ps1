@@ -235,6 +235,9 @@ function Native-Observation($e) {
     if($c.FrameworkId -cne 'Win32'){return $null}
     $h=[IntPtr]$c.NativeWindowHandle
     if($h -eq [IntPtr]::Zero -or -not (Native-ErrorWindow ([MendimaruUiNative]::GetAncestor($h,2)))){return $null}
+    $owner=[uint32]0
+    $null=[MendimaruUiNative]::GetWindowThreadProcessId($h,[ref]$owner)
+    if($owner -ne [uint32]$script:Identity.processId){return $null}
     $class=[MendimaruUiNative]::Class($h)
     $role=switch -CaseSensitive ($class){'Button'{'Button'};'Static'{'Text'};'Edit'{'Edit'};default{return $null}}
     $style=[MendimaruUiNative]::Style($h)
