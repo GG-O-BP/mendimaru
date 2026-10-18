@@ -13,6 +13,15 @@ using System.Text;
 public static class MendimaruUiNative {
     public delegate bool EnumProc(IntPtr hwnd, IntPtr p);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr p);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr p);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder text, int count);
+    public static string Class(IntPtr h) { var b=new StringBuilder(256); GetClassName(h,b,256); return b.ToString(); }
+    public static IntPtr[] Children(IntPtr root, uint pid) {
+        var children=new List<IntPtr>();
+        EnumChildWindows(root,(h,p)=>{ uint owner; GetWindowThreadProcessId(h,out owner);
+            if(owner==pid && IsWindowVisible(h))children.Add(h); return children.Count < 129;
+        },IntPtr.Zero); return children.ToArray();
+    }
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
@@ -43,6 +52,29 @@ public static class MendimaruUiNative {
         EnumWindows((h,p)=>{ uint owner; GetWindowThreadProcessId(h,out owner);
             if(owner==pid && IsWindowVisible(h))windows.Add(h); return windows.Count < 17;
         },IntPtr.Zero); return windows.ToArray();
+    }
+}
+'@
+# UIA providers may block Invoke until a modal closes. A bounded set of MTA
+# threads dispatches once; the request worker remains available to inspect and
+# close that modal. No callback executes PowerShell on a foreign thread.
+Add-Type -ReferencedAssemblies @([Windows.Automation.InvokePattern].Assembly.Location,[Windows.Automation.AutomationElementIdentifiers].Assembly.Location) -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Windows.Automation;
+public static class MendimaruUiInvoke {
+    static readonly object gate=new object();
+    static readonly HashSet<string> pending=new HashSet<string>();
+    public static bool Dispatch(InvokePattern pattern, string identity) {
+        lock(gate) { if(pending.Count>=4 || !pending.Add(identity)) return false; }
+        var thread=new Thread(()=>{
+            try { pattern.Invoke(); } catch { /* Dispatch is not effect confirmation. */ }
+            finally { lock(gate) pending.Remove(identity); }
+        });
+        thread.IsBackground=true; thread.SetApartmentState(ApartmentState.MTA);
+        try { thread.Start(); return true; }
+        catch { lock(gate) pending.Remove(identity); throw; }
     }
 }
 '@
@@ -170,6 +202,16 @@ function Matches($e,$selector,$observation=$null) {
     if ($null -ne $selector.automationId -and $c.AutomationId -cne $selector.automationId) { return $false }
     return $true
 }
+function Native-ErrorWindow($h) {
+    # Restrict the HWND fallback to an enabled native error dialog in the exact
+    # validated Studio process. Never enumerate credentials/configuration UI.
+    $p=Target;$owner=[uint32]0
+    $null=[MendimaruUiNative]::GetWindowThreadProcessId($h,[ref]$owner)
+    if($owner -ne $p.Id -or -not [MendimaruUiNative]::IsWindowEnabled($h)){return $false}
+    $root=[Windows.Automation.AutomationElement]::FromHandle($h)
+    return $root.Current.FrameworkId -ceq 'Win32' -and $root.Current.Name -cin @('Error','오류') -and
+        $root.Current.ControlType -eq [Windows.Automation.ControlType]::Window
+}
 function Scan($scope=$null) {
     # A new observation invalidates the previous element generation. A scope
     # is resolved before scanning, so no stale handle can cross generations.
@@ -190,6 +232,19 @@ function Scan($scope=$null) {
         # active. Preserve their roots and explicitly mark the tree partial.
         # Callers can scope a fresh lookup to the enabled dialog's root.
         if($item.omitChildren){$truncated=$true;$omitted.Add(@{elementId=$id;reason='disabled-window'});continue}
+        if($item.depth -eq 0){
+            $handle=[IntPtr]$e.Current.NativeWindowHandle
+            if($handle -ne [IntPtr]::Zero -and (Native-ErrorWindow $handle)){
+                $handles=@([MendimaruUiNative]::Children($handle,[uint32]$script:Identity.processId))
+                if($handles.Count -gt 128){$truncated=$true}
+                foreach($native in @($handles | Select-Object -First 128)){
+                    Check-Deadline
+                    $candidate=[Windows.Automation.AutomationElement]::FromHandle($native).GetUpdatedCache($script:ObservationCache)
+                    if($candidate.Cached.IsPassword -or $candidate.Cached.ControlType -notin @([Windows.Automation.ControlType]::Text,[Windows.Automation.ControlType]::Edit,[Windows.Automation.ControlType]::Button)){continue}
+                    $queue.Enqueue(@{e=$candidate;depth=1;parent=$id})
+                }
+            }
+        }
         $child=$walker.GetFirstChild($e,$script:ObservationCache)
         if($item.depth -ge 48){if($null -ne $child){$truncated=$true};continue}
         while($null -ne $child){
@@ -280,7 +335,11 @@ function Tree {
         $patterns=@($node.observed.patterns)
         $value=$null;$readOnly=$null
         if(-not $c.IsPassword -and -not (Configuration-Editor $e) -and $patterns -contains 'Value'){
-            $value=Short $node.observed.value;$readOnly=$node.observed.readOnly
+            $readOnly=$node.observed.readOnly
+            if($readOnly -and $c.ControlType -eq [Windows.Automation.ControlType]::Edit -and (Native-ErrorWindow (Window-For $e))){
+                $diagnosticText=[string]$node.observed.value
+                $value=$diagnosticText.Substring(0,[Math]::Min(8192,$diagnosticText.Length))
+            }else{$value=Short $node.observed.value}
         }
         $nodes.Add(@{elementId=$node.id;parentId=$node.parent;depth=$node.depth;role=$c.ControlType.ProgrammaticName.Replace('ControlType.','');name=$(if($c.IsPassword){'[password-redacted]'}else{Short $c.Name});automationId=$(if($c.IsPassword){''}else{Short $c.AutomationId});framework=$c.FrameworkId;enabled=$c.IsEnabled;offscreen=$c.IsOffscreen;password=$c.IsPassword;focused=$c.HasKeyboardFocus;value=$value;readOnly=$readOnly;patterns=$patterns;bounds=$publicBounds})
     }
@@ -309,8 +368,10 @@ function Input-Guard($e,[bool]$needsForeground,[bool]$allowConfigurationPassword
     # A freshly opened RemoteApp may not have a foreground HWND yet. Ask the
     # validated native element's provider to focus it before activation; input
     # still requires the exact owned window to become foreground below.
-    $e.SetFocus()
-    $null=[MendimaruUiNative]::SetForegroundWindow($h)
+    if([MendimaruUiNative]::GetForegroundWindow() -ne $h){
+        try {$e.SetFocus()} catch { if(-not (Native-ErrorWindow $h)){throw} }
+        $null=[MendimaruUiNative]::SetForegroundWindow($h)
+    }
     $focusDeadline=[DateTime]::UtcNow.AddMilliseconds(750)
     while([MendimaruUiNative]::GetForegroundWindow() -ne $h){
         Check-Deadline
@@ -457,7 +518,8 @@ function Act($r) {
         }
         'invoke' {
             if(-not $e.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)){throw 'ui-unsupported-element'}
-            $pattern.Invoke()
+            $identity=($e.GetRuntimeId() -join '.')
+            if(-not [MendimaruUiInvoke]::Dispatch($pattern,$identity)){throw 'ui-effect-unverified'}
             # Invoke completion means UIA dispatched the semantic action. The
             # caller must wait for the intended application state separately.
         }
@@ -488,8 +550,15 @@ function Act($r) {
             if($r.value -eq 'F5'){
                 if((State (Scan)).state -cne 'project-ready'){throw 'ui-effect-unverified'}
             }
-            $e.SetFocus()
-            if(-not $e.Current.HasKeyboardFocus -or [MendimaruUiNative]::GetForegroundWindow() -ne $h){throw 'ui-foreground-lost'}
+            $nativeRoot=($e.Current.ControlType -eq [Windows.Automation.ControlType]::Window -and
+                [IntPtr]$e.Current.NativeWindowHandle -eq $h -and (Native-ErrorWindow $h))
+            if($nativeRoot){
+                if($r.value -cnotin @('Tab','Enter','Escape')){throw 'ui-unsupported-element'}
+            }else{
+                if(-not $e.Current.HasKeyboardFocus){$e.SetFocus()}
+                if(-not $e.Current.HasKeyboardFocus){throw 'ui-foreground-lost'}
+            }
+            if([MendimaruUiNative]::GetForegroundWindow() -ne $h){throw 'ui-foreground-lost'}
             $null=Target
             [Windows.Forms.SendKeys]::SendWait($keys[[string]$r.value])
         }

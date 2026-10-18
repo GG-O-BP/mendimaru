@@ -216,3 +216,22 @@ its owner explicitly closes it. Reconnects are bounded to 16 per owner; stop
 and restart the Studio session when that bound is reached. Explicit `studio
 stop` alone may use guest discovery to reconcile an older failed keeper and
 retire it only after authoritative absence of its exact PID/start identity.
+
+### Native error dialogs and Invoke completion
+
+`invoke` dispatches the observed InvokePattern once on a bounded MTA thread.
+Acceptance does not confirm the application's effect. Use a fresh tree or
+semantic wait to observe the resulting dialog/state; do not replay input after
+a timeout or lost response. The helper rejects the same pending UIA runtime
+identity and allows at most four outstanding provider invokes, so a modal
+provider cannot block the worker needed to inspect and close it.
+
+For an enabled Win32 `Error`/`오류` window in the exact validated Studio process,
+the tree supplements UIA with at most 128 visible native child HWNDs. Only
+Text, Edit and Button controls are exposed; password controls are excluded.
+Read-only diagnostic Edit values are bounded to 8192 characters. All normal
+identity, stale-element, enabled-state and modal ownership guards still apply.
+An already foreground native error Window supports Tab, Enter and Escape
+without requiring a provider SetFocus call on that Window. Every keystroke
+still requires the exact owned top-level HWND to be foreground immediately
+before dispatch. This does not add coordinate clicking or clipboard reads.
