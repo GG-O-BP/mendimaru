@@ -583,6 +583,52 @@ fn isolated_runtime_stop_process() {
             .spawn()
             .unwrap();
         crate::winboat::register_keeper_test_client(&config, client);
+        if root.join("probe-outcome").exists() {
+            let query_root = root.clone();
+            thread::spawn(move || {
+                use crate::winboat::security::{
+                    authenticate_report, authenticated_envelope, OperationSecurity,
+                };
+                let request = query_root.join("client-control.json.sessions.request");
+                let report = query_root.join("client-control.json.sessions.report");
+                let security = OperationSecurity::fixture();
+                let mut sequence = 10;
+                loop {
+                    if let Ok(bytes) = fs::read(&request) {
+                        if let Ok(auth) = authenticate_report(&bytes, &security) {
+                            let packet: Value = serde_json::from_slice(&auth.payload).unwrap();
+                            let outcome =
+                                fs::read_to_string(query_root.join("probe-outcome")).unwrap();
+                            let mut sessions = Vec::new();
+                            if outcome == "live" || outcome == "wrong-identity" {
+                                let pid = if outcome == "live" { 4242 } else { 4343 };
+                                sessions.push(json!({"sessionId":format!("studio-{pid}-638908128000000000"),
+                                    "version":"11.12.3","processId":pid,"startedAt":"2025-08-15T00:00:00Z","hasWindow":true}));
+                            }
+                            let value = json!({"id":if outcome == "replayed" { json!("query_old") } else {packet["id"].clone()},
+                                "sessionId":STUDIO_ID,"ok":outcome != "failed","sessions":sessions});
+                            sequence += 1;
+                            let mut envelope = authenticated_envelope(
+                                &security,
+                                sequence,
+                                &serde_json::to_vec(&value).unwrap(),
+                            )
+                            .unwrap();
+                            if outcome == "tampered" {
+                                let last = envelope.len() - 2;
+                                envelope[last] ^= 1;
+                            }
+                            let _ = fs::remove_file(&request);
+                            fs::write(query_root.join("query-response.tmp"), envelope).unwrap();
+                            fs::rename(query_root.join("query-response.tmp"), &report).unwrap();
+                            fs::write(query_root.join("monitor-query-entered"), b"queried")
+                                .unwrap();
+                        }
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+            });
+        }
         if mode == "keeper" {
             // #146 exercises concurrent cleanup after a confirmed Studio exit.
             // RDP loss alone must no longer start cleanup (#148).
@@ -1425,11 +1471,21 @@ fn studio_orphan_probe_refuses_other_or_unverifiable_keeper_owners() {
 
 #[test]
 fn studio_refresh_queries_guest_with_keeper_and_preserves_ownership() {
-    for outcome in ["absent", "live", "failed", "wrong-identity"] {
+    for outcome in [
+        "absent",
+        "live",
+        "failed",
+        "wrong-identity",
+        "tampered",
+        "replayed",
+    ] {
         let fixture = Fixture::new();
         fixture.prepare_launch_recovery(outcome);
         let mut keeper = fixture.spawn("keeper-observe");
         until(|| fixture.path("keeper-ready").exists());
+        fixture.spawn("studio-status").finish();
+        assert!(fixture.path("monitor-query-entered").exists());
+        assert!(!fixture.path("probe-entered").exists());
         // Disconnect the retained transport and remove the observation report:
         // the keeper must return unknown until an explicit guest refresh.
         fs::write(fixture.path("client-disconnected"), b"disconnected").unwrap();
@@ -1449,11 +1505,14 @@ fn studio_refresh_queries_guest_with_keeper_and_preserves_ownership() {
             fixture.spawn(mode).finish();
             let result = fixture.result(mode);
             assert!(
-                fixture.path("probe-entered").exists(),
+                fixture.path("monitor-query-entered").exists(),
                 "{outcome}: {result}"
             );
-            fs::remove_file(fixture.path("probe-entered")).unwrap();
-            if outcome == "failed" {
+            assert!(
+                !fixture.path("probe-entered").exists(),
+                "refresh must not open RDP"
+            );
+            if matches!(outcome, "failed" | "tampered" | "replayed") {
                 assert_eq!(result["ok"], false, "{result}");
                 assert_eq!(result["error"]["capability"], "studio.status");
             } else {

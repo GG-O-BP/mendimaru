@@ -131,6 +131,22 @@ pub(crate) async fn authoritative_studio_sessions(
     studio_sessions(config).await
 }
 
+/// Explicit user-requested stop may reconcile an older keeper lacking the monitor query.
+#[cfg(target_os = "linux")]
+pub(crate) async fn guest_sessions_for_stop(
+    config: &AppConfig,
+) -> BackendResult<Vec<StudioSessionStatus>> {
+    crate::winboat::guest_sessions_for_stop(config)
+        .await
+        .map_err(|error| {
+            backend::winboat_operation_error(
+                BackendId::LinuxWinboat,
+                CapabilityId::StudioStop,
+                error,
+            )
+        })
+}
+
 pub async fn studio_session_status(
     config: &AppConfig,
     session_id: &str,

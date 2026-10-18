@@ -183,6 +183,9 @@ def main():
 
     try:
         assert cli("env", "ensure", "--timeout-seconds", "300", timeout=330)["data"]["ready"]
+        # Inspect retained owners before any legacy guest operation can open RDP.
+        owners = cli("studio", "status")
+        assert not owners["data"], "An existing Studio owner needs to finish"
         existing = cli("studio", "status", "--refresh", "--timeout-seconds", "90")
         assert not existing["data"], "The release fixture already has an active Studio owner"
         project, version = select_project(

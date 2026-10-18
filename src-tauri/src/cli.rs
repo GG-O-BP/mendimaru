@@ -311,6 +311,8 @@ struct SessionKeeperResponse {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SessionKeeperIpcResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    authoritative: Option<Vec<crate::contracts::StudioSessionStatus>>,
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     session: Option<crate::contracts::StudioSessionStatus>,
@@ -1117,7 +1119,7 @@ async fn run_command(
             let stopped_by_keeper = match request_keeper_stop(&paths, session_id).await {
                 Ok(stopped) => stopped,
                 Err(error) => {
-                    let sessions = crate::platform::authoritative_studio_sessions(&config)
+                    let sessions = crate::platform::guest_sessions_for_stop(&config)
                         .await
                         .map_err(CommandError::from);
                     complete_stopped_session_if_absent(error, sessions, &config, session_id)?;
@@ -1357,6 +1359,9 @@ fn reconcile_studio_sessions(
         {
             // Guest evidence determines process liveness; only its owner knows
             // whether the retained RemoteApp transport is still connected.
+            if current.project_name.is_none() {
+                current.project_name = keeper.project_name.clone();
+            }
             if keeper.connection == StudioConnectionState::Connected {
                 current.connection = keeper.connection;
                 current.reconnectable = false;
@@ -1981,7 +1986,20 @@ async fn serve_session_keeper(
                             Ok(packet) => crate::winboat::host_service::studio::launch(&session, packet).await,
                             Err(_) => Err(BackendError::invalid_request("invalid host-service launch")),
                         };
-                        let response = SessionKeeperIpcResponse { ok: result.is_ok(), session: None, error: result.err() };
+                        let response = SessionKeeperIpcResponse { authoritative: None, ok: result.is_ok(), session: None, error: result.err() };
+                        if let Ok(mut payload) = serde_json::to_vec(&response) { payload.push(b'\n'); let _ = write_half.write_all(&payload).await; }
+                        return;
+                    }
+                    if matches!(read, Ok(Ok(count)) if count > 0) && request.trim_end() == "refresh" {
+                        let result = async {
+                            let paths = AppPaths::discover_for_cli().map_err(|_| BackendError::invalid_request("configuration unavailable"))?;
+                            let config = crate::application::load_config(&paths).map_err(|_| BackendError::invalid_request("configuration unavailable"))?;
+                            crate::platform::authoritative_studio_sessions(&config).await
+                        }.await;
+                        let response = match result {
+                            Ok(sessions) => SessionKeeperIpcResponse { authoritative: Some(sessions), ok: true, session: None, error: None },
+                            Err(error) => SessionKeeperIpcResponse { authoritative: None, ok: false, session: None, error: Some(error) },
+                        };
                         if let Ok(mut payload) = serde_json::to_vec(&response) { payload.push(b'\n'); let _ = write_half.write_all(&payload).await; }
                         return;
                     }
@@ -1990,6 +2008,7 @@ async fn serve_session_keeper(
                         && request.trim_end() == "status"
                     {
                         SessionKeeperIpcResponse {
+                            authoritative: None,
                             error: None,
                             ok: true,
                             session: crate::winboat::registered_client_sessions()
@@ -2004,7 +2023,7 @@ async fn serve_session_keeper(
                         // channel without issuing any guest close request.
                         crate::winboat::disconnect_client(&session);
                         should_stop = true;
-                        SessionKeeperIpcResponse { error: None, ok: true, session: None }
+                        SessionKeeperIpcResponse { authoritative: None, error: None, ok: true, session: None }
                     } else if matches!(read, Ok(Ok(count)) if count > 0)
                         && request.trim_end() == "stop"
                     {
@@ -2012,12 +2031,14 @@ async fn serve_session_keeper(
                             .await
                             .unwrap_or(false);
                         SessionKeeperIpcResponse {
+                            authoritative: None,
                             error: None,
                             ok: should_stop,
                             session: None,
                         }
                     } else {
                         SessionKeeperIpcResponse {
+                            authoritative: None,
                             error: None,
                             ok: false,
                             session: None,
@@ -2101,6 +2122,43 @@ async fn keeper_sessions(
     }
     sessions.sort_by_key(|session| std::cmp::Reverse(session.started_at));
     Ok(sessions)
+}
+
+/// A retained owner must answer authoritative discovery through its authenticated
+/// monitor. Never fall back to a new RDP connection if any keeper responds.
+#[cfg(target_os = "linux")]
+pub(crate) async fn keeper_authoritative_sessions(
+    paths: &AppPaths,
+) -> Result<Option<Vec<crate::contracts::StudioSessionStatus>>, CommandError> {
+    let directory = ensure_session_socket_directory(paths).map_err(keeper_command_error)?;
+    for (index, entry) in std::fs::read_dir(directory)
+        .map_err(|_| keeper_command_error("session keeper discovery failed".into()))?
+        .enumerate()
+    {
+        if index >= 64 {
+            return Err(keeper_command_error("too many session keepers".into()));
+        }
+        let entry =
+            entry.map_err(|_| keeper_command_error("session keeper discovery failed".into()))?;
+        if entry.path().extension().and_then(|x| x.to_str()) != Some("sock") {
+            continue;
+        }
+        if request_session_keeper(&entry.path(), "status")
+            .await?
+            .is_some()
+        {
+            let response = request_session_keeper(&entry.path(), "refresh")
+                .await?
+                .ok_or_else(|| {
+                    keeper_command_error("the Studio owner ended during guest discovery".into())
+                })?;
+            if !response.ok {
+                return Err(keeper_command_error("the Studio owner could not query the guest; reconnect or upgrade the owner before retrying".into()));
+            }
+            return response.authoritative.map(Some).ok_or_else(|| keeper_command_error("the Studio owner does not support safe guest discovery; upgrade the owner before retrying".into()));
+        }
+    }
+    Ok(None)
 }
 
 /// A recovery probe must not displace any responding keeper, including one
@@ -2386,7 +2444,9 @@ async fn request_session_keeper(
 
 #[cfg(target_os = "linux")]
 fn keeper_response_timeout(request: &str) -> Duration {
-    if request == "stop" {
+    if request == "refresh" {
+        Duration::from_secs(35)
+    } else if request == "stop" {
         Duration::from_secs(90)
     } else if request.starts_with("host-service ") {
         Duration::from_secs(35)

@@ -15,6 +15,7 @@ $script:UiVerified = $false
 $script:UiClosed = $false
 
 __HOST_SERVICE_SUPERVISOR__
+__SESSION_QUERY__
 
 function Start-MendimaruUiProcess($Process) {
     # .NET Framework constructs StandardInput with Console.InputEncoding and
@@ -125,6 +126,7 @@ function Write-MendimaruUiResult($Response) {
     $script:UiPending=$null;$script:UiTask=$null
 }
 function Service-MendimaruUi {
+    Service-MendimaruSessionQuery
     Service-MendimaruHostService
     if($null -eq $script:UiIdentity){return}
     $closePath=$controlPath+'.ui.close'

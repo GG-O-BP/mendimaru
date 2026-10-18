@@ -87,8 +87,12 @@ pub(crate) async fn request(
     if cancellation.is_some_and(|token| token.is_cancelled()) {
         return Err(error(op, "ui-cancelled"));
     }
-    let (base, security, sequence) = crate::winboat::ui_channel(&request.session_id)
-        .map_err(|_| error(op, "ui-session-unavailable"))?;
+    let (base, security, sequence) =
+        crate::winboat::ui_channel(&request.session_id).map_err(|_| {
+            let mut failure = error(op, "ui-session-unavailable");
+            failure.diagnostic_ref = crate::winboat::transport_diagnostic(&request.session_id);
+            failure
+        })?;
     let id = crate::contracts::secure_identifier("ui")?;
     let req_path = channel_path(&base, ".ui.request");
     let report_path = channel_path(&base, ".ui.report");
