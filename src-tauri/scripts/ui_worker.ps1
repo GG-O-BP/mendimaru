@@ -24,6 +24,13 @@ public static class MendimaruUiNative {
         return b.ToString();
     }
     public static string Class(IntPtr h) { var b=new StringBuilder(256); GetClassName(h,b,256); return b.ToString(); }
+    public static string ControlRole(IntPtr h) {
+        string c=Class(h);
+        if(c=="Button" || c.StartsWith("WindowsForms10.BUTTON.",StringComparison.Ordinal)) return "Button";
+        if(c=="Static" || c.StartsWith("WindowsForms10.STATIC.",StringComparison.Ordinal)) return "Text";
+        if(c=="Edit" || c=="RichEdit20W" || c=="RICHEDIT50W" || c.StartsWith("WindowsForms10.EDIT.",StringComparison.Ordinal)) return "Edit";
+        return null;
+    }
     public static IntPtr[] Children(IntPtr root, uint pid) {
         var children=new List<IntPtr>();
         EnumChildWindows(root,(h,p)=>{ uint owner; GetWindowThreadProcessId(h,out owner);
@@ -101,7 +108,7 @@ $walker = [Windows.Automation.TreeWalker]::RawViewWalker
 function New-ObservationCache {
     $cache=New-Object Windows.Automation.CacheRequest
     $cache.TreeScope=[Windows.Automation.TreeScope]::Element
-    foreach($property in @('RuntimeId','Name','ControlType','IsPassword','AutomationId','FrameworkId','IsEnabled','IsOffscreen','HasKeyboardFocus','BoundingRectangle')){
+    foreach($property in @('RuntimeId','NativeWindowHandle','Name','ControlType','IsPassword','AutomationId','FrameworkId','IsEnabled','IsOffscreen','HasKeyboardFocus','BoundingRectangle')){
         $cache.Add([Windows.Automation.AutomationElement]::($property+'Property'))
     }
     $script:PatternProperties=@([Windows.Automation.AutomationElement].GetFields([Reflection.BindingFlags]'Public,Static,FlattenHierarchy') | Where-Object{$_.Name -match '^Is(.+)PatternAvailableProperty$'} | ForEach-Object{
@@ -117,7 +124,7 @@ function New-ObservationCache {
 $script:ObservationCache=New-ObservationCache
 function Observation($e) {
     $c=$e.Cached;$value=$null;$readOnly=$null;$modal=$false
-    $native=Native-Observation $e
+    $native=Native-Observation $e $c
     if(-not ($c.IsPassword -or ($native -and $native.password)) -and -not (Configuration-Editor $e) -and [bool]$e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::IsValuePatternAvailableProperty)){
         $value=$e.GetCachedPropertyValue([Windows.Automation.ValuePattern]::ValueProperty)
         $readOnly=$e.GetCachedPropertyValue([Windows.Automation.ValuePattern]::IsReadOnlyProperty)
@@ -230,21 +237,21 @@ function Native-ErrorWindow($h) {
     return $root.Current.FrameworkId -ceq 'Win32' -and $root.Current.Name -cin @('Error','오류') -and
         $root.Current.ControlType -eq [Windows.Automation.ControlType]::Window
 }
-function Native-Observation($e) {
-    $c=$e.Current
-    if($c.FrameworkId -cne 'Win32'){return $null}
+function Native-Observation($e,$snapshot=$null) {
+    $c=$(if($null -ne $snapshot){$snapshot}else{$e.Current})
+    if($c.FrameworkId -cnotin @('Win32','WinForm')){return $null}
     $h=[IntPtr]$c.NativeWindowHandle
     if($h -eq [IntPtr]::Zero -or -not (Native-ErrorWindow ([MendimaruUiNative]::GetAncestor($h,2)))){return $null}
     $owner=[uint32]0
     $null=[MendimaruUiNative]::GetWindowThreadProcessId($h,[ref]$owner)
     if($owner -ne [uint32]$script:Identity.processId){return $null}
-    $class=[MendimaruUiNative]::Class($h)
-    $role=switch -CaseSensitive ($class){'Button'{'Button'};'Static'{'Text'};'Edit'{'Edit'};default{return $null}}
+    $role=[MendimaruUiNative]::ControlRole($h)
+    if($null -eq $role){return $null}
     $style=[MendimaruUiNative]::Style($h)
-    $password=($class -ceq 'Edit' -and ($style -band 0x20) -ne 0)
-    $readOnly=($class -ceq 'Edit' -and ($style -band 0x800) -ne 0)
+    $password=($role -ceq 'Edit' -and ($style -band 0x20) -ne 0)
+    $readOnly=($role -ceq 'Edit' -and ($style -band 0x800) -ne 0)
     $text=$null
-    if(-not $password -and ($class -cne 'Edit' -or $readOnly)){
+    if(-not $password -and ($role -cne 'Edit' -or $readOnly)){
         Check-Deadline
         $limit=$(if($readOnly){8192}else{256})
         $text=[MendimaruUiNative]::Text($h,$limit)
@@ -280,7 +287,7 @@ function Scan($scope=$null) {
                 foreach($native in @($handles | Select-Object -First 128)){
                     Check-Deadline
                     $candidate=[Windows.Automation.AutomationElement]::FromHandle($native).GetUpdatedCache($script:ObservationCache)
-                    if($candidate.Cached.IsPassword -or [MendimaruUiNative]::Class($native) -cnotin @('Button','Static','Edit')){continue}
+                    if($candidate.Cached.IsPassword -or $null -eq [MendimaruUiNative]::ControlRole($native)){continue}
                     $queue.Enqueue(@{e=$candidate;depth=1;parent=$id})
                 }
             }
@@ -576,7 +583,7 @@ function Act($r) {
                 $button=[IntPtr]$e.Current.NativeWindowHandle
                 $native=Native-Observation $e
                 if($null -eq $native -or -not (Native-ErrorWindow $h) -or
-                    [MendimaruUiNative]::Class($button) -cne 'Button' -or
+                    [MendimaruUiNative]::ControlRole($button) -cne 'Button' -or
                     $native.text -cnotin @('Details >>','Details <<','Close','자세히 >>','자세히 <<','닫기')){throw 'ui-unsupported-element'}
                 # BM_CLICK is a semantic button activation on the freshly
                 # resolved exact child HWND; never a coordinate or replay.
