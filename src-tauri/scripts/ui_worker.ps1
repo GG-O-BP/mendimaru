@@ -26,6 +26,7 @@ public static class MendimaruUiNative {
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint message, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
@@ -517,9 +518,18 @@ function Act($r) {
             $e.SetFocus();if(-not $e.Current.HasKeyboardFocus){throw 'ui-effect-unverified'}
         }
         'invoke' {
-            if(-not $e.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)){throw 'ui-unsupported-element'}
-            $identity=($e.GetRuntimeId() -join '.')
-            if(-not [MendimaruUiInvoke]::Dispatch($pattern,$identity)){throw 'ui-effect-unverified'}
+            if($e.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)){
+                $identity=($e.GetRuntimeId() -join '.')
+                if(-not [MendimaruUiInvoke]::Dispatch($pattern,$identity)){throw 'ui-effect-unverified'}
+            }else{
+                $button=[IntPtr]$e.Current.NativeWindowHandle
+                if(-not (Native-ErrorWindow $h) -or $e.Current.ControlType -ne [Windows.Automation.ControlType]::Button -or
+                    [MendimaruUiNative]::Class($button) -cne 'Button' -or
+                    $e.Current.Name -cnotin @('Details >>','Details <<','Close','자세히 >>','자세히 <<','닫기')){throw 'ui-unsupported-element'}
+                # BM_CLICK is a semantic button activation on the freshly
+                # resolved exact child HWND; never a coordinate or replay.
+                if(-not [MendimaruUiNative]::PostMessage($button,0x00f5,[IntPtr]::Zero,[IntPtr]::Zero)){throw 'ui-effect-unverified'}
+            }
             # Invoke completion means UIA dispatched the semantic action. The
             # caller must wait for the intended application state separately.
         }
