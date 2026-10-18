@@ -92,10 +92,15 @@ $null=$form.ShowDialog()
     if($null -eq $open){throw 'fixture Invoke button missing'}
     $openId=Register $open
     $watch=[Diagnostics.Stopwatch]::StartNew()
+    Write-Output ('Fixture open: '+$open.Current.ControlType.ProgrammaticName+' / '+$open.Current.FrameworkId)
     $null=Act @{elementId=$openId;action='invoke'}
     if($watch.ElapsedMilliseconds -gt 1500){throw 'modal Invoke blocked the worker'}
     $tree=Await-Tree {param($t) @($t.root.nodes|Where-Object{$_.name -ceq 'Details >>'}).Count -eq 1}
     $details=@($tree.root.nodes|Where-Object{$_.name -ceq 'Details >>'})[0]
+    $detailsElement=Resolve $details.elementId
+    $detailsWindow=Window-For $detailsElement
+    $detailsRoot=[Windows.Automation.AutomationElement]::FromHandle($detailsWindow)
+    Write-Output ('Fixture details: '+$details.role+' / '+$details.framework+' / '+[MendimaruUiNative]::Class([IntPtr]$detailsElement.Current.NativeWindowHandle)+' / '+$detailsRoot.Current.Name+' / '+$detailsRoot.Current.FrameworkId+' / '+(Native-ErrorWindow $detailsWindow))
     $null=Act @{elementId=$details.elementId;action='invoke'}
     $tree=Await-Tree {param($t) @($t.root.nodes|Where-Object{$_.value -like '*END-OF-DETAILS'}).Count -eq 1}
     $errorWindow=@($tree.root.windows|Where-Object{$_.name -ceq 'Error'})[0]
@@ -108,6 +113,7 @@ $null=$form.ShowDialog()
     if(-not $rejected){throw 'disabled owner accepted duplicate input'}
     $tree=Tree
     $close=@($tree.root.nodes|Where-Object{$_.name -ceq 'Close'})[0]
+    Write-Output ('Fixture close: '+$close.role+' / '+$close.framework)
     $null=Act @{elementId=$close.elementId;action='invoke'}
     $null=Await-Tree {param($t) @($t.root.windows|Where-Object{$_.name -ceq 'Error'}).Count -eq 0}
     Write-Output 'UIA Invoke -> native Error -> Details -> bounded read -> keyboard Tab -> Close: PASS'
