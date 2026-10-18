@@ -183,7 +183,8 @@ function Register($element,$observation=$null) {
     if($null -ne $observation){$observedValue=$observation.value}
     elseif(-not $c.IsPassword -and -not (Configuration-Editor $element) -and $element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)){$observedValue=$pattern.Current.Value}
     if ($script:Elements.Count -ge 4096 -and -not $script:Elements.ContainsKey($id)) { throw 'ui-tree-truncated' }
-    $script:Elements[$id] = @{element=$element; rid=$rid; name=$c.Name; role=$c.ControlType.ProgrammaticName; password=$c.IsPassword; value=$observedValue}
+    $native=$(if($null -ne $observation){$observation.native}else{Native-Observation $element})
+    $script:Elements[$id] = @{native=$native;element=$element; rid=$rid; name=$c.Name; role=$c.ControlType.ProgrammaticName; password=$c.IsPassword; value=$observedValue}
     return $id
 }
 function Resolve([string]$id) {
@@ -195,6 +196,10 @@ function Resolve([string]$id) {
         if (($e.GetRuntimeId() -join '.') -cne $stored.rid -or $c.Name -cne $stored.name -or $c.ControlType.ProgrammaticName -cne $stored.role -or $c.IsPassword -ne $stored.password) { throw 'ui-stale-element' }
         $pattern=$null
         if($null -ne $stored.value -and ($e.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) -and $pattern.Current.Value -cne $stored.value){throw 'ui-stale-element'}
+        $native=Native-Observation $e
+        if($stored.native -and ($null -eq $native -or $native.role -cne $stored.native.role -or
+            $native.password -ne $stored.native.password -or $native.readOnly -ne $stored.native.readOnly -or
+            $native.text -cne $stored.native.text)){throw 'ui-stale-element'}
         $null = Window-For $e
         return $e
     } catch { throw 'ui-stale-element' }
@@ -202,7 +207,7 @@ function Resolve([string]$id) {
 function Public-Element($e) {
     $c=$e.Current
     $native=Native-Observation $e
-    return @{elementId=(Register $e); role=$(if($native){$native.role}else{$c.ControlType.ProgrammaticName.Replace('ControlType.','')}); name=$(if($c.IsPassword -or ($native -and $native.password)){'[password-redacted]'}else{Short $c.Name})}
+    return @{elementId=(Register $e); role=$(if($native){$native.role}else{$c.ControlType.ProgrammaticName.Replace('ControlType.','')}); name=$(if($c.IsPassword -or ($native -and $native.password)){'[password-redacted]'}elseif($native -and $native.role -ceq 'Edit'){''}elseif($native){$native.text}else{Short $c.Name})}
 }
 function Short([string]$s) { return $s.Substring(0,[Math]::Min(256,$s.Length)) }
 function Matches($e,$selector,$observation=$null) {
@@ -566,9 +571,10 @@ function Act($r) {
                 if(-not [MendimaruUiInvoke]::Dispatch($pattern,$identity)){throw 'ui-effect-unverified'}
             }else{
                 $button=[IntPtr]$e.Current.NativeWindowHandle
-                if(-not (Native-ErrorWindow $h) -or
+                $native=Native-Observation $e
+                if($null -eq $native -or -not (Native-ErrorWindow $h) -or
                     [MendimaruUiNative]::Class($button) -cne 'Button' -or
-                    $e.Current.Name -cnotin @('Details >>','Details <<','Close','자세히 >>','자세히 <<','닫기')){throw 'ui-unsupported-element'}
+                    $native.text -cnotin @('Details >>','Details <<','Close','자세히 >>','자세히 <<','닫기')){throw 'ui-unsupported-element'}
                 # BM_CLICK is a semantic button activation on the freshly
                 # resolved exact child HWND; never a coordinate or replay.
                 if(-not [MendimaruUiNative]::PostMessage($button,0x00f5,[IntPtr]::Zero,[IntPtr]::Zero)){throw 'ui-effect-unverified'}

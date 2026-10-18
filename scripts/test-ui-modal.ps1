@@ -8,7 +8,7 @@ $text=[IO.File]::ReadAllText($source)
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'worker syntax errors'}
-foreach($name in @('Check-Deadline','Modal','Window-For','Input-Guard')){
+foreach($name in @('Check-Deadline','Modal','Window-For','Native-ErrorWindow','Native-Observation','Input-Guard')){
     $definition=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $name},$true)
     . ([ScriptBlock]::Create($definition.Extent.Text))
 }
