@@ -32,6 +32,7 @@ public static class ErrorFixture {
             CreateWindowEx(0,"Static","Compilation of the app bundle failed.",0x50000000,10,10,340,25,h,IntPtr.Zero,IntPtr.Zero,IntPtr.Zero);
             CreateWindowEx(0,"Button","Details >>",0x50010000,10,45,100,30,h,(IntPtr)101,IntPtr.Zero,IntPtr.Zero);
             CreateWindowEx(0,"Button","Close",0x50010001,240,45,100,30,h,(IntPtr)102,IntPtr.Zero,IntPtr.Zero);
+            CreateWindowEx(0,"Edit","FIXTURE-PASSWORD-MUST-NOT-LEAK",0x50000020,10,180,100,20,h,(IntPtr)104,IntPtr.Zero,IntPtr.Zero);
             details=CreateWindowEx(0,"Edit","",0x50800844,10,85,330,90,h,(IntPtr)103,IntPtr.Zero,IntPtr.Zero);
             return (IntPtr)1;
         }
@@ -103,6 +104,7 @@ $null=$form.ShowDialog()
     Write-Output ('Fixture details: '+$details.role+' / '+$details.framework+' / '+[MendimaruUiNative]::Class([IntPtr]$detailsElement.Current.NativeWindowHandle)+' / '+$detailsRoot.Current.Name+' / '+$detailsRoot.Current.FrameworkId+' / '+(Native-ErrorWindow $detailsWindow))
     $null=Act @{elementId=$details.elementId;action='invoke'}
     $tree=Await-Tree {param($t) @($t.root.nodes|Where-Object{$_.value -like '*END-OF-DETAILS'}).Count -eq 1}
+    if(($tree | ConvertTo-Json -Depth 16) -like '*FIXTURE-PASSWORD-MUST-NOT-LEAK*'){throw 'native password leaked into public tree'}
     $errorWindow=@($tree.root.windows|Where-Object{$_.name -ceq 'Error'})[0]
     $root=Resolve $errorWindow.elementId
     $null=[MendimaruUiNative]::SetForegroundWindow([IntPtr]$errorWindow.handle)

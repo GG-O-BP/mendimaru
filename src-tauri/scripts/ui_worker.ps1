@@ -15,6 +15,14 @@ public static class MendimaruUiNative {
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr p);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr p);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder text, int count);
+    [DllImport("user32.dll", EntryPoint="GetWindowLongW")] static extern int GetWindowLong(IntPtr h, int index);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr SendMessageTimeout(IntPtr h,uint message,UIntPtr w,StringBuilder text,uint flags,uint timeout,out UIntPtr result);
+    public static uint Style(IntPtr h) { return unchecked((uint)GetWindowLong(h,-16)); }
+    public static string Text(IntPtr h,int limit) {
+        var b=new StringBuilder(limit+1); UIntPtr result;
+        if(SendMessageTimeout(h,0x000d,(UIntPtr)(uint)(limit+1),b,2,250,out result)==IntPtr.Zero) return null;
+        return b.ToString();
+    }
     public static string Class(IntPtr h) { var b=new StringBuilder(256); GetClassName(h,b,256); return b.ToString(); }
     public static IntPtr[] Children(IntPtr root, uint pid) {
         var children=new List<IntPtr>();
@@ -109,7 +117,8 @@ function New-ObservationCache {
 $script:ObservationCache=New-ObservationCache
 function Observation($e) {
     $c=$e.Cached;$value=$null;$readOnly=$null;$modal=$false
-    if(-not $c.IsPassword -and -not (Configuration-Editor $e) -and [bool]$e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::IsValuePatternAvailableProperty)){
+    $native=Native-Observation $e
+    if(-not ($c.IsPassword -or ($native -and $native.password)) -and -not (Configuration-Editor $e) -and [bool]$e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::IsValuePatternAvailableProperty)){
         $value=$e.GetCachedPropertyValue([Windows.Automation.ValuePattern]::ValueProperty)
         $readOnly=$e.GetCachedPropertyValue([Windows.Automation.ValuePattern]::IsReadOnlyProperty)
     }
@@ -117,7 +126,7 @@ function Observation($e) {
         $modal=[bool]$e.GetCachedPropertyValue([Windows.Automation.WindowPattern]::IsModalProperty)
     }
     $patterns=@($script:PatternProperties | Where-Object{[bool]$e.GetCachedPropertyValue($_.property)} | ForEach-Object{$_.name})
-    return @{c=$c;patterns=$patterns;rid=($e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::RuntimeIdProperty) -join '.');value=$value;readOnly=$readOnly;modal=$modal}
+    return @{c=$c;native=$native;patterns=$patterns;rid=($e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::RuntimeIdProperty) -join '.');value=$value;readOnly=$readOnly;modal=$modal}
 }
 
 function Check-Deadline {
@@ -192,13 +201,16 @@ function Resolve([string]$id) {
 }
 function Public-Element($e) {
     $c=$e.Current
-    return @{elementId=(Register $e); role=$c.ControlType.ProgrammaticName.Replace('ControlType.',''); name=$(if($c.IsPassword){'[password-redacted]'}else{Short $c.Name})}
+    $native=Native-Observation $e
+    return @{elementId=(Register $e); role=$(if($native){$native.role}else{$c.ControlType.ProgrammaticName.Replace('ControlType.','')}); name=$(if($c.IsPassword -or ($native -and $native.password)){'[password-redacted]'}else{Short $c.Name})}
 }
 function Short([string]$s) { return $s.Substring(0,[Math]::Min(256,$s.Length)) }
 function Matches($e,$selector,$observation=$null) {
     $c=$(if($null -ne $observation){$observation.c}else{$e.Current})
-    if ($c.IsPassword) { return $false }
-    if ($selector.role -and $c.ControlType.ProgrammaticName -cne ('ControlType.'+$selector.role)) { return $false }
+    $native=$(if($null -ne $observation){$observation.native}else{Native-Observation $e})
+    if ($c.IsPassword -or ($native -and $native.password)) { return $false }
+    $role=$(if($native){$native.role}else{$c.ControlType.ProgrammaticName.Replace('ControlType.','')})
+    if ($selector.role -and $role -cne $selector.role) { return $false }
     if ($null -ne $selector.name -and $c.Name -cne $selector.name) { return $false }
     if ($null -ne $selector.automationId -and $c.AutomationId -cne $selector.automationId) { return $false }
     return $true
@@ -212,6 +224,25 @@ function Native-ErrorWindow($h) {
     $root=[Windows.Automation.AutomationElement]::FromHandle($h)
     return $root.Current.FrameworkId -ceq 'Win32' -and $root.Current.Name -cin @('Error','오류') -and
         $root.Current.ControlType -eq [Windows.Automation.ControlType]::Window
+}
+function Native-Observation($e) {
+    $c=$e.Current
+    if($c.FrameworkId -cne 'Win32'){return $null}
+    $h=[IntPtr]$c.NativeWindowHandle
+    if($h -eq [IntPtr]::Zero -or -not (Native-ErrorWindow ([MendimaruUiNative]::GetAncestor($h,2)))){return $null}
+    $class=[MendimaruUiNative]::Class($h)
+    $role=switch -CaseSensitive ($class){'Button'{'Button'};'Static'{'Text'};'Edit'{'Edit'};default{return $null}}
+    $style=[MendimaruUiNative]::Style($h)
+    $password=($class -ceq 'Edit' -and ($style -band 0x20) -ne 0)
+    $readOnly=($class -ceq 'Edit' -and ($style -band 0x800) -ne 0)
+    $text=$null
+    if(-not $password -and ($class -cne 'Edit' -or $readOnly)){
+        Check-Deadline
+        $limit=$(if($readOnly){8192}else{256})
+        $text=[MendimaruUiNative]::Text($h,$limit)
+        if($null -eq $text){throw 'ui-effect-unverified'}
+    }
+    return @{role=$role;password=$password;readOnly=$readOnly;text=$text}
 }
 function Scan($scope=$null) {
     # A new observation invalidates the previous element generation. A scope
@@ -241,7 +272,7 @@ function Scan($scope=$null) {
                 foreach($native in @($handles | Select-Object -First 128)){
                     Check-Deadline
                     $candidate=[Windows.Automation.AutomationElement]::FromHandle($native).GetUpdatedCache($script:ObservationCache)
-                    if($candidate.Cached.IsPassword -or $candidate.Cached.ControlType -notin @([Windows.Automation.ControlType]::Text,[Windows.Automation.ControlType]::Edit,[Windows.Automation.ControlType]::Button)){continue}
+                    if($candidate.Cached.IsPassword -or [MendimaruUiNative]::Class($native) -cnotin @('Button','Static','Edit')){continue}
                     $queue.Enqueue(@{e=$candidate;depth=1;parent=$id})
                 }
             }
@@ -342,7 +373,18 @@ function Tree {
                 $value=$diagnosticText.Substring(0,[Math]::Min(8192,$diagnosticText.Length))
             }else{$value=Short $node.observed.value}
         }
-        $nodes.Add(@{elementId=$node.id;parentId=$node.parent;depth=$node.depth;role=$c.ControlType.ProgrammaticName.Replace('ControlType.','');name=$(if($c.IsPassword){'[password-redacted]'}else{Short $c.Name});automationId=$(if($c.IsPassword){''}else{Short $c.AutomationId});framework=$c.FrameworkId;enabled=$c.IsEnabled;offscreen=$c.IsOffscreen;password=$c.IsPassword;focused=$c.HasKeyboardFocus;value=$value;readOnly=$readOnly;patterns=$patterns;bounds=$publicBounds})
+        $native=$node.observed.native
+        $password=($c.IsPassword -or ($native -and $native.password))
+        $role=$c.ControlType.ProgrammaticName.Replace('ControlType.','')
+        $name=$(if($password){'[password-redacted]'}else{Short $c.Name})
+        if($native){
+            $role=$native.role
+            if($native.password){$value=$null;$patterns=@();$name='[password-redacted]'}
+            elseif($native.role -ceq 'Edit'){$name='';$value=$null;$patterns=@();if($native.readOnly){$value=$native.text;$readOnly=$true;$patterns=@('Value')}}
+            elseif($native.role -cin @('Button','Text')){$name=$native.text}
+            if($native.role -ceq 'Button' -and $name -cin @('Details >>','Details <<','Close','자세히 >>','자세히 <<','닫기')){$patterns=@('Invoke')}
+        }
+        $nodes.Add(@{elementId=$node.id;parentId=$node.parent;depth=$node.depth;role=$role;name=$name;automationId=$(if($password){''}else{Short $c.AutomationId});framework=$c.FrameworkId;enabled=$c.IsEnabled;offscreen=$c.IsOffscreen;password=$password;focused=$c.HasKeyboardFocus;value=$value;readOnly=$readOnly;patterns=$patterns;bounds=$publicBounds})
     }
     $windows=New-Object Collections.Generic.List[object]
     foreach($h in @(Windows)){
@@ -354,7 +396,8 @@ function Tree {
 }
 function Input-Guard($e,[bool]$needsForeground,[bool]$allowConfigurationPassword=$false) {
     $null=Target;Supported-Version
-    if(($e.Current.IsPassword -and -not $allowConfigurationPassword) -or $e.Current.IsOffscreen -or -not $e.Current.IsEnabled){throw 'ui-unsupported-element'}
+    $native=Native-Observation $e
+    if((($e.Current.IsPassword -or ($native -and $native.password)) -and -not $allowConfigurationPassword) -or $e.Current.IsOffscreen -or -not $e.Current.IsEnabled){throw 'ui-unsupported-element'}
     $h=Window-For $e
     if([MendimaruUiNative]::IsIconic($h) -or -not [MendimaruUiNative]::IsWindowEnabled($h)){throw 'ui-modal-blocked'}
     foreach($other in @(Windows)){
@@ -523,7 +566,7 @@ function Act($r) {
                 if(-not [MendimaruUiInvoke]::Dispatch($pattern,$identity)){throw 'ui-effect-unverified'}
             }else{
                 $button=[IntPtr]$e.Current.NativeWindowHandle
-                if(-not (Native-ErrorWindow $h) -or $e.Current.ControlType -ne [Windows.Automation.ControlType]::Button -or
+                if(-not (Native-ErrorWindow $h) -or
                     [MendimaruUiNative]::Class($button) -cne 'Button' -or
                     $e.Current.Name -cnotin @('Details >>','Details <<','Close','자세히 >>','자세히 <<','닫기')){throw 'ui-unsupported-element'}
                 # BM_CLICK is a semantic button activation on the freshly
