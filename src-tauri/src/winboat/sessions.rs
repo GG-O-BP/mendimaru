@@ -100,6 +100,13 @@ pub(crate) async fn list_authoritative(
             let studios = installed_versions_cached(config).await?;
             return normalize_sessions(config, &studios, reports);
         }
+        // A keeper may still be cleaning up an authenticated Studio exit. It
+        // must never discover itself over IPC or create a replacement RDP.
+        if !clients()?.is_empty() {
+            return Err(failure(
+                "the retained Studio monitor is no longer available",
+            ));
+        }
         let paths =
             crate::app_paths::AppPaths::discover_for_cli().map_err(|e| failure(e.to_string()))?;
         if let Some(sessions) = crate::cli::keeper_authoritative_sessions(&paths)
@@ -1604,7 +1611,62 @@ mod tests {
             .path()
             .join("launch.control.json.ui.close")
             .exists();
+        let replacement_status = super::clients()
+            .unwrap()
+            .get(session_id)
+            .unwrap()
+            .status
+            .clone();
+        let replacement_control = workspace.path().join("replacement.control.json");
+        let mut replacement_process = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .unwrap();
+        replacement_process.wait().unwrap();
+        super::register_client(
+            session_id,
+            super::RemoteAppProcess::from_test_child(replacement_process),
+            replacement_status,
+            RegisteredControl {
+                report_path: report_path.clone(),
+                control_path: replacement_control.clone(),
+                security: OperationSecurity::fixture(),
+                previous_report: authenticate_report(
+                    envelope.as_bytes(),
+                    &OperationSecurity::fixture(),
+                )
+                .unwrap(),
+                next_sequence: 1,
+                cleanup_report: false,
+            },
+            None,
+        )
+        .unwrap();
+        {
+            let registry = super::clients().unwrap();
+            let replacement = registry.get(session_id).unwrap();
+            assert_eq!(replacement.previous_monitors.len(), 1);
+            assert!(
+                replacement.project_access.is_some(),
+                "reconnect lost its project lease"
+            );
+        }
+        assert!(
+            !workspace
+                .path()
+                .join("launch.control.json.ui.close")
+                .exists(),
+            "reconnect retired a bridge monitor"
+        );
         super::disconnect_client(session_id);
+        assert!(workspace
+            .path()
+            .join("launch.control.json.ui.close")
+            .exists());
+        assert!(workspace
+            .path()
+            .join("replacement.control.json.ui.close")
+            .exists());
         assert!(result.is_err());
         assert!(
             retained && report_retained,
