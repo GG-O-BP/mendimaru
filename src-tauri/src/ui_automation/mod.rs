@@ -259,6 +259,10 @@ pub(crate) fn safe_reason(reason: &str) -> Option<&'static str> {
 /// Only fixed CLR type names and a signed HRESULT may cross the CLI boundary.
 /// Provider exception messages, arbitrary type names and paths remain private.
 pub(crate) fn safe_diagnostic(value: &str) -> bool {
+    if let Some((kind, code)) = value.strip_prefix("rdp:").and_then(|v| v.split_once(':')) {
+        return matches!(kind, "exit" | "signal")
+            && code.parse::<u8>().is_ok_and(|n| n.to_string() == code);
+    }
     let Some((kind, code)) = value.strip_prefix("uia:").and_then(|v| v.split_once(':')) else {
         return false;
     };

@@ -140,8 +140,8 @@ The existing `studio status` command remains the process/session inventory.
   Lock/disconnect fails closed. Focus and keyboard input require the selected RemoteApp to have foreground
   focus; a denied foreground transition returns `ui-foreground-lost`. Explicit `ui reconnect --session-id SESSION` revalidates identity and supports the command timeout and cancellation; a new worker
   generation invalidates old elements. A failed reconnect retains the original
-  session observer and project lease. A verified replacement sends a signed
-  retirement request to the previous monitor, preserving Studio. Studio handoff after binding never
+  session observer and project lease. A verified replacement retains the previous authenticated monitor and its
+  linked forwarding until exact Studio exit or explicit owner cleanup. Studio handoff after binding never
   silently retargets input to another PID.
 - The worker is a killable MTA child in a Windows job with kill-on-parent-close
   and a 512 MiB process-memory ceiling. A hung UIA call cannot hang the parent
@@ -196,3 +196,23 @@ request WinBoat credentials, RDP, or shared files.
 
 The MTA/process isolation follows Microsoft's
 [UI Automation threading guidance](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-threading).
+
+### Guest discovery and transport loss
+
+`studio status --refresh` and `--orphans` query live Windows processes through
+the retained keeper's authenticated monitor when an owner exists. They never
+open a second RDP connection to inspect an owned session, including after its
+RDP transport disconnects. An older keeper without this protocol fails the
+refresh; upgrade after stopping that owner. Cached `studio status` remains a
+non-disruptive ownership observation. The release gate checks it before any
+owner-free guest discovery.
+
+RDP exit does not prove Studio exit. A failed UI call may report the bounded
+diagnostic `rdp:exit:N` or `rdp:signal:N`, without guest output or credentials.
+Use the supported exact-session `ui reconnect` after observing the disconnected
+identity. Reconnect retains previous authenticated monitors so their linked
+MySQL/web forwarding remains alive until the exact Studio process exits or
+its owner explicitly closes it. Reconnects are bounded to 16 per owner; stop
+and restart the Studio session when that bound is reached. Explicit `studio
+stop` alone may use guest discovery to reconcile an older failed keeper and
+retire it only after authoritative absence of its exact PID/start identity.

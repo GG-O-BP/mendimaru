@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "cargoAuditVersion": "0.22.2",
-  "reviewedAt": "2026-10-13",
+  "reviewedAt": "2026-10-19",
   "policy": {
     "vulnerabilities": "deny",
     "unsound": "deny-unless-explicit-bounded-reachability",
@@ -114,11 +114,53 @@
       "upstreamUrl": "https://github.com/gtk-rs/gtk-rs-core/pull/1343",
       "remediationPlan": "Upgrade glib to >=0.20 through Tauri/wry as soon as a release drops gtk 0.18/webkit2gtk 2.0 (tauri 2.12.3, wry 0.57.0 and webkit2gtk 2.0.2 still require glib 0.18 on 2026-10-12); remove this exception immediately if a source reference to VariantStrIter or array_iter_str is introduced.",
       "expiresAt": "2026-12-31"
+    },
+    {
+      "advisoryId": "RUSTSEC-2026-0370",
+      "kind": "unmaintained",
+      "package": {
+        "name": "zvariant",
+        "version": "5.15.0"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri-plugin-opener v2.5.5 -> zbus v5.19.0"],
+      "reason": "Informational deprecation after the crate was merged into zbus 6. Tauri opener still requires zbus 5, including its current stable 2.7.2 release; no compatible upstream migration is available on 2026-10-19. This advisory reports no vulnerability.",
+      "upstreamUrl": "https://github.com/z-galaxy/zbus/issues/2043",
+      "remediationPlan": "Recheck Tauri opener for zbus 6 support by 2026-11-18, upgrade the compatible opener stack and remove this exact-version exception. Vulnerabilities and unknown warnings remain denied.",
+      "expiresAt": "2026-11-18"
+    },
+    {
+      "advisoryId": "RUSTSEC-2026-0371",
+      "kind": "unmaintained",
+      "package": {
+        "name": "zbus_names",
+        "version": "4.3.4"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri-plugin-opener v2.5.5 -> zbus v5.19.0"],
+      "reason": "Informational deprecation after the crate was merged into zbus 6. Tauri opener still requires zbus 5, including its current stable 2.7.2 release; no compatible upstream migration is available on 2026-10-19. This advisory reports no vulnerability.",
+      "upstreamUrl": "https://github.com/z-galaxy/zbus/issues/2043",
+      "remediationPlan": "Recheck Tauri opener for zbus 6 support by 2026-11-18, upgrade the compatible opener stack and remove this exact-version exception. Vulnerabilities and unknown warnings remain denied.",
+      "expiresAt": "2026-11-18"
+    },
+    {
+      "advisoryId": "RUSTSEC-2026-0372",
+      "kind": "unmaintained",
+      "package": {
+        "name": "zvariant_derive",
+        "version": "5.15.0"
+      },
+      "owner": "GGOBP",
+      "introducedBy": ["tauri-plugin-opener v2.5.5 -> zbus v5.19.0"],
+      "reason": "Informational deprecation after the crate was merged into zbus 6. Tauri opener still requires zbus 5, including its current stable 2.7.2 release; no compatible upstream migration is available on 2026-10-19. This advisory reports no vulnerability.",
+      "upstreamUrl": "https://github.com/z-galaxy/zbus/issues/2043",
+      "remediationPlan": "Recheck Tauri opener for zbus 6 support by 2026-11-18, upgrade the compatible opener stack and remove this exact-version exception. Vulnerabilities and unknown warnings remain denied.",
+      "expiresAt": "2026-11-18"
     }
   ],
   "advisoryDatabase": {
-    "advisoryCount": 1307,
-    "lastCommit": "57dcc0f2192e025138907a495c1ac9a7e1e3e123",
-    "lastUpdated": "2026-10-12T20:06:48+02:00"
+    "advisoryCount": 1338,
+    "lastCommit": "999ec89d5d3f10f20be14750ec8c2d8b44e0ac9b",
+    "lastUpdated": "2026-10-17T17:23:59+02:00"
   }
 }

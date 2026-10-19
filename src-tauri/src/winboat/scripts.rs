@@ -5,6 +5,10 @@ fn ui_preamble() -> String {
     UI_SUPERVISOR
         .replace("__UI_WORKER_BASE64__", &BASE64_STANDARD.encode(UI_WORKER))
         .replace(
+            "__SESSION_QUERY__",
+            include_str!("../../scripts/session_query.ps1"),
+        )
+        .replace(
             "__HOST_SERVICE_SUPERVISOR__",
             include_str!("../../scripts/host_service_supervisor.ps1"),
         )

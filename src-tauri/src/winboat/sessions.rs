@@ -42,6 +42,7 @@ struct RegisteredClient {
     status: StudioSessionStatus,
     control: RegisteredControl,
     project_access: Option<RegisteredProjectAccess>,
+    previous_monitors: Vec<RegisteredControl>,
 }
 
 struct RegisteredProjectAccess {
@@ -88,6 +89,38 @@ pub(crate) async fn list(
 
 /// Query the guest even when this process retains a session owner.
 pub(crate) async fn list_authoritative(
+    config: &AppConfig,
+) -> Result<Vec<StudioSessionStatus>, WindowsOperationFailure> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(session) = registered_client_sessions().first() {
+            let reports = super::session_query::query(&session.session_id)
+                .await
+                .map_err(failure)?;
+            let studios = installed_versions_cached(config).await?;
+            return normalize_sessions(config, &studios, reports);
+        }
+        // A keeper may still be cleaning up an authenticated Studio exit. It
+        // must never discover itself over IPC or create a replacement RDP.
+        if !clients()?.is_empty() {
+            return Err(failure(
+                "the retained Studio monitor is no longer available",
+            ));
+        }
+        let paths =
+            crate::app_paths::AppPaths::discover_for_cli().map_err(|e| failure(e.to_string()))?;
+        if let Some(sessions) = crate::cli::keeper_authoritative_sessions(&paths)
+            .await
+            .map_err(|e| failure(e.message))?
+        {
+            return Ok(sessions);
+        }
+    }
+    list_guest(config).await
+}
+
+/// A new RDP query is permitted only without owners, or during explicit stop recovery.
+pub(crate) async fn list_guest(
     config: &AppConfig,
 ) -> Result<Vec<StudioSessionStatus>, WindowsOperationFailure> {
     let started_at = Instant::now();
@@ -141,6 +174,12 @@ pub(crate) async fn reconnect(
         return Err(failure(
             "another connected Studio Pro session must be closed before reconnecting",
         ));
+    }
+    if clients()?
+        .get(session_id)
+        .is_some_and(|client| client.previous_monitors.len() >= 16)
+    {
+        return Err(failure("the session reconnect limit was reached; stop the Studio session before starting again"));
     }
     super::freerdp::ensure_supported(config).await?;
     ensure_guest_online(config).await?;
@@ -607,6 +646,7 @@ fn refresh_registered_clients(clients: &mut HashMap<String, RegisteredClient>) {
         match read_session_active(&mut client.control) {
             Ok(false) => {
                 terminate_client_process(&mut client.process);
+                close_client_monitors(session_id, client);
                 forget_registered_project_session(session_id, client);
                 client.project_access.take();
                 client.status.state = StudioProcessState::Stopped;
@@ -668,7 +708,8 @@ pub(super) async fn session_for_launch(
     if let Some(session) = observed_session(session_id).await.map_err(failure)? {
         return Ok(Some(session));
     }
-    let paths = crate::app_paths::AppPaths::discover_for_cli().map_err(failure)?;
+    let paths =
+        crate::app_paths::AppPaths::discover_for_cli().map_err(|e| failure(e.to_string()))?;
     if !registered_client_sessions().is_empty()
         || !crate::cli::session_keepers_absent_for_launch(&paths)
             .await
@@ -736,7 +777,8 @@ fn read_session_active(control: &mut RegisteredControl) -> Result<bool, String> 
 
 pub(crate) fn disconnect_all_clients() {
     if let Ok(mut clients) = clients() {
-        for (_, mut client) in clients.drain() {
+        for (session_id, mut client) in clients.drain() {
+            close_client_monitors(&session_id, &client);
             let _ = client.process.kill();
             let _ = client.process.wait();
         }
@@ -804,6 +846,7 @@ pub(crate) async fn stop_registered_client(
 
     let result = stop_registered_client_inner(session_id, &mut client).await;
     if result.is_ok() {
+        close_client_monitors(session_id, &client);
         if let Some(project_access) = &client.project_access {
             let _ = super::project_locks::remove_dead_process_lock(
                 project_access._lease.host_project_directory(),
@@ -941,19 +984,29 @@ fn register_client(
         }
     };
     clients.retain(|_, client| client.status.state != StudioProcessState::Stopped);
-    if let Some(mut previous) = clients.insert(
+    let mut previous_monitors = Vec::new();
+    let mut project_access = project_access;
+    if let Some(mut previous) = clients.remove(session_id) {
+        // A monitor may own a linked host-service bridge. Keep it alive through
+        // reconnect; each monitor observes the exact Studio PID/start and exits
+        // with it. Only the replaced RDP transport is retired here.
+        terminate_client_process(&mut previous.process);
+        previous_monitors = previous.previous_monitors;
+        previous_monitors.push(previous.control);
+        if project_access.is_none() {
+            project_access = previous.project_access;
+        }
+    }
+    clients.insert(
         session_id.to_string(),
         RegisteredClient {
             process: client,
             status,
             control,
             project_access,
+            previous_monitors,
         },
-    ) {
-        close_ui_monitor(session_id, &previous.control);
-        let _ = previous.process.kill();
-        let _ = previous.process.wait();
-    }
+    );
     Ok(())
 }
 
@@ -966,10 +1019,17 @@ fn forget_registered_project_session(session_id: &str, client: &RegisteredClient
 pub(crate) fn disconnect_client(session_id: &str) {
     if let Ok(mut clients) = clients() {
         if let Some(mut client) = clients.remove(session_id) {
-            close_ui_monitor(session_id, &client.control);
+            close_client_monitors(session_id, &client);
             let _ = client.process.kill();
             let _ = client.process.wait();
         }
+    }
+}
+
+fn close_client_monitors(session_id: &str, client: &RegisteredClient) {
+    close_ui_monitor(session_id, &client.control);
+    for control in &client.previous_monitors {
+        close_ui_monitor(session_id, control);
     }
 }
 
@@ -1104,12 +1164,9 @@ fn remove_regular_file(path: &Path) {
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn ui_channel(session_id: &str) -> Result<(PathBuf, OperationSecurity, u64), ()> {
+pub(crate) fn monitor_channel(session_id: &str) -> Result<(PathBuf, OperationSecurity, u64), ()> {
     let mut registry = clients().map_err(|_| ())?;
     let client = registry.get_mut(session_id).ok_or(())?;
-    if client.process.try_wait().map_err(|_| ())?.is_some() {
-        return Err(());
-    }
     let sequence = client.control.next_sequence;
     client.control.next_sequence = sequence.checked_add(1).ok_or(())?;
     Ok((
@@ -1117,6 +1174,31 @@ pub(crate) fn ui_channel(session_id: &str) -> Result<(PathBuf, OperationSecurity
         client.control.security.clone(),
         sequence,
     ))
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn transport_diagnostic(session_id: &str) -> Option<String> {
+    use std::os::unix::process::ExitStatusExt;
+    let mut registry = clients().ok()?;
+    let status = registry.get_mut(session_id)?.process.try_wait().ok()??;
+    status
+        .signal()
+        .map(|n| format!("rdp:signal:{n}"))
+        .or_else(|| status.code().map(|n| format!("rdp:exit:{n}")))
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn ui_channel(session_id: &str) -> Result<(PathBuf, OperationSecurity, u64), ()> {
+    {
+        let mut registry = clients().map_err(|_| ())?;
+        if !matches!(
+            registry.get_mut(session_id).ok_or(())?.process.try_wait(),
+            Ok(None)
+        ) {
+            return Err(());
+        }
+    }
+    monitor_channel(session_id)
 }
 
 #[cfg(test)]
@@ -1529,7 +1611,62 @@ mod tests {
             .path()
             .join("launch.control.json.ui.close")
             .exists();
+        let replacement_status = super::clients()
+            .unwrap()
+            .get(session_id)
+            .unwrap()
+            .status
+            .clone();
+        let replacement_control = workspace.path().join("replacement.control.json");
+        let mut replacement_process = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .unwrap();
+        replacement_process.wait().unwrap();
+        super::register_client(
+            session_id,
+            super::RemoteAppProcess::from_test_child(replacement_process),
+            replacement_status,
+            RegisteredControl {
+                report_path: report_path.clone(),
+                control_path: replacement_control.clone(),
+                security: OperationSecurity::fixture(),
+                previous_report: authenticate_report(
+                    envelope.as_bytes(),
+                    &OperationSecurity::fixture(),
+                )
+                .unwrap(),
+                next_sequence: 1,
+                cleanup_report: false,
+            },
+            None,
+        )
+        .unwrap();
+        {
+            let registry = super::clients().unwrap();
+            let replacement = registry.get(session_id).unwrap();
+            assert_eq!(replacement.previous_monitors.len(), 1);
+            assert!(
+                replacement.project_access.is_some(),
+                "reconnect lost its project lease"
+            );
+        }
+        assert!(
+            !workspace
+                .path()
+                .join("launch.control.json.ui.close")
+                .exists(),
+            "reconnect retired a bridge monitor"
+        );
         super::disconnect_client(session_id);
+        assert!(workspace
+            .path()
+            .join("launch.control.json.ui.close")
+            .exists());
+        assert!(workspace
+            .path()
+            .join("replacement.control.json.ui.close")
+            .exists());
         assert!(result.is_err());
         assert!(
             retained && report_retained,

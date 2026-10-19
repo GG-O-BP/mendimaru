@@ -19,7 +19,7 @@ $worker = [IO.File]::ReadAllBytes((Join-Path $source 'ui_worker.ps1'))
 $supervisor = [IO.File]::ReadAllText((Join-Path $source 'ui_supervisor.ps1')).Replace('__UI_WORKER_BASE64__',[Convert]::ToBase64String($worker))
 $hostSupervisor=[IO.File]::ReadAllText((Join-Path $source 'host_service_supervisor.ps1'))
 $hostSource=[Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $source 'host_service.cs')))
-$supervisor=$supervisor.Replace('__HOST_SERVICE_SUPERVISOR__',$hostSupervisor).Replace('__HOST_SERVICE_SOURCE_BASE64__',$hostSource)
+$supervisor=$supervisor.Replace('__SESSION_QUERY__',[IO.File]::ReadAllText((Join-Path $source 'session_query.ps1'))).Replace('__HOST_SERVICE_SUPERVISOR__',$hostSupervisor).Replace('__HOST_SERVICE_SOURCE_BASE64__',$hostSource)
 # Test-only capture of initialization stderr: this worker receives no secrets.
 # Production drains and discards stderr instead of exposing guest exceptions.
 $supervisor=$supervisor.Replace('$script:UiWorker.BeginErrorReadLine()', '$script:TestWorkerStderr=$script:UiWorker.StandardError.ReadToEndAsync()')

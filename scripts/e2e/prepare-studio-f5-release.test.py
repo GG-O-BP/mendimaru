@@ -220,6 +220,9 @@ class GenericReleaseTests(unittest.TestCase):
                 with self.assertRaises(subprocess.CalledProcessError): gate.main()
             else:
                 gate.main()
+        observations = [args for args in cli_calls if args[:2] == ("studio", "status")]
+        self.assertNotIn("--refresh", observations[0])
+        self.assertIn("--refresh", observations[1])
         start = next(args for args in cli_calls if args[:2] == ("studio", "start"))
         self.assertEqual(start[start.index("--version") + 1], version)
         self.assertEqual(start[start.index("--project-id") + 1], self.project_id)

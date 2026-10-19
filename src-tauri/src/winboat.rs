@@ -21,6 +21,8 @@ mod remote_app;
 pub(crate) mod runtime;
 mod scripts;
 pub(crate) mod security;
+#[cfg(target_os = "linux")]
+mod session_query;
 mod sessions;
 mod staging;
 pub(crate) mod startup;
@@ -42,9 +44,9 @@ pub use container::{
     environment_status, guest_is_online, open_winboat, recreate_compose_service, recreate_container,
 };
 pub(crate) use operation::WindowsOperationFailure;
-pub(crate) use sessions::stop as stop_studio_session;
 #[cfg(target_os = "linux")]
-pub(crate) use sessions::ui_channel;
+pub(crate) use sessions::list_guest as guest_sessions_for_stop;
+pub(crate) use sessions::stop as stop_studio_session;
 pub(crate) use sessions::{
     cleanup_dead_session_lock, close_all_registered_clients, disconnect_client,
     registered_client_sessions, stop_registered_client,
@@ -53,6 +55,8 @@ pub(crate) use sessions::{
     list as studio_sessions, list_authoritative as authoritative_studio_sessions,
     reconnect as reconnect_studio_session,
 };
+#[cfg(target_os = "linux")]
+pub(crate) use sessions::{monitor_channel, transport_diagnostic, ui_channel};
 #[cfg(target_os = "linux")]
 pub(crate) use sessions::{observed_session, registered_session_ended};
 pub(crate) use staging::stage_installer;
@@ -67,6 +71,17 @@ pub(crate) fn seed_installed_versions_cache(config: &AppConfig, versions: &[Stud
 
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) fn register_keeper_test_client(config: &AppConfig, child: std::process::Child) {
+    seed_installed_versions_cache(
+        config,
+        &[StudioVersion {
+            version: "11.12.3".into(),
+            display_name: "Studio Pro 11.12.3".into(),
+            executable_path: r"C:\Program Files\Mendix\11.12.3\modeler\studiopro.exe".into(),
+            install_root: r"C:\Program Files\Mendix\11.12.3".into(),
+            source: "fixture".into(),
+            removable: true,
+        }],
+    );
     let security = security::OperationSecurity::fixture();
     let payload = security::authenticated_envelope(&security, 1, b"{}").unwrap();
     let previous_report = security::authenticate_report(&payload, &security).unwrap();
