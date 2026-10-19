@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import secrets
+import unicodedata
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
@@ -20,7 +21,7 @@ def verify(origin, password, shutdown=False):
             or target.username or target.password or target.path not in ("", "/")
             or target.query or target.fragment):
         raise ValueError("Expected the fixed loopback admin origin")
-    if not password or len(password.encode("utf-8")) > 256 or any(ord(c) < 32 or ord(c) == 127 for c in password):
+    if not password or len(password.encode("utf-8")) > 256 or any(unicodedata.category(c) == "Cc" for c in password):
         raise ValueError("Invalid environment value")
     opener = build_opener(ProxyHandler({}), NoRedirect())
     encode = lambda value: base64.b64encode(value.encode("utf-8")).decode("ascii")
@@ -55,6 +56,9 @@ def verify(origin, password, shutdown=False):
     results = []
     for index, credential in enumerate(credentials):
         code, body = post("/", {"action": "runtime_status", "params": {}}, credential)
+        if index < 2 and code in (401, 403):
+            results.append({"httpStatus": code, "result": None})
+            continue
         payload = json.loads(body)
         result = payload.get("result") if isinstance(payload, dict) else None
         if index < 2:

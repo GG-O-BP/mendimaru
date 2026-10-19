@@ -34,6 +34,13 @@ class Verification(unittest.TestCase):
         self.assertEqual(result["m2eeShutdown"]["result"], 0)
         self.assertEqual(result["developmentServlet"], {"missing": 403, "incorrect": 403, "valid": 200})
 
+    def test_http_authentication_rejection_needs_no_json_body(self):
+        responses = self.good()
+        denied = io.BytesIO(b"Forbidden")
+        denied.code = 403
+        responses[3] = denied
+        self.assertEqual(self.run_case(responses)["m2eeRuntimeStatus"][0]["httpStatus"], 403)
+
     def test_http_200_authentication_denial_is_failure(self):
         cases = [(-4, 200), (None, 200), (False, 200), ("0", 200), (0, 403)]
         for result, code in cases:
@@ -56,7 +63,7 @@ class Verification(unittest.TestCase):
         for origin in ["http://example.com:18090", "http://127.0.0.1:8090", "http://user@127.0.0.1:18090", "http://127.0.0.1:18090/?secret"]:
             with self.assertRaises(ValueError):
                 module.verify(origin, "fixture")
-        for password in ["", "a\nb", "x"*257]:
+        for password in ["", "a\nb", "a\u0085b", "x"*257]:
             with self.assertRaises(ValueError):
                 module.verify("http://127.0.0.1:18090", password)
 
