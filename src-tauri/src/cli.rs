@@ -2167,6 +2167,8 @@ pub(crate) async fn keeper_authoritative_sessions(
 pub(crate) async fn session_keepers_absent_for_launch(
     paths: &AppPaths,
 ) -> Result<bool, CommandError> {
+    use std::os::unix::fs::MetadataExt;
+
     let directory = ensure_session_socket_directory(paths).map_err(keeper_command_error)?;
     let entries = std::fs::read_dir(directory).map_err(|_| {
         keeper_command_error("the session keeper directory could not be read".into())
@@ -2179,6 +2181,19 @@ pub(crate) async fn session_keepers_absent_for_launch(
         }
         let entry = entry
             .map_err(|_| keeper_command_error("a session keeper entry could not be read".into()))?;
+        // Cleanup writes its audit alongside the sockets. Exempt only that
+        // known, user-owned regular file; symlinks, sockets and unexpected
+        // entries must still pass the normal keeper trust/IPC checks below.
+        if entry.file_name() == "socket-cleanup.log" {
+            let metadata = std::fs::symlink_metadata(entry.path()).map_err(|_| {
+                keeper_command_error(
+                    "the session keeper cleanup audit could not be inspected".into(),
+                )
+            })?;
+            if metadata.is_file() && metadata.uid() == unsafe { libc::geteuid() } {
+                continue;
+            }
+        }
         if request_session_keeper(&entry.path(), "status")
             .await?
             .is_some()

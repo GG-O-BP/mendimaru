@@ -1330,6 +1330,13 @@ fn studio_launch_after_owner_loss_reuses_only_an_authoritatively_ended_identity(
     ] {
         let fixture = Fixture::new();
         fixture.prepare_launch_recovery(outcome);
+        let directory = fixture.path("cache/cli-sessions");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("socket-cleanup.log"),
+            b"retained cleanup audit\n",
+        )
+        .unwrap();
         let compose = fs::read(fixture.path("compose.yml")).unwrap();
         let record_path = fixture.path(&format!(
             "cache/winboat-runtime/sessions/{RUNTIME_ID}/session.json"
@@ -1386,11 +1393,58 @@ fn studio_launch_after_owner_loss_reuses_only_an_authoritatively_ended_identity(
 }
 
 #[test]
+fn studio_launch_recovers_reboot_runtime_with_cleanup_audit_and_dead_keeper() {
+    use std::os::unix::net::UnixListener;
+
+    for stale_socket in [false, true] {
+        let fixture = Fixture::new();
+        fixture.prepare_launch_recovery("absent");
+        let directory = fixture.path("cache/cli-sessions");
+        fs::create_dir_all(&directory).unwrap();
+        let audit = directory.join("socket-cleanup.log");
+        fs::write(&audit, b"retained cleanup audit\n").unwrap();
+        let socket = directory.join(session_socket_name(STUDIO_ID));
+        if stale_socket {
+            drop(UnixListener::bind(&socket).unwrap());
+            fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let record_path = fixture.path(&format!(
+            "cache/winboat-runtime/sessions/{RUNTIME_ID}/session.json"
+        ));
+        let mut record: Value = serde_json::from_slice(&fs::read(&record_path).unwrap()).unwrap();
+        record["state"] = json!("starting");
+        record["studioProcessId"] = Value::Null;
+        record["httpReady"] = json!(false);
+        fs::write(&record_path, serde_json::to_vec(&record).unwrap()).unwrap();
+
+        // Refresh remains safe with the same retained audit and dead socket.
+        fixture.spawn("studio-status").finish();
+        assert_eq!(fixture.result("studio-status")["data"], json!([]));
+        fs::remove_file(fixture.path("probe-entered")).unwrap();
+        fixture.spawn("launch-prepare").finish();
+        let result = fixture.result("launch-prepare");
+        assert_eq!(result["ok"], true, "stale_socket={stale_socket}: {result}");
+        assert_eq!(result["runtimeSessionId"], RUNTIME_ID);
+        assert!(fixture.path("probe-entered").exists());
+        let recovered: Value = serde_json::from_slice(&fs::read(record_path).unwrap()).unwrap();
+        assert!(recovered["studioSessionId"].is_null());
+        assert_eq!(fs::read(&audit).unwrap(), b"retained cleanup audit\n");
+        assert_eq!(socket.exists(), stale_socket);
+        assert_eq!(fixture.calls(), 0, "recovery must not recreate Compose");
+    }
+}
+
+#[test]
 fn studio_launch_preserves_a_retained_owner_without_opening_another_rdp_connection() {
     let fixture = Fixture::new();
     fixture.prepare_launch_recovery("absent");
     let mut keeper = fixture.spawn("keeper-observe");
     until(|| fixture.path("keeper-ready").exists());
+    fs::write(
+        fixture.path("cache/cli-sessions/socket-cleanup.log"),
+        b"audit\n",
+    )
+    .unwrap();
     let record = fixture.path(&format!(
         "cache/winboat-runtime/sessions/{RUNTIME_ID}/session.json"
     ));
@@ -1417,15 +1471,37 @@ fn studio_launch_preserves_a_retained_owner_without_opening_another_rdp_connecti
 #[test]
 fn studio_orphan_probe_refuses_other_or_unverifiable_keeper_owners() {
     use std::os::unix::net::UnixListener;
-    for kind in ["responding", "untrusted", "incomplete"] {
+    for kind in [
+        "responding",
+        "audit-socket",
+        "untrusted",
+        "unexpected-file",
+        "incomplete",
+        "audit-symlink",
+        "audit-directory",
+    ] {
         let fixture = Fixture::new();
         fixture.prepare_launch_recovery("absent");
         let directory = fixture.path("cache/cli-sessions");
         fs::create_dir_all(&directory).unwrap();
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let audit = directory.join("socket-cleanup.log");
+        match kind {
+            "audit-symlink" => {
+                std::os::unix::fs::symlink(fixture.path("config.json"), &audit).unwrap();
+            }
+            "audit-directory" => fs::create_dir(&audit).unwrap(),
+            "audit-socket" => {}
+            _ => fs::write(&audit, b"retained audit\n").unwrap(),
+        }
         let other_socket = directory.join(session_socket_name("studio-4343-638908128000000000"));
-        let server = if kind == "responding" {
-            let listener = UnixListener::bind(&other_socket).unwrap();
+        let server = if kind == "responding" || kind == "audit-socket" {
+            let listener = UnixListener::bind(if kind == "audit-socket" {
+                &audit
+            } else {
+                &other_socket
+            })
+            .unwrap();
             Some(thread::spawn(move || {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream
@@ -1441,7 +1517,9 @@ fn studio_orphan_probe_refuses_other_or_unverifiable_keeper_owners() {
         } else {
             if kind == "untrusted" {
                 fs::write(other_socket, b"preserve untrusted entry").unwrap();
-            } else {
+            } else if kind == "unexpected-file" {
+                fs::write(directory.join("unexpected.txt"), b"unrecognized entry").unwrap();
+            } else if kind == "incomplete" {
                 for index in 0..65 {
                     let socket = directory.join(format!("s-{index:032x}.sock"));
                     drop(UnixListener::bind(socket).unwrap());
