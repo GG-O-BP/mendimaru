@@ -5,6 +5,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 [assembly: System.Reflection.AssemblyFileVersion("11.12.6.0")]
 class Fixture {
     static void Main(string[] args) {
@@ -12,12 +13,16 @@ class Fixture {
         Process child = null;
         try {
             Console.WriteLine("ready");
-            string line;
-            while ((line = Console.ReadLine()) != null) {
-                if (line == "stop") {
+            using (var startSignal = EventWaitHandle.OpenExisting(args[0] + "-start"))
+            using (var stopSignal = EventWaitHandle.OpenExisting(args[0] + "-stop"))
+            using (var exitSignal = EventWaitHandle.OpenExisting(args[0] + "-exit")) {
+            for (;;) {
+                int command = WaitHandle.WaitAny(new WaitHandle[] { startSignal, stopSignal, exitSignal });
+                if (command == 2) break;
+                if (command == 1) {
                     if (child != null) { child.Kill(); child.WaitForExit(); child.Dispose(); child = null; }
                     Console.WriteLine("stopped");
-                } else if (line == "start") {
+                } else if (command == 0) {
                     if (child != null) throw new Exception();
                     var start = new ProcessStartInfo(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "java.exe"), "java");
                     start.UseShellExecute = false; start.CreateNoWindow = true; start.RedirectStandardOutput = true;
@@ -26,6 +31,7 @@ class Fixture {
                     if (child.StandardOutput.ReadLine() != "ready") throw new Exception();
                     Console.WriteLine("started");
                 }
+            }
             }
         } finally { if (child != null) { try { child.Kill(); child.WaitForExit(); } catch {} child.Dispose(); } }
     }

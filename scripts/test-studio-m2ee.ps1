@@ -11,13 +11,10 @@ $temp = Join-Path ([IO.Path]::GetTempPath()) ('mendimaru-m2ee-test-' + [Guid]::N
 $null = New-Item -ItemType Directory -Path $temp
 $studio = $null
 $foreign = $null
-function Send-FixtureLine($process, [string]$line) {
-    # Framework Process.StandardInput may prepend the console UTF-8 BOM. Use
-    # explicit ASCII bytes for this fixed test-control protocol.
-    $bytes = [Text.Encoding]::ASCII.GetBytes($line + "`n")
-    $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
-    $process.StandardInput.BaseStream.Flush()
-}
+$controlName = 'Local\mendimaru-m2ee-' + [Guid]::NewGuid().ToString('N')
+$startSignal = New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::AutoReset, ($controlName + '-start'))
+$stopSignal = New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::AutoReset, ($controlName + '-stop'))
+$exitSignal = New-Object Threading.EventWaitHandle($false, [Threading.EventResetMode]::AutoReset, ($controlName + '-exit'))
 function Read-FixtureLine($process, [string]$stage) {
     $pending = $process.StandardOutput.ReadLineAsync()
     if (-not $pending.Wait(10000)) { throw "Fixture timed out: $stage" }
@@ -31,9 +28,9 @@ try {
     Copy-Item -LiteralPath $executable -Destination (Join-Path $temp 'java.exe')
     $start = New-Object Diagnostics.ProcessStartInfo
     $start.FileName = $executable
+    $start.Arguments = $controlName
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
-    $start.RedirectStandardInput = $true
     $start.RedirectStandardOutput = $true
     $studio = [Diagnostics.Process]::Start($start)
     if ((Read-FixtureLine $studio 'Studio ready') -cne 'ready') { throw 'Studio fixture did not start' }
@@ -41,11 +38,11 @@ try {
     $alias = 'test-only-é-한글-' + [Guid]::NewGuid().ToString('N')
     $ticks = $studio.StartTime.ToUniversalTime().Ticks
     foreach ($round in @(1, 2)) {
-        Send-FixtureLine $studio 'start'
+        $null = $startSignal.Set()
         if ((Read-FixtureLine $studio 'Runtime started') -cne 'started') { throw 'Runtime fixture did not start' }
         Write-Output "Fixture: owned Runtime round $round ready"
         [MendimaruRuntime.BridgeTests]::Verify($studio.Id, $ticks, $executable, $alias)
-        Send-FixtureLine $studio 'stop'
+        $null = $stopSignal.Set()
         if ((Read-FixtureLine $studio 'Runtime stopped') -cne 'stopped') { throw 'Runtime fixture did not stop' }
     }
     $start.FileName = Join-Path $temp 'java.exe'
@@ -56,17 +53,19 @@ try {
     [MendimaruRuntime.BridgeTests]::RefuseForeignListener($studio.Id, $ticks, $executable, $alias)
     Write-Output 'PASS: owned Runtime environment, UTF-8 alias, missing/wrong/valid servlet and M2EE auth, shutdown, restart, unsafe HTTP, stale Studio and foreign listener refusal'
 } finally {
+    $null = $exitSignal.Set()
+    if ($null -ne $studio) { try { $null = $studio.WaitForExit(3000) } catch {} }
     foreach ($process in @($foreign, $studio)) {
         if ($null -ne $process) {
             try {
                 if (-not $process.HasExited) {
-                    $process.StandardInput.Close()
-                    if (-not $process.WaitForExit(3000)) { $process.Kill() }
+                    $process.Kill()
                 }
                 $null = $process.WaitForExit(5000)
             } catch {}
             $process.Dispose()
         }
     }
+    foreach ($signal in @($startSignal, $stopSignal, $exitSignal)) { $signal.Dispose() }
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }
