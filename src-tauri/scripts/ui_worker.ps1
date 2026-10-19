@@ -13,10 +13,35 @@ using System.Text;
 public static class MendimaruUiNative {
     public delegate bool EnumProc(IntPtr hwnd, IntPtr p);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr p);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr p);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder text, int count);
+    [DllImport("user32.dll", EntryPoint="GetWindowLongW")] static extern int GetWindowLong(IntPtr h, int index);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr SendMessageTimeout(IntPtr h,uint message,UIntPtr w,StringBuilder text,uint flags,uint timeout,out UIntPtr result);
+    public static uint Style(IntPtr h) { return unchecked((uint)GetWindowLong(h,-16)); }
+    public static string Text(IntPtr h,int limit) {
+        var b=new StringBuilder(limit+1); UIntPtr result;
+        if(SendMessageTimeout(h,0x000d,(UIntPtr)(uint)(limit+1),b,2,250,out result)==IntPtr.Zero) return null;
+        return b.ToString();
+    }
+    public static string Class(IntPtr h) { var b=new StringBuilder(256); GetClassName(h,b,256); return b.ToString(); }
+    public static string ControlRole(IntPtr h) {
+        string c=Class(h);
+        if(c=="Button" || c.StartsWith("WindowsForms10.BUTTON.",StringComparison.Ordinal)) return "Button";
+        if(c=="Static" || c.StartsWith("WindowsForms10.STATIC.",StringComparison.Ordinal)) return "Text";
+        if(c=="Edit" || c=="RichEdit20W" || c=="RICHEDIT50W" || c.StartsWith("WindowsForms10.EDIT.",StringComparison.Ordinal)) return "Edit";
+        return null;
+    }
+    public static IntPtr[] Children(IntPtr root, uint pid) {
+        var children=new List<IntPtr>();
+        EnumChildWindows(root,(h,p)=>{ uint owner; GetWindowThreadProcessId(h,out owner);
+            if(owner==pid && IsWindowVisible(h))children.Add(h); return children.Count < 129;
+        },IntPtr.Zero); return children.ToArray();
+    }
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
     [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint message, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
@@ -46,6 +71,29 @@ public static class MendimaruUiNative {
     }
 }
 '@
+# UIA providers may block Invoke until a modal closes. A bounded set of MTA
+# threads dispatches once; the request worker remains available to inspect and
+# close that modal. No callback executes PowerShell on a foreign thread.
+Add-Type -ReferencedAssemblies @([Windows.Automation.InvokePattern].Assembly.Location,[Windows.Automation.AutomationElementIdentifiers].Assembly.Location) -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Windows.Automation;
+public static class MendimaruUiInvoke {
+    static readonly object gate=new object();
+    static readonly HashSet<string> pending=new HashSet<string>();
+    public static bool Dispatch(InvokePattern pattern, string identity) {
+        lock(gate) { if(pending.Count>=4 || !pending.Add(identity)) return false; }
+        var thread=new Thread(()=>{
+            try { pattern.Invoke(); } catch { /* Dispatch is not effect confirmation. */ }
+            finally { lock(gate) pending.Remove(identity); }
+        });
+        thread.IsBackground=true; thread.SetApartmentState(ApartmentState.MTA);
+        try { thread.Start(); return true; }
+        catch { lock(gate) pending.Remove(identity); throw; }
+    }
+}
+'@
 $null = [MendimaruUiNative]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $script:Identity = [Console]::ReadLine() | ConvertFrom-Json
 $script:Generation = [Guid]::NewGuid().ToString('N')
@@ -60,7 +108,7 @@ $walker = [Windows.Automation.TreeWalker]::RawViewWalker
 function New-ObservationCache {
     $cache=New-Object Windows.Automation.CacheRequest
     $cache.TreeScope=[Windows.Automation.TreeScope]::Element
-    foreach($property in @('RuntimeId','Name','ControlType','IsPassword','AutomationId','FrameworkId','IsEnabled','IsOffscreen','HasKeyboardFocus','BoundingRectangle')){
+    foreach($property in @('RuntimeId','NativeWindowHandle','Name','ControlType','IsPassword','AutomationId','FrameworkId','IsEnabled','IsOffscreen','HasKeyboardFocus','BoundingRectangle')){
         $cache.Add([Windows.Automation.AutomationElement]::($property+'Property'))
     }
     $script:PatternProperties=@([Windows.Automation.AutomationElement].GetFields([Reflection.BindingFlags]'Public,Static,FlattenHierarchy') | Where-Object{$_.Name -match '^Is(.+)PatternAvailableProperty$'} | ForEach-Object{
@@ -76,7 +124,9 @@ function New-ObservationCache {
 $script:ObservationCache=New-ObservationCache
 function Observation($e) {
     $c=$e.Cached;$value=$null;$readOnly=$null;$modal=$false
-    if(-not $c.IsPassword -and -not (Configuration-Editor $e) -and [bool]$e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::IsValuePatternAvailableProperty)){
+    if($null -eq $c.ControlType){throw 'ui-stale-element'}
+    $native=Native-Observation $e $c
+    if(-not ($c.IsPassword -or ($native -and $native.password)) -and -not (Configuration-Editor $e) -and [bool]$e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::IsValuePatternAvailableProperty)){
         $value=$e.GetCachedPropertyValue([Windows.Automation.ValuePattern]::ValueProperty)
         $readOnly=$e.GetCachedPropertyValue([Windows.Automation.ValuePattern]::IsReadOnlyProperty)
     }
@@ -84,7 +134,7 @@ function Observation($e) {
         $modal=[bool]$e.GetCachedPropertyValue([Windows.Automation.WindowPattern]::IsModalProperty)
     }
     $patterns=@($script:PatternProperties | Where-Object{[bool]$e.GetCachedPropertyValue($_.property)} | ForEach-Object{$_.name})
-    return @{c=$c;patterns=$patterns;rid=($e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::RuntimeIdProperty) -join '.');value=$value;readOnly=$readOnly;modal=$modal}
+    return @{c=$c;native=$native;patterns=$patterns;rid=($e.GetCachedPropertyValue([Windows.Automation.AutomationElement]::RuntimeIdProperty) -join '.');value=$value;readOnly=$readOnly;modal=$modal}
 }
 
 function Check-Deadline {
@@ -141,7 +191,8 @@ function Register($element,$observation=$null) {
     if($null -ne $observation){$observedValue=$observation.value}
     elseif(-not $c.IsPassword -and -not (Configuration-Editor $element) -and $element.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)){$observedValue=$pattern.Current.Value}
     if ($script:Elements.Count -ge 4096 -and -not $script:Elements.ContainsKey($id)) { throw 'ui-tree-truncated' }
-    $script:Elements[$id] = @{element=$element; rid=$rid; name=$c.Name; role=$c.ControlType.ProgrammaticName; password=$c.IsPassword; value=$observedValue}
+    $native=$(if($null -ne $observation){$observation.native}else{Native-Observation $element})
+    $script:Elements[$id] = @{native=$native;element=$element; rid=$rid; name=$c.Name; role=$c.ControlType.ProgrammaticName; password=$c.IsPassword; value=$observedValue}
     return $id
 }
 function Resolve([string]$id) {
@@ -153,22 +204,61 @@ function Resolve([string]$id) {
         if (($e.GetRuntimeId() -join '.') -cne $stored.rid -or $c.Name -cne $stored.name -or $c.ControlType.ProgrammaticName -cne $stored.role -or $c.IsPassword -ne $stored.password) { throw 'ui-stale-element' }
         $pattern=$null
         if($null -ne $stored.value -and ($e.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) -and $pattern.Current.Value -cne $stored.value){throw 'ui-stale-element'}
+        $native=Native-Observation $e
+        if($stored.native -and ($null -eq $native -or $native.role -cne $stored.native.role -or
+            $native.password -ne $stored.native.password -or $native.readOnly -ne $stored.native.readOnly -or
+            $native.text -cne $stored.native.text)){throw 'ui-stale-element'}
         $null = Window-For $e
         return $e
     } catch { throw 'ui-stale-element' }
 }
 function Public-Element($e) {
     $c=$e.Current
-    return @{elementId=(Register $e); role=$c.ControlType.ProgrammaticName.Replace('ControlType.',''); name=$(if($c.IsPassword){'[password-redacted]'}else{Short $c.Name})}
+    $native=Native-Observation $e
+    return @{elementId=(Register $e); role=$(if($native){$native.role}else{$c.ControlType.ProgrammaticName.Replace('ControlType.','')}); name=$(if($c.IsPassword -or ($native -and $native.password)){'[password-redacted]'}elseif($native -and $native.role -ceq 'Edit'){''}elseif($native){$native.text}else{Short $c.Name})}
 }
 function Short([string]$s) { return $s.Substring(0,[Math]::Min(256,$s.Length)) }
 function Matches($e,$selector,$observation=$null) {
     $c=$(if($null -ne $observation){$observation.c}else{$e.Current})
-    if ($c.IsPassword) { return $false }
-    if ($selector.role -and $c.ControlType.ProgrammaticName -cne ('ControlType.'+$selector.role)) { return $false }
+    $native=$(if($null -ne $observation){$observation.native}else{Native-Observation $e})
+    if ($c.IsPassword -or ($native -and $native.password)) { return $false }
+    $role=$(if($native){$native.role}else{$c.ControlType.ProgrammaticName.Replace('ControlType.','')})
+    if ($selector.role -and $role -cne $selector.role) { return $false }
     if ($null -ne $selector.name -and $c.Name -cne $selector.name) { return $false }
     if ($null -ne $selector.automationId -and $c.AutomationId -cne $selector.automationId) { return $false }
     return $true
+}
+function Native-ErrorWindow($h) {
+    # Restrict the HWND fallback to an enabled native error dialog in the exact
+    # validated Studio process. Never enumerate credentials/configuration UI.
+    $p=Target;$owner=[uint32]0
+    $null=[MendimaruUiNative]::GetWindowThreadProcessId($h,[ref]$owner)
+    if($owner -ne $p.Id -or -not [MendimaruUiNative]::IsWindowEnabled($h)){return $false}
+    $root=[Windows.Automation.AutomationElement]::FromHandle($h)
+    return $root.Current.FrameworkId -ceq 'Win32' -and $root.Current.Name -cin @('Error','오류') -and
+        $root.Current.ControlType -eq [Windows.Automation.ControlType]::Window
+}
+function Native-Observation($e,$snapshot=$null) {
+    $c=$(if($null -ne $snapshot){$snapshot}else{$e.Current})
+    if($c.FrameworkId -cnotin @('Win32','WinForm')){return $null}
+    $h=[IntPtr]$c.NativeWindowHandle
+    if($h -eq [IntPtr]::Zero -or -not (Native-ErrorWindow ([MendimaruUiNative]::GetAncestor($h,2)))){return $null}
+    $owner=[uint32]0
+    $null=[MendimaruUiNative]::GetWindowThreadProcessId($h,[ref]$owner)
+    if($owner -ne [uint32]$script:Identity.processId){return $null}
+    $role=[MendimaruUiNative]::ControlRole($h)
+    if($null -eq $role){return $null}
+    $style=[MendimaruUiNative]::Style($h)
+    $password=($role -ceq 'Edit' -and ($style -band 0x20) -ne 0)
+    $readOnly=($role -ceq 'Edit' -and ($style -band 0x800) -ne 0)
+    $text=$null
+    if(-not $password -and ($role -cne 'Edit' -or $readOnly)){
+        Check-Deadline
+        $limit=$(if($readOnly){8192}else{256})
+        $text=[MendimaruUiNative]::Text($h,$limit)
+        if($null -eq $text){throw 'ui-effect-unverified'}
+    }
+    return @{role=$role;password=$password;readOnly=$readOnly;text=$text}
 }
 function Scan($scope=$null) {
     # A new observation invalidates the previous element generation. A scope
@@ -190,6 +280,19 @@ function Scan($scope=$null) {
         # active. Preserve their roots and explicitly mark the tree partial.
         # Callers can scope a fresh lookup to the enabled dialog's root.
         if($item.omitChildren){$truncated=$true;$omitted.Add(@{elementId=$id;reason='disabled-window'});continue}
+        if($item.depth -eq 0){
+            $handle=[IntPtr]$e.Current.NativeWindowHandle
+            if($handle -ne [IntPtr]::Zero -and (Native-ErrorWindow $handle)){
+                $handles=@([MendimaruUiNative]::Children($handle,[uint32]$script:Identity.processId))
+                if($handles.Count -gt 128){$truncated=$true}
+                foreach($native in @($handles | Select-Object -First 128)){
+                    Check-Deadline
+                    $candidate=[Windows.Automation.AutomationElement]::FromHandle($native).GetUpdatedCache($script:ObservationCache)
+                    if($candidate.Cached.IsPassword -or $null -eq [MendimaruUiNative]::ControlRole($native)){continue}
+                    $queue.Enqueue(@{e=$candidate;depth=1;parent=$id})
+                }
+            }
+        }
         $child=$walker.GetFirstChild($e,$script:ObservationCache)
         if($item.depth -ge 48){if($null -ne $child){$truncated=$true};continue}
         while($null -ne $child){
@@ -275,14 +378,31 @@ function Tree {
     $p=Target;$scan=Scan;$nodes=New-Object Collections.Generic.List[object]
     foreach($node in $scan.nodes){
         Check-Deadline
-        $e=$node.e;$c=$node.observed.c;$bounds=$c.BoundingRectangle
+        $e=$node.e;$c=$node.observed.c
+        if($null -eq $c.ControlType){throw 'ui-stale-element'}
+        $bounds=$c.BoundingRectangle
         $publicBounds=@(0,0,0,0);if(-not $bounds.IsEmpty){$publicBounds=@($bounds.X,$bounds.Y,$bounds.Width,$bounds.Height)}
         $patterns=@($node.observed.patterns)
         $value=$null;$readOnly=$null
         if(-not $c.IsPassword -and -not (Configuration-Editor $e) -and $patterns -contains 'Value'){
-            $value=Short $node.observed.value;$readOnly=$node.observed.readOnly
+            $readOnly=$node.observed.readOnly
+            if($readOnly -and $c.ControlType -eq [Windows.Automation.ControlType]::Edit -and (Native-ErrorWindow (Window-For $e))){
+                $diagnosticText=[string]$node.observed.value
+                $value=$diagnosticText.Substring(0,[Math]::Min(8192,$diagnosticText.Length))
+            }else{$value=Short $node.observed.value}
         }
-        $nodes.Add(@{elementId=$node.id;parentId=$node.parent;depth=$node.depth;role=$c.ControlType.ProgrammaticName.Replace('ControlType.','');name=$(if($c.IsPassword){'[password-redacted]'}else{Short $c.Name});automationId=$(if($c.IsPassword){''}else{Short $c.AutomationId});framework=$c.FrameworkId;enabled=$c.IsEnabled;offscreen=$c.IsOffscreen;password=$c.IsPassword;focused=$c.HasKeyboardFocus;value=$value;readOnly=$readOnly;patterns=$patterns;bounds=$publicBounds})
+        $native=$node.observed.native
+        $password=($c.IsPassword -or ($native -and $native.password))
+        $role=$c.ControlType.ProgrammaticName.Replace('ControlType.','')
+        $name=$(if($password){'[password-redacted]'}else{Short $c.Name})
+        if($native){
+            $role=$native.role
+            if($native.password){$value=$null;$patterns=@();$name='[password-redacted]'}
+            elseif($native.role -ceq 'Edit'){$name='';$value=$null;$patterns=@();if($native.readOnly){$value=$native.text;$readOnly=$true;$patterns=@('Value')}}
+            elseif($native.role -cin @('Button','Text')){$name=$native.text}
+            if($native.role -ceq 'Button' -and $name -cin @('Details >>','Details <<','Close','자세히 >>','자세히 <<','닫기')){$patterns=@('Invoke')}
+        }
+        $nodes.Add(@{elementId=$node.id;parentId=$node.parent;depth=$node.depth;role=$role;name=$name;automationId=$(if($password){''}else{Short $c.AutomationId});framework=$c.FrameworkId;enabled=$c.IsEnabled;offscreen=$c.IsOffscreen;password=$password;focused=$c.HasKeyboardFocus;value=$value;readOnly=$readOnly;patterns=$patterns;bounds=$publicBounds})
     }
     $windows=New-Object Collections.Generic.List[object]
     foreach($h in @(Windows)){
@@ -294,7 +414,8 @@ function Tree {
 }
 function Input-Guard($e,[bool]$needsForeground,[bool]$allowConfigurationPassword=$false) {
     $null=Target;Supported-Version
-    if(($e.Current.IsPassword -and -not $allowConfigurationPassword) -or $e.Current.IsOffscreen -or -not $e.Current.IsEnabled){throw 'ui-unsupported-element'}
+    $native=Native-Observation $e
+    if((($e.Current.IsPassword -or ($native -and $native.password)) -and -not $allowConfigurationPassword) -or $e.Current.IsOffscreen -or -not $e.Current.IsEnabled){throw 'ui-unsupported-element'}
     $h=Window-For $e
     if([MendimaruUiNative]::IsIconic($h) -or -not [MendimaruUiNative]::IsWindowEnabled($h)){throw 'ui-modal-blocked'}
     foreach($other in @(Windows)){
@@ -309,8 +430,10 @@ function Input-Guard($e,[bool]$needsForeground,[bool]$allowConfigurationPassword
     # A freshly opened RemoteApp may not have a foreground HWND yet. Ask the
     # validated native element's provider to focus it before activation; input
     # still requires the exact owned window to become foreground below.
-    $e.SetFocus()
-    $null=[MendimaruUiNative]::SetForegroundWindow($h)
+    if([MendimaruUiNative]::GetForegroundWindow() -ne $h){
+        try {$e.SetFocus()} catch { if(-not (Native-ErrorWindow $h)){throw} }
+        $null=[MendimaruUiNative]::SetForegroundWindow($h)
+    }
     $focusDeadline=[DateTime]::UtcNow.AddMilliseconds(750)
     while([MendimaruUiNative]::GetForegroundWindow() -ne $h){
         Check-Deadline
@@ -456,8 +579,19 @@ function Act($r) {
             $e.SetFocus();if(-not $e.Current.HasKeyboardFocus){throw 'ui-effect-unverified'}
         }
         'invoke' {
-            if(-not $e.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)){throw 'ui-unsupported-element'}
-            $pattern.Invoke()
+            if($e.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)){
+                $identity=($e.GetRuntimeId() -join '.')
+                if(-not [MendimaruUiInvoke]::Dispatch($pattern,$identity)){throw 'ui-effect-unverified'}
+            }else{
+                $button=[IntPtr]$e.Current.NativeWindowHandle
+                $native=Native-Observation $e
+                if($null -eq $native -or -not (Native-ErrorWindow $h) -or
+                    [MendimaruUiNative]::ControlRole($button) -cne 'Button' -or
+                    $native.text -cnotin @('Details >>','Details <<','Close','자세히 >>','자세히 <<','닫기')){throw 'ui-unsupported-element'}
+                # BM_CLICK is a semantic button activation on the freshly
+                # resolved exact child HWND; never a coordinate or replay.
+                if(-not [MendimaruUiNative]::PostMessage($button,0x00f5,[IntPtr]::Zero,[IntPtr]::Zero)){throw 'ui-effect-unverified'}
+            }
             # Invoke completion means UIA dispatched the semantic action. The
             # caller must wait for the intended application state separately.
         }
@@ -488,8 +622,15 @@ function Act($r) {
             if($r.value -eq 'F5'){
                 if((State (Scan)).state -cne 'project-ready'){throw 'ui-effect-unverified'}
             }
-            $e.SetFocus()
-            if(-not $e.Current.HasKeyboardFocus -or [MendimaruUiNative]::GetForegroundWindow() -ne $h){throw 'ui-foreground-lost'}
+            $nativeRoot=($e.Current.ControlType -eq [Windows.Automation.ControlType]::Window -and
+                [IntPtr]$e.Current.NativeWindowHandle -eq $h -and (Native-ErrorWindow $h))
+            if($nativeRoot){
+                if($r.value -cnotin @('Tab','Enter','Escape')){throw 'ui-unsupported-element'}
+            }else{
+                if(-not $e.Current.HasKeyboardFocus){$e.SetFocus()}
+                if(-not $e.Current.HasKeyboardFocus){throw 'ui-foreground-lost'}
+            }
+            if([MendimaruUiNative]::GetForegroundWindow() -ne $h){throw 'ui-foreground-lost'}
             $null=Target
             [Windows.Forms.SendKeys]::SendWait($keys[[string]$r.value])
         }
