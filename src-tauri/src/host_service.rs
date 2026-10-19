@@ -47,6 +47,7 @@ pub(crate) fn valid_password_env(name: &str) -> bool {
             .all(|(i, b)| b == b'_' || b.is_ascii_alphabetic() || (i > 0 && b.is_ascii_digit()))
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub(crate) fn valid_m2ee_password(value: &str) -> bool {
     !value.is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
 }
