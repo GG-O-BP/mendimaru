@@ -467,6 +467,14 @@ jobs:
           ./scripts/test-session-query.ps1
           ./scripts/test-guest-clock.ps1
 
+      - name: Test host-service listener ownership and streaming
+        shell: powershell
+        run: ./scripts/test-host-service.ps1
+
+      - name: Test owned Studio M2EE bridge and foreign listener refusal
+        shell: powershell
+        run: ./scripts/test-studio-m2ee.ps1
+
   security:
     name: Dependency security audit
     needs: changes

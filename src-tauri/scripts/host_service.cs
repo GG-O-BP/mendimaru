@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 public sealed class MendimaruHostService : IDisposable {
     const int FrameBytes = 16384;
     readonly TcpListener listener;
+    readonly MendimaruRuntime.AdminBridge adminBridge;
     readonly string host, pin;
     readonly int port;
     readonly byte[] key;
@@ -30,6 +31,12 @@ public sealed class MendimaruHostService : IDisposable {
         listener = new TcpListener(IPAddress.Loopback, guestPort);
         listener.Server.ExclusiveAddressUse = true;
         listener.Start(64);
+    }
+
+    public MendimaruHostService(string host, int port, string pin, int guestPort, byte[] operationKey, int studioPid, long studioTicks, string studioPath, string password)
+        : this(host, port, pin, guestPort, operationKey) {
+        try { adminBridge = new MendimaruRuntime.AdminBridge(studioPid, studioTicks, studioPath, password); }
+        catch { Dispose(); throw; }
     }
 
     bool ValidateCertificate(object sender, X509Certificate cert, X509Chain chain, SslPolicyErrors errors) {
@@ -153,6 +160,10 @@ public sealed class MendimaruHostService : IDisposable {
                     byte[] ack = new byte[1];
                     await Exact(ssl, ack, 1).ConfigureAwait(false);
                     if (ack[0] != 1) throw new InvalidDataException();
+                    if (kind == 3 && adminBridge != null) {
+                        await adminBridge.Serve(ssl, cancel.Token).ConfigureAwait(false);
+                        continue;
+                    }
                     await client.ConnectAsync(IPAddress.Loopback, targetPort).ConfigureAwait(false);
                     client.NoDelay = true;
                     await Drain(Encode(client.GetStream(), ssl), Decode(ssl, client), client, upstream, 300000).ConfigureAwait(false);
@@ -210,6 +221,6 @@ public sealed class MendimaruHostService : IDisposable {
     }
 
     public void Dispose() {
-        if (!cancel.IsCancellationRequested) { cancel.Cancel(); listener.Stop(); Array.Clear(key, 0, key.Length); }
+        if (!cancel.IsCancellationRequested) { cancel.Cancel(); listener.Stop(); Array.Clear(key, 0, key.Length); if (adminBridge != null) adminBridge.Dispose(); }
     }
 }

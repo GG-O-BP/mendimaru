@@ -176,6 +176,11 @@ pub(crate) async fn start(
     // keeper 수명 전체의 flock으로 막고 stale 레코드는 보존한다.
     for status in list(config).await? {
         if status.runtime_session_id == request.runtime_session_id && status.state == "ready" {
+            // An environment value can rotate without changing its name. Never
+            // silently reuse an existing authentication binding.
+            if request.m2ee_password_env.is_some() || status.m2ee_authentication_configured {
+                return Err(fail("M2EE authentication binding already exists; stop the owned host-service before restarting"));
+            }
             if request.guest_port != 0 && request.guest_port != status.guest_port {
                 return Err(fail(
                     "host-service already owns a different guest port for this Runtime",
@@ -184,11 +189,20 @@ pub(crate) async fn start(
             return Ok(status);
         }
     }
+    if let Some(name) = &request.m2ee_password_env {
+        let secret = zeroize::Zeroizing::new(std::env::var(name).map_err(|_| {
+            fail("M2EE password environment variable must contain a nonempty UTF-8 value")
+        })?);
+        if !crate::host_service::valid_m2ee_password(&secret) {
+            return Err(fail("M2EE password environment variable must contain 1 to 256 UTF-8 bytes without control characters"));
+        }
+    }
     let mut command = tokio::process::Command::new(std::env::current_exe().map_err(io_error)?);
     command
         .arg("__host-service-keeper")
         .arg(&request.runtime_session_id)
-        .arg(request.guest_port.to_string());
+        .arg(request.guest_port.to_string())
+        .arg(request.m2ee_password_env.as_deref().unwrap_or(""));
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -346,7 +360,7 @@ pub(crate) fn keeper_dispatch(arguments: &[std::ffi::OsString]) -> i32 {
     let result = crate::i18n::initialize("en-US")
         .map_err(io_error)
         .and_then(|_| {
-            let [runtime, port] = arguments else {
+            let [runtime, port, password_env] = arguments else {
                 return Err(BackendError::invalid_request(
                     "invalid host-service keeper request",
                 ));
@@ -360,6 +374,10 @@ pub(crate) fn keeper_dispatch(arguments: &[std::ffi::OsString]) -> i32 {
                     .unwrap_or_default()
                     .parse()
                     .map_err(io_error)?,
+                m2ee_password_env: password_env
+                    .to_str()
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned),
             };
             request.validate()?;
             let paths = AppPaths::discover_for_cli().map_err(io_error)?;
@@ -600,6 +618,14 @@ async fn prepare(config: &AppConfig, request: &StartRequest) -> Result<Prepared,
         pin: pin.clone(),
         guest_port: request.guest_port,
         operation_key: security.bootstrap_key_text().to_string(),
+        m2ee_password: request
+            .m2ee_password_env
+            .as_ref()
+            .map(|name| {
+                std::env::var(name)
+                    .map_err(|_| fail("M2EE password environment variable is unavailable"))
+            })
+            .transpose()?,
     };
     let paths = AppPaths::discover_for_cli().map_err(io_error)?;
     crate::cli::request_keeper_host_service(&paths, &studio, &packet).await?;
@@ -623,6 +649,7 @@ async fn prepare(config: &AppConfig, request: &StartRequest) -> Result<Prepared,
             active_connections: 0,
             web_host_port: None,
             admin_host_port: None,
+            m2ee_authentication_configured: request.m2ee_password_env.is_some(),
         },
         root,
         ipc,
@@ -723,6 +750,7 @@ mod tests {
             active_connections: 0,
             web_host_port: None,
             admin_host_port: None,
+            m2ee_authentication_configured: false,
         }
     }
 
@@ -853,6 +881,7 @@ mod tests {
             service: "mysql".into(),
             allow_host_port: 3306,
             guest_port: 0,
+            m2ee_password_env: None,
         };
         request.validate().unwrap();
         let compose = std::fs::read(&config.compose_file).unwrap();

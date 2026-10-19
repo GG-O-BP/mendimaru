@@ -14,7 +14,11 @@ fn ui_preamble() -> String {
         )
         .replace(
             "__HOST_SERVICE_SOURCE_BASE64__",
-            &BASE64_STANDARD.encode(include_str!("../../scripts/host_service.cs")),
+            &BASE64_STANDARD.encode(format!(
+                "{}\n{}",
+                include_str!("../../scripts/host_service.cs"),
+                include_str!("../../scripts/studio_m2ee.cs")
+            )),
         )
 }
 

@@ -560,7 +560,7 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
              Stops the selected Studio session through its verified process identity.",
         ),
         (Some("host-service"), _) => Some(
-            "Usage: mendimaru host-service start --service mysql --allow-host-port 3306 --runtime-session-id ID [--guest-port PORT]\n\
+            "Usage: mendimaru host-service start --service mysql --allow-host-port 3306 --runtime-session-id ID [--guest-port PORT] [--m2ee-password-env NAME]\n\
              Usage: mendimaru host-service status|stop --session-id ID\n\
              Usage: mendimaru host-service list\n\
              Manages an authenticated TLS stream from Windows loopback to Linux 127.0.0.1:3306.\n\
@@ -2984,6 +2984,7 @@ fn parse_host_service_command(values: &[String]) -> Result<CliCommand, BackendEr
                     "--allow-host-port",
                     "--runtime-session-id",
                     "--guest-port",
+                    "--m2ee-password-env",
                 ],
                 &[],
             )?;
@@ -3003,6 +3004,7 @@ fn parse_host_service_command(values: &[String]) -> Result<CliCommand, BackendEr
                     BackendError::invalid_request("--allow-host-port is required")
                 })?,
                 guest_port: port("--guest-port")?.unwrap_or(0),
+                m2ee_password_env: options.get("--m2ee-password-env").cloned(),
             };
             request.validate()?;
             Ok(CliCommand::HostServiceStart { request })

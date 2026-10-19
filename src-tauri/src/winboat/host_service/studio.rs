@@ -12,17 +12,24 @@ pub(crate) struct Launch {
     pub pin: String,
     pub guest_port: u16,
     pub operation_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub m2ee_password: Option<String>,
 }
 impl Drop for Launch {
     fn drop(&mut self) {
         use zeroize::Zeroize;
         self.operation_key.zeroize();
+        self.m2ee_password.zeroize();
     }
 }
 impl Launch {
     fn validate(&self) -> Result<(), BackendError> {
         if !crate::host_service::valid_id(&self.id, "hostsvc_")
             || !self.host.is_private()
+            || self
+                .m2ee_password
+                .as_deref()
+                .is_some_and(|v| !crate::host_service::valid_m2ee_password(v))
             || self.port == 0
             || self.pin.len() != 64
             || !self
@@ -76,10 +83,13 @@ pub(crate) async fn launch(session: &str, packet: Launch) -> Result<(), BackendE
             let sealed = security
                 .seal_ui_value(&packet.operation_key)
                 .map_err(io_error)?;
+            let sealed_password = packet.m2ee_password.as_deref()
+                .map(|value| security.seal_ui_value(value).map_err(io_error)).transpose()?;
             let payload = serde_json::to_vec(&serde_json::json!({
                 "id":packet.id,"host":packet.host,"port":packet.port,"pin":packet.pin,
                 "guestPort":packet.guest_port,"studioSessionId":session,
-                "expiresAt":chrono::Utc::now().timestamp_millis()+30000,"sealedKey":sealed
+                "expiresAt":chrono::Utc::now().timestamp_millis()+30000,"sealedKey":sealed,
+                "sealedM2eePassword":sealed_password
             }))
             .map_err(io_error)?;
             let bytes = authenticated_envelope(&security, sequence, &payload).map_err(io_error)?;
@@ -118,7 +128,12 @@ pub(crate) async fn launch(session: &str, packet: Launch) -> Result<(), BackendE
                         return if value["ok"] == true {
                             Ok(())
                         } else {
-                            Err(fail(if value["reason"]=="owned" { "Studio monitor still owns the previous host-service helper; retry after control cleanup" } else { "host-service Studio helper refused startup" }))
+                            Err(fail(match value["reason"].as_str() {
+                                Some("owned") => "Studio monitor still owns the previous host-service helper; retry after control cleanup",
+                                Some("compile-refused") => "host-service Studio helper compilation was refused",
+                                Some("authentication-refused") => "host-service M2EE binding was refused; exact Studio 11.12.6 and a valid owned identity are required",
+                                _ => "host-service Studio helper refused startup",
+                            }))
                         };
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -146,6 +161,7 @@ mod tests {
             pin: "a".repeat(64),
             guest_port: 0,
             operation_key: STANDARD.encode([42; 32]),
+            m2ee_password: None,
         };
         packet.validate().unwrap();
         for address in [
