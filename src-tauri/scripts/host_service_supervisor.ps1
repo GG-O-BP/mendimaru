@@ -17,7 +17,7 @@ function Service-MendimaruHostService {
         $auth=Read-MendimaruAuthenticatedPayload -Path $path
         $packet=$auth.Json|ConvertFrom-Json
         if($auth.Sequence -le $script:HostServiceSequence -or
-            (@($packet.PSObject.Properties.Name|Sort-Object) -join ',') -cne 'expiresAt,guestPort,host,id,pin,port,sealedKey,studioSessionId' -or
+            (@($packet.PSObject.Properties.Name|Sort-Object) -join ',') -cne 'expiresAt,guestPort,host,id,pin,port,sealedKey,sealedM2eePassword,studioSessionId' -or
             $packet.id -cnotmatch '^hostsvc_[0-9a-f]{32}$' -or $packet.studioSessionId -cne $script:UiIdentity.sessionId -or
             [long]$packet.expiresAt -lt [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()-5000 -or
             [long]$packet.expiresAt -gt [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()+35000 -or
@@ -32,7 +32,7 @@ function Service-MendimaruHostService {
         if($sealed.version -ne 1 -or (@($sealed.PSObject.Properties.Name|Sort-Object) -join ',') -cne 'ciphertext,iv,version'){throw 'invalid-host-service'}
         $iv=[Convert]::FromBase64String([string]$sealed.iv);$cipher=[Convert]::FromBase64String([string]$sealed.ciphertext)
         if($iv.Length -ne 16 -or $cipher.Length -ne 48){throw 'invalid-host-service'}
-        $aes=[Security.Cryptography.Aes]::Create();$derived=$null;$plain=$null;$key=$null;$decryptor=$null
+        $aes=[Security.Cryptography.Aes]::Create();$derived=$null;$plain=$null;$key=$null;$decryptor=$null;$passwordBytes=$null;$password=$null
         try {
             $derived=$script:MendimaruHmac.ComputeHash([Text.Encoding]::ASCII.GetBytes('mendimaru-ui-value-v1'))
             $aes.Key=$derived;$aes.IV=$iv;$aes.Mode=[Security.Cryptography.CipherMode]::CBC;$aes.Padding=[Security.Cryptography.PaddingMode]::PKCS7
@@ -43,10 +43,25 @@ function Service-MendimaruHostService {
                 $source=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__HOST_SERVICE_SOURCE_BASE64__'))
                 Add-Type -TypeDefinition $source -Language CSharp -ErrorAction Stop
             }
-            $script:HostService=New-Object MendimaruHostService([string]$packet.host,[int]$packet.port,[string]$packet.pin,[int]$packet.guestPort,$key)
+            if($null -ne $packet.sealedM2eePassword){
+                $sealedPassword=$packet.sealedM2eePassword
+                if($sealedPassword.version -ne 1 -or (@($sealedPassword.PSObject.Properties.Name|Sort-Object) -join ',') -cne 'ciphertext,iv,version'){throw 'invalid-host-service'}
+                $passwordIv=[Convert]::FromBase64String([string]$sealedPassword.iv)
+                $passwordCipher=[Convert]::FromBase64String([string]$sealedPassword.ciphertext)
+                if($passwordIv.Length -ne 16 -or $passwordCipher.Length -lt 16 -or $passwordCipher.Length -gt 272 -or $passwordCipher.Length % 16 -ne 0){throw 'invalid-host-service'}
+                $aes.IV=$passwordIv
+                $passwordDecryptor=$aes.CreateDecryptor()
+                try {$passwordBytes=$passwordDecryptor.TransformFinalBlock($passwordCipher,0,$passwordCipher.Length)}finally{$passwordDecryptor.Dispose()}
+                $password=(New-Object Text.UTF8Encoding($false,$true)).GetString($passwordBytes)
+                if($script:UiIdentity.fileVersion -cne '11.12.6.0' -or [Text.Encoding]::UTF8.GetByteCount($password) -gt 256 -or [string]::IsNullOrEmpty($password) -or $password -match '[\x00-\x1f\x7f]'){throw 'invalid-host-service'}
+                $script:HostService=New-Object MendimaruHostService([string]$packet.host,[int]$packet.port,[string]$packet.pin,[int]$packet.guestPort,$key,[int]$script:UiIdentity.processId,[long]$script:UiIdentity.startedTicks,[string]$script:UiIdentity.executable,$password)
+            }else{
+                $script:HostService=New-Object MendimaruHostService([string]$packet.host,[int]$packet.port,[string]$packet.pin,[int]$packet.guestPort,$key)
+            }
             $script:HostServiceTask=$script:HostService.Run()
         }finally{
-            foreach($bytes in @($derived,$plain,$key)){if($null -ne $bytes){[Array]::Clear($bytes,0,$bytes.Length)}}
+            foreach($bytes in @($derived,$plain,$key,$passwordBytes)){if($null -ne $bytes){[Array]::Clear($bytes,0,$bytes.Length)}}
+            $password=$null
             if($null -ne $decryptor){$decryptor.Dispose()};$aes.Dispose()
         }
         $resultPath=$controlPath+'.host-service.report'

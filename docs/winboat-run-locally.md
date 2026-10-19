@@ -188,3 +188,9 @@ and the separate external-change fixture and disposable-VM gates.
 See [shared Linux + WinBoat tests](shared-winboat-testing.md) for fixed preparation
 identity, cross-process data exclusion, supported combinations, upgrade behavior,
 and the installed-package real Studio F5 integration gate.
+
+## Development servlet and M2EE authentication (#266)
+
+See the explicit [Studio M2EE environment contract](studio-m2ee-authentication.md)
+for exact 11.12.6 authentication through the owned admin HTTP bridge. HTTP
+readiness alone is not authenticated admin or browser readiness.

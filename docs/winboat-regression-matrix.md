@@ -36,6 +36,19 @@ Compose rollback, authenticated recovery, locks and keeper cases remain required
 in the ordinary suite. These fixtures do not claim live Studio app acceptance;
 the release workflow supplies the separate Studio F5 and browser gate.
 
+## Studio M2EE authentication (0.7.6, #266)
+
+The optional host-service start field `m2eePasswordEnv` and status field
+`m2eeAuthenticationConfigured` are additive within v7. Prior records omit the
+status field and deserialize as unconfigured without rewriting. Runtime record
+layout and compatibility rules are unchanged. The ordinary Rust suite retains
+v4/v5/v6/current discovery, invalidation, Compose rollback, keeper ownership and
+cleanup, and adds explicit environment-name and UTF-8 secret bounds. The Windows
+PowerShell gate compiles and exercises the production bridge against an isolated
+owned/foreign process fixture; the Python acceptance verifier rejects HTTP-200
+M2EE authentication denial. See [the authentication guide](studio-m2ee-authentication.md)
+for the separate real Studio acceptance and lifecycle boundary.
+
 ## Startup and disposable UEFI recovery (#129–134)
 
 | Boundary                                                                        | Automated scenarios                                                                                                                                                                                                                 |

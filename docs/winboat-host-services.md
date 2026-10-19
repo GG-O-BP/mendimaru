@@ -79,6 +79,16 @@ readiness는 웹 중계를 사용한다. 이전 host-service 상태에는 이 �
 웹 16개와 관리 4개의 사전 연결을 사용하고, 각 리스너의 활성 중계 작업은
 32개로 제한한다. 중계 종료 또는 인증된 제어 연결 손실 시 함께 닫힌다.
 
+## Studio M2EE 환경 기반 인증 연결 (#266)
+
+`host-service start`에 `--m2ee-password-env MXCLI_APP_ADMIN_PASSWORD`를 명시하면
+Studio Pro 11.12.6.0의 관리 포트 중계가 호스트 환경변수 기반 인증을 현재 소유
+Runtime의 M2EE 인증으로 연결한다. 앱 관리자 암호나 접근정책은 변경하지 않는다.
+옵션에는 환경변수 이름만 전달한다. 상태의 `m2eeAuthenticationConfigured`는
+구성 여부이며 실제 인증 성공을 뜻하지 않는다. 비밀·소유권 경계, 요청 제한,
+정상/누락/오류 검증과 안전한 종료는 [M2EE 인증 계약](studio-m2ee-authentication.md)을
+따른다. 옵션이 없는 기존 중계는 원래 동작을 유지한다.
+
 ## 보안과 스트리밍
 
 - 허용된 목적지는 `mysql`과 명시적인 `--allow-host-port 3306`뿐이다.

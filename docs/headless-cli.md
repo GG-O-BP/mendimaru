@@ -414,3 +414,7 @@ Runtime; the owner prepares and finalizes (#151). See
 [bounded parallel test execution](browser-testing.md#bounded-parallel-test-execution-155)
 for the declaration format, the parallel permission table, the reported
 evidence, and the limits.
+
+Studio Pro 11.12.6 Run Locally supports an explicit host authentication alias via
+`host-service start --m2ee-password-env NAME`; see the
+[environment and secret-handling contract](studio-m2ee-authentication.md).

@@ -57,7 +57,12 @@ validate(
 );
 validate(
   `${hostServiceSchema}#/$defs/status`,
-  { ...hostService, webHostPort: 18080, adminHostPort: 18090 },
+  {
+    ...hostService,
+    webHostPort: 18080,
+    adminHostPort: 18090,
+    m2eeAuthenticationConfigured: true,
+  },
   "host-service reverse HTTP status",
 );
 for (const invalid of [
@@ -89,6 +94,31 @@ validate(
   },
   "host-service start request",
 );
+const m2eeStart = {
+  runtimeSessionId: hostService.runtimeSessionId,
+  service: "mysql",
+  allowHostPort: 3306,
+  guestPort: 0,
+  m2eePasswordEnv: "MXCLI_APP_ADMIN_PASSWORD",
+};
+validate(
+  `${hostServiceSchema}#/$defs/startRequest`,
+  m2eeStart,
+  "explicit M2EE environment binding",
+);
+for (const invalid of [
+  { m2eePasswordEnv: "" },
+  { m2eePasswordEnv: "2BAD" },
+  { m2eePassword: "never accepted" },
+]) {
+  if (
+    ajv.validate(`${hostServiceSchema}#/$defs/startRequest`, {
+      ...m2eeStart,
+      ...invalid,
+    })
+  )
+    throw new Error("host-service accepted an unsafe M2EE binding");
+}
 for (const blocking of [false, true]) {
   const assessment = {
     connectivity: true,
