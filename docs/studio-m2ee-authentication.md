@@ -68,12 +68,14 @@ Existing TLS pinning, per-connection authentication, cancellation and lifecycle
 cleanup remain in force.
 
 Before each admin request the helper checks the selected Studio PID, creation
-time, executable, owner and exact file version. It finds the PID that owns the
-IPv4 loopback listener on 8090, requires `java`/`javaw` with the same owner and
+time, executable, owner and exact file version. It connects to the fixed admin socket, verifies the PID owning that exact
+accepted connection and the IPv4 loopback listener on 8090, and requires `java`/`javaw` with the same owner and
 interactive session, and verifies its live, creation-time-ordered ancestry back
 to that Studio (at most eight levels). It reads only `M2EE_ADMIN_PASS` from that
 process's bounded x64 environment, clears temporary buffers, and rechecks the
-listener/process identity. It does not read credential stores, deployment
+listener/process/connection identity. The header travels over that same socket;
+there is no reconnection or connection pool that could retarget a replacement
+listener between validation and sending. It does not read credential stores, deployment
 configuration or project user settings, enumerate arbitrary secrets, return a
 credential through an API, or cache a Runtime credential across F5 restarts.
 A missing listener, foreign process, stale identity, unsupported architecture,

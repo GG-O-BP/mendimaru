@@ -1,16 +1,12 @@
 // Fixed-purpose Studio 11.12.6 admin authentication bridge. No credential API,
 // arbitrary PID, address, file, environment name or script is exposed to callers.
-// The shipped compiler targets .NET Framework; keep this transport compatible
-// with PowerShell 5.1 while allowing compilation checks on modern .NET.
-#if MENDIMARU_MODERN_DOTNET
-#pragma warning disable SYSLIB0014
-#endif
 namespace MendimaruRuntime {
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
     using System.Net;
+    using System.Net.Sockets;
     using System.Runtime.InteropServices;
     using System.Text;
     using System.Threading;
@@ -45,9 +41,9 @@ namespace MendimaruRuntime {
             Array.Clear(actual, 0, actual.Length);
             return difference == 0;
         }
-        string Password() {
+        string Password(int pid, int peerPort) {
             using (var studio = Studio()) {
-                int pid = Native.AdminListener();
+                if (Native.AdminListener() != pid) throw new InvalidDataException();
                 using (var child = Process.GetProcessById(pid)) {
                     if ((child.ProcessName != "java" && child.ProcessName != "javaw") || child.SessionId != studio.SessionId ||
                         child.StartTime.ToUniversalTime().Ticks < studioTicks || !Native.SameOwner(pid)) throw new InvalidDataException();
@@ -67,7 +63,7 @@ namespace MendimaruRuntime {
                     if (!owned) throw new InvalidDataException();
                     string value = Native.M2eePassword(child.Id);
                     // Recheck the listener and identities after reading; never cache a Runtime secret across F5.
-                    if (Native.AdminListener() != child.Id || child.HasExited) throw new InvalidDataException();
+                    if (Native.AdminListener() != child.Id || Native.AdminConnectionOwner(peerPort) != child.Id || child.HasExited) throw new InvalidDataException();
                     using (var checkedStudio = Studio()) {}
                     return value;
                 }
@@ -128,30 +124,44 @@ namespace MendimaruRuntime {
                         }
                         if (input.Length > headerEnd + length) throw new InvalidDataException();
                     }
-                    // Validate ownership even for rejected credentials: never forward to another app.
-                    string secret = Password();
-                    var request = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:8090" + path);
-                    request.Method = "POST"; request.ContentType = "application/json"; request.Proxy = null;
-                    request.AllowAutoRedirect = false; request.KeepAlive = false; request.Timeout = 10000; request.ReadWriteTimeout = 10000;
-                    if (auth != null) request.Headers["X-M2EE-Authentication"] = Matches(auth) ? Convert.ToBase64String(Encoding.UTF8.GetBytes(secret)) : Convert.ToBase64String(Guid.NewGuid().ToByteArray());
-                    secret = null; auth = null; request.ContentLength = length;
-                    using (token.Register(() => request.Abort())) {
+                    // Connect first and authenticate the owner of this exact
+                    // accepted socket. A listener replacement cannot receive a
+                    // credential through reconnect, connection pooling or a race.
+                    using (var tcp = new TcpClient())
+                    using (token.Register(() => tcp.Close())) {
+                        await tcp.ConnectAsync(IPAddress.Loopback, 8090).ConfigureAwait(false);
+                        int peerPort = ((IPEndPoint)tcp.Client.LocalEndPoint).Port;
+                        string secret = Password(Native.AdminConnectionOwner(peerPort), peerPort);
+                        string translated = auth == null ? null : (Matches(auth) ? Convert.ToBase64String(Encoding.UTF8.GetBytes(secret)) : Convert.ToBase64String(Guid.NewGuid().ToByteArray()));
+                        secret = null; auth = null;
+                        byte[] header = Encoding.ASCII.GetBytes("POST " + path + " HTTP/1.1\r\nHost: 127.0.0.1:8090\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: " + length.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\r\n" +
+                            (translated == null ? "" : "X-M2EE-Authentication: " + translated + "\r\n") + "\r\n");
+                        translated = null;
                         try {
-                            using (var body = await request.GetRequestStreamAsync().ConfigureAwait(false)) { await body.WriteAsync(input.GetBuffer(), headerEnd, length, token).ConfigureAwait(false); }
-                            HttpWebResponse response;
-                            try { response = (HttpWebResponse)await request.GetResponseAsync().ConfigureAwait(false); }
-                            catch (WebException e) { response = e.Response as HttpWebResponse; if (response == null) throw; }
-                            using (response)
-                            using (var body = response.GetResponseStream())
+                            Stream upstream = tcp.GetStream();
+                            await upstream.WriteAsync(header, 0, header.Length, token).ConfigureAwait(false);
+                            await upstream.WriteAsync(input.GetBuffer(), headerEnd, length, token).ConfigureAwait(false);
                             using (var output = new MemoryStream()) {
-                                byte[] buffer = new byte[16384]; int n;
-                                while ((n = await body.ReadAsync(buffer, 0, buffer.Length, token).ConfigureAwait(false)) != 0) { if (output.Length + n > MaxBody) throw new InvalidDataException(); output.Write(buffer, 0, n); }
-                                string header = "HTTP/1.1 " + (int)response.StatusCode + " Response\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: " + output.Length + "\r\n\r\n";
-                                await Send(wire, Encoding.ASCII.GetBytes(header), token).ConfigureAwait(false);
+                                byte[] buffer = new byte[16384]; int n, responseHeaderEnd = -1;
+                                while ((n = await upstream.ReadAsync(buffer, 0, buffer.Length, token).ConfigureAwait(false)) != 0) {
+                                    if (output.Length + n > MaxHeader + MaxBody) throw new InvalidDataException();
+                                    output.Write(buffer, 0, n);
+                                    if (responseHeaderEnd < 0) {
+                                        byte[] bytes = output.GetBuffer();
+                                        for (int i = 0; i + 3 < output.Length && i + 4 <= MaxHeader; i++) {
+                                            if (bytes[i] == 13 && bytes[i+1] == 10 && bytes[i+2] == 13 && bytes[i+3] == 10) { responseHeaderEnd = i+4; break; }
+                                        }
+                                        if (responseHeaderEnd < 0 && output.Length >= MaxHeader) throw new InvalidDataException();
+                                    }
+                                }
+                                if (responseHeaderEnd < 0 || output.Length - responseHeaderEnd > MaxBody) throw new InvalidDataException();
+                                string status = Encoding.ASCII.GetString(output.GetBuffer(), 0, Math.Min(13, (int)output.Length));
+                                if ((!status.StartsWith("HTTP/1.1 ") && !status.StartsWith("HTTP/1.0 ")) || status.Length < 13 ||
+                                    status[9] < '2' || status[9] > '5' || status[10] < '0' || status[10] > '9' || status[11] < '0' || status[11] > '9' || status[12] != ' ') throw new InvalidDataException();
                                 await Send(wire, output.ToArray(), token).ConfigureAwait(false);
                                 await wire.WriteAsync(new byte[4], 0, 4, token).ConfigureAwait(false);
                             }
-                        } finally { request.Headers.Remove("X-M2EE-Authentication"); Array.Clear(input.GetBuffer(), 0, (int)input.Length); }
+                        } finally { Array.Clear(header, 0, header.Length); Array.Clear(input.GetBuffer(), 0, (int)input.Length); }
                     }
                 }
             }
@@ -183,18 +193,22 @@ namespace MendimaruRuntime {
                 }
             } finally { if (token != IntPtr.Zero) CloseHandle(token); CloseHandle(p); }
         }
-        public static int AdminListener() {
-            int size = 0; GetExtendedTcpTable(IntPtr.Zero, ref size, false, 2, 3, 0);
+        public static int AdminListener() { return AdminOwner(0); }
+        public static int AdminConnectionOwner(int peerPort) { if (peerPort <= 0) throw new InvalidDataException(); return AdminOwner(peerPort); }
+        static int AdminOwner(int peerPort) {
+            int table = peerPort == 0 ? 3 : 4;
+            int size = 0; GetExtendedTcpTable(IntPtr.Zero, ref size, false, 2, table, 0);
             if (size < 4 || size > 1048576) throw new InvalidDataException();
             IntPtr data = Marshal.AllocHGlobal(size);
             try {
-                if (GetExtendedTcpTable(data, ref size, false, 2, 3, 0) != 0) throw new InvalidDataException();
+                if (GetExtendedTcpTable(data, ref size, false, 2, table, 0) != 0) throw new InvalidDataException();
                 int count = Marshal.ReadInt32(data); if (count < 0 || count > (size - 4) / 24) throw new InvalidDataException();
                 int found = 0;
                 for (int i = 0; i < count; i++) {
                     IntPtr row = IntPtr.Add(data, 4 + i * 24);
                     int port = (Marshal.ReadByte(row, 8) << 8) | Marshal.ReadByte(row, 9);
-                    if (Marshal.ReadInt32(row) != 2 || port != 8090) continue;
+                    if (Marshal.ReadInt32(row) != (peerPort == 0 ? 2 : 5) || port != 8090) continue;
+                    if (peerPort != 0 && (((Marshal.ReadByte(row, 16) << 8) | Marshal.ReadByte(row, 17)) != peerPort || Marshal.ReadInt32(row, 12) != 0x0100007f)) continue;
                     // M2EE must retain guest IPv4 loopback isolation.
                     if (Marshal.ReadInt32(row, 4) != 0x0100007f || found != 0) throw new InvalidDataException();
                     found = Marshal.ReadInt32(row, 20);

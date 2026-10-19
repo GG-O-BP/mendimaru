@@ -2,8 +2,7 @@ $ErrorActionPreference = 'Stop'
 # .NET Framework helper의 실제 공급 소스를 컴파일하고 소켓 소유권을 검증한다.
 $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../src-tauri/scripts/host_service.cs'))
 $source += "`n" + [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../src-tauri/scripts/studio_m2ee.cs'))
-$compilerOptions = if ($PSVersionTable.PSEdition -eq 'Core') { '/define:MENDIMARU_MODERN_DOTNET' } else { '/define:MENDIMARU_FRAMEWORK' }
-Add-Type -TypeDefinition $source -Language CSharp -CompilerOptions $compilerOptions -ErrorAction Stop
+Add-Type -TypeDefinition $source -Language CSharp -ErrorAction Stop
 $key = New-Object byte[] 32
 $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
 $rng.GetBytes($key)
