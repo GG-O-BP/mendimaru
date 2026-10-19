@@ -40,7 +40,7 @@ namespace MendimaruRuntime {
         }
         static string Request(string path,string auth,string body) { return "POST "+path+" HTTP/1.1\r\nHost: localhost\r\nContent-Length: "+body.Length+"\r\n"+(auth==null?"":"X-M2EE-Authentication: "+auth+"\r\n")+"\r\n"+body; }
         static string Send(AdminBridge bridge,string request,int fragment) {
-            using(var wire=new Duplex(Framed(request,fragment))) { bridge.Serve(wire,CancellationToken.None).GetAwaiter().GetResult();return Unframed(wire.Output.ToArray()); }
+            using(var wire=new Duplex(Framed(request,fragment))) { var pending=bridge.Serve(wire,CancellationToken.None);if(!pending.Wait(20000))throw new Exception("bridge fixture timed out");pending.GetAwaiter().GetResult();return Unframed(wire.Output.ToArray()); }
         }
         static void Reject(AdminBridge bridge,string request) {
             bool rejected=false; try { Send(bridge,request,5); } catch { rejected=true; }
@@ -50,13 +50,13 @@ namespace MendimaruRuntime {
             using(var bridge=new AdminBridge(pid,ticks,path,password)) {
                 string alias=Convert.ToBase64String(Encoding.UTF8.GetBytes(password));
                 foreach(string auth in new string[]{null,"incorrect",alias}) {
-                    bool valid=auth==alias;
+                    bool valid=auth==alias; Console.WriteLine("Fixture: servlet " + (auth==null?"missing":valid?"valid":"incorrect"));
                     string servlet=Send(bridge,Request("/dev/preview_execute_oql",auth,"{}"),1);
                     if(!servlet.StartsWith(valid?"HTTP/1.1 200 ":"HTTP/1.1 403 ") || (valid&&!servlet.Contains("\"data\"")))throw new Exception("servlet authentication failed");
-                    string status=Send(bridge,Request("/",auth,"{\"action\":\"runtime_status\",\"params\":{}}"),7);
+                    Console.WriteLine("Fixture: M2EE status"); string status=Send(bridge,Request("/",auth,"{\"action\":\"runtime_status\",\"params\":{}}"),7);
                     if(!status.Contains(valid?"\"result\":0":"\"result\":-4"))throw new Exception("M2EE result lost");
                 }
-                string shutdown=Send(bridge,Request("/",alias,"{\"action\":\"shutdown\",\"params\":{}}"),1024);
+                Console.WriteLine("Fixture: M2EE shutdown"); string shutdown=Send(bridge,Request("/",alias,"{\"action\":\"shutdown\",\"params\":{}}"),1024);
                 if(!shutdown.Contains("\"result\":0"))throw new Exception("shutdown failed");
                 Reject(bridge,Request("http://example.com/",alias,"{}"));
                 Reject(bridge,Request("/other",alias,"{}"));
