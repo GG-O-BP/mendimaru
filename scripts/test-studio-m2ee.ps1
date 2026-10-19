@@ -11,6 +11,13 @@ $temp = Join-Path ([IO.Path]::GetTempPath()) ('mendimaru-m2ee-test-' + [Guid]::N
 $null = New-Item -ItemType Directory -Path $temp
 $studio = $null
 $foreign = $null
+function Send-FixtureLine($process, [string]$line) {
+    # Framework Process.StandardInput may prepend the console UTF-8 BOM. Use
+    # explicit ASCII bytes for this fixed test-control protocol.
+    $bytes = [Text.Encoding]::ASCII.GetBytes($line + "`n")
+    $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+    $process.StandardInput.BaseStream.Flush()
+}
 function Read-FixtureLine($process, [string]$stage) {
     $pending = $process.StandardOutput.ReadLineAsync()
     if (-not $pending.Wait(10000)) { throw "Fixture timed out: $stage" }
@@ -34,13 +41,11 @@ try {
     $alias = 'test-only-é-한글-' + [Guid]::NewGuid().ToString('N')
     $ticks = $studio.StartTime.ToUniversalTime().Ticks
     foreach ($round in @(1, 2)) {
-        $studio.StandardInput.WriteLine('start')
-        $studio.StandardInput.Flush()
+        Send-FixtureLine $studio 'start'
         if ((Read-FixtureLine $studio 'Runtime started') -cne 'started') { throw 'Runtime fixture did not start' }
         Write-Output "Fixture: owned Runtime round $round ready"
         [MendimaruRuntime.BridgeTests]::Verify($studio.Id, $ticks, $executable, $alias)
-        $studio.StandardInput.WriteLine('stop')
-        $studio.StandardInput.Flush()
+        Send-FixtureLine $studio 'stop'
         if ((Read-FixtureLine $studio 'Runtime stopped') -cne 'stopped') { throw 'Runtime fixture did not stop' }
     }
     $start.FileName = Join-Path $temp 'java.exe'
