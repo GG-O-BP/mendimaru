@@ -51,7 +51,7 @@ is likewise positive evidence for its semantic phase despite those omitted owner
 
 | Action           | Preconditions and result                                                                                                                                                                                                                       |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `invoke`         | Requires the element's InvokePattern. A completed call confirms semantic dispatch; wait separately for the app effect.                                                                                                                         |
+| `invoke`         | Dispatches InvokePattern or the observed native Error Details/Close fallback once; wait separately for the app effect.                                                                                                                         |
 | `click`          | Uses SelectionItemPattern or TogglePattern and verifies the resulting state. Coordinate/canvas clicking is unsupported.                                                                                                                        |
 | `focus`          | Requires a visible enabled element in the foreground owned window; verifies keyboard focus.                                                                                                                                                    |
 | `set-value`      | Properties Name or unique native Go To editor: Mendix identifier (100 ASCII characters). Configuration Database URL/name/user/password: explicitly labelled native fields only. Verifies non-password editor readback; password is write-only. |
@@ -229,7 +229,7 @@ provider cannot block the worker needed to inspect and close it.
 For an enabled Win32 `Error`/`오류` window in the exact validated Studio process,
 the tree supplements UIA with at most 128 visible native child HWNDs. Only
 Text, Edit and Button controls are exposed; password controls are excluded.
-Read-only diagnostic Edit values are bounded to 8192 characters. Only an observed standard Win32 Button named Details >>, Details << or Close
+Native controls reported by UIA as generic panes receive adapter Button/Text/Edit roles and supported actions from their verified native classes. Read-only diagnostic Edit values are bounded to 8192 characters. Only an observed standard Win32 Button named Details >>, Details << or Close
 (and the listed Korean equivalents) can use semantic BM_CLICK when its UIA
 provider lacks InvokePattern. All normal identity, stale-element, enabled-state
 and modal ownership guards still apply.
