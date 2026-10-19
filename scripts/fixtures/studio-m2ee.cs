@@ -43,6 +43,7 @@ class Fixture {
                 client.ReceiveTimeout = 5000; client.SendTimeout = 5000;
                 using (var reader = new StreamReader(client.GetStream(), Encoding.ASCII, false, 4096, true)) {
                     string first = reader.ReadLine(), line, authentication = null; int length = 0;
+                    if (first == null) continue; // Ownership refusal closes before sending a header.
                     while (!String.IsNullOrEmpty(line = reader.ReadLine())) {
                         int colon = line.IndexOf(':'); string key = line.Substring(0, colon), value = line.Substring(colon+1).Trim();
                         if (key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase)) length = Int32.Parse(value);
