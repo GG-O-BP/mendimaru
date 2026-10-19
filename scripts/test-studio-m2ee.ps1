@@ -2,7 +2,8 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $source = [IO.File]::ReadAllText((Join-Path $root 'src-tauri/scripts/studio_m2ee.cs'))
 $source += "`n" + [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'fixtures/studio-m2ee-tests.cs'))
-Add-Type -TypeDefinition $source -Language CSharp -ErrorAction Stop
+$compilerOptions = if ($PSVersionTable.PSEdition -eq 'Core') { '/define:MENDIMARU_MODERN_DOTNET' } else { '/define:MENDIMARU_FRAMEWORK' }
+Add-Type -TypeDefinition $source -Language CSharp -CompilerOptions $compilerOptions -ErrorAction Stop
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
     Write-Output 'PASS: admin bridge and ownership fixture compile; Windows process tests require Windows'
     exit 0

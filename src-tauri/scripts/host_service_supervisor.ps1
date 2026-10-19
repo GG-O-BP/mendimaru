@@ -12,7 +12,7 @@ function Service-MendimaruHostService {
     if($null -ne $script:HostServiceTask -and ($script:HostServiceTask.IsCompleted -or $script:HostService.IsClosed)){Close-MendimaruHostService}
     $path=$controlPath+'.host-service.request'
     if(-not (Test-Path -LiteralPath $path)){return}
-    $packet=$null;$accepted=$false
+    $packet=$null;$accepted=$false;$stage='startup'
     try {
         $auth=Read-MendimaruAuthenticatedPayload -Path $path
         $packet=$auth.Json|ConvertFrom-Json
@@ -39,10 +39,12 @@ function Service-MendimaruHostService {
             $decryptor=$aes.CreateDecryptor();$plain=$decryptor.TransformFinalBlock($cipher,0,$cipher.Length)
             $key=[Convert]::FromBase64String((New-Object Text.UTF8Encoding($false,$true)).GetString($plain))
             if($key.Length -ne 32){throw 'invalid-host-service'}
+            $stage='compile'
             if(-not ('MendimaruHostService' -as [type])){
                 $source=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__HOST_SERVICE_SOURCE_BASE64__'))
                 Add-Type -TypeDefinition $source -Language CSharp -ErrorAction Stop
             }
+            $stage='authentication'
             if($null -ne $packet.sealedM2eePassword){
                 $sealedPassword=$packet.sealedM2eePassword
                 if($sealedPassword.version -ne 1 -or (@($sealedPassword.PSObject.Properties.Name|Sort-Object) -join ',') -cne 'ciphertext,iv,version'){throw 'invalid-host-service'}
@@ -58,6 +60,7 @@ function Service-MendimaruHostService {
             }else{
                 $script:HostService=New-Object MendimaruHostService([string]$packet.host,[int]$packet.port,[string]$packet.pin,[int]$packet.guestPort,$key)
             }
+            $stage='startup'
             $script:HostServiceTask=$script:HostService.Run()
         }finally{
             foreach($bytes in @($derived,$plain,$key,$passwordBytes)){if($null -ne $bytes){[Array]::Clear($bytes,0,$bytes.Length)}}
@@ -70,7 +73,7 @@ function Service-MendimaruHostService {
         # 인증 실패는 응답하지 않는다. 유효한 요청도 예외 값/키는 내보내지 않는다.
         if($accepted){
             $resultPath=$controlPath+'.host-service.report'
-            Write-MendimaruReport ([ordered]@{id=$packet.id;ok=$false;reason=$(if($_.Exception.Message -ceq 'host-service-owned'){'owned'}else{'startup-refused'})})
+            Write-MendimaruReport ([ordered]@{id=$packet.id;ok=$false;reason=$(if($_.Exception.Message -ceq 'host-service-owned'){'owned'}elseif($stage -ceq 'compile'){'compile-refused'}elseif($stage -ceq 'authentication'){'authentication-refused'}else{'startup-refused'})})
         }
     }
 }

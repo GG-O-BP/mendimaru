@@ -2,8 +2,9 @@
 // arbitrary PID, address, file, environment name or script is exposed to callers.
 // The shipped compiler targets .NET Framework; keep this transport compatible
 // with PowerShell 5.1 while allowing compilation checks on modern .NET.
-#pragma warning disable 1691
+#if MENDIMARU_MODERN_DOTNET
 #pragma warning disable SYSLIB0014
+#endif
 namespace MendimaruRuntime {
     using System;
     using System.Collections.Generic;

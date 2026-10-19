@@ -128,7 +128,12 @@ pub(crate) async fn launch(session: &str, packet: Launch) -> Result<(), BackendE
                         return if value["ok"] == true {
                             Ok(())
                         } else {
-                            Err(fail(if value["reason"]=="owned" { "Studio monitor still owns the previous host-service helper; retry after control cleanup" } else { "host-service Studio helper refused startup" }))
+                            Err(fail(match value["reason"].as_str() {
+                                Some("owned") => "Studio monitor still owns the previous host-service helper; retry after control cleanup",
+                                Some("compile-refused") => "host-service Studio helper compilation was refused",
+                                Some("authentication-refused") => "host-service M2EE binding was refused; exact Studio 11.12.6 and a valid owned identity are required",
+                                _ => "host-service Studio helper refused startup",
+                            }))
                         };
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
