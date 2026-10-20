@@ -170,8 +170,8 @@ The existing `studio status` command remains the process/session inventory.
 
 ## Errors and versioning
 
-The outer contract is **7.0.0** after the closed host-service command additions
-in #249. Persisted v4/v5/v6 Runtime/build/browser records remain
+The outer contract is **8.0.0** after the closed Studio internal log command addition
+in #268. Persisted v4/v5/v6/v7 Runtime/build/browser records remain
 readable without rewriting original snapshots or artifact descriptors. Older,
 incompatible Runtime records retain the existing quarantine/forget behavior.
 

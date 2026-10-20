@@ -49,7 +49,8 @@ pub(crate) enum Concurrency {
 /// focus, while `focus` and `keyboard-input` act on the foreground.
 pub(crate) fn concurrency(operation: Operation, action: Option<UiActionKind>) -> Concurrency {
     match operation {
-        Operation::Capabilities
+        Operation::StudioLogs
+        | Operation::Capabilities
         | Operation::Tree
         | Operation::Find
         | Operation::Screenshot

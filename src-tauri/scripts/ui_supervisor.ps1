@@ -16,6 +16,7 @@ $script:UiClosed = $false
 
 __HOST_SERVICE_SUPERVISOR__
 __SESSION_QUERY__
+__STUDIO_LOGS__
 
 function Start-MendimaruUiProcess($Process) {
     # .NET Framework constructs StandardInput with Console.InputEncoding and
@@ -218,6 +219,14 @@ function Service-MendimaruUi {
         }
         $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
         if([long]$message.expiresAt -le $now -or [long]$message.expiresAt -gt ($now+60000+$script:UiRequestClockGraceMs)){Write-MendimaruUiResult @{ok=$false;reason='ui-request-expired'};return}
+        if($message.request.operation -ceq 'studio-logs'){
+            try { Write-MendimaruUiResult @{ok=$true;data=(Get-MendimaruStudioLogs $message.request.logs)} }
+            catch {
+                $reason=[string]$_.Exception.Message
+                if($reason -cnotin @('studio-logs-not-found','studio-logs-unreadable','studio-logs-wrong-session','studio-logs-unsupported-version','studio-logs-cursor-invalid')){$reason='studio-logs-unreadable'}
+                Write-MendimaruUiResult @{ok=$false;reason=$reason}
+            };return
+        }
         if($message.request.operation -ceq 'release'){
             Stop-MendimaruUi;Write-MendimaruUiResult @{ok=$true;data=@{sessionId=$script:UiIdentity.sessionId;released=$true}};return
         }

@@ -15,6 +15,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 mod assets;
+mod studio_logs;
 mod ui;
 #[cfg(target_os = "linux")]
 pub(crate) use ui::request_keeper_ui;
@@ -77,6 +78,9 @@ enum CliCommand {
         session_id: Option<String>,
         refresh: bool,
         orphan_filter: bool,
+    },
+    StudioLogs {
+        request: crate::ui_automation::Request,
     },
     StudioStop {
         session_id: String,
@@ -177,6 +181,7 @@ impl CliCommand {
             Self::StudioStart { .. } => "studio.start",
             Self::StudioStatus { .. } => "studio.status",
             Self::StudioStop { .. } => "studio.stop",
+            Self::StudioLogs { .. } => "studio.logs",
             Self::RuntimeBuild { .. } => "runtime.build",
             Self::RuntimeStart { .. } => "runtime.start",
             Self::RuntimeList => "runtime.list",
@@ -523,7 +528,7 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
         (Some("studio"), None) => Some(
             "Usage: mendimaru studio COMMAND\n\
              \n\
-             Commands: list, install, uninstall, start, status, stop",
+             Commands: list, install, uninstall, start, status, stop, logs",
         ),
         (Some("studio"), Some("list")) => Some(
             "Usage: mendimaru studio list\n\
@@ -553,6 +558,10 @@ fn subcommand_help(values: &[&str]) -> Option<&'static str> {
              one selected session. The default Linux summary checks the trusted\n\
              session keeper; --refresh queries the authoritative WinBoat guest;\n\
              --orphans returns only sessions not owned by a keeper.",
+        ),
+        (Some("studio"), Some("logs")) => Some(
+            "Usage: mendimaru studio logs --session-id ID [--since RFC3339] [--until RFC3339] [--max-bytes 65536] [--max-lines 200] [--cursor CURSOR]\n\
+             Reads sanitized Studio internal exceptions for an owned Linux WinBoat Studio Pro 11.12.6 session. Read-only; JSON can be redirected to an artifact. No arbitrary paths.",
         ),
         (Some("studio"), Some("stop")) => Some(
             "Usage: mendimaru studio stop --session-id STUDIO_SESSION_ID\n\
@@ -779,6 +788,7 @@ Commands:
   runtime url --session-id ID     Print a readiness-verified Runtime URL
   runtime stop --session-id ID    Stop a Runtime session
   runtime forget --session-id ID  Forget a stopped or incompatible record
+  studio logs --session-id ID     Read bounded Studio internal exception logs
   runtime logs --session-id ID    Read bounded Runtime diagnostic logs
   browser frontend-health [...]   Observe frontend health without asset bypass
   browser doctor                  Check the browser test toolchain
@@ -954,6 +964,7 @@ async fn run_command(
         CliCommand::HostServiceStop { session_id } => {
             CommandOutput::data(crate::host_service::inspect(&config, session_id, true).await?)
         }
+        CliCommand::StudioLogs { request } => studio_logs::run(&config, request).await,
         CliCommand::Ui {
             request,
             read_value,
@@ -1569,7 +1580,7 @@ fn finish_session_keeper_launch(mut response: SessionKeeperResponse) -> i32 {
         ));
     }
     let serialized = serde_json::to_vec(&response).unwrap_or_else(|_| {
-        br#"{"ok":false,"error":{"schemaVersion":"7.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
+        br#"{"ok":false,"error":{"schemaVersion":"8.0.0","code":"operation_failed","message":"session keeper serialization failed","retryable":false}}"#.to_vec()
     });
     let written = std::io::stdout()
         .write_all(&serialized)
@@ -3146,6 +3157,7 @@ fn parse_studio_command(values: &[String]) -> Result<CliCommand, BackendError> {
                 orphan_filter,
             })
         }
+        Some("logs") => studio_logs::parse(&values[1..]),
         Some("stop") => Ok(CliCommand::StudioStop {
             session_id: required_option(&values[1..], "--session-id")?,
         }),
@@ -3649,7 +3661,8 @@ fn sanitize_backend_error(error: BackendError) -> BackendError {
         (_, Some(BackendId::LinuxWinboat), Some(capability), message)
             if matches!(
                 capability,
-                CapabilityId::UiCapabilities
+                CapabilityId::StudioLogs
+                    | CapabilityId::UiCapabilities
                     | CapabilityId::UiTree
                     | CapabilityId::UiFind
                     | CapabilityId::UiAction

@@ -215,7 +215,7 @@ launcher details remain private. See
 
 ## Compatibility and versioning
 
-The current schema version is `7.0.0` and follows semantic versioning. Version
+The current schema version is `8.0.0` and follows semantic versioning. Version
 2 added multi-mode capability discovery, explicit Runtime backend/readiness,
 WinBoat Run Locally status fields, and its distinct failure codes. Version 3
 adds the first supported browser-test contract and optional Runtime version
@@ -334,3 +334,9 @@ interpretation. Normal
 `env status` and redetection do not synchronize time. See
 [clock recovery](winboat-clock-sync.md) for prerequisites, partial-failure
 semantics, and reboot verification.
+
+Version 8 adds the closed `studio.logs` command/capability and bounded
+[Studio internal log contract](studio-internal-logs.md) on Linux WinBoat.
+Existing v4–v7 Runtime/build/browser/artifact records remain readable without
+rewriting snapshots. Windows native and macOS report the new capability as
+unsupported.

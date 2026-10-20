@@ -14,7 +14,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": "7.0.0"
+      "const": "8.0.0"
     },
     "command": {
       "enum": [
@@ -30,6 +30,7 @@
         "studio.start",
         "studio.status",
         "studio.stop",
+        "studio.logs",
         "runtime",
         "runtime.build",
         "runtime.start",
@@ -161,6 +162,28 @@
             "required": ["runtimeSessionId"]
           }
         ]
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "studio.logs"
+          },
+          "ok": {
+            "const": true
+          }
+        },
+        "required": ["command", "ok"]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "https://github.com/GG-O-BP/mendimaru/schemas/studio-logs.schema.json"
+          }
+        }
       }
     }
   ]

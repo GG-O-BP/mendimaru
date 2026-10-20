@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/GG-O-BP/mendimaru/schemas/studio-logs.schema.json",
+  "title": "Bounded sanitized Studio internal log page",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sessionId",
+    "version",
+    "source",
+    "redactionPolicy",
+    "guestTimeZone",
+    "lines",
+    "exceptionCount",
+    "bytes",
+    "maxBytes",
+    "maxLines",
+    "nextCursor",
+    "truncated",
+    "incompleteLine",
+    "initialTimestamp",
+    "lastTimestamp",
+    "snapshotBytes",
+    "scannedBytes"
+  ],
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "pattern": "^studio-[0-9]+-[0-9]{18}$"
+    },
+    "version": {
+      "const": "11.12.6"
+    },
+    "source": {
+      "const": "studio-internal"
+    },
+    "redactionPolicy": {
+      "const": "structural-only"
+    },
+    "guestTimeZone": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "lines": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": {
+        "type": "string",
+        "maxLength": 65536
+      }
+    },
+    "exceptionCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2000
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 262144
+    },
+    "maxBytes": {
+      "type": "integer",
+      "minimum": 256,
+      "maximum": 262144
+    },
+    "maxLines": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2000
+    },
+    "nextCursor": {
+      "type": "string",
+      "maxLength": 1024,
+      "pattern": "^[A-Za-z0-9_-]+\\.[0-9a-f]{64}$"
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "incompleteLine": {
+      "type": "boolean"
+    },
+    "initialTimestamp": {
+      "type": ["string", "null"]
+    },
+    "lastTimestamp": {
+      "type": ["string", "null"]
+    },
+    "snapshotBytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 16777216
+    },
+    "scannedBytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4194304
+    }
+  }
+}

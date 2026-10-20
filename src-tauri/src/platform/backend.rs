@@ -313,7 +313,8 @@ fn capability_for(backend: BackendId, id: CapabilityId, architecture: &str) -> C
     if backend == BackendId::LinuxWinboat
         && matches!(
             id,
-            CapabilityId::UiCapabilities
+            CapabilityId::StudioLogs
+                | CapabilityId::UiCapabilities
                 | CapabilityId::UiTree
                 | CapabilityId::UiFind
                 | CapabilityId::UiAction
@@ -381,6 +382,9 @@ fn capability_for(backend: BackendId, id: CapabilityId, architecture: &str) -> C
 
 fn required_permissions(backend: BackendId, id: CapabilityId) -> &'static [&'static str] {
     match (backend, id) {
+        (BackendId::LinuxWinboat, CapabilityId::StudioLogs) => {
+            &["owned-studio-session", "studio-internal-log-read"]
+        }
         (BackendId::LinuxWinboat, CapabilityId::StudioDetect) => &["winboat-guest-online"],
         (BackendId::LinuxWinboat, CapabilityId::StudioInstall)
         | (BackendId::LinuxWinboat, CapabilityId::StudioUninstall) => {
@@ -1273,6 +1277,7 @@ mod tests {
                             | CapabilityId::HostServiceStatus
                             | CapabilityId::HostServiceStop
                             | CapabilityId::BrowserArtifacts
+                            | CapabilityId::StudioLogs
                             | CapabilityId::UiCapabilities
                             | CapabilityId::UiTree
                             | CapabilityId::UiFind

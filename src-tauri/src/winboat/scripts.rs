@@ -5,6 +5,13 @@ fn ui_preamble() -> String {
     UI_SUPERVISOR
         .replace("__UI_WORKER_BASE64__", &BASE64_STANDARD.encode(UI_WORKER))
         .replace(
+            "__STUDIO_LOGS__",
+            &include_str!("../../scripts/studio_logs.ps1").replace(
+                "__STUDIO_LOGS_SOURCE_BASE64__",
+                &BASE64_STANDARD.encode(include_str!("../../scripts/studio_logs.cs")),
+            ),
+        )
+        .replace(
             "__SESSION_QUERY__",
             include_str!("../../scripts/session_query.ps1"),
         )

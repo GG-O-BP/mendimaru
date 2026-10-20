@@ -16,6 +16,7 @@ const schemaFiles = [
   "schemas/frontend-health.schema.json",
   "schemas/startup.schema.json",
   "schemas/environment-assessment.schema.json",
+  "schemas/studio-logs.schema.json",
   "schemas/host-service.schema.json",
 ];
 const schemas = schemaFiles.map((path) =>
@@ -33,7 +34,7 @@ const assessmentSchema = schemas.find((schema) =>
 ).$id;
 const hostServiceSchema = schemas.at(-1).$id;
 const hostService = {
-  schemaVersion: "7.0.0",
+  schemaVersion: "8.0.0",
   sessionId: `hostsvc_${"a".repeat(32)}`,
   runtimeSessionId: `runtime_${"b".repeat(32)}`,
   backend: "linux-winboat",
@@ -186,10 +187,55 @@ assert(
   "CLI backend differs from snapshot",
 );
 const sessionId = `session_${"ab".repeat(16)}`;
+const studioLogLine = "System.InvalidOperationException: [message omitted]";
+const studioLogPage = {
+  sessionId: "studio-4242-639280000000000000",
+  version: "11.12.6",
+  source: "studio-internal",
+  redactionPolicy: "structural-only",
+  guestTimeZone: "Pacific Standard Time",
+  lines: [studioLogLine],
+  exceptionCount: 1,
+  bytes: Buffer.byteLength(`${studioLogLine}\n`),
+  maxBytes: 1024,
+  maxLines: 10,
+  nextCursor: `c25hcHNob3Q.${"a".repeat(64)}`,
+  truncated: false,
+  incompleteLine: false,
+  initialTimestamp: null,
+  lastTimestamp: "2026-10-20 12:00:00.1234",
+  snapshotBytes: 256,
+  scannedBytes: 256,
+};
+const studioLogSchema = schemas.find((schema) =>
+  schema.$id.endsWith("/studio-logs.schema.json"),
+).$id;
+validate(studioLogSchema, studioLogPage, "Studio internal diagnostics");
+validate(
+  schemas[4].$id,
+  {
+    schemaVersion: "8.0.0",
+    command: "studio.logs",
+    ok: true,
+    platform: "linux",
+    backend: "linux-winboat",
+    sessionId,
+    studioSessionId: studioLogPage.sessionId,
+    data: studioLogPage,
+  },
+  "CLI Studio diagnostics envelope",
+);
+for (const invalid of [
+  { ...studioLogPage, source: "runtime-relay" },
+  { ...studioLogPage, maxBytes: 262145 },
+  { ...studioLogPage, rawLogPath: "C:\\private" },
+]) {
+  reject(studioLogSchema, invalid, "unsafe Studio diagnostics");
+}
 validate(
   schemas[2].$id,
   {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     sessionId,
     createdAt: snapshot.capturedAt,
     state: "created",
@@ -200,7 +246,7 @@ validate(
 validate(
   schemas[3].$id,
   {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     artifactId: `artifact_${"cd".repeat(16)}`,
     sessionId,
     backend: manifest.backend,
@@ -212,7 +258,7 @@ validate(
 validate(
   schemas[1].$id,
   {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     code: "unsupported_capability",
     message: "runtime.url is not implemented by this backend",
     backend: manifest.backend,
@@ -230,7 +276,7 @@ const parseErrorEnvelope = {
   command: "studio",
   ok: false,
   error: {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     code: "invalid_request",
     message: "the command request is invalid",
     backend: manifest.backend,
@@ -244,7 +290,7 @@ const stopErrorEnvelope = {
   command: "studio.stop",
   ok: false,
   error: {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     code: "precondition_failed",
     message: "a required precondition was not satisfied",
     backend: manifest.backend,
@@ -261,7 +307,7 @@ validate(schemas[4].$id, stopErrorEnvelope, "CLI Studio stop error envelope");
 validate(
   schemas[4].$id,
   {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     command: "unknown",
     ok: false,
     platform: manifest.hostPlatform,
@@ -269,7 +315,7 @@ validate(
     sessionId: "session_unavailable",
     capabilitySnapshot: null,
     error: {
-      schemaVersion: "7.0.0",
+      schemaVersion: "8.0.0",
       code: "operation_failed",
       message: "the command could not be completed",
       backend: manifest.backend,
@@ -292,7 +338,7 @@ validate(
 validate(
   schemas[5].$id,
   {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     command: "studio.install",
     event: "progress",
     sessionId,
@@ -311,7 +357,7 @@ validate(
 const runtimeSessionId = `runtime_${"12".repeat(16)}`;
 const runtimeBuildSessionId = `session_${"56".repeat(16)}`;
 const runtimeLogArtifact = {
-  schemaVersion: "7.0.0",
+  schemaVersion: "8.0.0",
   artifactId: `artifact_${"34".repeat(16)}`,
   sessionId: runtimeSessionId,
   backend: manifest.backend,
@@ -321,7 +367,7 @@ const runtimeLogArtifact = {
   location: `mendimaru-cache://artifact_${"34".repeat(16)}`,
 };
 const buildArtifact = (suffix, kind, mediaType) => ({
-  schemaVersion: "7.0.0",
+  schemaVersion: "8.0.0",
   artifactId: `artifact_${suffix.repeat(16)}`,
   sessionId: runtimeBuildSessionId,
   backend: manifest.backend,
@@ -357,7 +403,7 @@ validate(
 validate(
   schemas[6].$id,
   {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     sessionId: runtimeSessionId,
     backend: manifest.backend,
     mode: "portable",
@@ -374,7 +420,7 @@ validate(
 validate(
   schemas[6].$id,
   {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     sessionId: runtimeSessionId,
     backend: "linux-winboat",
     mode: "studio-run-locally",
@@ -402,7 +448,7 @@ validate(
 
 const browserSessionId = `session_${"90".repeat(16)}`;
 const browserArtifact = {
-  schemaVersion: "7.0.0",
+  schemaVersion: "8.0.0",
   artifactId: `artifact_${"91".repeat(16)}`,
   sessionId: browserSessionId,
   backend: manifest.backend,
@@ -416,7 +462,7 @@ const browserArtifact = {
 validate(
   `${schemas[8].$id}#/$defs/doctor`,
   {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     runnerVersion: "1.0.0",
     ready: true,
     nodeVersion: "22.22.2",
@@ -489,7 +535,7 @@ reject(
 validate(
   `${schemas[8].$id}#/$defs/summary`,
   {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     sessionId: browserSessionId,
     outcome: "passed",
     passed: 1,
@@ -515,7 +561,7 @@ validate(
 validate(
   `${schemas[8].$id}#/$defs/manifest`,
   {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     sessionId: browserSessionId,
     createdAt: snapshot.capturedAt,
     hostPlatform: "linux",
@@ -561,6 +607,7 @@ const expectedIds = new Set([
   "studio.start",
   "studio.status",
   "studio.stop",
+  "studio.logs",
   "runtime.build",
   "runtime.start",
   "runtime.status",

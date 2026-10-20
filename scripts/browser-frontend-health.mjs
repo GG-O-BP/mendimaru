@@ -318,7 +318,7 @@ export async function diagnoseFrontend(chromium, request) {
       !["observation_incomplete", "navigation_timeout"].includes(code),
   );
   return {
-    schemaVersion: "7.0.0",
+    schemaVersion: "8.0.0",
     startedAt,
     finishedAt: new Date().toISOString(),
     frontendState: unhealthy
