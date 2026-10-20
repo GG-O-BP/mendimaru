@@ -104,10 +104,13 @@ fn read_status(config: &AppConfig, root: &Path, id: &str) -> Result<Status, Back
             "host-service state belongs to another VM or record version",
         ));
     }
-    let state = stored.status;
+    let mut state = stored.status;
     if state.session_id != id
         || state.backend != BackendId::LinuxWinboat
-        || state.schema_version != CONTRACT_SCHEMA_VERSION
+        || !matches!(
+            state.schema_version.as_str(),
+            "7.0.0" | CONTRACT_SCHEMA_VERSION
+        )
         || state.service != "mysql"
         || state.guest_host != "127.0.0.1"
         || state.target_host != "127.0.0.1"
@@ -132,6 +135,7 @@ fn read_status(config: &AppConfig, root: &Path, id: &str) -> Result<Status, Back
     {
         return Err(fail("host-service state identity is incompatible"));
     }
+    state.schema_version = CONTRACT_SCHEMA_VERSION.into();
     Ok(state)
 }
 
@@ -752,6 +756,23 @@ mod tests {
             admin_host_port: None,
             m2ee_authentication_configured: false,
         }
+    }
+
+    #[test]
+    fn v7_host_service_records_remain_readable_without_rewriting_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = config();
+        let mut status = state();
+        status.schema_version = "7.0.0".into();
+        save(&config, directory.path(), &status).unwrap();
+        let path = directory.path().join(format!("{}.json", status.session_id));
+        let before = std::fs::read(&path).unwrap();
+        let loaded = read_status(&config, directory.path(), &status.session_id).unwrap();
+        assert_eq!(loaded.schema_version, CONTRACT_SCHEMA_VERSION);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        status.schema_version = "9.0.0".into();
+        save(&config, directory.path(), &status).unwrap();
+        assert!(read_status(&config, directory.path(), &status.session_id).is_err());
     }
 
     #[test]

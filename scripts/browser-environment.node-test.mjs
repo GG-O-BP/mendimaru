@@ -175,7 +175,7 @@ test(
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     const baseUrl = `http://127.0.0.1:${server.address().port}/`;
     const request = {
-      schemaVersion: "7.0.0",
+      schemaVersion: "8.0.0",
       sessionId: `session_${"c".repeat(32)}`,
       baseUrl,
       outputDirectory: directory,

@@ -17,6 +17,7 @@ mendimaru studio uninstall --version VERSION
 mendimaru studio start --version VERSION [--project-id PROJECT_ID]
 mendimaru studio status [--session-id STUDIO_SESSION_ID] [--refresh | --orphans]
 mendimaru studio stop --session-id STUDIO_SESSION_ID
+mendimaru studio logs --session-id STUDIO_SESSION_ID [--since RFC3339] [--until RFC3339] [--max-bytes N] [--max-lines N] [--cursor CURSOR]
 mendimaru project list
 mendimaru project version --project-id PROJECT_ID
 mendimaru runtime build --project-id PROJECT_ID [--clean]
@@ -71,6 +72,9 @@ placed anywhere in the command:
 The CLI accepts version strings and opaque IDs only. It has no project-path,
 installer-URL, credential, password, or token option. It never opens a file
 dialog or confirmation window.
+
+See [Studio internal exception diagnostics](studio-internal-logs.md) for the
+read-only, session-bound `studio logs` provider and structural redaction.
 
 ## Result and error streams
 

@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "code", "message", "retryable"],
   "properties": {
-    "schemaVersion": { "const": "7.0.0" },
+    "schemaVersion": { "const": "8.0.0" },
     "code": {
       "enum": [
         "unsupported_capability",

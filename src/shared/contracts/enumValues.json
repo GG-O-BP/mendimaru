@@ -57,6 +57,7 @@
     "studio.start": true,
     "studio.status": true,
     "studio.stop": true,
+    "studio.logs": true,
     "runtime.build": true,
     "runtime.start": true,
     "runtime.status": true,

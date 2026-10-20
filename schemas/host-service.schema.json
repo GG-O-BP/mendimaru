@@ -52,7 +52,7 @@
       ],
       "properties": {
         "schemaVersion": {
-          "const": "7.0.0"
+          "const": "8.0.0"
         },
         "sessionId": {
           "type": "string",

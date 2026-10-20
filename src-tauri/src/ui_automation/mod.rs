@@ -20,6 +20,7 @@ pub(crate) const MAX_TIMEOUT_MS: u64 = 60000;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Operation {
+    StudioLogs,
     Capabilities,
     Tree,
     Find,
@@ -32,6 +33,7 @@ pub enum Operation {
 impl Operation {
     pub fn capability(self) -> CapabilityId {
         match self {
+            Self::StudioLogs => CapabilityId::StudioLogs,
             Self::Capabilities | Self::Release | Self::Reconnect => CapabilityId::UiCapabilities,
             Self::Tree => CapabilityId::UiTree,
             Self::Find => CapabilityId::UiFind,
@@ -83,6 +85,8 @@ pub struct Request {
     /// Physical pixels relative to the selected window: x, y, width, height.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<[u32; 4]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logs: Option<crate::studio_logs::LogOptions>,
 }
 
 impl Request {
@@ -98,6 +102,7 @@ impl Request {
             condition: None,
             window_id: None,
             region: None,
+            logs: None,
         }
     }
     pub fn validate(&self) -> Result<(), BackendError> {
@@ -148,6 +153,11 @@ impl Request {
             .as_ref()
             .is_some_and(|v| v.len() > 256 || v.chars().any(char::is_control))
         {
+            return Err(invalid());
+        }
+        if self.operation == Operation::StudioLogs {
+            self.logs.as_ref().ok_or_else(invalid)?.validate()?;
+        } else if self.logs.is_some() {
             return Err(invalid());
         }
         let finding = matches!(self.operation, Operation::Find | Operation::Wait);
@@ -230,6 +240,11 @@ fn valid_element_id(value: &str) -> bool {
 
 pub(crate) fn safe_reason(reason: &str) -> Option<&'static str> {
     [
+        "studio-logs-not-found",
+        "studio-logs-unreadable",
+        "studio-logs-wrong-session",
+        "studio-logs-unsupported-version",
+        "studio-logs-cursor-invalid",
         "ui-session-unavailable",
         "ui-bridge-untrusted",
         "ui-helper-timeout",
@@ -281,12 +296,12 @@ pub(crate) fn safe_diagnostic(value: &str) -> bool {
 pub(crate) fn error(operation: Operation, reason: &str) -> BackendError {
     let reason = safe_reason(reason).unwrap_or("ui-provider-failed");
     let code = match reason {
-        "ui-unsupported-version" | "ui-unsupported-element" => {
+        "studio-logs-unsupported-version" | "ui-unsupported-version" | "ui-unsupported-element" => {
             BackendErrorCode::UnsupportedCapability
         }
         "ui-helper-timeout" => BackendErrorCode::ExternalProcessTimeout,
         "ui-cancelled" => BackendErrorCode::ExternalProcessCancelled,
-        "ui-invalid-request" => BackendErrorCode::InvalidRequest,
+        "studio-logs-cursor-invalid" | "ui-invalid-request" => BackendErrorCode::InvalidRequest,
         _ => BackendErrorCode::PreconditionFailed,
     };
     let mut failure = BackendError {
@@ -556,11 +571,11 @@ mod tests {
         );
     }
     #[test]
-    fn v7_preserves_v4_through_v6_record_read_compatibility_and_rejects_other_shapes() {
-        for v in ["4.0.0", "5.0.0", "6.0.0", "7.0.0"] {
+    fn v8_preserves_v4_through_v7_record_read_compatibility_and_rejects_other_shapes() {
+        for v in ["4.0.0", "5.0.0", "6.0.0", "7.0.0", "8.0.0"] {
             assert!(crate::contracts::compatible_record_schema(v));
         }
-        for v in ["3.0.0", "8.0.0", "5.1.0"] {
+        for v in ["3.0.0", "9.0.0", "5.1.0"] {
             assert!(!crate::contracts::compatible_record_schema(v));
         }
     }
