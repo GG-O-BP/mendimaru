@@ -100,7 +100,7 @@ https://admin:$canary@private.example/?token=$canary
     # A partial final record is withheld, and cannot trap a client in an
     # endless truncated-page loop or silently jump into a later append.
     $partialPath=Join-Path $lab 'partial.txt'
-    [IO.File]::WriteAllText($partialPath,"2026-10-20 12:00:00.1234 ERROR Mendix.Modeler.Run no error`nSystem.InvalidOperationException: password=$canary",(New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText($partialPath,"2026-10-20 12:00:00.1234 ERROR Mendix.Modeler.Run no error`nSystem.Exception: password=$canary",(New-Object Text.UTF8Encoding($false)))
     $stream=[MendimaruStudioLogFile]::Open($partialPath)
     $options=[pscustomobject]@{maxBytes=1024;maxLines=200;since=$null;until=$null;cursor=$null}
     $partial=Get-MendimaruStudioLogPage $options $stream $session $started
@@ -112,6 +112,9 @@ https://admin:$canary@private.example/?token=$canary
     $options.cursor=$null
     $fresh=Get-MendimaruStudioLogPage $options $stream $session $started
     if($fresh.incompleteLine -or $fresh.truncated -or $fresh.exceptionCount -ne 1 -or ($fresh|ConvertTo-Json -Depth 10 -Compress).Contains($canary)){throw 'fresh snapshot did not safely include completed record'}
+    [IO.File]::AppendAllText($partialPath,"System.Operation2Exception: password=$canary`n",(New-Object Text.UTF8Encoding($false)))
+    $counted=Get-MendimaruStudioLogPage $options $stream $session $started
+    if($counted.exceptionCount -ne 2 -or ($counted|ConvertTo-Json -Depth 10 -Compress).Contains($canary)){throw 'base or digit-suffixed exception type was not counted safely'}
     $stream.Dispose();$stream=$null
     Write-Output 'Studio diagnostics: secret canary, nested causes, stack symbols, byte/line bounds, cursor isolation/tamper, timezone filtering, and read-only checks passed.'
 } finally {

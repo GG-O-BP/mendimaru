@@ -479,6 +479,10 @@ jobs:
         shell: powershell
         run: ./scripts/test-studio-logs.ps1
 
+      - name: Test Studio internal logs under PowerShell 7
+        shell: pwsh
+        run: ./scripts/test-studio-logs.ps1
+
   security:
     name: Dependency security audit
     needs: changes
