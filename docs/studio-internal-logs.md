@@ -87,3 +87,30 @@ stderr. The capability is `studio.logs`; the closed result contract is
 [`studio-logs.schema.json`](../schemas/studio-logs.schema.json), under outer
 contract **8.0.0**. Shell redirection exports only the sanitized JSON; no raw
 log artifact is persisted by Mendimaru.
+
+## Live validation on 2026-10-20
+
+The [sanitized CLI evidence](evidence/studio-logs-11.12.6.json) comes from an
+owned Linux WinBoat Studio Pro **11.12.6.0** session using the 0.8.0 candidate.
+A test harness reset two verified loopback HTTP connections from that Studio
+process to its own newly started Runtime. This reproduced the actual generic
+“An error occurred while trying to run your app.” dialog at 04:59:00 UTC.
+The internal log recorded the startup exception at 21:58:57.6745 guest time
+(`Pacific Standard Time`, UTC−07:00 on this date).
+
+The authenticated `studio logs` CLI returned 38 structurally sanitized lines,
+including `M2EEException → HttpRequestException → IOException →
+SocketException (10053)` and the `StartupManager.PerformStartup` /
+`RuntimeController.Start` stack. The response passed contract 8.0.0 validation
+and had empty stderr. Two-line/512-byte pages advanced their cursor; a modified
+cursor exited 2 with empty stdout, and a foreign session was rejected.
+Model and configuration hashes and the selected Studio/Runtime UI state were
+unchanged across collection. The collector has no database, network or Runtime
+lifecycle primitive; database contents were not separately queried.
+
+The fault injection was a separate test action, performed before collection.
+It establishes that this command can capture a real startup exception chain;
+it does **not** establish the cause of the original application's failure.
+Windows production-parser fixtures additionally cover nested causes, HRESULTs,
+secret canaries, exact-PID ownership, simultaneous writers, hard links,
+overwritten snapshots, pagination, and incomplete final records.
