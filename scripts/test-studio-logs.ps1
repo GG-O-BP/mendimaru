@@ -97,6 +97,22 @@ https://admin:$canary@private.example/?token=$canary
     if(-not $rejected){throw 'overwritten snapshot accepted'}
 
     $stream.Dispose();$stream=$null
+    # A partial final record is withheld, and cannot trap a client in an
+    # endless truncated-page loop or silently jump into a later append.
+    $partialPath=Join-Path $lab 'partial.txt'
+    [IO.File]::WriteAllText($partialPath,"2026-10-20 12:00:00.1234 ERROR Mendix.Modeler.Run no error`nSystem.InvalidOperationException: password=$canary",(New-Object Text.UTF8Encoding($false)))
+    $stream=[MendimaruStudioLogFile]::Open($partialPath)
+    $options=[pscustomobject]@{maxBytes=1024;maxLines=200;since=$null;until=$null;cursor=$null}
+    $partial=Get-MendimaruStudioLogPage $options $stream $session $started
+    if(-not $partial.incompleteLine -or $partial.truncated -or ($partial|ConvertTo-Json -Depth 10 -Compress).Contains($canary)){throw 'partial record exposed or pagination cannot terminate'}
+    $options.cursor=$partial.nextCursor
+    [IO.File]::AppendAllText($partialPath,"`n",(New-Object Text.UTF8Encoding($false)))
+    $same=Get-MendimaruStudioLogPage $options $stream $session $started
+    if(-not $same.incompleteLine -or $same.truncated -or $same.lines.Count -ne 0 -or $same.nextCursor -cne $partial.nextCursor){throw 'partial snapshot cursor jumped into appended data'}
+    $options.cursor=$null
+    $fresh=Get-MendimaruStudioLogPage $options $stream $session $started
+    if($fresh.incompleteLine -or $fresh.truncated -or $fresh.exceptionCount -ne 1 -or ($fresh|ConvertTo-Json -Depth 10 -Compress).Contains($canary)){throw 'fresh snapshot did not safely include completed record'}
+    $stream.Dispose();$stream=$null
     Write-Output 'Studio diagnostics: secret canary, nested causes, stack symbols, byte/line bounds, cursor isolation/tamper, timezone filtering, and read-only checks passed.'
 } finally {
     if($null -ne $stream){$stream.Dispose()};$script:MendimaruHmac.Dispose()

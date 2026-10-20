@@ -57,7 +57,9 @@ defaults to 200 (allowed 1–2,000). Each read hashes at most a 16 MiB snapshot,
 scans at most 4 MiB, and buffers at most 64 KiB per source line. Larger files
 or lines exceeding the scan budget fail explicitly. Oversized diagnostic lines
 are replaced, never sliced into potentially secret fragments. Incomplete final
-lines are withheld and reported through `incompleteLine`.
+lines are withheld and reported through `incompleteLine`. A snapshot ending in
+an incomplete line reports `truncated: false`; repeating that cursor cannot
+complete the line. Omit the cursor to read a fresh snapshot after an append.
 
 The signed opaque cursor binds the session, pinned file identity, snapshot
 content/length, byte position, timestamp context and time filters. Reusing it

@@ -85,7 +85,7 @@ function Get-MendimaruStudioLogPage($Options,[IO.FileStream]$Stream,[string]$Ses
     $cursor=$encoded+'.'+(Get-MendimaruStudioLogMac ($binding+'|'+$encoded))
     # At EOF keep a cursor bound to the current snapshot. Call without a cursor
     # for a fresh snapshot; continuation never silently jumps to newer data.
-    return @{sessionId=$SessionId;version='11.12.6';source='studio-internal';exceptionCount=@($lines|Where-Object {$_ -match '[A-Za-z](Exception|Error)(?: \((?:-?[0-9]+|0x[0-9a-f]{8})\))?: \[message omitted\]$'}).Count;initialTimestamp=$initialTimestamp;lastTimestamp=$timestamp;redactionPolicy='structural-only';guestTimeZone=[TimeZoneInfo]::Local.Id;lines=$lines.ToArray();bytes=$bytes;maxBytes=$maxBytes;maxLines=$maxLines;nextCursor=$cursor;truncated=($position -lt $end -or $lineTruncated);incompleteLine=$incomplete;snapshotBytes=$end;scannedBytes=($position-$statePosition)}
+    return @{sessionId=$SessionId;version='11.12.6';source='studio-internal';exceptionCount=@($lines|Where-Object {$_ -match '[A-Za-z](Exception|Error)(?: \((?:-?[0-9]+|0x[0-9a-f]{8})\))?: \[message omitted\]$'}).Count;initialTimestamp=$initialTimestamp;lastTimestamp=$timestamp;redactionPolicy='structural-only';guestTimeZone=[TimeZoneInfo]::Local.Id;lines=$lines.ToArray();bytes=$bytes;maxBytes=$maxBytes;maxLines=$maxLines;nextCursor=$cursor;truncated=(($position -lt $end -and -not $incomplete) -or $lineTruncated);incompleteLine=$incomplete;snapshotBytes=$end;scannedBytes=($position-$statePosition)}
 }
 function Get-MendimaruStudioLogs($Options) {
     $identity=$script:UiIdentity
