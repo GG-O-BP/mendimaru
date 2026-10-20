@@ -475,6 +475,10 @@ jobs:
         shell: powershell
         run: ./scripts/test-studio-m2ee.ps1
 
+      - name: Test bounded Studio internal logs and secret redaction
+        shell: powershell
+        run: ./scripts/test-studio-logs.ps1
+
   security:
     name: Dependency security audit
     needs: changes

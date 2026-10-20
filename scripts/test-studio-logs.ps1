@@ -69,7 +69,7 @@ https://admin:$canary@private.example/?token=$canary
     try {
         foreach($index in @(0,1)){
             $start=New-Object Diagnostics.ProcessStartInfo
-            $start.FileName=(Join-Path $PSHOME 'powershell.exe')
+            $start.FileName=(Get-Process -Id $PID).Path
             $start.Arguments='-NoLogo -NoProfile -NonInteractive -EncodedCommand '+[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($writerSource))
             $start.UseShellExecute=$false;$start.CreateNoWindow=$true;$start.RedirectStandardInput=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
             $writer=[Diagnostics.Process]::Start($start);$writers.Add($writer)
